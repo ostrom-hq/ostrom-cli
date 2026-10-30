@@ -15,17 +15,18 @@ internal object SecretServiceVault : Vault {
     override val backend = SecretBackend.SECRET_SERVICE
 
     /**
-     * libsecret is installed and a Secret Service answers on the session bus. The probe looks up an account that is
-     * never written: with nothing to unlock it shows no prompt, so any running service answers it at once, and one
-     * that does not within [PROBE_MILLIS] counts as absent. A service that answers but later refuses (a locked
-     * collection) stays the store: its secrets are there, and switching to the encrypted file would hide them.
+     * libsecret is installed and a Secret Service runs on the session bus. The probe looks up an account that is never
+     * written: with nothing to unlock it shows no prompt. Only "no service to ask" (no bus, no service on it) means
+     * absent. A service that is slow (a cold start past [PROBE_MILLIS]) or refuses stays the store, so the choice never
+     * flips from one command to the next: its secrets are there, and the encrypted file would hide them. A hung
+     * service then fails each call loudly, after its deadline, rather than silently storing elsewhere.
      */
     override fun isAvailable(): Boolean {
         if (ostrom_secret_load() != 1) return false
         val probe = vaultRead { buffer, capacity, length, code ->
             ostrom_secret_read(SECRET_SERVICE_NAME, PROBE, PROBE_MILLIS, buffer, capacity, length, code)
         }
-        return probe.status == VAULT_OK || probe.status == VAULT_NOT_FOUND
+        return probe.status != VAULT_UNREACHABLE
     }
 
     override fun read(service: String, account: String) =

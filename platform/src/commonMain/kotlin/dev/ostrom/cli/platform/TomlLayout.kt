@@ -18,7 +18,10 @@ internal class TomlLayout(val topLevel: List<Boolean>, val firstTable: Int)
  */
 internal class TomlLines(val bom: Boolean, val lines: MutableList<String>, val endings: MutableList<String>)
 
-/** [text] split into [TomlLines]; a lone `\r` stays inside its line, as TOML only ends a line with LF or CRLF. */
+/**
+ * [text] split into [TomlLines]; a lone `\r` (a last line cut after it included) stays inside its line, as TOML only
+ * ends a line with LF or CRLF.
+ */
 internal fun tomlLines(text: String): TomlLines {
     val body = text.removePrefix(BOM)
     val lines = mutableListOf<String>()
@@ -27,7 +30,7 @@ internal fun tomlLines(text: String): TomlLines {
     while (start < body.length) {
         val newline = body.indexOf('\n', start)
         val end = if (newline < 0) body.length else newline
-        val crlf = end > start && body[end - 1] == '\r'
+        val crlf = newline >= 0 && end > start && body[end - 1] == '\r'
         lines += body.substring(start, if (crlf) end - 1 else end)
         endings += if (newline < 0) "" else if (crlf) "\r\n" else "\n"
         start = end + 1

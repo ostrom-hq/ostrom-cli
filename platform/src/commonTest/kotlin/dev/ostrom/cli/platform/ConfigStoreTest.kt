@@ -188,4 +188,11 @@ class ConfigStoreTest {
         assertEquals("\uFEFF# notepad\nserver = \"https://b.example\"\r\nretries = 3\ncolor = \"never\"\n", written())
         assertEquals(mapOf(ConfigKey.SERVER to "https://b.example", ConfigKey.COLOR to "never"), store.list())
     }
+
+    @Test
+    fun aLoneCarriageReturnStaysInItsLine() {
+        file("retries = 3\r")
+        store.set(ConfigKey.COLOR, "never")
+        assertEquals("retries = 3\r\ncolor = \"never\"\n", written())
+    }
 }

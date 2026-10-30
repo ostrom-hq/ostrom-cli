@@ -72,12 +72,17 @@ class SecretStoreTest {
         val vault = FakeVault().apply { failWith = VaultAnswer(3, code = -25308) }
         val store = secretStoreOf(vault, home, files)
         val read = assertFailsWith<SecretStoreException> { store.read("s") }
-        val expected = "macOS Keychain could not read the secret s (error -25308): macOS needs your permission and " +
-            "cannot ask here: run ostrom login in a Terminal of your desktop session and choose Always Allow."
+        val expected = "macOS Keychain could not read the secret s (error -25308): macOS needs your permission for " +
+            "this ostrom: run ostrom login in a Terminal of your desktop session and choose Always Allow."
         assertEquals(expected, read.message)
-        vault.failWith = VaultAnswer(3, code = -128)
-        val denied = assertFailsWith<SecretStoreException> { store.read("s") }.message
-        assertEquals("macOS Keychain could not read the secret s (error -128): unlock it and try again.", denied)
+        for (code in listOf(-128, -25293)) {
+            vault.failWith = VaultAnswer(3, code = code)
+            val asked = assertFailsWith<SecretStoreException> { store.read("s") }.message!!
+            assertTrue(asked.endsWith("choose Always Allow."), asked)
+        }
+        vault.failWith = VaultAnswer(3, code = -34018)
+        val other = assertFailsWith<SecretStoreException> { store.read("s") }.message
+        assertEquals("macOS Keychain could not read the secret s (error -34018): unlock it and try again.", other)
         vault.failWith = VaultAnswer(3, code = -25308)
         assertTrue(assertFailsWith<SecretStoreException> { store.write("s", "x") }.message!!.contains("could not keep"))
         assertTrue(assertFailsWith<SecretStoreException> { store.delete("s") }.message!!.contains("could not forget"))
@@ -130,7 +135,7 @@ class SecretStoreTest {
         assertNull(swapped.read("broken"))
         assertNull(swapped.read("no-separator"))
         files.write(secretsFile, text)
-        assertNull(secretStoreOf(null, home, files, user = "1001").read("a"), "another user")
+        assertNull(secretStoreOf(null, home, files, user = "another-user").read("a"), "another user")
         assertEquals("secret-a", secretStoreOf(null, FakeEnvironment(mapOf("HOME" to "/home/maya")), files).read("a"))
         machine("another-machine")
         assertNull(secretStoreOf(null, home, files).read("a"))

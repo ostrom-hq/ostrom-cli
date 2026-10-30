@@ -83,6 +83,7 @@ private fun isIpv6(address: String): Boolean {
     return halves.size <= 2 && shaped && if (halves.size == 2) count < IPV6_GROUPS else count == IPV6_GROUPS
 }
 
+private val COLOR_VALUES = setOf("auto", "always", "never")
 private val SCHEMES = setOf("http", "https")
 private const val DIGITS = "0123456789"
 private const val HEX_DIGITS = "0123456789abcdefABCDEF"

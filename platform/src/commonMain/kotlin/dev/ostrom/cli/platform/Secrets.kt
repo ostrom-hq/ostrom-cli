@@ -20,14 +20,14 @@ enum class SecretBackend(
     val warning: String? = null,
     private val advice: Map<Int, String> = emptyMap(),
 ) {
-    // macOS asks again when the program changes (an update signed differently), and only where a window can show:
-    // -25308 (errSecInteractionNotAllowed) is that question asked where nobody can answer it.
+    // macOS asks again when the program changes (an update signed differently): -25308 is that question asked where
+    // no window can show, -128 and -25293 the question cancelled or denied.
     KEYCHAIN(
         "macOS Keychain",
-        advice = mapOf(
-            ERR_SEC_INTERACTION_NOT_ALLOWED to "macOS needs your permission and cannot ask here: run ostrom " +
-                "login in a Terminal of your desktop session and choose Always Allow",
-        ),
+        advice = listOf(ERR_SEC_INTERACTION_NOT_ALLOWED, ERR_SEC_USER_CANCELED, ERR_SEC_AUTH_FAILED).associateWith {
+            "macOS needs your permission for this ostrom: run ostrom login in a Terminal of your desktop session " +
+                "and choose Always Allow"
+        },
     ),
     SECRET_SERVICE("Secret Service (libsecret)"),
     CREDENTIAL_MANAGER("Windows Credential Manager"),
@@ -44,6 +44,12 @@ enum class SecretBackend(
 
 /** The Keychain's OSStatus for a question it cannot ask the user here (no window: SSH, a background job). */
 private const val ERR_SEC_INTERACTION_NOT_ALLOWED = -25_308
+
+/** The Keychain's OSStatus when the user cancels its question. */
+private const val ERR_SEC_USER_CANCELED = -128
+
+/** The Keychain's OSStatus when the user denies access (or types a wrong password). */
+private const val ERR_SEC_AUTH_FAILED = -25_293
 
 /** The secret store could not keep or give back a secret; [message] says what to do. */
 class SecretStoreException(override val message: String, cause: Throwable? = null) : Exception(message, cause)
