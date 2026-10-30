@@ -200,7 +200,9 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
 
     private fun environmentOf(run: Run, relay: SessionRelay, view: String?): Map<String, String?> {
         val site = run.site
-        val folder = site.executable.toPath().parent?.toString()
+        // Only an absolute path names a folder: a bare name would put the working folder on the agent's PATH.
+        val binary = site.executable.toPath()
+        val folder = if (binary.isAbsolute) binary.parent else null
         val path = site.variable("PATH").orEmpty()
         return mapOf(
             LaunchVariables.RELAY_URL to relay.url,
