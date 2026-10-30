@@ -116,6 +116,8 @@ class ReceiptCommandsTest {
             sleep = {},
             readLine = { null },
             openUrl = { false },
+            postHogKey = "",
+            sendStatistics = { _, _ -> },
         ),
     )
 
