@@ -28,7 +28,12 @@ object SessionHooks {
         val context = HookContext.read { environment[it] }
         // the relay's capability for the hooks is read from its file, never from the agent's environment (S2-25)
         val token = context.relayTokenFile?.let(files::read)?.trim()
-        val calls = RelayCalls(environment["OSTROM_RELAY_URL"], token, http)
+        // every call of the hook, the checks' included, ends within the agent's budget
+        val calls = BudgetedCalls.of(
+            RelayCalls(environment["OSTROM_RELAY_URL"], token, http),
+            environment["OSTROM_HOOK_BUDGET_MS"],
+            clock,
+        )
         val git = CapturedGit(capture, context.git)
         // the package's checks and notifications, when the launcher laid one down for the session
         val checks = environment["OSTROM_PACKAGE"]?.let { view ->
