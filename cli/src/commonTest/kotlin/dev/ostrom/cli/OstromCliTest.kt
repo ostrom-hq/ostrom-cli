@@ -13,152 +13,22 @@ import dev.ostrom.cli.hooks.HookRunner
 import dev.ostrom.cli.launch.AgentRunner
 import dev.ostrom.cli.launcher.Agent
 import dev.ostrom.cli.launcher.Credentials
-import dev.ostrom.cli.launcher.FileCredentialStore
-import dev.ostrom.cli.launcher.LaunchFilesImpl
 import dev.ostrom.cli.launcher.LaunchRequest
-import dev.ostrom.cli.launcher.LaunchSite
 import dev.ostrom.cli.mcp.McpServer
-import dev.ostrom.cli.platform.Console
-import dev.ostrom.cli.platform.Environment
 import dev.ostrom.cli.platform.ExecutableFinder
 import dev.ostrom.cli.platform.FileStoreImpl
-import dev.ostrom.cli.platform.OperatingSystem
 import dev.ostrom.cli.platform.SecretBackend
 import dev.ostrom.cli.platform.SecretStore
 import dev.ostrom.cli.platform.SecretStoreException
-import dev.ostrom.cli.platform.StandardInput
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import okio.Path.Companion.toPath
-import okio.fakefilesystem.FakeFileSystem
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
-class OstromCliTest {
-    private class FakeConsole : Console {
-        val out = StringBuilder()
-        val err = StringBuilder()
-        override fun out(text: String) {
-            out.append(text)
-        }
-
-        override fun err(text: String) {
-            err.append(text)
-        }
-
-        override val isInteractive = false
-        override fun readStandardInput(maxBytes: Int, timeoutMillis: Int): StandardInput = error("not used")
-    }
-
-    private class FakeEnvironment(private val values: Map<String, String>) : Environment {
-        override fun get(name: String) = values[name]
-        override val operatingSystem = OperatingSystem.LINUX
-        override val architecture = "x64"
-    }
-
-    private val console = FakeConsole()
-    private val fileSystem = FakeFileSystem()
-    private val hookCalls = mutableListOf<List<String>>()
-    private val statistics = mutableListOf<String>()
-    private val withServer = mapOf("HOME" to "/home/maya", "OSTROM_URL" to "https://ostrom.example")
-    private val launches = mutableListOf<Pair<LaunchRequest, LaunchSite>>()
-    private val waits = mutableListOf<Long>()
-    private val requests = mutableListOf<Pair<String, ServerRequest>>()
-
-    /** A server that answers `METHOD path` from [routes] (404 otherwise), recording each request with its server. */
-    private fun serverOf(routes: Map<String, Pair<Int, String>>): (String) -> OstromApi = { url ->
-        object : OstromApi {
-            override suspend fun get(path: String) = send(ServerRequest("GET", path))
-            override suspend fun send(request: ServerRequest): ServerResponse {
-                requests += url to request
-                val (status, body) = routes["${request.method} ${request.path}"] ?: (404 to "{}")
-                return ServerResponse(status, body, 1)
-            }
-        }
-    }
-
-    private val deviceFlow = mapOf(
-        "POST /api/v1/auth/device" to (200 to """{"deviceCode":"dc","userCode":"4F2C-9B1D","interval":1}"""),
-        "POST /api/v1/auth/device/token" to (200 to """{"token":"ost_new","login":"maya-k"}"""),
-    )
-
-    /** A server that answers every request with [status] after [millis]. */
-    private fun serverAnswering(status: Int, millis: Long): (String) -> OstromApi = {
-        object : OstromApi {
-            override suspend fun get(path: String) = ServerResponse(status, "", millis)
-            override suspend fun send(request: ServerRequest) = get(request.path)
-        }
-    }
-
-    /** What the test's secret store keeps, by name. */
-    private val secretsKept = mutableMapOf<String, String>()
-
-    /** A secret store in [backend], in memory ([secretsKept]). */
-    private fun storeIn(backend: SecretBackend): () -> SecretStore = {
-        object : SecretStore {
-            override val backend = backend
-            override fun read(name: String): String? = secretsKept[name]
-            override fun write(name: String, secret: String) {
-                secretsKept[name] = secret
-            }
-
-            override fun delete(name: String) {
-                secretsKept -= name
-            }
-        }
-    }
-
-    /** Asserts that stdout contains [text], showing all of it otherwise. */
-    private fun assertOut(text: String) = assertTrue(console.out.contains(text), console.out.toString())
-
-    @Suppress("LongParameterList") // one default per dependency a test replaces
-    private fun cli(
-        environment: Map<String, String> = mapOf("HOME" to "/home/maya"),
-        installed: Set<String> = setOf("git", "claude"),
-        api: (String) -> OstromApi = { error("no server in this test") },
-        executable: String? = "/opt/ostrom",
-        secrets: () -> SecretStore = storeIn(SecretBackend.KEYCHAIN),
-        postHogKey: String = "",
-    ) = OstromCli(
-        CliDependencies(
-            console = console,
-            environment = FakeEnvironment(environment),
-            files = FileStoreImpl(fileSystem),
-            finder = object : ExecutableFinder {
-                override fun find(name: String) = if (name in installed) "/usr/bin/$name" else null
-            },
-            api = api,
-            hookRunner = object : HookRunner {
-                override fun run(arguments: List<String>): Int = 0.also { hookCalls += arguments }
-            },
-            mcpServer = { object : McpServer { override fun serve() = 0 } },
-            credentials = { directory ->
-                val path = (directory.toPath() / "credentials.json").toString()
-                val files = LaunchFilesImpl(fileSystem) { _, _ -> }
-                FileCredentialStore(files, path, secrets, { console.err("$it\n") }) { environment[it] }
-            },
-            workingDirectory = { "/work/acme" },
-            executable = executable,
-            temporaryDirectory = "/tmp",
-            agents = AgentRunner { request, site -> 7.also { launches += request to site } },
-            sleep = { waits += it },
-            secrets = secrets,
-            postHogKey = postHogKey,
-            sendStatistics = { _, body -> statistics += body },
-        ),
-    )
-
-    /** Signs this device in as `ost_1`, @maya: the token in the secret store, the login in `credentials.json`. */
-    private fun signIn(directory: String, server: String = "https://ostrom.example") {
-        fileSystem.createDirectories(directory.toPath())
-        fileSystem.write(directory.toPath() / "credentials.json") {
-            writeUtf8("""{"$server":{"login":"maya"}}""")
-        }
-        secretsKept[server] = "ost_1"
-    }
-
+class OstromCliTest : CliKit() {
     @Test
     fun anAgentRunsWithTheServerAndTheCredentialsOfThisDevice() {
         signIn("/home/maya/.config/ostrom")
@@ -745,6 +615,8 @@ class OstromCliTest {
             temporaryDirectory = "/tmp",
             agents = AgentRunner { _, _ -> 0 },
             sleep = {},
+            readLine = { null },
+            openUrl = { false },
             postHogKey = "",
             sendStatistics = { _, _ -> },
         )
