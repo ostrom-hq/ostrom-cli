@@ -70,7 +70,8 @@ class ApprovalCommandsTest : CliKit() {
         val inbox = "GET /api/v1/approvals?mine=true&status=pending"
         val error = """{"error":{"message":"not a member of acme"}}"""
         // a redirection the client does not follow is no refusal of Ostrom's: it could not answer
-        val codes = listOf(401 to 65, 403 to 77, 404 to 66, 409 to 64, 410 to 64, 429 to 1, 422 to 1, 302 to 69, 500 to 69)
+        val refusals = listOf(401 to 65, 403 to 77, 404 to 66, 409 to 64, 410 to 64, 429 to 1, 422 to 1)
+        val codes = refusals + listOf(302 to 69, 500 to 69)
         for ((status, code) in codes) {
             val server = serverOf(mapOf(inbox to (status to error)))
             assertEquals(code, cli(environment = withServer, api = server).run(arrayOf("inbox")), "HTTP $status")
