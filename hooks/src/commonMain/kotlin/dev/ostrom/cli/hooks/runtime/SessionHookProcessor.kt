@@ -16,6 +16,7 @@ import dev.ostrom.cli.hooks.gate.GitRunner
  * @property canonical A folder with its symbolic links resolved.
  * @property workingDirectory Where the hook was started, for events that do not say.
  * @property checks The workflow package of the session.
+ * @property now The current time in milliseconds since the epoch: a gate policy past its signed expiry is not trusted.
  */
 data class HookPorts(
     val calls: OstromCalls,
@@ -24,6 +25,7 @@ data class HookPorts(
     val canonical: (String) -> String,
     val workingDirectory: String,
     val checks: WorkflowChecks = NoWorkflowChecks,
+    val now: () -> Long = SessionHooks::epochMillis,
 )
 
 /**
@@ -45,7 +47,14 @@ class SessionHookProcessor(private val context: HookContext, private val ports: 
                 ports.calls,
                 ids,
                 ports.files,
-                CatalogueStore(session, ports.files, ports.calls),
+                CatalogueStoreImpl(
+                    session,
+                    ports.files,
+                    ports.calls,
+                    SignedGatePolicy(SignedGatePolicy.keysOf(session.instanceKeys)),
+                    PackageSeal(session.packageSeal, session.packageManifest, ports.files),
+                    ports.now,
+                ),
                 ports.checks,
                 ports.git,
                 ports.canonical,

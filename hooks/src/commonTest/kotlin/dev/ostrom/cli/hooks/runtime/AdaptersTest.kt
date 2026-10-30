@@ -140,18 +140,35 @@ class AdaptersTest {
     }
 
     @Test
-    fun theRealWiringReachesTheRelayAndTheResolvedGit() {
+    fun theRealWiringReachesTheRelayWithTheTokenOfItsFileAndTheResolvedGit() {
         val fileSystem = FakeFileSystem()
+        fileSystem.createDirectories("/s".toPath())
+        fileSystem.write("/s/relay-token".toPath()) { writeUtf8("t0k\n") }
         val capture = Capture()
-        val http = answer(200, """{"actions":[{"class":"x"}]}""")
+        val signed = PolicyVectors.envelope(payload = PolicyVectors.PAYLOAD_R, signature = PolicyVectors.SIGNATURE_R)
+        val http = answer(200, signed.toString())
         val environment = Variables(
-            mapOf("OSTROM_RELAY_URL" to "http://127.0.0.1:4100", "OSTROM_GIT" to "/usr/bin/git", "OSTROM_REPO" to "r"),
+            mapOf(
+                "OSTROM_RELAY_URL" to "http://127.0.0.1:4100",
+                "OSTROM_RELAY_TOKEN_FILE" to "/s/relay-token",
+                // S2-25: a token left in the environment is never the one sent
+                "OSTROM_RELAY_TOKEN" to "from-the-environment",
+                "OSTROM_INSTANCE_KEYS" to PolicyVectors.KEYS,
+                "OSTROM_GIT" to "/usr/bin/git",
+                "OSTROM_REPO" to "r",
+            ),
         )
-        val processor = SessionHooks.processor(environment, fileSystem, capture, http, SessionHooks::epochMillis)
+        val processor = SessionHooks.processor(environment, fileSystem, capture, http) { PolicyVectors.NOW }
         val push = """{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push"}}"""
         assertEquals(HookReply(), processor.process(HookKind.GATE, push.encodeToByteArray(), "claude"))
-        assertEquals("/api/v1/gates/catalog?repo=r", http.sent.first().second.path)
+        val asked = http.sent.first().second
+        assertEquals("/api/v1/gates/catalog/signed?repo=r", asked.path)
+        assertEquals(mapOf("Authorization" to "Bearer t0k"), asked.headers)
         assertEquals("/usr/bin/git", capture.captured.first().first(), "never the git of the agent's PATH (S2-30)")
+        val missing = Variables(mapOf("OSTROM_RELAY_URL" to "http://127.0.0.1:4100", "OSTROM_RELAY_TOKEN_FILE" to "/x"))
+        SessionHooks.processor(missing, fileSystem, capture, http, SessionHooks::epochMillis)
+            .process(HookKind.GATE, push.encodeToByteArray(), "claude")
+        assertEquals(emptyMap(), http.sent.last().second.headers, "no token file, no token")
         val plain = SessionHooks.processor(Variables(emptyMap()), fileSystem, capture, http, SessionHooks::epochMillis)
         assertEquals(HookReply(), plain.process(HookKind.SESSION, null, "claude"))
         assertTrue(SessionHooks.epochMillis() > 1_700_000_000_000)

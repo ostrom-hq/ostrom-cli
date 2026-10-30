@@ -29,8 +29,11 @@ interface SessionRelay : AutoCloseable {
     /** `http://127.0.0.1:<port>`. */
     val url: String
 
-    /** The capability the agent's side presents, valid for this launch only. */
+    /** The hooks' capability, valid for this launch only: written to a private file, never into an environment. */
     val token: String
+
+    /** The agent's own capability (its MCP servers and inference, no hook route), for this launch only (S2-25). */
+    val clientToken: String
 }
 
 /** Starts the local relay of a launch. */
