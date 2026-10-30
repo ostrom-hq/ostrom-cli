@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli
 
+import dev.ostrom.cli.api.Download
 import dev.ostrom.cli.api.OstromApi
 import dev.ostrom.cli.api.ServerRequest
 import dev.ostrom.cli.api.ServerResponse
@@ -19,6 +20,8 @@ import dev.ostrom.cli.platform.OperatingSystem
 import dev.ostrom.cli.platform.SecretBackend
 import dev.ostrom.cli.platform.SecretStore
 import dev.ostrom.cli.platform.StandardInput
+import dev.ostrom.cli.update.AgentSessions
+import dev.ostrom.cli.update.SelfUpdate
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -74,6 +77,7 @@ class ReceiptCommandsTest {
     }
 
     private val console = FakeConsole()
+    private val noSessions = AgentSessions { null }
     private val fileSystem = FakeFileSystem()
     private val requests = mutableListOf<ServerRequest>()
     private val home = "/home/maya/.config/ostrom"
@@ -121,6 +125,7 @@ class ReceiptCommandsTest {
             capture = FakeMysql(),
             readLine = { null },
             openUrl = { false },
+            selfUpdate = SelfUpdate({ _, _ -> Download.Missing(404) }, fileSystem, { _, _ -> false }, {}, noSessions),
             postHogKey = "",
             sendStatistics = { _, _ -> },
         ),

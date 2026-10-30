@@ -71,12 +71,6 @@ internal class HarnessRemoveCommand : PendingCommand("remove", "Remove a harness
 
 internal class InitCommand : PendingCommand("init", "Set up this repository (admin: the organisation)")
 
-internal class UpdateCommand : PendingCommand("update", "Update ostrom (signed release)") {
-    val check by option("--check", help = "Only say whether an update exists").flag()
-    val rollback by option("--rollback", help = "Go back to the previous version").flag()
-    val version by option("--version", help = "Install this version")
-}
-
 internal class InviteCommand : PendingCommand("invite", "Invite developers by GitHub login (admin)") {
     val logins by argument("@github-login").multiple(required = true)
     val team by option("--team", help = "Team")
@@ -135,7 +129,7 @@ fun pendingCommands(implemented: List<CliktCommand>): List<CliktCommand> {
         named("config"),
         named("doctor"),
         named("telemetry"),
-        UpdateCommand(),
+        named("update"),
         named("version"),
         InviteCommand(),
         MembersCommand().subcommands(MembersListCommand(), MembersRoleCommand(), MembersRemoveCommand()),

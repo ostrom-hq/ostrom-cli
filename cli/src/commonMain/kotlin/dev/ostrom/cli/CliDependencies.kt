@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli
 
+import dev.ostrom.cli.api.DownloadsImpl
 import dev.ostrom.cli.api.OstromApi
 import dev.ostrom.cli.api.OstromApiImpl
 import dev.ostrom.cli.api.StatisticsSender
@@ -40,6 +41,9 @@ import dev.ostrom.cli.platform.currentExecutable
 import dev.ostrom.cli.platform.systemSecretStore
 import dev.ostrom.cli.relay.LocalRelayStarterImpl
 import dev.ostrom.cli.telemetry.UsageStatistics
+import dev.ostrom.cli.update.AgentSessionsImpl
+import dev.ostrom.cli.update.SelfUpdate
+import dev.ostrom.cli.update.TarUnpacker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.delay
@@ -66,6 +70,7 @@ import kotlin.time.TimeSource
  * @property capture Runs short child processes and reads their output (`mysql` for `ostrom import teamcode`).
  * @property readLine Reads a line the developer typed, or null at the end of the input.
  * @property openUrl Opens a page in the developer's browser; false when it could not.
+ * @property selfUpdate `ostrom update`.
  * @property secrets Opens the secret store of this device (system store, or encrypted file). Each call chooses and
  * probes the store again (up to a second on Linux): a command calls it once and keeps the store; the hook's fast
  * path never calls it.
@@ -92,6 +97,7 @@ class CliDependencies(
     val capture: ProcessCapture,
     val readLine: () -> String?,
     val openUrl: (String) -> Boolean,
+    val selfUpdate: SelfUpdate,
     val postHogKey: String,
     val sendStatistics: suspend (url: String, body: String) -> Unit,
     val secrets: () -> SecretStore = { systemSecretStore(environment, files) },
@@ -122,6 +128,7 @@ class CliDependencies(
             val finder = ExecutableFinderImpl(environment)
             val api = { url: String -> OstromApiImpl(url, USER_AGENT, trace = trace) }
             val launchFiles = LaunchFilesImpl()
+            val temporary = FileSystem.SYSTEM_TEMPORARY_DIRECTORY.toString()
             val files = FileStoreImpl()
             val secrets = { systemSecretStore(environment, files) }
             return CliDependencies(
@@ -139,7 +146,7 @@ class CliDependencies(
                 },
                 workingDirectory = { FileSystem.SYSTEM.canonicalize(".".toPath()).toString() },
                 executable = currentExecutable(),
-                temporaryDirectory = FileSystem.SYSTEM_TEMPORARY_DIRECTORY.toString(),
+                temporaryDirectory = temporary,
                 agents = AgentRunnerImpl(
                     console = console,
                     finder = finder,
@@ -151,19 +158,12 @@ class CliDependencies(
                     blocking = Dispatchers.IO,
                     userAgent = USER_AGENT,
                 ),
-                gateWait = {
-                    val relay = RelayCalls(
-                        environment["OSTROM_RELAY_URL"],
-                        GateWait.tokenOf { environment[it] },
-                        LoopbackHttpImpl(),
-                    )
-                    val started = TimeSource.Monotonic.markNow()
-                    GateWait(relay, { started.elapsedNow().inWholeMilliseconds }, ::pause, console::err)
-                },
+                gateWait = { gateWait(environment, console) },
                 sleep = { delay(it) },
                 capture = ProcessCaptureImpl(),
                 readLine = ::readlnOrNull,
                 openUrl = BrowserOpener(ProcessLauncherImpl(), environment.operatingSystem)::open,
+                selfUpdate = selfUpdate(environment, console, temporary),
                 postHogKey = BuildInfo.POSTHOG_KEY,
                 secrets = secrets,
                 sendStatistics = { url, body -> statistics.send(url, body) },
@@ -171,6 +171,23 @@ class CliDependencies(
         }
 
         private val USER_AGENT = "ostrom/${BuildInfo.VERSION}"
+
+        /** `ostrom wait`: asks through the relay of the session this process runs in. */
+        private fun gateWait(environment: Environment, console: Console): GateWait {
+            val token = GateWait.tokenOf { environment[it] }
+            val relay = RelayCalls(environment["OSTROM_RELAY_URL"], token, LoopbackHttpImpl())
+            val started = TimeSource.Monotonic.markNow()
+            return GateWait(relay, { started.elapsedNow().inWholeMilliseconds }, ::pause, console::err)
+        }
+
+        /** `ostrom update`, on this binary and the system's own files. */
+        private fun selfUpdate(environment: Environment, console: Console, temporary: String) = SelfUpdate(
+            DownloadsImpl(USER_AGENT),
+            FileSystem.SYSTEM,
+            TarUnpacker(ProcessLauncherImpl(), environment["SystemRoot"]),
+            { console.out("$it\n") },
+            AgentSessionsImpl(environment, FileSystem.SYSTEM, temporary, LoopbackHttpImpl()),
+        )
 
         /** The hook runner alone, for the fast path of `main` (nothing else is built). */
         fun hookRunner(console: Console, environment: Environment): HookRunner {
