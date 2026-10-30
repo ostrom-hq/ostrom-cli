@@ -49,39 +49,58 @@ class DeviceLogin(
 
     /** Shows the code of a started flow, then waits for GitHub's yes. */
     private suspend fun started(body: JsonObject, serverUrl: String): LoginOutcome {
-        val deviceCode = body.text("deviceCode") ?: ""
-        val userCode = body.text("userCode") ?: "?"
+        val deviceCode = body.text("deviceCode").orEmpty()
+        val userCode = body.text("userCode").orEmpty()
         val page = body.text("verificationUri") ?: "$githubWeb/login/device"
-        if (!page.startsWith("$githubWeb/")) {
-            return LoginOutcome.Stopped(
-                UNREACHABLE,
-                "$serverUrl sent a sign-in page that is not GitHub's ($page). Check the --server URL.",
-            )
+        // the code and the page go to the terminal: nothing but GitHub's page, and no control character in either
+        val refusal = when {
+            !page.startsWith("$githubWeb/") || page.any(::isControl) ->
+                "$serverUrl sent a sign-in page that is not GitHub's (${page.filterNot(::isControl)}). " +
+                    "Check the --server URL."
+            deviceCode.isEmpty() || !USER_CODE.matches(userCode) ->
+                "$serverUrl answered without a usable sign-in code. Check the --server URL."
+            else -> null
         }
+        if (refusal != null) return LoginOutcome.Stopped(UNREACHABLE, refusal)
         say("! Copy your one-time code: $userCode")
         say("  Open $page and enter it.")
-        val interval = (body["interval"] as? JsonPrimitive)?.intOrNull ?: DEFAULT_INTERVAL_SECONDS
-        val expiresIn = (body["expiresIn"] as? JsonPrimitive)?.intOrNull ?: DEFAULT_EXPIRY_SECONDS
+        // a server's interval of 0 would ask GitHub in a tight loop, and a huge expiry would never end
+        val interval = ((body["interval"] as? JsonPrimitive)?.intOrNull ?: DEFAULT_INTERVAL_SECONDS)
+            .coerceIn(1, MAX_INTERVAL_SECONDS)
+        val expiresIn = ((body["expiresIn"] as? JsonPrimitive)?.intOrNull ?: DEFAULT_EXPIRY_SECONDS)
+            .coerceIn(1, MAX_EXPIRY_SECONDS)
         return poll(deviceCode, interval * MILLIS, expiresIn * MILLIS, serverUrl)
     }
 
+    /**
+     * Asks until GitHub's answer, the code's expiry, or a refusal. A lost connection, a 5xx or a 429 is asked again
+     * (the developer may already have entered the code); still lost at the expiry, it is what is said.
+     */
     private suspend fun poll(deviceCode: String, every: Long, budget: Long, serverUrl: String): LoginOutcome {
         var waited = 0L
         var pause = every
+        var lost: ServerAnswer.Failed? = null
         var outcome: LoginOutcome? = null
         while (outcome == null) {
             if (waited >= budget) {
-                outcome = LoginOutcome.Stopped(EXPIRED, "The code expired. Run ostrom login again.")
+                outcome = lost?.let { LoginOutcome.Stopped(UNREACHABLE, messageOf(it, serverUrl)) }
+                    ?: LoginOutcome.Stopped(EXPIRED, "The code expired. Run ostrom login again.")
             } else {
                 sleep(pause)
                 waited += pause
                 val answer = server.post(TOKEN, objectOf("deviceCode" to deviceCode), null)
-                outcome = outcomeOf(answer, serverUrl)
+                lost = (answer as? ServerAnswer.Failed)?.takeIf(::isTransient)
+                outcome = if (lost == null) outcomeOf(answer, serverUrl) else null
                 if (answer is ServerAnswer.Failed && answer.type == "slow_down") pause += SLOW_DOWN_MILLIS
             }
         }
         return outcome
     }
+
+    private fun isTransient(answer: ServerAnswer.Failed): Boolean =
+        answer.status.let { it == null || it >= SERVER_ERROR || it == TOO_MANY }
+
+    private fun isControl(char: Char): Boolean = char < ' ' || char == '\u007f'
 
     /** The outcome of one poll, or null to poll again. */
     private fun outcomeOf(answer: ServerAnswer, serverUrl: String): LoginOutcome? = when (answer) {
@@ -122,6 +141,11 @@ class DeviceLogin(
         private const val DEFAULT_INTERVAL_SECONDS = 5
         private const val DEFAULT_EXPIRY_SECONDS = 900
         private const val SLOW_DOWN_MILLIS = 5_000L
+        private const val MAX_INTERVAL_SECONDS = 60
+        private const val MAX_EXPIRY_SECONDS = 1_800
+        private const val SERVER_ERROR = 500
+        private const val TOO_MANY = 429
+        private val USER_CODE = Regex("[A-Za-z0-9-]{1,32}")
         private const val PENDING = 428
         private const val FORBIDDEN = 403
         private const val EXPIRED = 1

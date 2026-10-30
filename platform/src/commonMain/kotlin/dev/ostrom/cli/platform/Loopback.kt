@@ -129,8 +129,12 @@ object HttpMessages {
             if (colon <= 0) null else line.substring(0, colon).trim().lowercase() to line.substring(colon + 1).trim()
         }.toMap()
         val length = headers["content-length"]?.toIntOrNull()
+        val codings = headers["transfer-encoding"].orEmpty().lowercase().split(',').map { it.trim() }
+            .filter { it.isNotEmpty() && it != "identity" }
         val body = when {
-            headers["transfer-encoding"]?.lowercase() == "chunked" -> dechunk(raw)
+            codings == listOf("chunked") -> dechunk(raw)
+            // `gzip, chunked` and the like: a coding this reader does not undo is not a body it can hand back
+            codings.isNotEmpty() -> null
             length == null -> raw
             // a negative length is no length, a body shorter than its own is a relay that died midway
             length < 0 || length > raw.size -> null
@@ -159,7 +163,7 @@ object HttpMessages {
 
     /**
      * Where the data of the chunk at [at] is and where the next one starts, or null when the bytes are not a chunk
-     * (a size that is not hex, negative, or past the end).
+     * (a size that is not hex, negative, or past the end, or data not followed by its CRLF).
      */
     private fun chunkAt(raw: ByteArray, at: Int): Pair<IntRange, Int>? {
         val lineEnd = indexOf(raw, CRLF_BYTES, at)
@@ -168,10 +172,15 @@ object HttpMessages {
         val start = lineEnd + CRLF_BYTES.size
         return if (size == null || size < 0 || size > raw.size - start) {
             null
+        } else if (size > 0 && !endsWithCrlf(raw, start + size)) {
+            null
         } else {
             start until start + size to start + size + CRLF_BYTES.size
         }
     }
+
+    private fun endsWithCrlf(raw: ByteArray, at: Int): Boolean =
+        at + CRLF_BYTES.size <= raw.size && raw[at] == CRLF_BYTES[0] && raw[at + 1] == CRLF_BYTES[1]
 
     private fun indexOf(bytes: ByteArray, needle: ByteArray, from: Int = 0): Int {
         for (i in from..bytes.size - needle.size) {
