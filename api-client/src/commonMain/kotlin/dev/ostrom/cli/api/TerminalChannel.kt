@@ -52,6 +52,7 @@ class TerminalChannels(
     private val userAgent: String,
     private val client: HttpClient = webSocketClient(),
 ) {
+    /** How the CLI opens a terminal on any server. */
     companion object {
         /**
          * Opens a terminal on the server of the call, `(serverUrl, path, token)`, with [userAgent]. Each open has a
