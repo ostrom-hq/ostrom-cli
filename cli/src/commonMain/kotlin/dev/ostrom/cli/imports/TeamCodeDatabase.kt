@@ -122,15 +122,20 @@ data class MysqlUrl(val user: String, val host: String, val port: Int, val datab
             val match = URL.matchEntire(url) ?: throw TeamCodeReadException(
                 "--db must be mysql://user@host[:port]/database (got \"${url.take(SHOWN)}\").",
             )
-            val (user, password, host, port, database) = match.destructured
-            if (password.isNotEmpty()) {
+            val group = match.groupValues
+            if (group[PASSWORD].isNotEmpty()) {
                 throw TeamCodeReadException("put the password in MYSQL_PWD, never in --db: a command line is public.")
             }
-            return MysqlUrl(user, host, port.ifEmpty { DEFAULT_PORT }.toInt(), database)
+            return MysqlUrl(group[USER], group[HOST], group[PORT].ifEmpty { DEFAULT_PORT }.toInt(), group[DATABASE])
         }
 
         private val URL =
             Regex("mysql://([A-Za-z0-9_.-]+)(:[^@]*)?@([A-Za-z0-9_.-]+)(?::(\\d{1,5}))?/([A-Za-z0-9_\$]+)")
+        private const val USER = 1
+        private const val PASSWORD = 2
+        private const val HOST = 3
+        private const val PORT = 4
+        private const val DATABASE = 5
         private const val DEFAULT_PORT = "3306"
         private const val SHOWN = 80
     }

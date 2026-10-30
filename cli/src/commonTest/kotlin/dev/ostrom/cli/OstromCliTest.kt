@@ -136,7 +136,9 @@ class OstromCliTest {
         assertEquals(65, cli(environment = withServer).run(arguments), "not signed in")
         assertTrue("set OSTROM_TOKEN to an admin's console token" in console.err.toString(), console.err.toString())
         signIn("/home/maya/.config/ostrom")
-        assertEquals(64, cli(environment = withServer, capture = FakeMysql(FULL_SCHEMA, TEAM_TABLES)).run(arguments))
+        val mysql = FakeMysql(FULL_SCHEMA, TEAM_TABLES)
+        val noKey = cli(environment = withServer, api = serverOf(emptyMap()), capture = mysql)
+        assertEquals(64, noKey.run(arguments))
         assertOut("--key-file holds no TeamCode key")
         fileSystem.createDirectories("/keys".toPath())
         fileSystem.write("/keys/tc.key".toPath()) { writeUtf8(Sealed.KEY + "\n") }
