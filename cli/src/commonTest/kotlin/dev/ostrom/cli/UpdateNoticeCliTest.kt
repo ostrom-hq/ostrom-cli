@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli
 
-import okio.Path.Companion.toPath
 import dev.ostrom.cli.update.UpdateNotice
+import okio.IOException
+import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -57,7 +58,9 @@ class UpdateNoticeCliTest : CliKit() {
         fileSystem.createDirectories("/home/maya/.config/ostrom".toPath())
         fileSystem.write(NOTICE.toPath()) { writeUtf8("""{"latest":"1.2.0","checkedAt":$now}""") }
         console.isInteractive = true
-        noticeAdvice = { error("the session probe broke") }
+        noticeAdvice = { throw IllegalArgumentException("a path the platform refuses") }
+        assertEquals(0, cli().run(arrayOf("version")))
+        noticeAdvice = { throw IOException("the session probe broke") }
         assertEquals(0, cli().run(arrayOf("version")))
         assertTrue(console.err.isEmpty(), console.err.toString())
         noticeAdvice = { null }

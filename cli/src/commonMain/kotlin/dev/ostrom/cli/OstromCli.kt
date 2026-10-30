@@ -30,6 +30,7 @@ import dev.ostrom.cli.launcher.Agent
 import dev.ostrom.cli.platform.SecretStoreException
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
+import okio.IOException
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
 
@@ -63,12 +64,17 @@ class OstromCli(private val dependencies: CliDependencies) {
         return code
     }
 
-    /** The notice is a courtesy: whatever goes wrong with its file or its refresh never changes the command's code. */
+    /**
+     * The notice is a courtesy: a file it cannot read or write, a path the platform refuses, never changes the
+     * command's code.
+     */
     private fun sayNotice() {
         try {
             dependencies.updateNotice?.after(dependencies.console::err)
-        } catch (_: RuntimeException) {
-            // nothing to say: the next command tries again
+        } catch (_: IllegalArgumentException) {
+            // a path the file system refuses: nothing to say, the next command tries again
+        } catch (_: IOException) {
+            // a file or a probe that failed: nothing to say, the next command tries again
         }
     }
 
