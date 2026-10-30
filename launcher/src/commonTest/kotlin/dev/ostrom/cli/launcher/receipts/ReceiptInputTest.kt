@@ -48,11 +48,11 @@ class ReceiptInputTest {
             "/c/packages/d2.json" to "[]",
         )
         val kept = KeptCopiesImpl(files::get, "/c")
-        assertEquals(bundle.at("receipt"), kept.receipt("r1"))
+        assertEquals<JsonElement?>(bundle.at("receipt"), kept.receipt("r1"))
         assertEquals(gate, kept.receipt("r2"))
         assertNull(kept.receipt("r3"))
         assertNull(kept.receipt("r4"))
-        assertEquals(bundle.at("package"), kept.envelope("d1"))
+        assertEquals<JsonElement?>(bundle.at("package"), kept.envelope("d1"))
         assertNull(kept.envelope("d2"))
         assertNull(kept.envelope("d3"))
     }

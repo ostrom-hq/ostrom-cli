@@ -170,11 +170,13 @@ internal class ReceiptsPullCommand(private val dependencies: CliDependencies) : 
             throw refuse(ExitCode.FAILED, "Ostrom answered something that is not a receipt bundle.")
         }
         val path = join(dependencies.directory(), "receipts", "$id.json")
-        try {
+        val unwritten = try {
             dependencies.files.write(path, pretty(bundle))
+            null
         } catch (e: FileWriteException) {
-            throw refuse(ExitCode.CANNOT_WRITE, "Could not write ${e.path}.")
+            e.path
         }
+        if (unwritten != null) throw refuse(ExitCode.CANNOT_WRITE, "Could not write $unwritten.")
         dependencies.console.out("✓ Saved $id with its package and keys.\n")
     }
 }
