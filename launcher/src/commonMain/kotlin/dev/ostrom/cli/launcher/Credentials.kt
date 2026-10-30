@@ -3,6 +3,7 @@ package dev.ostrom.cli.launcher
 
 import dev.ostrom.cli.platform.SecretStore
 import kotlinx.serialization.json.JsonObject
+import okio.IOException
 
 /**
  * Who the developer is on a server.
@@ -64,11 +65,20 @@ class FileCredentialStore(
         return if (token.isNullOrEmpty()) null else Credentials(token, login)
     }
 
-    /** S2-32: the token left in clear in the file goes to the secret store (unless it holds one), then off the file. */
+    /**
+     * S2-32: the token left in clear in the file goes to the secret store (unless it holds one), then off the file. A
+     * file that cannot be rewritten (a read-only mount) never stops the command: it is said, and tried again next time.
+     */
     private fun moveToStore(server: String, token: String, login: String) {
         if (store.read(server) == null) store.write(server, token)
-        files.write(path, pretty(JsonObject(all() + (server to objectOf("login" to login)))), FileAccess.PRIVATE)
-        notice("ostrom: the device token of $server moved from credentials.json to ${store.backend.displayName}")
+        val where = store.backend.displayName
+        try {
+            files.write(path, pretty(JsonObject(all() + (server to objectOf("login" to login)))), FileAccess.PRIVATE)
+            notice("ostrom: the device token of $server moved from credentials.json to $where")
+        } catch (e: IOException) {
+            notice("! The device token of $server is in $where now, but $path could not be rewritten (${e.message}): " +
+                "remove its token from that file")
+        }
     }
 
     override fun save(server: String, credentials: Credentials) {
@@ -80,7 +90,8 @@ class FileCredentialStore(
     override fun forget(server: String) {
         // in both stores, even when the token was read from the file (SecretStore.delete reaches every store)
         store.delete(server)
-        files.write(path, pretty(JsonObject(all() - server)), FileAccess.PRIVATE)
+        val all = all()
+        if (server in all) files.write(path, pretty(JsonObject(all - server)), FileAccess.PRIVATE)
     }
 
     private fun all(): JsonObject = parseObject(files.read(path)) ?: JsonObject(emptyMap())
