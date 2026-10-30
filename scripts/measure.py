@@ -8,6 +8,10 @@ The wall time includes Python's own process spawn (well under a millisecond on L
 figures are an upper bound of the binary's start-up. `inside` is the time the hook reports itself
 (OSTROM_HOOK_TIMING=1: from entering the hook runner to the reply written). Results go to stdout and, in GitHub
 Actions, to the job summary. Exits 1 when the median hook time is above --max-hook-ms.
+
+The budget is measured on the hook of an ordinary tool call (`ls`), which is most of an agent's calls: the gate reads
+it and lets it through without starting anything. A `git push` is measured too and shown, not held to the budget: the
+gate then runs `git` to read what the push sends (outside a session, as here, it refuses with exit 2).
 """
 import argparse
 import os
@@ -16,19 +20,24 @@ import statistics
 import subprocess
 import time
 
-EVENT = (
-    '{"hook_event_name":"PreToolUse","session_id":"s_8f2a","cwd":"/repo","tool_name":"Bash",'
-    '"tool_input":{"command":"git push origin main","description":"Push the fix"}}'
-).encode()
+def event(command):
+    return (
+        '{"hook_event_name":"PreToolUse","session_id":"s_8f2a","cwd":"/repo","tool_name":"Bash",'
+        '"tool_input":{"command":"%s","description":"A step"}}' % command
+    ).encode()
 
 
-def run_many(command, runs, stdin=None, env=None):
+EVENT = event("ls -la")
+PUSH = event("git push origin main")
+
+
+def run_many(command, runs, stdin=None, env=None, accepted=(0,)):
     walls, insides = [], []
     for index in range(runs + 5):
         start = time.perf_counter()
         result = subprocess.run(command, input=stdin, capture_output=True, env=env)
         wall = (time.perf_counter() - start) * 1000
-        if result.returncode != 0:
+        if result.returncode not in accepted:
             raise SystemExit(f"{command} exited {result.returncode}: {result.stderr.decode(errors='replace')}")
         if index < 5:
             continue  # warm-up: page cache, first-run checks of the OS
@@ -55,6 +64,8 @@ def main():
 
     env = dict(os.environ, OSTROM_HOOK_TIMING="1")
     hook_walls, hook_insides = run_many([args.binary, "hook", "gate"], args.runs, stdin=EVENT, env=env)
+    push_walls, _ = run_many([args.binary, "hook", "gate"], args.runs, stdin=PUSH, env=env, accepted=(0, 2))
+    push_median, push_p90 = describe(push_walls)
     version_walls, _ = run_many([args.binary, "version"], args.runs)
     hook_median, hook_p90 = describe(hook_walls)
     inside_median, _ = describe(hook_insides) if hook_insides else (float("nan"), None)
@@ -65,7 +76,8 @@ def main():
         "",
         "| Measure | Median (ms) | p90 (ms) |",
         "| --- | --- | --- |",
-        f"| `ostrom hook gate` (wall, {args.runs} runs) | {hook_median:.2f} | {hook_p90:.2f} |",
+        f"| `ostrom hook gate`, ordinary call (wall, {args.runs} runs) | {hook_median:.2f} | {hook_p90:.2f} |",
+        f"| `ostrom hook gate`, `git push` (wall, runs `git`) | {push_median:.2f} | {push_p90:.2f} |",
         f"| `ostrom hook gate` (inside the hook) | {inside_median:.3f} | |",
         f"| `ostrom version` (wall) | {version_median:.2f} | {version_p90:.2f} |",
     ]
