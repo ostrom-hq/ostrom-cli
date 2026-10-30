@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.platform
 
+import kotlin.math.min
+import kotlin.time.TimeMark
+import kotlin.time.TimeSource
+
 /** Why [Console.readStandardInput] returned nothing. */
 enum class StandardInputFailure {
     /** The read failed. */
@@ -61,8 +65,7 @@ class ConsoleImpl : Console {
         get() = isTerminal(1)
 
     override fun readStandardInput(maxBytes: Int, timeoutMillis: Int): StandardInput {
-        val buffer = ByteArray(maxBytes + 1)
-        return standardInputOf(buffer, readStdin(buffer, timeoutMillis))
+        return readGrowing(maxBytes, timeoutMillis, ::readStdin, TimeSource.Monotonic.markNow())
     }
 
     private fun writeTo(descriptor: Int, text: String) {
@@ -70,6 +73,33 @@ class ConsoleImpl : Console {
         writeBytes(descriptor, text.encodeToByteArray())
     }
 }
+
+/**
+ * Reads stdin into a buffer of [INITIAL_STDIN_BYTES], grown (doubled, up to [maxBytes]) only when an input fills it:
+ * a hook event of a few hundred bytes costs a 256 KiB buffer, not the largest event accepted.
+ *
+ * @param read The shim: fills a buffer from an offset within a deadline, same codes as `ostrom_read_stdin`.
+ * @param start When the read started: the deadline counts every read from there.
+ */
+internal fun readGrowing(
+    maxBytes: Int,
+    timeoutMillis: Int,
+    read: (buffer: ByteArray, offset: Int, timeoutMillis: Int) -> Int,
+    start: TimeMark,
+): StandardInput {
+    var buffer = ByteArray(min(INITIAL_STDIN_BYTES, maxBytes) + 1)
+    var count = read(buffer, 0, timeoutMillis)
+    while (count == READ_TOO_LARGE && buffer.size <= maxBytes) {
+        val offset = buffer.size
+        buffer = buffer.copyOf(min(offset.toLong() * 2, maxBytes + 1L).toInt())
+        val left = timeoutMillis - start.elapsedNow().inWholeMilliseconds
+        count = if (left > 0) read(buffer, offset, left.toInt()) else READ_TIMEOUT
+    }
+    return standardInputOf(buffer, count)
+}
+
+/** The first stdin buffer of [readGrowing] (decision of 30/10, 05:15). */
+internal const val INITIAL_STDIN_BYTES = 256 * 1024
 
 /** Codes of the C shim `ostrom_read_stdin` below zero. */
 internal const val READ_TIMEOUT = -2
@@ -91,5 +121,5 @@ internal expect fun writeBytes(descriptor: Int, bytes: ByteArray)
 /** True when the standard stream [descriptor] (0, 1 or 2) is a terminal. */
 internal expect fun isTerminal(descriptor: Int): Boolean
 
-/** Reads stdin into [buffer]; same return contract as the C shim `ostrom_read_stdin`. */
-internal expect fun readStdin(buffer: ByteArray, timeoutMillis: Int): Int
+/** Reads stdin into [buffer] from [offset]; same return contract as the C shim `ostrom_read_stdin`. */
+internal expect fun readStdin(buffer: ByteArray, offset: Int, timeoutMillis: Int): Int
