@@ -81,6 +81,8 @@ internal class LogoutCommand(private val dependencies: CliDependencies) : CliktC
         // the saved entry, never OSTROM_TOKEN: a CI token in the environment is not this device's session
         val credentials = store.saved(serverUrl)
         if (credentials == null) {
+            // S2-32: a token left only in the other store (the encrypted file of an SSH session) is forgotten too
+            store.forget(serverUrl)
             dependencies.console.out("Not signed in. Nothing to do.\n")
             throw ProgramResult(ExitCode.OK.code)
         }
