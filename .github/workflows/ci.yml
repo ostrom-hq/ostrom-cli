@@ -27,7 +27,6 @@ env:
 
 permissions:
   contents: read
-  packages: read # dev.ostrom artifacts of ostrom-core on GitHub Packages
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -41,6 +40,22 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: ostrom-core version
+        id: core
+        run: echo "ref=$(tr -d '[:space:]' < gradle/ostrom-core.ref)" >> "$GITHUB_OUTPUT"
+      # GITHUB_TOKEN cannot read another repository's Maven packages: ostrom-core is built from its commit (05:50).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ostrom-hq/ostrom-core
+          ref: ${{ steps.core.outputs.ref }}
+          ssh-key: ${{ secrets.DEPLOY_KEY_CORE }}
+          path: ostrom-core
+          persist-credentials: false
+      - name: Build ostrom-core from that checkout
+        run: |
+          mv ostrom-core ../ostrom-core
+          mkdir -p ~/.gradle
+          echo "ostrom.core.local=true" >> ~/.gradle/gradle.properties
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
@@ -74,7 +89,6 @@ jobs:
         env:
           OSTROM_NETWORK_TESTS: '1'
           OSTROM_SECRET_SERVICE_TESTS: '1'
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           dbus-run-session -- bash -ec '
             printf ci-keyring | gnome-keyring-daemon --unlock --components=secrets > /dev/null
@@ -102,8 +116,6 @@ jobs:
           --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
           --sizes cli/build/bin/*/releaseExecutable/ostrom.*
       - name: The bench's build contract
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./ci/build-linux.sh && ldd dist/ostrom
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -191,6 +203,22 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: ostrom-core version
+        id: core
+        run: echo "ref=$(tr -d '[:space:]' < gradle/ostrom-core.ref)" >> "$GITHUB_OUTPUT"
+      # GITHUB_TOKEN cannot read another repository's Maven packages: ostrom-core is built from its commit (05:50).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ostrom-hq/ostrom-core
+          ref: ${{ steps.core.outputs.ref }}
+          ssh-key: ${{ secrets.DEPLOY_KEY_CORE }}
+          path: ostrom-core
+          persist-credentials: false
+      - name: Build ostrom-core from that checkout
+        run: |
+          mv ostrom-core ../ostrom-core
+          mkdir -p ~/.gradle
+          echo "ostrom.core.local=true" >> ~/.gradle/gradle.properties
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
@@ -206,7 +234,6 @@ jobs:
       - name: macosArm64 tests and release binary
         env:
           OSTROM_NETWORK_TESTS: '1'
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./gradlew macosArm64Test :cli:linkReleaseExecutableMacosArm64
       - name: Hook start-up budget and size
         run: >-

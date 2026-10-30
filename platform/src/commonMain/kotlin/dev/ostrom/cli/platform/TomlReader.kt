@@ -8,7 +8,7 @@ import kotlin.math.min
  * strings) are skipped, and a line inside a multi-line value is never read as a key.
  */
 internal fun parseToml(text: String): Map<String, String> {
-    val lines = text.lines()
+    val lines = tomlLines(text).lines
     val layout = tomlLayout(lines)
     val values = linkedMapOf<String, String>()
     for (index in 0 until layout.firstTable) {

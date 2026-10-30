@@ -13,17 +13,21 @@ import kotlin.io.encoding.Base64
  *
  * @property displayName How doctor and login name it.
  * @property warning What to tell the developer when this store is used, or null when there is nothing to say.
- * @property whenRefused What to do when the store refuses a secret.
+ * @property advice What to do when the store refuses with a given error code; any other code: unlock and retry.
  */
 enum class SecretBackend(
     val displayName: String,
     val warning: String? = null,
-    val whenRefused: String = "unlock it and try again",
+    private val advice: Map<Int, String> = emptyMap(),
 ) {
-    // macOS asks again when the program changes (an update signed differently): only where a dialog can be shown.
+    // macOS asks again when the program changes (an update signed differently), and only where a window can show:
+    // -25308 (errSecInteractionNotAllowed) is that question asked where nobody can answer it.
     KEYCHAIN(
         "macOS Keychain",
-        whenRefused = "run ostrom doctor in a Terminal of your session and choose Always Allow when macOS asks",
+        advice = mapOf(
+            ERR_SEC_INTERACTION_NOT_ALLOWED to "macOS needs your permission and cannot ask here: run ostrom " +
+                "login in a Terminal of your desktop session and choose Always Allow",
+        ),
     ),
     SECRET_SERVICE("Secret Service (libsecret)"),
     CREDENTIAL_MANAGER("Windows Credential Manager"),
@@ -32,7 +36,14 @@ enum class SecretBackend(
         "No Secret Service on this device: secrets are kept in an encrypted file only you can read. " +
             "Install and unlock GNOME Keyring or KWallet to keep them in the system store.",
     ),
+    ;
+
+    /** What to do when this store refused with [code]. */
+    fun adviceFor(code: Int): String = advice[code] ?: "unlock it and try again"
 }
+
+/** The Keychain's OSStatus for a question it cannot ask the user here (no window: SSH, a background job). */
+private const val ERR_SEC_INTERACTION_NOT_ALLOWED = -25_308
 
 /** The secret store could not keep or give back a secret; [message] says what to do. */
 class SecretStoreException(override val message: String, cause: Throwable? = null) : Exception(message, cause)
@@ -176,7 +187,7 @@ internal class VaultSecretStore(private val vault: Vault) : SecretStore {
             VAULT_UNREACHABLE -> "${vault.backend.displayName} stopped answering: start it again (log in to the " +
                 "desktop session, or unlock GNOME Keyring or KWallet), then try again."
             else -> "${vault.backend.displayName} could not $action the secret $name (error ${answer.code}): " +
-                "${vault.backend.whenRefused}."
+                "${vault.backend.adviceFor(answer.code)}."
         },
     )
 }
@@ -231,12 +242,19 @@ internal class EncryptedFileSecretStore(
         return if (text.lines().first() == HEADER) parse(text) else emptyMap()
     }
 
-    /** The sealed entries, to be written back: a file in another format is never replaced (a newer CLI's). */
+    /**
+     * The sealed entries, to be written back. A file that exists but cannot be read, or one in another format (a newer
+     * CLI's), is never replaced: the other servers' secrets in it would be lost. An empty file holds none.
+     */
     private fun writableEntries(): Map<String, String> {
         val text = files.read(path)
-        if (text != null && text.lines().first() != HEADER) {
-            throw SecretStoreException("$path was written by another version of ostrom: update ostrom to change it.")
+        val problem = when {
+            text == null && files.exists(path) -> "$path cannot be read: check that it is yours, then try again."
+            text != null && text.isNotBlank() && text.lines().first() != HEADER ->
+                "$path was written by another version of ostrom: update ostrom to change it."
+            else -> null
         }
+        if (problem != null) throw SecretStoreException(problem)
         return parse(text.orEmpty())
     }
 

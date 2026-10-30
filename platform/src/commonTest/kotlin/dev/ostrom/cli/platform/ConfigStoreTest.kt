@@ -125,7 +125,7 @@ class ConfigStoreTest {
     fun aKeyAddedToAFileWithOnlyTablesGoesFirstAndAnEmptiedFileIsEmpty() {
         file("[profile]\nname = \"x\"")
         store.set(ConfigKey.EDITOR, "vim")
-        assertEquals("editor = \"vim\"\n[profile]\nname = \"x\"\n", written())
+        assertEquals("editor = \"vim\"\n[profile]\nname = \"x\"", written())
         file("editor = \"vim\"\n")
         store.unset(ConfigKey.EDITOR)
         assertEquals("", written())
@@ -177,5 +177,15 @@ class ConfigStoreTest {
         store.set(ConfigKey.COLOR, "never")
         assertEquals("# notepad\r\nserver = \"https://a.example\"\r\ncolor = \"never\"\r\n", written())
         assertEquals("https://a.example", store.get(ConfigKey.SERVER))
+    }
+
+    @Test
+    fun aByteOrderMarkMixedEndingsAndAMissingLastNewlineAreKept() {
+        file("\uFEFF# notepad\nserver = \"https://a.example\"\r\nretries = 3")
+        assertEquals("https://a.example", store.get(ConfigKey.SERVER))
+        store.set(ConfigKey.SERVER, "https://b.example")
+        store.set(ConfigKey.COLOR, "never")
+        assertEquals("\uFEFF# notepad\nserver = \"https://b.example\"\r\nretries = 3\ncolor = \"never\"\n", written())
+        assertEquals(mapOf(ConfigKey.SERVER to "https://b.example", ConfigKey.COLOR to "never"), store.list())
     }
 }

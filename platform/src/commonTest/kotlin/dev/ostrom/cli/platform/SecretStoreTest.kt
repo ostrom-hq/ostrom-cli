@@ -72,9 +72,13 @@ class SecretStoreTest {
         val vault = FakeVault().apply { failWith = VaultAnswer(3, code = -25308) }
         val store = secretStoreOf(vault, home, files)
         val read = assertFailsWith<SecretStoreException> { store.read("s") }
-        val expected = "macOS Keychain could not read the secret s (error -25308): run ostrom doctor in a Terminal " +
-            "of your session and choose Always Allow when macOS asks."
+        val expected = "macOS Keychain could not read the secret s (error -25308): macOS needs your permission and " +
+            "cannot ask here: run ostrom login in a Terminal of your desktop session and choose Always Allow."
         assertEquals(expected, read.message)
+        vault.failWith = VaultAnswer(3, code = -128)
+        val denied = assertFailsWith<SecretStoreException> { store.read("s") }.message
+        assertEquals("macOS Keychain could not read the secret s (error -128): unlock it and try again.", denied)
+        vault.failWith = VaultAnswer(3, code = -25308)
         assertTrue(assertFailsWith<SecretStoreException> { store.write("s", "x") }.message!!.contains("could not keep"))
         assertTrue(assertFailsWith<SecretStoreException> { store.delete("s") }.message!!.contains("could not forget"))
         vault.failWith = VaultAnswer(VAULT_TOO_LARGE)
@@ -141,7 +145,10 @@ class SecretStoreTest {
         assertFailsWith<SecretStoreException> { store.write("other", "x") }
         assertFailsWith<SecretStoreException> { store.delete("name") }
         assertEquals("ostrom-secrets 2\nname value\n", files.read(secretsFile))
+        // An empty file (touched, or cut short) holds no secret and is written over.
         files.write(secretsFile, "")
+        store.write("name", "x")
+        assertEquals("x", store.read("name"))
         assertFailsWith<SecretStoreException> { store.write("", "x") }
         assertFailsWith<SecretStoreException> { store.write("two words", "x") }
     }
@@ -180,6 +187,16 @@ class SecretStoreTest {
         fileSystem.write("/home/maya/.config/ostrom".toPath()) { writeUtf8("not a folder") }
         val refused = assertFailsWith<SecretStoreException> { secretStoreOf(null, home, files).write("a", "x") }
         assertTrue(refused.message!!.startsWith("Could not write"), refused.message)
+    }
+
+    @Test
+    fun aFileThatCannotBeReadIsNeverReplaced() {
+        machine()
+        fileSystem.createDirectories(secretsFile.toPath())
+        val store = secretStoreOf(null, home, files)
+        assertNull(store.read("a"))
+        val refused = assertFailsWith<SecretStoreException> { store.write("a", "x") }
+        assertTrue(refused.message!!.endsWith("cannot be read: check that it is yours, then try again."))
     }
 
     @Test

@@ -16,14 +16,31 @@ extern char **environ;
 #define OSTROM_ENVIRON environ
 #endif
 
-/* The child being waited for, the target of the signals relayed by ostrom_relay_signal. */
-static volatile pid_t ostrom_child = 0;
-/* A signal that came before the child's pid was known (on another thread of the runtime), relayed once it is. */
-static volatile sig_atomic_t ostrom_pending_signal = 0;
+/* The child being waited for, the target of the signals relayed by ostrom_relay_signal; 0 when there is none. */
+static pid_t ostrom_child = 0;
+/*
+ * The signals (one bit each, SIGHUP and SIGTERM) that came while there was no child to pass them to: before its pid
+ * was known (on another thread of the runtime), or after it ended. Lock-free atomics, safe in a signal handler.
+ */
+static int ostrom_pending_signals = 0;
+
+/* Passes the pending signals to `child`; the exchange hands each one to exactly one caller. */
+static void ostrom_relay_pending(pid_t child) {
+    int pending = __atomic_exchange_n(&ostrom_pending_signals, 0, __ATOMIC_SEQ_CST);
+    if (pending & (1 << SIGHUP)) kill(child, SIGHUP);
+    if (pending & (1 << SIGTERM)) kill(child, SIGTERM);
+}
 
 static void ostrom_relay_signal(int signal_number) {
-    if (ostrom_child > 0) kill(ostrom_child, signal_number);
-    else ostrom_pending_signal = signal_number;
+    pid_t child = __atomic_load_n(&ostrom_child, __ATOMIC_SEQ_CST);
+    if (child > 0) {
+        kill(child, signal_number);
+        return;
+    }
+    __atomic_fetch_or(&ostrom_pending_signals, 1 << signal_number, __ATOMIC_SEQ_CST);
+    /* The pid may have been published in between: then this handler relays what it just kept. */
+    child = __atomic_load_n(&ostrom_child, __ATOMIC_SEQ_CST);
+    if (child > 0) ostrom_relay_pending(child);
 }
 
 /*
@@ -32,8 +49,9 @@ static void ostrom_relay_signal(int signal_number) {
  * default action), like system(3), and relays SIGTERM and SIGHUP to the child (a closed terminal tab, a supervisor
  * stopping the CLI) then keeps waiting, so that the agent never outlives the CLI: the CLI ends when the agent does,
  * with its code (an agent that ignores SIGTERM keeps running, as it would without the CLI). One that arrives before
- * the child's pid is known (blocked on this thread, kept by the handler on another) is relayed as soon as it is, or
- * raised again here when the spawn failed. Returns 0 and sets *exit_code
+ * the child's pid is known (blocked on this thread, kept by the handler on another) is relayed as soon as it is; one
+ * with no child to take it (the spawn failed, or the child had already ended) is raised again here once the old
+ * handlers are back, so the CLI stops as it was asked to. Returns 0 and sets *exit_code
  * (128 + signal when killed), 1 when the executable is not found, 2 on any other failure.
  */
 static inline int ostrom_spawn_wait(const char *file, char *const argv[], int *exit_code) {
@@ -70,9 +88,8 @@ static inline int ostrom_spawn_wait(const char *file, char *const argv[], int *e
     int spawned = posix_spawnp(&pid, file, NULL, &attributes, argv, OSTROM_ENVIRON);
     posix_spawnattr_destroy(&attributes);
     if (spawned == 0) {
-        ostrom_child = pid;
-        if (ostrom_pending_signal != 0) kill(pid, ostrom_pending_signal);
-        ostrom_pending_signal = 0;
+        __atomic_store_n(&ostrom_child, pid, __ATOMIC_SEQ_CST);
+        ostrom_relay_pending(pid);
     }
     sigprocmask(SIG_SETMASK, &previous_mask, NULL);
     int result = 2;
@@ -85,15 +102,15 @@ static inline int ostrom_spawn_wait(const char *file, char *const argv[], int *e
         if (waited == pid && WIFEXITED(status)) { *exit_code = WEXITSTATUS(status); result = 0; }
         else if (waited == pid && WIFSIGNALED(status)) { *exit_code = 128 + WTERMSIG(status); result = 0; }
     }
-    ostrom_child = 0;
+    __atomic_store_n(&ostrom_child, 0, __ATOMIC_SEQ_CST);
     sigaction(SIGINT, &old_int, NULL);
     sigaction(SIGQUIT, &old_quit, NULL);
     sigaction(SIGTERM, &old_term, NULL);
     sigaction(SIGHUP, &old_hup, NULL);
-    /* No child to pass it to (the spawn failed): the signal is this process's again, with its own action. */
-    int pending = ostrom_pending_signal;
-    ostrom_pending_signal = 0;
-    if (pending != 0) raise(pending);
+    /* Signals no child took are this process's again, with its own action. */
+    int pending = __atomic_exchange_n(&ostrom_pending_signals, 0, __ATOMIC_SEQ_CST);
+    if (pending & (1 << SIGHUP)) raise(SIGHUP);
+    if (pending & (1 << SIGTERM)) raise(SIGTERM);
     return result;
 }
 

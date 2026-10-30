@@ -15,25 +15,41 @@ internal object SecretServiceVault : Vault {
     override val backend = SecretBackend.SECRET_SERVICE
 
     /**
-     * libsecret is installed and a Secret Service runs on the session bus. A service that runs but refuses (a locked
-     * collection, no answer within the shim's deadline) is still the store: its secrets are there, and switching to
-     * the encrypted file would hide them (or keep a new one where the next command does not look).
+     * libsecret is installed and a Secret Service answers on the session bus. The probe looks up an account that is
+     * never written: with nothing to unlock it shows no prompt, so any running service answers it at once, and one
+     * that does not within [PROBE_MILLIS] counts as absent. A service that answers but later refuses (a locked
+     * collection) stays the store: its secrets are there, and switching to the encrypted file would hide them.
      */
-    override fun isAvailable(): Boolean =
-        ostrom_secret_load() == 1 && read(SECRET_SERVICE_NAME, PROBE).status != VAULT_UNREACHABLE
+    override fun isAvailable(): Boolean {
+        if (ostrom_secret_load() != 1) return false
+        val probe = vaultRead { buffer, capacity, length, code ->
+            ostrom_secret_read(SECRET_SERVICE_NAME, PROBE, PROBE_MILLIS, buffer, capacity, length, code)
+        }
+        return probe.status == VAULT_OK || probe.status == VAULT_NOT_FOUND
+    }
 
     override fun read(service: String, account: String) =
         vaultRead { buffer, capacity, length, code ->
-            ostrom_secret_read(service, account, buffer, capacity, length, code)
+            ostrom_secret_read(service, account, deadline(), buffer, capacity, length, code)
         }
 
     override fun write(service: String, account: String, secret: ByteArray) =
         // libsecret keeps text: a device token is ASCII.
-        vaultCall { code -> ostrom_secret_write(service, account, secret.decodeToString(), code) }
+        vaultCall { code -> ostrom_secret_write(service, account, secret.decodeToString(), deadline(), code) }
 
     override fun delete(service: String, account: String) =
-        vaultCall { code -> ostrom_secret_delete(service, account, code) }
+        vaultCall { code -> ostrom_secret_delete(service, account, deadline(), code) }
+
+    /**
+     * How long a call may wait for the service: in a terminal, long enough to answer an unlock prompt; elsewhere (a
+     * hook, a background job), short, as nobody is there to answer it and the agent waits.
+     */
+    private fun deadline() = if (isTerminal(STDERR)) INTERACTIVE_MILLIS else BACKGROUND_MILLIS
 
     /** An account never written: looking it up only proves the service runs. */
     private const val PROBE = "availability-probe"
+    private const val PROBE_MILLIS = 1_000
+    private const val BACKGROUND_MILLIS = 3_000
+    private const val INTERACTIVE_MILLIS = 120_000
+    private const val STDERR = 2
 }

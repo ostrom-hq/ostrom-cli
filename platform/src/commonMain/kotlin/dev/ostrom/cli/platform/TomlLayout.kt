@@ -12,6 +12,37 @@ import kotlin.math.min
  */
 internal class TomlLayout(val topLevel: List<Boolean>, val firstTable: Int)
 
+/**
+ * The lines of a TOML file and the end of each (`\n`, `\r\n`, or empty for a last line without one), so that a rewrite
+ * keeps every line ending as it was. A UTF-8 byte order mark (Notepad's) is set apart in [bom].
+ */
+internal class TomlLines(val bom: Boolean, val lines: MutableList<String>, val endings: MutableList<String>)
+
+/** [text] split into [TomlLines]; a lone `\r` stays inside its line, as TOML only ends a line with LF or CRLF. */
+internal fun tomlLines(text: String): TomlLines {
+    val body = text.removePrefix(BOM)
+    val lines = mutableListOf<String>()
+    val endings = mutableListOf<String>()
+    var start = 0
+    while (start < body.length) {
+        val newline = body.indexOf('\n', start)
+        val end = if (newline < 0) body.length else newline
+        val crlf = end > start && body[end - 1] == '\r'
+        lines += body.substring(start, if (crlf) end - 1 else end)
+        endings += if (newline < 0) "" else if (crlf) "\r\n" else "\n"
+        start = end + 1
+    }
+    return TomlLines(body.length != text.length, lines, endings)
+}
+
+/** The text of [lines], ends and byte order mark as they were. */
+internal fun tomlText(lines: TomlLines): String = buildString {
+    if (lines.bom) append(BOM)
+    for (index in lines.lines.indices) append(lines.lines[index]).append(lines.endings[index])
+}
+
+private const val BOM = "\uFEFF"
+
 /** The [TomlLayout] of [lines]: strings, comments and brackets are followed across lines. */
 internal fun tomlLayout(lines: List<String>): TomlLayout {
     val scanner = TomlScanner()

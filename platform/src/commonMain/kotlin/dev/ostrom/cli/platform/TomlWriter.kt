@@ -3,20 +3,31 @@ package dev.ostrom.cli.platform
 
 /**
  * [text] with the top-level line of [key] replaced by [line], or removed when [line] is null. A new key goes after
- * the last top-level line, before the first table. Every other line is kept as it is, and so are the file's line
- * endings (`\r\n` when it has them, as Notepad writes it).
+ * the last top-level line, before the first table, and ends like the file's first line (`\r\n` in a file Notepad
+ * wrote). Every other line is kept as it is, its own line ending and the byte order mark included.
  */
 internal fun withTomlLine(text: String, key: String, line: String?): String {
-    val newline = if ("\r\n" in text) "\r\n" else "\n"
-    val lines = if (text.isEmpty()) mutableListOf() else text.removeSuffix(newline).lines().toMutableList()
+    val file = tomlLines(text)
+    val lines = file.lines
     val layout = tomlLayout(lines)
     val existing = (0 until layout.firstTable).firstOrNull { layout.topLevel[it] && tomlKeyOf(lines[it]) == key }
     when {
         existing != null && line != null -> lines[existing] = line
-        existing != null -> lines.removeAt(existing)
-        line != null -> lines.add(insertionPoint(lines, layout.firstTable), line)
+        existing != null -> {
+            lines.removeAt(existing)
+            file.endings.removeAt(existing)
+        }
+        line != null -> insert(file, insertionPoint(lines, layout.firstTable), line)
     }
-    return if (lines.isEmpty()) "" else lines.joinToString(newline, postfix = newline)
+    return tomlText(file)
+}
+
+/** Adds [line] to [file] at [index], with the file's line ending; a last line without one gets it first. */
+private fun insert(file: TomlLines, index: Int, line: String) {
+    val newline = file.endings.firstOrNull { it.isNotEmpty() } ?: "\n"
+    if (index > 0 && file.endings[index - 1].isEmpty()) file.endings[index - 1] = newline
+    file.lines.add(index, line)
+    file.endings.add(index, newline)
 }
 
 /** Where a new top-level line goes: after the last non-blank line before [end], the first table. */

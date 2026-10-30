@@ -112,9 +112,14 @@ receiving Ctrl-C, stdin read through `PeekNamedPipe`, UTF-8 output on the consol
 
 ## ostrom-core
 
-`api-client` depends on `dev.ostrom:ostrom-api` (the API models of ostrom-core, `OstromJson`, `ApiError`), read from
-GitHub Packages (`maven.pkg.github.com/ostrom-hq/ostrom-core`, with `GITHUB_ACTOR` / `GITHUB_TOKEN`, or `gpr.user` /
-`gpr.key` in `~/.gradle/gradle.properties`; a token with `read:packages`). The version is `ostromCoreVersion` in
-`gradle.properties`, a published one with its JVM variant: there is no `includeBuild` of a local clone, so every build
-(CI, the bench, a laptop) compiles against the same released contract. A contract change is released by ostrom-core
-first, then the version is raised here.
+`api-client` depends on `dev.ostrom:ostrom-api` (the API models of ostrom-core, `OstromJson`, `ApiError`). The version
+is `ostromCoreVersion` in `gradle.properties`, and `gradle/ostrom-core.ref` is the ostrom-core commit that published it:
+change both together.
+
+- Locally: from GitHub Packages (`maven.pkg.github.com/ostrom-hq/ostrom-core`, with `gpr.user` / `gpr.key` in
+  `~/.gradle/gradle.properties`, a token with `read:packages`), or from a clone at `../ostrom-core` with
+  `ostrom.core.local=true`, which `includeBuild`s it and substitutes `ostrom-api`, `ostrom-receipts` and
+  `ostrom-telemetry`.
+- In CI (`ci.yml`, `release.yml`): a repository's `GITHUB_TOKEN` cannot read another repository's Maven packages, so
+  ostrom-core is checked out at the commit of `gradle/ostrom-core.ref` with the read-only key `DEPLOY_KEY_CORE`, then
+  built through `ostrom.core.local` (JOURNAL 05:50).
