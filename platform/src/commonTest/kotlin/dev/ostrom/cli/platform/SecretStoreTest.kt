@@ -238,4 +238,23 @@ class SecretStoreTest {
         secretStoreOf(FakeVault(available = false), home, files).delete("https://ostrom.run")
         assertFalse(fileSystem.exists("/home/maya/.config".toPath()), "neither a secrets file nor its lock")
     }
+
+    @Test
+    fun aStoreThatRefusesToForgetNeverKeepsTheOtherOnesToken() {
+        machine()
+        val withoutService = secretStoreOf(FakeVault(available = false), home, files)
+        withoutService.write("https://ostrom.run", "osd_from_ssh")
+        // The system store is locked: the file's token is forgotten all the same, and the refusal is reported.
+        val locked = FakeVault().apply { failWith = VaultAnswer(3, code = -25308) }
+        assertFailsWith<SecretStoreException> { secretStoreOf(locked, home, files).delete("https://ostrom.run") }
+        assertNull(withoutService.read("https://ostrom.run"))
+        // A file this version cannot change: the system store's token is forgotten all the same.
+        files.write(secretsFile, "ostrom-secrets 2\nname value\n")
+        val vault = FakeVault()
+        val store = secretStoreOf(vault, home, files)
+        store.write("https://ostrom.run", "osd_from_desktop")
+        val newer = assertFailsWith<SecretStoreException> { store.delete("https://ostrom.run") }.message
+        assertTrue(newer.endsWith("update ostrom to change it."), newer)
+        assertTrue(vault.secrets.isEmpty())
+    }
 }

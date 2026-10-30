@@ -34,7 +34,7 @@ interface FileStore {
      *
      * @throws FileWriteException When the lock file cannot be created or locked.
      */
-    fun <T> exclusive(path: String, block: () -> T): T = block()
+    fun <T> exclusive(path: String, block: () -> T): T
 }
 
 /** Takes an exclusive lock on a file, released when the returned handle is closed. */

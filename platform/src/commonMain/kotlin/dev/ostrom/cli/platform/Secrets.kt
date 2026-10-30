@@ -141,8 +141,17 @@ internal class SystemSecretStore(
     override fun write(name: String, secret: String) = primary.write(name, secret)
 
     override fun delete(name: String) {
-        primary.delete(name)
-        leftovers()?.delete(name)
+        // Both are tried whatever the other answers: a locked system store must not keep the file's token on disk.
+        // The first refusal is then reported; its message says what to do, so the next logout can finish.
+        val refusals = listOf({ primary.delete(name) }, { leftovers()?.delete(name) }).mapNotNull { forget ->
+            try {
+                forget()
+                null
+            } catch (e: SecretStoreException) {
+                e
+            }
+        }
+        refusals.firstOrNull()?.let { throw it }
     }
 }
 

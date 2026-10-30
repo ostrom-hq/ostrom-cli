@@ -12,7 +12,9 @@ import okio.IOException
 import platform.windows.GetLastError
 
 internal actual fun lockFile(path: String): AutoCloseable {
-    val file = memScoped { ostrom_lock_file_w(path.wcstr.ptr) }
-        ?: throw IOException("could not lock $path (error ${GetLastError()})")
+    // The error is read before the scope frees its memory, which may change it.
+    val file = memScoped {
+        ostrom_lock_file_w(path.wcstr.ptr) ?: throw IOException("could not lock $path (error ${GetLastError()})")
+    }
     return AutoCloseable { ostrom_unlock_file_w(file) }
 }

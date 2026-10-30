@@ -61,15 +61,4 @@ class FileStoreTest {
         assertFailsWith<IllegalArgumentException> { locked.exclusive("/") { } }
         assertEquals(2, locked.exclusive("/c/d") { 2 })
     }
-
-    @Test
-    fun aFileStoreWithoutLocksRunsTheBlockAsItIs() {
-        val bare = object : FileStore {
-            override fun read(path: String): String? = null
-            override fun write(path: String, text: String) = Unit
-            override fun delete(path: String) = Unit
-            override fun exists(path: String) = false
-        }
-        assertEquals(1, bare.exclusive("/x") { 1 })
-    }
 }
