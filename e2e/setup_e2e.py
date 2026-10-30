@@ -80,10 +80,10 @@ def make_handler(state):
 
         def _route(self, method, path, token, body, query):
             route = (method, path)
+            # the device's token never holds an organisation's write scopes (S2-04): only a console token writes
+            if method != "GET" and token != CONSOLE_TOKEN:
+                return self._error(403, "orgs:write is needed")
             if route == ("POST", "/api/v1/orgs/o1/members/invites"):
-                # the device's token never holds orgs:write (S2-04): only a console token invites
-                if token != CONSOLE_TOKEN:
-                    return self._error(403, "orgs:write is needed")
                 return self._answer(201, {"invited": [i["email"].lower() for i in body["invites"]]})
             if route == ("GET", "/api/v1/orgs/o1/members"):
                 return self._answer(200, {"items": [{"login": "maya", "name": "Maya", "role": "admin",
@@ -173,15 +173,20 @@ def main():
             return done.returncode, done.stdout, done.stderr
 
         print("ostrom init")
+        admin = {"OSTROM_TOKEN": CONSOLE_TOKEN}
         code, out, err = ostrom("init", "--yes")
         check(code == 0, f"init --yes sets up the repository (exit {code}: {err.strip()})")
+        check("Accept them on the console" in out, "with the device's token, init says where rules are accepted")
+        check(all(r["status"] == "proposed" for r in state.rules), "and accepts none")
         check("✓ Acme (acme)" in out and "acme-api · covered" in out, "init links Acme and finds the repository")
         check("git-safety (proposed)" in out, "init shows the harness of the repository")
         config = open(os.path.join(home, "config.toml")).read()
         check('org = "acme"' in config, "init keeps the organisation in config.toml")
         bashrc = open(os.path.join(work, ".bashrc")).read()
         check("alias claude='ostrom claude'" in bashrc, "init aliases the agent it found to ostrom")
-        check(all(r["status"] == "accepted" for r in state.rules), "init --yes accepts the proposed rules")
+        code, out, err = ostrom("init", "--yes", extra=admin)
+        check(code == 0 and "✓ 2 rules accepted" in out, f"with a console token, init accepts them ({err.strip()})")
+        check(all(r["status"] == "accepted" for r in state.rules), "the server has them accepted")
         check(sorted(os.listdir(repo)) == [".git"], "the repository holds only its .git")
         code, out, _ = ostrom("init")
         check(code == 0 and "aliases in" in out and "none proposed yet" in out, "a second init sees it all done")
@@ -204,7 +209,7 @@ def main():
         code, out, _ = ostrom("policy", "show")
         check(code == 0 and "sonnet · default sonnet" in out, "policy show reads the models")
         check("Self-approval  not on this server yet" in out, "a route not served is said, not failed")
-        code, out, _ = ostrom("policy", "set", "models", "sonnet,opus")
+        code, out, _ = ostrom("policy", "set", "models", "sonnet,opus", extra=admin)
         check(code == 0 and state.models["allowed"] == ["sonnet", "opus"], "policy set models saves the models")
         check(state.models["default"] == "sonnet", "the default is kept")
         code, out, _ = ostrom("policy", "check", "claude")
@@ -217,10 +222,10 @@ def main():
         print("ostrom harness")
         with open(os.path.join(work, "deploy.json"), "w") as handle:
             json.dump({"name": "deploy", "nodes": [{"kind": "gate", "label": "Deploy"}]}, handle)
-        code, out, err = ostrom("harness", "add", os.path.join(work, "deploy.json"), "--yes")
+        code, out, err = ostrom("harness", "add", os.path.join(work, "deploy.json"), "--yes", extra=admin)
         check(code == 0 and "✓ Added deploy (w2), on trial" in out, f"harness add proposes a workflow ({err})")
         check(state.workflows[-1]["status"] == "proposed", "on trial until enforced")
-        code, out, _ = ostrom("harness", "enforce", "w2")
+        code, out, _ = ostrom("harness", "enforce", "w2", extra=admin)
         check(code == 0 and state.workflows[-1]["status"] == "accepted", "harness enforce ends the trial")
         check(state.workflows[-1]["version"] == 2, "at the version read")
         code, out, _ = ostrom("harness", "list", "--all")

@@ -32,8 +32,22 @@ private fun JsonObject.nodes() = list("nodes").filterIsInstance<JsonObject>()
 
 private fun JsonObject.version(): Int? = (this["version"] as? JsonPrimitive)?.content?.toIntOrNull()
 
-/** `trial run` for a workflow only proposed, `enforced` once accepted. */
-private fun JsonObject.mode(): String = if (text("status") == "proposed") "trial run" else "enforced"
+/** The statuses of a workflow that blocks (`WorkflowStatus` of the contract). */
+private val ENFORCED = setOf("accepted", "edited")
+
+/** `trial run` for a workflow only proposed, `enforced` once accepted or edited; another status as it is. */
+private fun JsonObject.mode(): String = when (val status = text("status")) {
+    "proposed" -> "trial run"
+    null, in ENFORCED -> "enforced"
+    else -> status
+}
+
+/** The version [name] was read at, sent back with a save so that no one's change is overwritten. */
+private fun JsonObject.expectedVersion(name: String?): Int = version() ?: throw stopWith(
+    ExitCode.FAILED,
+    "Ostrom did not say which version of ${name ?: "the workflow"} it holds: nothing was saved, so that no one's " +
+        "change is overwritten.",
+)
 
 private fun JsonObject.approvals(): List<JsonObject> = nodes().filter { it.text("kind") == "gate" }
 
@@ -174,12 +188,12 @@ internal class HarnessEnforceCommand(private val dependencies: CliDependencies) 
         val access = dependencies.orgAccess(server, org)
         val current = access.read(workflow(id), "No workflow $id in ${access.org.slug}.")
         val name = current.text("name")
-        if (current.text("status") != "proposed") {
+        if (current.text("status") in ENFORCED) {
             dependencies.console.out("$name is already enforced.\n")
             return
         }
         val enforced = saved(current, "status" to "accepted")
-        val body = objectOf("workflow" to enforced, "expectedVersion" to current.version())
+        val body = objectOf("workflow" to enforced, "expectedVersion" to current.expectedVersion(name))
         access.write("PUT", workflow(id), body, "No workflow $id in ${access.org.slug}.")
         dependencies.console.out("✓ $name is now enforced in ${access.org.name}.\n")
     }
@@ -203,7 +217,7 @@ internal class HarnessUpdateCommand(private val dependencies: CliDependencies) :
         val next = saved(document, "id" to id, "status" to (document.text("status") ?: current.text("status")))
         dependencies.console.out("Before  ${line(current)}\nAfter   ${line(next)}\n")
         if (!yes && !dependencies.confirm("Save it?")) throw stopWith(ExitCode.INCOMPLETE, "Nothing was changed.")
-        val body = objectOf("workflow" to next, "expectedVersion" to current.version())
+        val body = objectOf("workflow" to next, "expectedVersion" to current.expectedVersion(current.text("name")))
         val stored = access.write("PUT", workflow(id), body, "No workflow $id in ${access.org.slug}.")
         dependencies.console.out("✓ Saved ${line(stored)}\n")
     }

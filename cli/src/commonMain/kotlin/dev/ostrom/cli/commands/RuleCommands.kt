@@ -25,14 +25,32 @@ internal fun ruleLine(rule: JsonObject): String =
     listOfNotNull(rule.text("id"), rule.text("status"), rule.text("strength"), rule.text("statement"))
         .joinToString("  ")
 
+/** The ids of the first page of rules still proposed, and whether the server has more. */
+private fun OrgAccess.proposedPage(): Pair<List<String>, Boolean> {
+    val body = read("$RULES?status=proposed", "No rules in ${org.slug}.")
+    val ids = body.list("items").filterIsInstance<JsonObject>().mapNotNull { it.text("id") }
+    return ids to !body.text("next").isNullOrEmpty()
+}
+
 /**
- * The ids of the rules [status] (`proposed`), as `GET /api/v1/rules?status=` lists them on its first page.
+ * Decides every rule still proposed with [status], page after page: a page decided is no longer proposed, so the next
+ * read gives the next one. At most [MAX_PAGES] pages, for a server that would keep them proposed.
  *
- * @return The ids, maybe none.
+ * @return How many rules changed.
  */
-internal fun OrgAccess.ruleIds(status: String): List<String> =
-    read("$RULES?status=${segment(status)}", "No rules in ${org.slug}.").list("items")
-        .filterIsInstance<JsonObject>().mapNotNull { it.text("id") }
+internal fun OrgAccess.decideProposed(status: String): Int {
+    var count = 0
+    var pages = 0
+    do {
+        val (ids, more) = proposedPage()
+        if (ids.isNotEmpty()) count += decideRules(ids, status)
+        pages++
+    } while (more && ids.isNotEmpty() && pages < MAX_PAGES)
+    return count
+}
+
+/** The most pages of proposed rules one command decides. */
+private const val MAX_PAGES = 20
 
 /**
  * Decides [ids] with [status] (`accepted`, `rejected`): one rule by `PATCH /rules/{id}`, several by `POST
@@ -137,12 +155,11 @@ internal abstract class RulesDecideCommand(
         dependencies.outsideSessions("policy rules $commandName")
         if (ids.isEmpty() == !proposed) throw stopWith(ExitCode.USAGE, "Name rule ids, or add --proposed (not both).")
         val access = dependencies.orgAccess(server, org)
-        val chosen = ids.ifEmpty { access.ruleIds("proposed") }
-        if (chosen.isEmpty()) {
+        val count = if (proposed) access.decideProposed(status) else access.decideRules(ids, status)
+        if (proposed && count == 0) {
             dependencies.console.out("No rule is proposed in ${access.org.name}. Nothing to do.\n")
             return
         }
-        val count = access.decideRules(chosen, status)
         dependencies.console.out("✓ ${if (count == 1) "1 rule" else "$count rules"} $status in ${access.org.name}.\n")
     }
 }

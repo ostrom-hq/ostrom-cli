@@ -264,9 +264,6 @@ class OstromCliTest : CliKit() {
         assertEquals(0, cli().run(arrayOf("harness")))
         assertTrue(console.out.contains("enforce"), console.out.toString())
         console.out.clear()
-        assertEquals(0, cli().run(arrayOf("members")))
-        assertTrue(console.out.contains("remove"), console.out.toString())
-        console.out.clear()
         assertEquals(0, cli().run(arrayOf("policy", "rules")))
         assertTrue(console.out.contains("accept"), console.out.toString())
     }

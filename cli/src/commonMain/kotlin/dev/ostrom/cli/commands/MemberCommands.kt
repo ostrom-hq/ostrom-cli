@@ -76,9 +76,11 @@ internal class InviteCommand(private val dependencies: CliDependencies) : CliktC
     }
 }
 
-/** `ostrom members`: the members of the organisation and their roles. */
-internal class MembersCommand :
-    GroupCommand("members", "Members of your organisation and their roles (admin)", comingSoon = false)
+/** `ostrom members`: the list, unless a subcommand is given. */
+internal class MembersCommand(private val dependencies: CliDependencies) :
+    GroupCommand("members", "Members of your organisation and their roles (admin)", "list", comingSoon = false) {
+    override fun runDefault() = dependencies.listMembers(org = null, server = null, json = false)
+}
 
 /** `ostrom members list`: login, name, role and the day each joined. */
 internal class MembersListCommand(private val dependencies: CliDependencies) : CliktCommand(name = "list") {
@@ -88,28 +90,28 @@ internal class MembersListCommand(private val dependencies: CliDependencies) : C
     private val server by serverFlag()
     private val json by jsonFlag()
 
-    override fun run() {
-        val access = dependencies.orgAccess(server, org)
-        val body = access.read(membersOf(access.org), access.org.missing())
-        val members = body.list("items").filterIsInstance<JsonObject>()
-        val console = dependencies.console
-        if (json) {
-            console.out("$body\n")
-            return
-        }
-        console.out("${access.org.name} · ${if (members.size == 1) "1 member" else "${members.size} members"}\n")
-        members.forEach { member ->
-            val joined = member.text("joinedAt")?.take(DATE)?.let { "joined $it" }
-            val parts = listOfNotNull("@${member.text("login")}", member.text("name"), member.text("role"), joined)
-            console.out("  ${parts.joinToString("  ")}\n")
-        }
-    }
+    override fun run() = dependencies.listMembers(org, server, json)
+}
 
-    private companion object {
-        /** `2026-10-30` of an ISO instant. */
-        const val DATE = 10
+/** The members of the organisation, a line each, or the server's answer with [json]. */
+private fun CliDependencies.listMembers(org: String?, server: String?, json: Boolean) {
+    val access = orgAccess(server, org)
+    val body = access.read(membersOf(access.org), access.org.missing())
+    val members = body.list("items").filterIsInstance<JsonObject>()
+    if (json) {
+        console.out("$body\n")
+        return
+    }
+    console.out("${access.org.name} · ${if (members.size == 1) "1 member" else "${members.size} members"}\n")
+    members.forEach { member ->
+        val joined = member.text("joinedAt")?.take(DATE)?.let { "joined $it" }
+        val parts = listOfNotNull("@${member.text("login")}", member.text("name"), member.text("role"), joined)
+        console.out("  ${parts.joinToString("  ")}\n")
     }
 }
+
+/** `2026-10-30` of an ISO instant. */
+private const val DATE = 10
 
 /** `ostrom members role <login> <role>`: changes a member's role (owners and admins). */
 internal class MembersRoleCommand(private val dependencies: CliDependencies) : CliktCommand(name = "role") {

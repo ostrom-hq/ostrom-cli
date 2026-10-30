@@ -1,17 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.commands
 
-import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.PrintMessage
-import com.github.ajalt.clikt.parameters.options.flag
-import com.github.ajalt.clikt.parameters.options.option
 import dev.ostrom.cli.CliDependencies
 import dev.ostrom.cli.ExitCode
 import dev.ostrom.cli.api.OstromApi
 import dev.ostrom.cli.api.ServerRequest
 import dev.ostrom.cli.api.ServerUnreachableException
 import dev.ostrom.cli.launcher.LaunchVariables
-import dev.ostrom.cli.launcher.Routes
 import dev.ostrom.cli.launcher.ServerAnswer
 import dev.ostrom.cli.launcher.ServerCall
 import dev.ostrom.cli.launcher.ServerJson
@@ -102,20 +98,6 @@ internal class OrgTransport(private val api: OstromApi, private val org: String?
     }
 }
 
-/** `--org`, for the commands that act in an organisation. */
-internal fun CliktCommand.orgOption() =
-    option("--org", help = "Organisation, by its short name or id (else OSTROM_ORG, else the one of ostrom init)")
-
-/** `--json`. */
-internal fun CliktCommand.jsonFlag() = option("--json", help = "Machine-readable output").flag()
-
-/** `--server`. */
-internal fun CliktCommand.serverFlag() =
-    option("--server", help = "Ostrom server URL (else OSTROM_URL, else the one of ostrom login)")
-
-/** `--yes`. */
-internal fun CliktCommand.yesFlag() = option("--yes", help = "Do not ask for confirmation").flag()
-
 /**
  * The signed-in device and the organisation it acts in: [wanted] (`--org`), else `OSTROM_ORG`, else the one `ostrom
  * init` kept, else the person's only organisation. [choose] picks among several (`ostrom init` asks); without it,
@@ -172,26 +154,6 @@ private fun orgOf(view: JsonObject): Org? {
     return Org(id, slug, view.text("name") ?: slug, view.text("role") ?: "member")
 }
 
-/** The message and exit code of a stopped command, on stderr. */
-internal fun stopWith(code: ExitCode, message: String) = PrintMessage(message, code.code, printError = true)
-
-/**
- * Asks [question] and reads the answer; without a terminal it stops with 64, telling to add [flag] (`--yes`).
- *
- * @return The answer, trimmed; empty at the end of the input.
- */
-internal fun CliDependencies.ask(question: String, flag: String): String {
-    if (!console.isInteractive) {
-        throw stopWith(ExitCode.USAGE, "ostrom: no terminal to ask \"$question\": add $flag")
-    }
-    console.out(question)
-    return readLine()?.trim().orEmpty()
-}
-
-/** True when the developer answered yes to [question] (`[y/N]`: anything else is no). */
-internal fun CliDependencies.confirm(question: String): Boolean =
-    ask("$question [y/N] ", "--yes").lowercase() in setOf("y", "yes")
-
 /**
  * The repository the working folder is in, named as `ostrom <agent>` names it: `OSTROM_REPO`, else the folder of the
  * git top; null outside a git repository.
@@ -204,9 +166,6 @@ private fun CliDependencies.gitTopName(): String? {
     val path = (top as? CaptureResult.Exited)?.takeIf { it.code == 0 }?.output?.trim()?.trimEnd('/', '\\')
     return path?.substringAfterLast('/')?.substringAfterLast('\\')?.ifEmpty { null }
 }
-
-/** A path segment, encoded. */
-internal fun segment(value: String) = Routes.encode(value)
 
 /** The longest `git rev-parse` may take. */
 private const val GIT_MILLIS = 5_000

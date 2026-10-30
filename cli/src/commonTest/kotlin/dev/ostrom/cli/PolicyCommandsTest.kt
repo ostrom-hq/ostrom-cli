@@ -32,7 +32,7 @@ class PolicyCommandsTest : SetupKit() {
         assertEquals(0, run(bare, "policy", "show"))
         assertOut("  Models         none allowed · default none\n  Self-approval  not on this server yet\n")
         console.out.clear()
-        assertEquals(0, run(bare + (gates to (200 to "{}")), "policy", "show"))
+        assertEquals(0, run(bare + (gates to (200 to "{}")), "policy"))
         assertOut("  Self-approval  not on this server yet\n")
         console.out.clear()
         assertEquals(0, run(bare, "policy", "show", "--json"))

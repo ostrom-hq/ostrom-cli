@@ -91,6 +91,19 @@ class RuleCommandsTest : SetupKit() {
         console.out.clear()
         assertEquals(0, run(mapOf(proposed to (200 to """{"items":[]}""")), "policy", "rules", "accept", "--proposed"))
         assertEquals("No rule is proposed in Acme. Nothing to do.\n", console.out.toString())
+        // a page with more after it: the next read gives the rest; an empty page with more ends it
+        val paged = mapOf(
+            proposed to (200 to """{"items":[$r1],"next":"c2"}"""),
+            "PATCH /api/v1/rules/r1" to (200 to r1),
+        )
+        console.out.clear()
+        assertEquals(0, run(paged, "policy", "rules", "reject", "--proposed"))
+        assertEquals("✓ 20 rules rejected in Acme.\n", console.out.toString(), "at most 20 pages")
+        assertEquals(20, sent().count { it == "PATCH /api/v1/rules/r1" })
+        console.out.clear()
+        val emptyMore = mapOf(proposed to (200 to """{"items":[],"next":"c2"}"""))
+        assertEquals(0, run(emptyMore, "policy", "rules", "accept", "--proposed"))
+        assertEquals("No rule is proposed in Acme. Nothing to do.\n", console.out.toString())
         assertEquals(64, run(routes, "policy", "rules", "accept"))
         assertErr("Name rule ids, or add --proposed (not both).\n")
         assertEquals(64, run(routes, "policy", "rules", "reject", "r1", "--proposed"))

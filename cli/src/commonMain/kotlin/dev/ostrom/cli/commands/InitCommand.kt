@@ -7,12 +7,12 @@ import com.github.ajalt.clikt.parameters.options.option
 import dev.ostrom.cli.CliDependencies
 import dev.ostrom.cli.ExitCode
 import dev.ostrom.cli.launcher.Agent
+import dev.ostrom.cli.launcher.jsonOf
 import dev.ostrom.cli.launcher.list
 import dev.ostrom.cli.launcher.objectOf
 import dev.ostrom.cli.launcher.text
 import dev.ostrom.cli.platform.ConfigKey
 import dev.ostrom.cli.platform.ConfigStoreImpl
-import dev.ostrom.cli.platform.FileWriteException
 import dev.ostrom.cli.setup.ShellHooks
 import kotlinx.serialization.json.JsonObject
 
@@ -44,7 +44,8 @@ internal class InitCommand(private val dependencies: CliDependencies) : CliktCom
         hooks()
         rules(access)
         if (json) {
-            dependencies.console.out("${objectOf(*summary.toList().toTypedArray())}\n")
+            val done = JsonObject(summary.filterValues { it != null }.mapValues { jsonOf(it.value) })
+            dependencies.console.out("$done\n")
         } else {
             say("Nothing is written in this repository. Next: ostrom claude")
         }
@@ -71,17 +72,13 @@ internal class InitCommand(private val dependencies: CliDependencies) : CliktCom
 
     private fun link(access: OrgAccess) {
         val file = dependencies.configFile(dependencies.directory())
-        try {
-            ConfigStoreImpl(dependencies.files, file).set(ConfigKey.ORG, access.org.slug)
-        } catch (e: FileWriteException) {
-            throw stopWith(ExitCode.CANNOT_WRITE, "Could not write ${e.path}.")
-        }
+        writeOrStop { ConfigStoreImpl(dependencies.files, file).set(ConfigKey.ORG, access.org.slug) }
         summary["org"] = objectOf("id" to access.org.id, "slug" to access.org.slug, "role" to access.org.role)
         say("✓ ${access.org.name} (${access.org.slug}) on ${access.signed.serverUrl}, as @${access.signed.login}, " +
             access.org.role)
     }
 
-    /** The repository is the organisation's (77 otherwise), and what its agents start with. */
+    /** The repository, whether the organisation covers it, and what its agents start with. */
     private fun repository(access: OrgAccess) {
         val name = repo ?: dependencies.currentRepo()
         summary["repo"] = name
@@ -89,14 +86,11 @@ internal class InitCommand(private val dependencies: CliDependencies) : CliktCom
             say("  Not in a git repository: this device is set up. Run ostrom init in one to check it.")
             return
         }
-        // GET /api/v1/repos (SRV-LECTURES): when the server lists them, a repository outside them is refused
+        // GET /api/v1/repos (SRV-LECTURES), when served. A clone in a folder named otherwise is not found by its name:
+        // a warning, never a refusal, so that init still sets the device up.
         val repos = access.readIfServed("/api/v1/repos")?.list("items")?.filterIsInstance<JsonObject>()
-        if (repos != null && repos.none { it.text("name") == name || it.text("name")?.endsWith("/$name") == true }) {
-            throw stopWith(
-                ExitCode.REFUSED,
-                "$name is not one of ${access.org.name}'s repositories. Ask an admin to add it (${access.console}).",
-            )
-        }
+        val covered = repos?.any { it.text("name") == name || it.text("name")?.endsWith("/$name") == true }
+        summary["covered"] = covered
         val workflows = access.readIfServed("/api/v1/workflows?repo=${segment(name)}")?.list("items")
             ?.filterIsInstance<JsonObject>()
         summary["workflows"] = workflows?.size
@@ -105,7 +99,11 @@ internal class InitCommand(private val dependencies: CliDependencies) : CliktCom
             workflows.isEmpty() -> "no workflow yet (ostrom harness add <file.json>)"
             else -> workflows.joinToString(" · ") { "${it.text("name")} (${it.text("status")})" }
         }
-        say("  Repository  $name${if (repos == null) "" else " · covered"}\n  Harness     $harness")
+        say("  Repository  $name${if (covered == true) " · covered" else ""}\n  Harness     $harness")
+        if (covered == false) {
+            say("! $name is not among ${access.org.name}'s repositories on the server: ask an admin to add it " +
+                "(${access.console}).")
+        }
     }
 
     /** The agents of this device, and the aliases that start them with Ostrom's hooks. */
@@ -118,53 +116,55 @@ internal class InitCommand(private val dependencies: CliDependencies) : CliktCom
         }
         say("  Agents      ${found.joinToString(" · ") { "${it.command} ✓" }}")
         val block = ShellHooks.block(found)
-        val home = dependencies.environment.homeDirectory
-        val file = home?.let { ShellHooks.startupFile(dependencies.environment["SHELL"], it) }
+        val environment = dependencies.environment
+        val file = environment.homeDirectory?.let { home ->
+            ShellHooks.startupFile(environment["SHELL"], home, environment.operatingSystem, environment["ZDOTDIR"])
+        }
         val current = file?.let { dependencies.files.read(it) }.orEmpty()
+        val next = file?.let { ShellHooks.merged(current, block) }
         val names = found.joinToString(" and ") { it.command }
-        val installed = file != null && ShellHooks.merged(current, block) == current
-        summary["hooks"] = if (installed) file else null
+        summary["hooks"] = if (next != null && next == current) file else null
+        val lines = block.trimEnd()
         when {
-            installed -> say("✓ Hooks       $names start with Ostrom's hooks (aliases in $file)")
-            file == null -> say("  Hooks       add to your shell's startup file:\n${block.trimEnd()}")
+            file == null ->
+                say("  Hooks       start them as ostrom <agent>, or add to your shell's startup file:\n$lines")
+            next == null -> say("! Hooks       $file has Ostrom's markers, but not as init writes them: fix them, " +
+                "or add these lines yourself:\n$lines")
+            next == current -> say("✓ Hooks       $names start with Ostrom's hooks (aliases in $file)")
             agreed("Start $names with Ostrom's hooks when you type their name (aliases in $file)?") -> {
-                write(file, ShellHooks.merged(current, block))
+                writeOrStop { dependencies.files.write(file, next) }
                 summary["hooks"] = file
-                say("✓ Hooks       $names start with Ostrom's hooks from your next shell ($file)")
+                say("✓ Hooks       $names typed in a new terminal start with Ostrom's hooks ($file)")
             }
             else -> say("  Hooks       not installed: ostrom init --yes adds the aliases to $file")
         }
     }
 
-    private fun write(file: String, text: String) {
-        try {
-            dependencies.files.write(file, text)
-        } catch (e: FileWriteException) {
-            throw stopWith(ExitCode.CANNOT_WRITE, "Could not write ${e.path}.")
-        }
-    }
-
     /** The rules the analysis proposed, accepted here by an owner or admin who says yes. */
     private fun rules(access: OrgAccess) {
-        val proposed = access.readIfServed("$RULES?status=proposed")?.list("items")?.filterIsInstance<JsonObject>()
+        val page = access.readIfServed("$RULES?status=proposed")
+        val proposed = page?.list("items")?.filterIsInstance<JsonObject>()
         summary["proposedRules"] = proposed?.size
         when {
             proposed == null -> say("  Rules       not on this server yet")
             proposed.isEmpty() -> say("  Rules       none proposed yet: the analysis of ${access.org.name} " +
                 "proposes them (${access.console}/rules)")
-            else -> proposedRules(access, proposed)
+            else -> proposedRules(access, proposed, !page?.text("next").isNullOrEmpty())
         }
     }
 
-    private fun proposedRules(access: OrgAccess, proposed: List<JsonObject>) {
-        say("  Rules       ${proposed.size} proposed for ${access.org.name}:")
+    private fun proposedRules(access: OrgAccess, proposed: List<JsonObject>, more: Boolean) {
+        val size = if (more) "${proposed.size}+" else "${proposed.size}"
+        say("  Rules       $size proposed for ${access.org.name}:")
         proposed.take(SHOWN).forEach { say("    ${ruleLine(it)}") }
-        if (proposed.size > SHOWN) say("    … and ${proposed.size - SHOWN} more: ostrom policy rules list")
-        val ids = proposed.mapNotNull { it.text("id") }
+        if (proposed.size > SHOWN || more) say("    … and more: ostrom policy rules list --status proposed")
         when {
             !access.org.admin -> say("  An owner or admin accepts them: ostrom policy rules accept --proposed")
-            agreed("Accept these ${proposed.size} rules? Agents follow them from their next session.") -> {
-                val count = access.decideRules(ids, "accepted")
+            // the token of ostrom login never holds an organisation's write scopes (S2-04): no question it cannot do
+            !access.consoleToken -> say("  Accept them on the console (${access.console}/rules), or with " +
+                "OSTROM_TOKEN set: ostrom policy rules accept --proposed")
+            agreed("Accept these $size rules? Agents follow them from their next session.") -> {
+                val count = access.decideProposed("accepted")
                 summary["acceptedRules"] = count
                 say("✓ $count rules accepted")
             }

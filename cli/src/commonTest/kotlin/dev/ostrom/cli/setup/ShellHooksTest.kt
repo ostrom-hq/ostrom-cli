@@ -2,12 +2,14 @@
 package dev.ostrom.cli.setup
 
 import dev.ostrom.cli.launcher.Agent
+import dev.ostrom.cli.platform.OperatingSystem
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 class ShellHooksTest {
     private val block = ShellHooks.block(listOf(Agent.CLAUDE, Agent.CODEX))
+    private val linux = OperatingSystem.LINUX
 
     @Test
     fun theBlockAliasesEachAgentToOstromBetweenItsMarkers() {
@@ -20,10 +22,16 @@ class ShellHooksTest {
 
     @Test
     fun zshAndBashHaveTheirStartupFileAndOtherShellsNone() {
-        assertEquals("/home/maya/.zshrc", ShellHooks.startupFile("/bin/zsh", "/home/maya"))
-        assertEquals("/home/maya/.bashrc", ShellHooks.startupFile("bash", "/home/maya"))
-        assertNull(ShellHooks.startupFile("/usr/bin/fish", "/home/maya"))
-        assertNull(ShellHooks.startupFile(null, "/home/maya"))
+        assertEquals("/home/maya/.zshrc", ShellHooks.startupFile("/bin/zsh", "/home/maya", linux))
+        assertEquals("/home/maya/.zshrc", ShellHooks.startupFile("zsh", "/home/maya", linux, ""))
+        assertEquals("/home/maya/.zsh/.zshrc", ShellHooks.startupFile("zsh", "/home/maya", linux, "/home/maya/.zsh"))
+        assertEquals("/home/maya/.bashrc", ShellHooks.startupFile("bash", "/home/maya", linux))
+        val mac = OperatingSystem.MACOS
+        assertEquals("/Users/maya/.bash_profile", ShellHooks.startupFile("/bin/bash", "/Users/maya", mac))
+        assertEquals("/Users/maya/.zshrc", ShellHooks.startupFile("/bin/zsh", "/Users/maya", mac))
+        assertNull(ShellHooks.startupFile("/usr/bin/fish", "/home/maya", linux))
+        assertNull(ShellHooks.startupFile(null, "/home/maya", linux))
+        assertNull(ShellHooks.startupFile("bash", "C:\\Users\\maya", OperatingSystem.WINDOWS))
     }
 
     @Test
@@ -31,6 +39,8 @@ class ShellHooksTest {
         assertEquals(block, ShellHooks.merged("", block))
         assertEquals("export A=1\n\n$block", ShellHooks.merged("export A=1\n", block))
         assertEquals("export A=1\n\n$block", ShellHooks.merged("export A=1", block))
+        val endFirst = "${ShellHooks.END}\nexport A=1\n"
+        assertEquals("$endFirst\n$block", ShellHooks.merged(endFirst, block), "an end alone is not a block")
     }
 
     @Test
@@ -44,10 +54,9 @@ class ShellHooksTest {
     }
 
     @Test
-    fun aBeginMarkerWithoutItsEndIsNotABlock() {
-        val broken = "${ShellHooks.BEGIN}\nalias claude='claude'\n"
-        assertEquals("$broken\n$block", ShellHooks.merged(broken, block))
-        val endFirst = "${ShellHooks.END}\nexport A=1\n"
-        assertEquals("$endFirst\n$block", ShellHooks.merged(endFirst, block))
+    fun markersInitDidNotWriteAreLeftAlone() {
+        assertNull(ShellHooks.merged("${ShellHooks.BEGIN}\nalias claude='claude'\n", block), "a begin without its end")
+        val twice = "${ShellHooks.BEGIN}\nalias me='me'\n$block"
+        assertNull(ShellHooks.merged(twice, block), "two begins: the person's lines may be in between")
     }
 }

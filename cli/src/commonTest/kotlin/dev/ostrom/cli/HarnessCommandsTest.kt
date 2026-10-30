@@ -32,9 +32,12 @@ class HarnessCommandsTest : SetupKit() {
         assertEquals("""{"items":[$safety,$tests]}""" + "\n", console.out.toString())
         console.out.clear()
         val two = """{"name":"two","nodes":[{"kind":"gate"},{"kind":"gate"}]}"""
-        val all = mapOf("GET /api/v1/workflows" to (200 to """{"items":[$two]}"""))
+        val edited = """{"name":"three","status":"edited","nodes":[]}"""
+        val archived = """{"name":"four","status":"archived","nodes":[]}"""
+        val all = mapOf("GET /api/v1/workflows" to (200 to """{"items":[$two,$edited,$archived]}"""))
         assertEquals(0, run(all, "harness", "list", "--all", "--repo", "api"))
-        assertOut("Harness of Acme\n  two  enforced  2 steps  2 approvals\n")
+        assertOut("Harness of Acme\n  two  enforced  2 steps  2 approvals\n  three  enforced  0 steps\n")
+        assertOut("  four  archived  0 steps\n")
     }
 
     @Test
@@ -112,6 +115,17 @@ class HarnessCommandsTest : SetupKit() {
         console.out.clear()
         assertEquals(0, run(mapOf("GET /api/v1/workflows/w2" to (200 to tests)), "harness", "enforce", "w2"))
         assertEquals("tests is already enforced.\n", console.out.toString())
+        // another status is enforced like a proposed one; without a version nothing is saved
+        val archived = """{"id":"w5","name":"old","status":"archived","version":7}"""
+        val routes5 = mapOf(
+            "GET /api/v1/workflows/w5" to (200 to archived),
+            "PUT /api/v1/workflows/w5" to (200 to "{}"),
+        )
+        assertEquals(0, run(routes5, "harness", "enforce", "w5"))
+        assertTrue(bodyOf("PUT /api/v1/workflows/w5").orEmpty().endsWith(""""expectedVersion":7}"""))
+        val unversioned = mapOf("GET /api/v1/workflows/w6" to (200 to """{"id":"w6","status":"proposed"}"""))
+        assertEquals(1, run(unversioned, "harness", "enforce", "w6"))
+        assertErr("Ostrom did not say which version of the workflow it holds: nothing was saved")
         assertEquals(1, sent().count { it == put })
     }
 
@@ -127,12 +141,14 @@ class HarnessCommandsTest : SetupKit() {
         assertOut("✓ Saved deploy  v4  trial run  1 step  1 approval  w1\n")
         val body = bodyOf(put).orEmpty()
         assertTrue(body.contains(""""id":"w1","status":"proposed"},"expectedVersion":3}"""), body)
-        // a file that says its status wins, and a workflow without a version is saved without one
+        // a file that says its status wins
         writeFile("/work/acme/deploy.json", file.replace("{\"name\"", "{\"status\":\"accepted\",\"name\""))
+        assertEquals(0, run(routes, "harness", "update", "w1", "deploy.json", "--yes"))
+        assertTrue(bodyOf(put).orEmpty().startsWith("""{"workflow":{"status":"accepted","""), bodyOf(put))
+        // a workflow without a version is never saved blind
         val plain = mapOf("GET /api/v1/workflows/w1" to (200 to tests), put to (200 to tests))
-        assertEquals(0, run(plain, "harness", "update", "w1", "deploy.json", "--yes"))
-        assertTrue(bodyOf(put).orEmpty().endsWith(""""id":"w1"}}"""), bodyOf(put))
-        assertTrue(""""status":"accepted"""" in bodyOf(put).orEmpty())
+        assertEquals(1, run(plain, "harness", "update", "w1", "deploy.json", "--yes"))
+        assertErr("Ostrom did not say which version of tests it holds: nothing was saved, so that no one's change")
         console.isInteractive = true
         typed += "no"
         assertEquals(2, run(routes, "harness", "update", "w1", "deploy.json"))

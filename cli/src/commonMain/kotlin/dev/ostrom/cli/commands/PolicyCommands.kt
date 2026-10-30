@@ -31,9 +31,11 @@ private val SELF_APPROVAL = listOf("sole-approver", "never")
 
 private fun JsonObject.texts(key: String) = list(key).filterIsInstance<JsonPrimitive>().map { it.content }
 
-/** `ostrom policy`: models, self-approval, rules; and whether a developer may start an agent. */
-internal class PolicyCommand :
-    GroupCommand("policy", "Models, self-approval and rules of your organisation (admin)", comingSoon = false)
+/** `ostrom policy`: models, self-approval, rules; and whether a developer may start an agent. The policy by default. */
+internal class PolicyCommand(private val dependencies: CliDependencies) :
+    GroupCommand("policy", "Models, self-approval and rules of your organisation (admin)", "show", comingSoon = false) {
+    override fun runDefault() = dependencies.showPolicy(org = null, server = null, json = false)
+}
 
 /** `ostrom policy show`: the model policy and the self-approval policy. */
 internal class PolicyShowCommand(private val dependencies: CliDependencies) : CliktCommand(name = "show") {
@@ -43,24 +45,26 @@ internal class PolicyShowCommand(private val dependencies: CliDependencies) : Cl
     private val server by serverFlag()
     private val json by jsonFlag()
 
-    override fun run() {
-        val access = dependencies.orgAccess(server, org)
-        val models = access.read(MODELS, "No model policy in ${access.org.slug}.")
-        // the gate policy is served by SRV-REGLES: a server without it still shows the models
-        val gates = access.readIfServed(GATE_POLICY)
-        val console = dependencies.console
-        if (json) {
-            console.out("${objectOf("models" to models, "gates" to gates)}\n")
-            return
-        }
-        val allowed = models.texts("allowed")
-        console.out("Policy of ${access.org.name}\n")
-        val list = if (allowed.isEmpty()) "none allowed" else allowed.joinToString(", ")
-        console.out("  Models         $list · default ${models.text("default") ?: "none"}\n")
-        val self = gates?.text("selfApproval") ?: "not on this server yet"
-        console.out("  Self-approval  $self\n")
-        console.out("Change it: ostrom policy set models|default-model|self-approval <value>\n")
+    override fun run() = dependencies.showPolicy(org, server, json)
+}
+
+/** The model policy and the self-approval policy, or both answers with [json]. */
+private fun CliDependencies.showPolicy(org: String?, server: String?, json: Boolean) {
+    val access = orgAccess(server, org)
+    val models = access.read(MODELS, "No model policy in ${access.org.slug}.")
+    // the gate policy is served by SRV-REGLES: a server without it still shows the models
+    val gates = access.readIfServed(GATE_POLICY)
+    if (json) {
+        console.out("${objectOf("models" to models, "gates" to gates)}\n")
+        return
     }
+    val allowed = models.texts("allowed")
+    console.out("Policy of ${access.org.name}\n")
+    val list = if (allowed.isEmpty()) "none allowed" else allowed.joinToString(", ")
+    console.out("  Models         $list · default ${models.text("default") ?: "none"}\n")
+    val self = gates?.text("selfApproval") ?: "not on this server yet"
+    console.out("  Self-approval  $self\n")
+    console.out("Change it: ostrom policy set models|default-model|self-approval <value>\n")
 }
 
 /**

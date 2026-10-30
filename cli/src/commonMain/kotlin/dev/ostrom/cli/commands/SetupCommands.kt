@@ -17,12 +17,12 @@ internal fun setupCommands(dependencies: CliDependencies): List<CliktCommand> = 
         HarnessRemoveCommand(dependencies),
     ),
     InviteCommand(dependencies),
-    MembersCommand().subcommands(
+    MembersCommand(dependencies).subcommands(
         MembersListCommand(dependencies),
         MembersRoleCommand(dependencies),
         MembersRemoveCommand(dependencies),
     ),
-    PolicyCommand().subcommands(
+    PolicyCommand(dependencies).subcommands(
         PolicyShowCommand(dependencies),
         PolicySetCommand(dependencies),
         PolicyCheckCommand(dependencies),

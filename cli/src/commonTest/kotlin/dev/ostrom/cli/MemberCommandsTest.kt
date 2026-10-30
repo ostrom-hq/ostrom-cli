@@ -33,8 +33,8 @@ class MemberCommandsTest : SetupKit() {
 
     @Test
     fun inviteTakesAddressesAndTheRolesOfAnOrganisationOnly() {
-        assertEquals(64, run(emptyMap(), "invite", "@maya-k", "tom"))
-        assertErr("Ostrom invites by e-mail address, and @maya-k, tom is not one. ")
+        assertEquals(64, run(emptyMap(), "invite", "maya-k", "tom"))
+        assertErr("Ostrom invites by e-mail address, and maya-k, tom is not one. ")
         assertErr("Example: ostrom invite maya@acme.dev\n")
         assertEquals(64, run(emptyMap(), "invite", "a@b.dev", "--role", "owner"))
         assertErr("The role must be one of admin, member, approver, billing.\n")
@@ -51,7 +51,7 @@ class MemberCommandsTest : SetupKit() {
         assertOut("Acme · 2 members\n  @lena  Lena  owner  joined 2026-10-01\n  @tom  member\n")
         console.out.clear()
         val one = """{"items":[{"login":"lena","name":"Lena","role":"owner"}]}"""
-        assertEquals(0, run(mapOf("GET /api/v1/orgs/o1/members" to (200 to one)), "members", "list"))
+        assertEquals(0, run(mapOf("GET /api/v1/orgs/o1/members" to (200 to one)), "members"))
         assertOut("Acme · 1 member\n")
         console.out.clear()
         assertEquals(0, run(mapOf("GET /api/v1/orgs/o1/members" to (200 to one)), "members", "list", "--json"))
@@ -61,7 +61,7 @@ class MemberCommandsTest : SetupKit() {
     @Test
     fun aRoleIsChangedByItsName() {
         val patch = "PATCH /api/v1/orgs/o1/members/tom"
-        assertEquals(0, run(mapOf(patch to (200 to "{}")), "members", "role", "@tom", "admin"))
+        assertEquals(0, run(mapOf(patch to (200 to "{}")), "members", "role", "tom", "admin"))
         assertEquals("""{"role":"admin"}""", bodyOf(patch))
         assertOut("✓ @tom is now admin of Acme.\n")
         assertEquals(64, run(emptyMap(), "members", "role", "tom", "boss"))
@@ -76,7 +76,7 @@ class MemberCommandsTest : SetupKit() {
         val routes = mapOf(delete to (204 to ""))
         console.isInteractive = true
         typed += "tom"
-        assertEquals(0, run(routes, "members", "remove", "@tom"))
+        assertEquals(0, run(routes, "members", "remove", "tom"))
         assertOut("Type tom to remove them from Acme: ✓ @tom was removed from Acme.\n")
         typed += "Tom"
         assertEquals(2, run(routes, "members", "remove", "tom"))

@@ -13,6 +13,9 @@ import kotlin.test.assertTrue
 /** `ostrom init`: the organisation linked, the repository checked, the agents' hooks, the starting rules. */
 class InitCommandTest : SetupKit() {
     private val zsh = withServer + ("SHELL" to "/bin/zsh")
+
+    /** Signed in with a console token: the one that may accept rules (S2-04). */
+    private val zshAdmin = zsh + ("OSTROM_TOKEN" to "otk_admin")
     private val repos = "GET /api/v1/repos" to (200 to """{"items":[{"name":"acme/acme-api"},{"name":"web"}]}""")
     private val harness = "GET /api/v1/workflows?repo=acme-api" to
         (200 to """{"items":[{"name":"git-safety","status":"proposed"},{"name":"tests","status":"accepted"}]}""")
@@ -31,17 +34,18 @@ class InitCommandTest : SetupKit() {
 
     @Test
     fun initWithYesLinksTheOrganisationInstallsTheHooksAndAcceptsTheRules() {
-        assertEquals(0, run(everything, "init", "--yes", environment = zsh, capture = gitTop()))
-        assertOut("✓ Acme (acme) on https://ostrom.example, as @maya, admin\n")
+        assertEquals(0, run(everything, "init", "--yes", environment = zshAdmin, capture = gitTop()))
+        assertOut("✓ Acme (acme) on https://ostrom.example, as @unknown, admin\n")
         assertOut("  Repository  acme-api · covered\n  Harness     git-safety (proposed) · tests (accepted)\n")
         assertOut("  Agents      claude ✓\n")
-        assertOut("✓ Hooks       claude start with Ostrom's hooks from your next shell (/home/maya/.zshrc)\n")
+        assertOut("✓ Hooks       claude typed in a new terminal start with Ostrom's hooks (/home/maya/.zshrc)\n")
         assertOut("  Rules       2 proposed for Acme:\n    r1  proposed  No push to main\n    r2\n")
         assertOut("✓ 2 rules accepted\nNothing is written in this repository. Next: ostrom claude\n")
         assertConfig("/home/maya/.config/ostrom/config.toml", "acme")
         assertEquals(ShellHooks.block(listOf(Agent.CLAUDE)), text("/home/maya/.zshrc"))
         assertEquals("""{"ids":["r1","r2"],"status":"accepted"}""", bodyOf("POST /api/v1/rules/bulk"))
         assertTrue(requests.drop(1).all { it.second.org == "o1" }, "every call after the list names Acme")
+        assertTrue(requests.all { it.second.token == "otk_admin" })
     }
 
     @Test
@@ -60,10 +64,17 @@ class InitCommandTest : SetupKit() {
     fun withoutATerminalNorYesInitChangesOnlyTheLink() {
         assertEquals(0, run(everything, "init", environment = zsh, capture = gitTop()))
         assertOut("  Hooks       not installed: ostrom init --yes adds the aliases to /home/maya/.zshrc\n")
-        assertOut("  Accept them: ostrom policy rules accept --proposed\n")
+        // the token of ostrom login cannot accept rules: init says where it is done
+        assertOut("  Accept them on the console (https://ostrom.example/rules), or with OSTROM_TOKEN set: ")
         assertTrue(!fileSystem.exists("/home/maya/.zshrc".toPath()), "no alias written")
         assertTrue(sent().none { it.startsWith("POST") }, "no rule accepted")
         assertConfig("/home/maya/.config/ostrom/config.toml", "acme")
+        console.out.clear()
+        val paged = mapOf(proposed to (200 to """{"items":[{"id":"r1"},{"id":"r2"}],"next":"c2"}"""))
+        assertEquals(0, run(paged, "init", "--repo", "api", environment = zshAdmin))
+        assertOut("  Rules       2+ proposed for Acme:\n    r1\n    r2\n    … and more: ostrom policy rules list ")
+        assertOut("  Accept them: ostrom policy rules accept --proposed\n")
+        assertTrue(sent().none { it.startsWith("POST") || it.startsWith("PATCH") }, "no rule accepted")
     }
 
     @Test
@@ -71,7 +82,7 @@ class InitCommandTest : SetupKit() {
         console.isInteractive = true
         typed += "y"
         typed += "n"
-        assertEquals(0, run(everything, "init", environment = zsh, capture = gitTop()))
+        assertEquals(0, run(everything, "init", environment = zshAdmin, capture = gitTop()))
         assertOut("Start claude with Ostrom's hooks when you type their name (aliases in /home/maya/.zshrc)? [y/N] ")
         assertOut("Accept these 2 rules? Agents follow them from their next session. [y/N] ")
         assertTrue(fileSystem.exists("/home/maya/.zshrc".toPath()))
@@ -84,18 +95,21 @@ class InitCommandTest : SetupKit() {
         val routes = mapOf(orgs(beta), proposed to (200 to """{"items":[$many]}"""))
         assertEquals(0, run(routes, "init", "--yes", "--repo", "api", environment = withServer))
         assertOut("  Repository  api\n  Harness     not on this server yet\n")
-        assertOut("    r5  Rule 5\n    … and 2 more: ostrom policy rules list\n")
+        assertOut("    r5  Rule 5\n    … and more: ostrom policy rules list --status proposed\n")
         assertOut("  An owner or admin accepts them: ostrom policy rules accept --proposed\n")
         assertTrue("r6  Rule 6" !in console.out)
         assertTrue(sent().none { it.startsWith("POST") })
     }
 
     @Test
-    fun aRepositoryTheOrganisationDoesNotCoverIsRefused() {
+    fun aRepositoryTheServerDoesNotListIsAWarningNotARefusal() {
+        // a clone in a folder named otherwise is not found by its name: init still sets the device up
         val other = mapOf("GET /api/v1/repos" to (200 to """{"items":[{"name":"acme/web"},{}]}"""))
-        assertEquals(77, run(other, "init", "--yes", environment = zsh, capture = gitTop()))
-        assertErr("acme-api is not one of Acme's repositories. Ask an admin to add it (https://ostrom.example).\n")
-        assertTrue(!fileSystem.exists("/home/maya/.zshrc".toPath()), "nothing installed for a refused repository")
+        assertEquals(0, run(other, "init", "--yes", environment = zsh, capture = gitTop()))
+        assertOut("  Repository  acme-api\n  Harness     not on this server yet\n")
+        assertOut("! acme-api is not among Acme's repositories on the server: ask an admin to add it " +
+            "(https://ostrom.example).\n")
+        assertTrue(fileSystem.exists("/home/maya/.zshrc".toPath()), "the device is set up all the same")
         val same = mapOf("GET /api/v1/repos" to (200 to """{"items":[{"name":"acme-api"}]}"""))
         assertEquals(0, run(same, "init", environment = zsh, capture = gitTop()))
         assertOut("  Repository  acme-api · covered\n")
@@ -126,14 +140,29 @@ class InitCommandTest : SetupKit() {
         assertEquals(0, run(emptyMap(), "init", "--yes", "--repo", "api", environment = fish,
             installed = setOf("claude", "codex")))
         assertOut("  Agents      claude ✓ · codex ✓\n")
-        assertOut("  Hooks       add to your shell's startup file:\n# >>> ostrom")
+        assertOut("  Hooks       start them as ostrom <agent>, or add to your shell's startup file:\n# >>> ostrom")
         assertOut("alias codex='ostrom codex'\n# <<< ostrom <<<\n")
         console.out.clear()
         // no home at all: the CLI's folder from OSTROM_HOME, no startup file to write
         val noHome = mapOf("OSTROM_URL" to "https://ostrom.example", "OSTROM_HOME" to "/cfg", "SHELL" to "/bin/zsh")
         assertEquals(0, run(emptyMap(), "init", "--yes", "--repo", "api", environment = noHome, home = "/cfg"))
-        assertOut("  Hooks       add to your shell's startup file:\n")
+        assertOut("  Hooks       start them as ostrom <agent>, or add to your shell's startup file:\n")
         assertConfig("/cfg/config.toml", "acme")
+    }
+
+    @Test
+    fun zshsOwnFolderIsHonouredAndMarkersInitDidNotWriteAreLeftAlone() {
+        val zdotdir = zsh + ("ZDOTDIR" to "/home/maya/.zsh")
+        assertEquals(0, run(emptyMap(), "init", "--yes", "--repo", "api", environment = zdotdir))
+        assertOut("(/home/maya/.zsh/.zshrc)\n")
+        assertTrue(fileSystem.exists("/home/maya/.zsh/.zshrc".toPath()))
+        console.out.clear()
+        val broken = "export A=1\n${ShellHooks.BEGIN}\nalias claude='claude'\n"
+        fileSystem.write("/home/maya/.zshrc".toPath()) { writeUtf8(broken) }
+        assertEquals(0, run(emptyMap(), "init", "--yes", "--repo", "api", environment = zsh))
+        assertOut("! Hooks       /home/maya/.zshrc has Ostrom's markers, but not as init writes them: fix them")
+        assertOut("alias claude='ostrom claude'\n# <<< ostrom <<<\n")
+        assertEquals(broken, text("/home/maya/.zshrc"), "the file is left as it was")
     }
 
     @Test
@@ -172,14 +201,14 @@ class InitCommandTest : SetupKit() {
         console.isInteractive = true
         assertEquals(0, run(everything, "init", "--json", environment = zsh, capture = gitTop()))
         assertEquals(
-            """{"org":{"id":"o1","slug":"acme","role":"admin"},"repo":"acme-api","workflows":2,""" +
+            """{"org":{"id":"o1","slug":"acme","role":"admin"},"repo":"acme-api","covered":true,"workflows":2,""" +
                 """"agents":["claude"],"proposedRules":2}""" + "\n",
             console.out.toString(),
         )
         console.out.clear()
-        assertEquals(0, run(everything, "init", "--json", "--yes", environment = zsh, capture = gitTop()))
+        assertEquals(0, run(everything, "init", "--json", "--yes", environment = zshAdmin, capture = gitTop()))
         assertEquals(
-            """{"org":{"id":"o1","slug":"acme","role":"admin"},"repo":"acme-api","workflows":2,""" +
+            """{"org":{"id":"o1","slug":"acme","role":"admin"},"repo":"acme-api","covered":true,"workflows":2,""" +
                 """"agents":["claude"],"hooks":"/home/maya/.zshrc","proposedRules":2,"acceptedRules":2}""" + "\n",
             console.out.toString(),
         )
