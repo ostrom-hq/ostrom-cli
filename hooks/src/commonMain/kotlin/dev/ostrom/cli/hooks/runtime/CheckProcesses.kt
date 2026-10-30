@@ -112,17 +112,16 @@ class GitCheckouts(
     }
 
     private fun run(repository: String, arguments: List<String>, timeoutMillis: Int): CaptureResult {
-        val command = listOf(git) + SAFE + listOf("-C", repository) + arguments
-        return budget.cap(timeoutMillis)?.let { capture.capture(command, it) } ?: CaptureResult.TimedOut
+        // no hook, no fsmonitor, no LFS filter (an empty filter command is no filter for git)
+        val command = listOf(
+            git, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "filter.lfs.smudge=",
+            "-c", "filter.lfs.process=", "-c", "filter.lfs.clean=", "-c", "filter.lfs.required=false", "-C", repository,
+        ) + arguments
+        val limit = budget.cap(timeoutMillis) ?: return CaptureResult.TimedOut
+        return capture.capture(command, limit)
     }
 
     private companion object {
-        /** No hook, no fsmonitor, no LFS filter (an empty filter command is no filter for git). */
-        val SAFE = listOf(
-            "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "filter.lfs.smudge=",
-            "-c", "filter.lfs.process=", "-c", "filter.lfs.clean=", "-c", "filter.lfs.required=false",
-        )
-
         const val SHORT_MILLIS = 5_000
 
         /** A checkout writes the whole tree of a commit. */

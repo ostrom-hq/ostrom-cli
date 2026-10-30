@@ -397,6 +397,9 @@ class PackageChecksTest {
         val early = """{"id":"e","nodeId":"e","kind":"notify","event":"PreToolUse","tools":["Bash"],"patterns":["git"],
             "mode":"enforce","notifyId":"x"}"""
         assertFalse(checks(listOf(early)).guards(bash("git push origin main")), "a notification guards nothing")
+        val late = """{"id":"l","nodeId":"l","kind":"check","event":"PostToolUse","tools":["Bash"],"patterns":["git"],
+            "mode":"enforce","scriptId":"s-test"}"""
+        assertFalse(checks(listOf(late)).guards(bash("git push origin main")), "a check after the action guards none")
         texts.remove("/t/package.json")
         assertFalse(checks(viewText = null).guards(bash("git push origin main")), "no view, nothing guarded")
     }
