@@ -120,9 +120,9 @@ internal actual fun captureOutput(
         val bytes = synchronized(output) { output.toByteArray() }
         CaptureResult.Exited(process.exitValue(), bytes.decodeToString())
     }
-} catch (e: IOException) {
-    // "Cannot run program …: error=2" (ENOENT, and ERROR_FILE_NOT_FOUND on Windows) is the only "not found"
-    if (e.message.orEmpty().contains("error=2,")) CaptureResult.NotFound else CaptureResult.Failed
+} catch (_: IOException) {
+    // the JDK's wording of a missing program changes between versions: a child that cannot start is not found
+    CaptureResult.NotFound
 }
 
 /** stdin from the null device, stderr dropped: what the native shims do. */
