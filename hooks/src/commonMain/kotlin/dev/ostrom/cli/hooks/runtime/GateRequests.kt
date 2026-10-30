@@ -16,6 +16,7 @@ import dev.ostrom.cli.hooks.gate.UnreadablePushException
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * A gated action the before-tool hook asks a yes for.
@@ -54,14 +55,13 @@ class GateRequests(
         val read = if (redirected == null && subject.kind == ToolKind.BASH) {
             readPush(directory, subject.text)
         } else {
-            Result.success(null)
+            PushRead(null, null)
         }
-        val problem = read.exceptionOrNull()
         return when {
             redirected != null -> replies.deny(GateTexts.redirected(ask.action.name, ask.gate, redirected))
-            problem != null && ask.gate.enforce ->
-                replies.deny(GateTexts.unreadable(ask.action.name, ask.gate, problem.message.orEmpty()))
-            else -> request(ask, directory, read.getOrNull())
+            read.problem != null && ask.gate.enforce ->
+                replies.deny(GateTexts.unreadable(ask.action.name, ask.gate, read.problem))
+            else -> request(ask, directory, read.push)
         }
     }
 
@@ -113,10 +113,13 @@ class GateRequests(
         }
     }
 
-    private fun readPush(directory: String, text: String): Result<Push?> = try {
-        Result.success(pushes.read(directory, text.substringBefore(NOTE)))
+    /** A push read from a command, or why it could not be. */
+    private class PushRead(val push: Push?, val problem: String?)
+
+    private fun readPush(directory: String, text: String): PushRead = try {
+        PushRead(pushes.read(directory, text.substringBefore(NOTE)), null)
     } catch (e: UnreadablePushException) {
-        Result.failure(e)
+        PushRead(null, e.reason)
     }
 
     private fun redirection(subject: ToolSubject): String? = if (subject.kind != ToolKind.BASH) {
@@ -178,10 +181,9 @@ data class GateAnswer(
         }
 
         private fun approversOf(gate: JsonObject): String? {
-            val list = (gate["approvers"] as? JsonArray)?.mapNotNull { element ->
-                (element as? JsonPrimitive)?.takeIf { it.isString }?.content
-            }
-            return list?.let { if (it.isEmpty()) "the gate owner" else it.joinToString(" or ") }
+            val array = gate["approvers"] as? JsonArray ?: return null
+            val list = array.filter { it is JsonPrimitive && it.isString }.map { it.jsonPrimitive.content }
+            return if (list.isEmpty()) "the gate owner" else list.joinToString(" or ")
         }
     }
 }

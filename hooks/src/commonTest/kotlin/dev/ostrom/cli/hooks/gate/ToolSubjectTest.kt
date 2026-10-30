@@ -28,6 +28,7 @@ class ToolSubjectTest {
         assertEquals(ToolSubject(ToolKind.WRITE, "Write", "/w/a.kt"), of("Edit", """{"file_path":"/w/a.kt"}"""))
         assertEquals(ToolSubject(ToolKind.WRITE, "Write", "/w/b.kt"), of("write_file", """{"path":"/w/b.kt"}"""))
         assertEquals(ToolSubject(ToolKind.WRITE, "Write", """{"patch":"x"}"""), of("apply_patch", """{"patch":"x"}"""))
+        assertEquals(ToolSubject(ToolKind.WRITE, "Write", "[1]"), of("Write", "[1]"), "an input that is not an object")
         assertEquals(2_000, of("patch", """{"patch":"${"y".repeat(3_000)}"}""").text.length)
     }
 

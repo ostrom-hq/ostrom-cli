@@ -110,19 +110,20 @@ class DeviceLogin(
         else -> "Ostrom could not sign you in: ${answer.message}"
     }
 
-    private companion object {
-        const val START = "/api/v1/auth/device"
-        const val TOKEN = "/api/v1/auth/device/token"
-        const val MILLIS = 1_000L
-        const val DEFAULT_INTERVAL_SECONDS = 5
-        const val DEFAULT_EXPIRY_SECONDS = 900
-        const val SLOW_DOWN_MILLIS = 5_000L
-        const val PENDING = 428
-        const val FORBIDDEN = 403
-        const val EXPIRED = 1
-        const val CANCELLED = 2
-        const val UNREACHABLE = 69
-        const val REFUSED = 77
-        val WAIT = setOf("authorization_pending", "slow_down")
+    /** The device flow's waits and limits. */
+    companion object {
+        private const val START = "/api/v1/auth/device"
+        private const val TOKEN = "/api/v1/auth/device/token"
+        private const val MILLIS = 1_000L
+        private const val DEFAULT_INTERVAL_SECONDS = 5
+        private const val DEFAULT_EXPIRY_SECONDS = 900
+        private const val SLOW_DOWN_MILLIS = 5_000L
+        private const val PENDING = 428
+        private const val FORBIDDEN = 403
+        private const val EXPIRED = 1
+        private const val CANCELLED = 2
+        private const val UNREACHABLE = 69
+        private const val REFUSED = 77
+        private val WAIT = setOf("authorization_pending", "slow_down")
     }
 }

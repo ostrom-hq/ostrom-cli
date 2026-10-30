@@ -24,7 +24,11 @@ class PushInvocations(private val git: GitRunner, private val home: String) {
 
     private fun aliasedPush(directory: String, invocation: GitInvocation, verb: String): GitInvocation? {
         val inline = invocation.configs.lastOrNull { it.substringBefore('=').equals("alias.$verb", ignoreCase = true) }
-        val alias = inline?.substringAfter('=', "") ?: git.run(directory, listOf("config", "--get", "alias.$verb"))
+        val alias = if (inline != null) {
+            inline.substringAfter('=', "")
+        } else {
+            git.run(directory, listOf("config", "--get", "alias.$verb"))
+        }
         val words = ShellWords.segments(alias).singleOrNull().orEmpty()
         return when {
             alias.startsWith("!") -> throw UnreadablePushException(
