@@ -85,11 +85,14 @@ private fun inferenceTarget(method: HttpMethod, path: String): RelayTarget {
 
 /**
  * Whether a request that carries the hooks' capability ([hooks]) or the agent's own ([client]) may reach [target]. The
- * hook routes take the hooks' capability only, which never enters the agent's environment; the MCP and inference routes
- * take the agent's, which opens no hook route (security audit S2-25). Off the allow-list, either gets its 404.
+ * hook routes take the hooks' capability, which never enters the agent's environment; the MCP and inference routes
+ * take the agent's (security audit S2-25). The agent's opens one hook route, reading where a gate stands
+ * (`GET /api/v1/gates/{id}`, which `ostrom wait` calls from the agent's shell): it neither asks, consumes nor closes
+ * anything. Off the allow-list, either gets its 404.
  */
 internal fun opens(target: RelayTarget, hooks: Boolean, client: Boolean): Boolean = when (target) {
-    is RelayTarget.Hook, is RelayTarget.Catalog, RelayTarget.SignedCatalog -> hooks
+    is RelayTarget.Hook -> hooks || client && target.longPoll
+    is RelayTarget.Catalog, RelayTarget.SignedCatalog -> hooks
     RelayTarget.NotFound -> true
     is RelayTarget.Mcp, is RelayTarget.Inference, RelayTarget.McpMethodNotAllowed -> client
 }

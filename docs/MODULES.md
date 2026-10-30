@@ -41,17 +41,23 @@ Rules that keep the binary fast and the modules apart:
 While `ostrom <agent>` runs, the launcher starts a `LocalRelay`
 (`LocalRelayStarterImpl(report).start(RelayConfig(...))`) on `127.0.0.1` and a port chosen by the system, and closes
 it when the agent exits. The agent's hooks, its MCP client
-and, when the launch relays it, its inference reach Ostrom through it with the relay's random capability
-(`LocalRelay.token`, 64 hexadecimal characters from `secureRandomBytes`); the relay adds the launch's agent token,
-which never enters the agent's environment (audit A12/A13).
+and, when the launch relays it, its inference reach Ostrom through it with one of two random capabilities (64
+hexadecimal characters from `secureRandomBytes` each); the relay adds the launch's agent token, which never enters the
+agent's environment (audit A12/A13). The hooks' capability (`LocalRelay.token`) is written to a private file
+(`OSTROM_RELAY_TOKEN_FILE`) and opens the hook routes; the agent's own (`LocalRelay.clientToken`, `OSTROM_RELAY_TOKEN`)
+opens its MCP servers, its inference and the read of a gate (`GET /api/v1/gates/{id}`, for `ostrom wait`), no other
+hook route: 403 otherwise (S2-25).
 
-- Every request needs the capability (`Authorization: Bearer`, `x-api-key` or `x-ostrom-local-token`, compared in
+- Every request needs a capability (`Authorization: Bearer`, `x-api-key` or `x-ostrom-local-token`, compared in
   constant time): 401 otherwise. An `Origin` header or a `Host` that is not the loopback: 403.
 - Only an allow-list is forwarded, everything else is 404 (never an open proxy): the hook routes
   (`POST /api/v1/sessions`, `/sessions/{id}/reopen|seen`, `/api/v1/gates`, `/api/v1/notifications`, `GET
   /api/v1/gates/{id}` and `/gates/catalog`, as they are, 2 MiB, 15 s, 70 s for a gate wait; ending a session, its sign
   of life, the use of a yes and check runs are the launcher's and Ostrom's, never forwarded for the agent, S2-25 and
-  S2-29), the catalogue of the verified package answered from memory when there is one (S2-20), `POST /mcp/{server}` for the launch's servers (to `/api/v1/mcp/{server}`, streamed, 401/403 from
+  S2-29), the catalogue of the verified package answered from memory when there is one, the organisation's gate
+  policy signed by the instance (`GET /api/v1/gates/catalog/signed`, kept 30 s in memory, a failure never kept; the
+  hooks check its signature against `OSTROM_INSTANCE_KEYS` and its expiry at every call, and hold every action without
+  one, S2-20 and S2-38), `POST /mcp/{server}` for the launch's servers (to `/api/v1/mcp/{server}`, streamed, 401/403 from
   Ostrom become 502), and with inference `/v1/messages`, `/v1/chat/completions`, `/v1/models` (to
   `/api/v1/inference/…`, 4 MiB, the response streamed, only the provider headers forwarded).
 - Ostrom unreachable or too slow: 502 with `{"error":{"type":"unreachable","message":"Ostrom is unreachable (…)"}}`,

@@ -84,8 +84,10 @@ class RelayPolicyTest {
             assertEquals(HttpStatusCode.OK, client.post("/v1/messages") { header("x-api-key", CLIENT_TOKEN) }.status)
             assertEquals(HttpStatusCode.OK, client.post("/api/v1/sessions") { bearerAuth(TOKEN) }.status)
             assertEquals(HttpStatusCode.NotFound, client.get("/elsewhere") { bearerAuth(CLIENT_TOKEN) }.status)
+            // `ostrom wait` reads where a gate stands from the agent's shell: a read, never a yes used
+            assertEquals(HttpStatusCode.OK, client.get("/api/v1/gates/g-1") { bearerAuth(CLIENT_TOKEN) }.status)
             assertEquals(HttpStatusCode.Unauthorized, client.post("/api/v1/sessions").status)
         }
-        assertEquals(3, ostrom.requests.size)
+        assertEquals(4, ostrom.requests.size)
     }
 }

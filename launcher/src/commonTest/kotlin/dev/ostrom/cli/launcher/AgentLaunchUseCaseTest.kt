@@ -60,6 +60,7 @@ class AgentLaunchUseCaseTest {
         object : SessionRelay {
             override val url = "http://127.0.0.1:4100"
             override val token = "relay-token"
+            override val clientToken = "client-token"
 
             override fun close() {
                 relayClosed = true
@@ -83,7 +84,18 @@ class AgentLaunchUseCaseTest {
         assertEquals(listOf("/usr/bin/claude", "--plugin-dir", join(temporary, "plugin")), commands.single())
         val environment = environments.single()
         assertEquals("http://127.0.0.1:4100", environment[LaunchVariables.RELAY_URL])
-        assertEquals("relay-token", environment[LaunchVariables.RELAY_TOKEN])
+        // S2-25: the agent gets its own capability; the hooks' is in a private file, never in an environment
+        assertEquals("client-token", environment[LaunchVariables.RELAY_TOKEN])
+        val tokenFile = join(temporary, "relay-token")
+        assertEquals(tokenFile, environment[LaunchVariables.RELAY_TOKEN_FILE])
+        assertEquals("relay-token", filesWhileRunning[tokenFile])
+        assertEquals(FileAccess.PRIVATE, files.access[tokenFile])
+        assertFalse("relay-token" in environment.values, "the hooks' capability is in no variable")
+        // S2-20: the instance's keys, read before the agent starts, are what the gate policy must be signed with
+        assertEquals(KEYS, environment[LaunchVariables.INSTANCE_KEYS])
+        assertNull(server.sent("GET ${Routes.INSTANCE_KEYS}").single().token, "a public route")
+        assertNull(environment[LaunchVariables.PACKAGE_SEAL], "no package, no seal")
+        assertNull(environment[LaunchVariables.PACKAGE_MANIFEST])
         for (name in listOf(LaunchVariables.DEVICE_TOKEN, LaunchVariables.SERVER)) {
             assertTrue(environment.containsKey(name) && environment[name] == null, "$name is removed")
         }
@@ -108,7 +120,7 @@ class AgentLaunchUseCaseTest {
         assertEquals("agent-token", server.sent("POST /api/v1/sessions/s1/end").single().token)
         val settings = checkNotNull(parseObject(filesWhileRunning[join(temporary, "session-env.json")]))
         assertEquals(FileAccess.PRIVATE, files.access[join(temporary, "session-env.json")])
-        assertEquals("relay-token", settings.text(LaunchVariables.RELAY_TOKEN))
+        assertEquals("client-token", settings.text(LaunchVariables.RELAY_TOKEN))
         assertFalse(settings.containsKey("PATH") || settings.containsKey(LaunchVariables.DEVICE_TOKEN))
         // S2-20: no catalogue is written where the agent could empty it; without a package the relay asks Ostrom
         assertNull(filesWhileRunning[join(temporary, "plugin", "ostrom", "gates.json")])
@@ -143,6 +155,12 @@ class AgentLaunchUseCaseTest {
         val environment = environments.single()
         assertEquals("http://127.0.0.1:4100", environment["ANTHROPIC_BASE_URL"])
         assertEquals(join(temporary, "package.json"), environment[LaunchVariables.PACKAGE])
+        // S2-33: the hooks get the seal of what was laid down, and the manifest it is the SHA-256 of
+        val manifest = join(temporary, "package.sha256")
+        assertEquals(manifest, environment[LaunchVariables.PACKAGE_MANIFEST])
+        val sealed = checkNotNull(filesWhileRunning[manifest])
+        assertEquals(sha256Hex(sealed.encodeToByteArray()), environment[LaunchVariables.PACKAGE_SEAL])
+        assertTrue(sealed.contains(join(temporary, "plugin", "ostrom", "gates.json")), sealed)
         assertEquals("p202610300845-a216a112", environment[LaunchVariables.HARNESS_VERSION])
         assertEquals("opus", environment[LaunchVariables.MODEL])
         assertEquals(setOf("github", "ostrom", "ostrom-workflow"), relaySettings.single().mcpServers)
@@ -250,6 +268,19 @@ class AgentLaunchUseCaseTest {
         files.failDirectories = true
         assertEquals(73, start())
         assertEquals("ostrom: cannot create $temporary (read-only file system)", said.last())
+        assertEquals(emptyList(), commands)
+    }
+
+    @Test
+    fun withoutTheInstancesKeysTheAgentIsNotStarted() = runTest {
+        // S2-20: no gate policy of the session could be trusted; the agent would run with every action held
+        serveALaunch()
+        server.unreachable = setOf("GET ${Routes.INSTANCE_KEYS}")
+        assertEquals(69, start())
+        assertEquals(
+            "ostrom: the instance's keys could not be read (connection refused): the agent is not started",
+            said.last(),
+        )
         assertEquals(emptyList(), commands)
     }
 
@@ -400,5 +431,10 @@ class AgentLaunchUseCaseTest {
         server["GET ${Routes.MCP_SERVERS}"] = 200 to """{"items":[]}"""
         server["GET ${Routes.INFERENCE_MODELS}"] = 200 to """{"data":[]}"""
         server["POST /api/v1/sessions/s1/end"] = 200 to """{"session":{"receiptId":"R1"},"verification":{"ok":true}}"""
+        server["GET ${Routes.INSTANCE_KEYS}"] = 200 to KEYS
+    }
+
+    private companion object {
+        const val KEYS = """{"keys":[{"keyId":"k1","algorithm":"ed25519","publicKeyPem":"pem"}]}"""
     }
 }

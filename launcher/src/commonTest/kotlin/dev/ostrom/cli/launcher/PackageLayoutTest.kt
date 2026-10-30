@@ -34,7 +34,8 @@ class PackageLayoutTest {
             ),
             "abc",
         )
-        val view = PackageLayout(files).layDown(pack, plugin, temporary)
+        val laid = PackageLayout(files).layDown(pack, plugin, temporary)
+        val view = laid.view
         assertEquals("skill", files.texts[join(plugin, "skills", "a", "SKILL.md")])
         assertEquals(FileAccess.EXECUTABLE, files.access[join(temporary, "scripts", "check.sh")])
         assertEquals(FileAccess.EXECUTABLE, files.access[join(temporary, "bin", "run")])
@@ -47,6 +48,26 @@ class PackageLayoutTest {
         assertEquals("acme-api", written.text("repo"))
         assertEquals(join(temporary, "scripts"), written.text("scriptsDir"))
         assertEquals("""[{"id":"n1","kind":"check","label":"Tests","mode":"enforce"}]""", written["nodes"].toString())
-        assertEquals(5, files.texts.size, "4 files and the view, nothing else")
+        // S2-33: every file laid down, by SHA-256, in a manifest whose own SHA-256 the hooks get in their environment
+        val manifest = checkNotNull(files.texts[laid.manifest])
+        assertEquals(join(temporary, "package.sha256"), laid.manifest)
+        assertEquals(FileAccess.PRIVATE, files.access[laid.manifest])
+        assertEquals(sha256Hex(manifest.encodeToByteArray()), laid.seal)
+        val lines = manifest.lines().filter { it.isNotEmpty() }
+        assertEquals(
+            listOf(
+                join(plugin, "skills", "a", "SKILL.md"),
+                join(temporary, "scripts", "check.sh"),
+                join(temporary, "bin", "run"),
+                join(plugin, "empty"),
+                view,
+            ),
+            lines.map { it.substringAfter("  ") },
+        )
+        for (line in lines) {
+            val path = line.substringAfter("  ")
+            assertEquals(sha256Hex(files.texts.getValue(path).encodeToByteArray()), line.substringBefore("  "), path)
+        }
+        assertEquals(6, files.texts.size, "4 files, the view and the manifest, nothing else")
     }
 }
