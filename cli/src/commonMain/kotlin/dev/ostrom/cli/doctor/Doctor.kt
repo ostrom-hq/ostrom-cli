@@ -10,6 +10,8 @@ import dev.ostrom.cli.platform.Environment
 import dev.ostrom.cli.platform.ExecutableFinder
 import dev.ostrom.cli.platform.FileStore
 import dev.ostrom.cli.platform.FileWriteException
+import dev.ostrom.cli.platform.SecretStore
+import dev.ostrom.cli.platform.SecretStoreException
 import okio.Path.Companion.toPath
 
 /** How one doctor line reads: ✓ fine, ! to do, ✗ broken. */
@@ -38,6 +40,7 @@ interface RunDoctorUseCase {
  * @param api Builds the client of a server URL.
  * @param signedInAs The GitHub login this device is signed in with on a server URL, or null.
  * @param pinnedKey The kid of the signing key this device pinned for a server URL, or null.
+ * @param secrets Opens the secret store, where the device token is kept.
  */
 @Suppress("LongParameterList") // Each check reads one dependency; grouping them would only hide which.
 class RunDoctorUseCaseImpl(
@@ -50,6 +53,7 @@ class RunDoctorUseCaseImpl(
     private val api: (String) -> OstromApi,
     private val signedInAs: (String) -> String?,
     private val pinnedKey: (String) -> String?,
+    private val secrets: () -> SecretStore,
 ) : RunDoctorUseCase {
     override suspend fun invoke(): List<DoctorCheck> {
         // the URL as login and the launcher key it: without its trailing slash
@@ -60,6 +64,7 @@ class RunDoctorUseCaseImpl(
                 "ostrom $version · ${environment.operatingSystem.displayName} ${environment.architecture}",
             ),
             configFolder(),
+            secretStore(),
             signIn(url),
             server(url),
             url?.let { key(it) },
@@ -98,11 +103,23 @@ class RunDoctorUseCaseImpl(
         }
     }
 
+    private fun secretStore(): DoctorCheck = try {
+        val backend = secrets().backend
+        val warning = backend.warning
+        if (warning == null) {
+            DoctorCheck(CheckStatus.OK, "Secrets kept in ${backend.displayName}")
+        } else {
+            DoctorCheck(CheckStatus.WARNING, warning)
+        }
+    } catch (e: SecretStoreException) {
+        DoctorCheck(CheckStatus.PROBLEM, e.message)
+    }
+
     private suspend fun server(url: String?): DoctorCheck {
         if (url == null) return DoctorCheck(CheckStatus.WARNING, "No server yet: ostrom login sets it.")
         val host = hostOf(url)
         return try {
-            val response = api(url).get("/api/health")
+            val response = api(url).use { it.get("/api/health") }
             if (response.status < SERVER_ERROR) {
                 DoctorCheck(CheckStatus.OK, "$host reachable (${response.millis} ms)")
             } else {

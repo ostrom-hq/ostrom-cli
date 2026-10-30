@@ -20,6 +20,8 @@ import dev.ostrom.cli.platform.LoopbackHttp
 import dev.ostrom.cli.platform.LoopbackRequest
 import dev.ostrom.cli.platform.LoopbackResponse
 import dev.ostrom.cli.platform.OperatingSystem
+import dev.ostrom.cli.platform.SecretBackend
+import dev.ostrom.cli.platform.SecretStore
 import dev.ostrom.cli.platform.StandardInput
 import dev.ostrom.cli.update.AgentSessionsImpl
 import dev.ostrom.cli.update.SelfUpdate
@@ -103,6 +105,7 @@ open class CliKit {
         installed: Set<String> = setOf("git", "claude"),
         api: (String) -> OstromApi = { error("no server in this test") },
         executable: String? = "/opt/ostrom",
+        secrets: () -> SecretStore = storeIn(SecretBackend.KEYCHAIN),
         postHogKey: String = "",
     ) = OstromCli(
         CliDependencies(
@@ -137,6 +140,7 @@ open class CliKit {
             ),
             postHogKey = postHogKey,
             sendStatistics = { _, body -> statistics += body },
+            secrets = secrets,
         ),
     )
 
@@ -149,6 +153,16 @@ open class CliKit {
         fileSystem.createDirectories("/home/maya/.config/ostrom".toPath())
         fileSystem.write("/home/maya/.config/ostrom/server-keys.json".toPath()) {
             writeUtf8("""{"https://ostrom.example":{"kid":"$kid","publicKeyPem":"x"}}""")
+        }
+    }
+
+    /** A secret store in [backend] that keeps nothing (doctor only reads where it is). */
+    protected fun storeIn(backend: SecretBackend): () -> SecretStore = {
+        object : SecretStore {
+            override val backend = backend
+            override fun read(name: String): String? = null
+            override fun write(name: String, secret: String) = Unit
+            override fun delete(name: String) = Unit
         }
     }
 

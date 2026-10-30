@@ -5,19 +5,31 @@ import com.github.ajalt.clikt.core.Abort
 import com.github.ajalt.clikt.core.PrintHelpMessage
 import com.github.ajalt.clikt.core.ProgramResult
 import com.github.ajalt.clikt.core.UsageError
+import dev.ostrom.cli.api.Download
 import dev.ostrom.cli.api.OstromApi
 import dev.ostrom.cli.api.ServerRequest
 import dev.ostrom.cli.api.ServerResponse
 import dev.ostrom.cli.api.ServerUnreachableException
+import dev.ostrom.cli.hooks.HookRunner
+import dev.ostrom.cli.launch.AgentRunner
 import dev.ostrom.cli.launcher.Agent
 import dev.ostrom.cli.launcher.Credentials
 import dev.ostrom.cli.launcher.LaunchRequest
+import dev.ostrom.cli.mcp.McpServer
+import dev.ostrom.cli.platform.ExecutableFinder
+import dev.ostrom.cli.platform.FileStoreImpl
+import dev.ostrom.cli.platform.SecretBackend
+import dev.ostrom.cli.platform.SecretStore
+import dev.ostrom.cli.platform.SecretStoreException
+import dev.ostrom.cli.update.AgentSessions
+import dev.ostrom.cli.update.SelfUpdate
 import dev.ostrom.cli.update.UpdateRequest
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class OstromCliTest : CliKit() {
@@ -154,6 +166,41 @@ class OstromCliTest : CliKit() {
     }
 
     @Test
+    fun configSetRefusesAValueTheCliWouldMisread() {
+        val refused = listOf(
+            "server" to "ostrom.example" to "server must be an http:// or https:// URL",
+            "server" to "https://ostrom.example/a b" to "server must be",
+            "server" to "ftp://ostrom.example" to "server must be",
+            "server" to "https://ostrom.example:99999" to "server must be",
+            "server" to "https://ostrom.example:0" to "server must be",
+            "server" to "http://-" to "server must be",
+            "server" to "https://user@ostrom.example" to "server must be",
+            "default_agent" to "cursor" to "default_agent must be one of claude, codex, opencode, gemini",
+            "color" to "rainbow" to "color must be auto, always or never.",
+            "editor" to " " to "editor cannot be empty.",
+        )
+        for ((setting, message) in refused) {
+            val (key, value) = setting
+            console.err.clear()
+            assertEquals(64, cli().run(arrayOf("config", "set", key, value)), "$key = $value")
+            assertTrue(console.err.contains(message), console.err.toString())
+            assertTrue(fileSystem.allPaths.none { it.name == "config.toml" }, "nothing is saved")
+        }
+        val accepted = listOf(
+            "server" to "https://ostrom.example:8443/base/",
+            "server" to "http://localhost:8080",
+            "server" to "http://[::1]:8080",
+            "server" to "http://ci_host",
+            "server" to "https://10.0.0.7:65535/ostrom",
+            "color" to "always",
+            "editor" to "code --wait",
+        )
+        for ((key, value) in accepted) {
+            assertEquals(0, cli().run(arrayOf("config", "set", key, value)), "$key = $value")
+        }
+    }
+
+    @Test
     fun configWithoutAHomeFolderCannotBeWritten() {
         assertEquals(73, cli(environment = emptyMap()).run(arrayOf("config", "set", "color", "never")))
     }
@@ -163,6 +210,7 @@ class OstromCliTest : CliKit() {
         assertEquals(0, cli().run(arrayOf("doctor")))
         val report = console.out.toString()
         assertTrue(report.contains("  ✓ Config folder /home/maya/.config/ostrom is writable\n"), report)
+        assertTrue(report.contains("  ✓ Secrets kept in macOS Keychain\n"), report)
         assertTrue(report.contains("  ! Not signed in. Run ostrom login.\n"), report)
         assertTrue(report.contains("  ✓ Agents found: claude\n"), report)
         assertTrue(report.endsWith("0 problems, 2 warnings.\n"), report)
@@ -256,7 +304,7 @@ class OstromCliTest : CliKit() {
     @Test
     fun theRealWiringBuildsEveryDependency() {
         val dependencies = CliDependencies.create()
-        dependencies.api("https://ostrom.example")
+        dependencies.api("https://ostrom.example").close()
         dependencies.mcpServer()
         val nowhere = UpdateRequest("1.0.0", "linux-x64", "/nowhere-ostrom/ostrom", "https://releases.example")
         assertEquals(66, runBlocking { dependencies.selfUpdate.rollback(nowhere) })
@@ -511,5 +559,53 @@ class OstromCliTest : CliKit() {
         // an empty variable is no session
         val logout = serverOf(mapOf("POST /api/v1/auth/logout" to (200 to "{}")))
         assertEquals(0, cli(environment = withServer + ("OSTROM_LAUNCH_ID" to ""), api = logout).run(arrayOf("logout")))
+    }
+
+    @Test
+    fun doctorWarnsAboutTheEncryptedFileAndFailsWithoutAnyStore() {
+        assertEquals(0, cli(secrets = storeIn(SecretBackend.ENCRYPTED_FILE)).run(arrayOf("doctor")))
+        assertOut("  ! No Secret Service on this device: secrets are kept in an encrypted file only you can read.")
+        console.out.clear()
+        val none: () -> SecretStore = { throw SecretStoreException("No secret store on this device.") }
+        assertEquals(1, cli(secrets = none).run(arrayOf("doctor")))
+        assertOut("  ✗ No secret store on this device.\n")
+    }
+
+    @Test
+    fun theDefaultSecretStoreIsThisPlatformsOwn() {
+        fileSystem.createDirectories("/etc".toPath())
+        fileSystem.write("/etc/machine-id".toPath()) { writeUtf8("4c4c4544004d3510804bb4c04f4d3832\n") }
+        val dependencies = CliDependencies(
+            console = console,
+            environment = FakeEnvironment(mapOf("HOME" to "/home/maya")),
+            files = FileStoreImpl(fileSystem),
+            finder = object : ExecutableFinder {
+                override fun find(name: String): String? = null
+            },
+            api = { error("no server in this test") },
+            hookRunner = object : HookRunner {
+                override fun run(arguments: List<String>) = 0
+            },
+            mcpServer = { object : McpServer { override fun serve() = 0 } },
+            credentials = { error("no credentials in this test") },
+            workingDirectory = { "/work/acme" },
+            executable = null,
+            temporaryDirectory = "/tmp",
+            agents = AgentRunner { _, _ -> 0 },
+            sleep = {},
+            readLine = { null },
+            openUrl = { false },
+            selfUpdate = SelfUpdate(
+                { _, _ -> Download.Missing(404) },
+                fileSystem,
+                { _, _ -> false },
+                {},
+                AgentSessions { null },
+            ),
+            postHogKey = "",
+            sendStatistics = { _, _ -> },
+        )
+        // The JVM test target has no system store: the encrypted file. Native targets get their system's.
+        assertIs<SecretBackend>(dependencies.secrets().backend)
     }
 }

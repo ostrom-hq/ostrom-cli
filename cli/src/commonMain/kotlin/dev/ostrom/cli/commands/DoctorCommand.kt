@@ -35,6 +35,7 @@ class DoctorCommand(private val dependencies: CliDependencies) : CliktCommand(na
             api = dependencies.api,
             signedInAs = { url -> directory?.let { dependencies.credentials(it).load(url)?.login } },
             pinnedKey = { url -> directory?.let { pinnedKid(dependencies, it, url) } },
+            secrets = dependencies.secrets,
         )
         val checks = runBlocking { doctor() }
         val problems = checks.count { it.status == CheckStatus.PROBLEM }
