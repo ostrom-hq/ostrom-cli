@@ -39,7 +39,8 @@ class SessionHook(
     }
 
     private fun firstModelCall(event: JsonObject, agentSession: String): HookReply {
-        val mark = context.sessionFile?.let { "$it.context-$agentSession" }?.takeIf { files.read(it) == null }
+        val session = context.sessionFile
+        val mark = if (session == null) null else "$session.context-$agentSession".takeIf { files.read(it) == null }
         return if (mark == null) {
             HookReply()
         } else {

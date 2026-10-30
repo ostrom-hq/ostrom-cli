@@ -43,5 +43,7 @@ class ShellWordsTest {
         assertEquals(listOf(listOf("a\\")), ShellWords.segments("a\\"))
         assertEquals(listOf(listOf("a", "b c\\")), ShellWords.segments("a \"b c\\"))
         assertEquals(listOf(listOf("x\\y")), ShellWords.segments("'x\\y'"))
+        assertEquals(listOf(listOf("a", "b")), ShellWords.segments("a\tb"), "a tab separates words")
+        assertEquals(listOf(listOf("sleep", "1")), ShellWords.segments("sleep 1 &"), "a last & runs in the background")
     }
 }

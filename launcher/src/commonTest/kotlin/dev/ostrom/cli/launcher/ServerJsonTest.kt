@@ -27,9 +27,13 @@ class ServerJsonTest {
         fake["GET /closed"] = 409 to """{"error":{"type":"session_closed","message":"closed"}}"""
         fake["GET /old"] = 400 to """{"error":"bad thing"}"""
         fake["GET /html"] = 502 to "<html>"
+        fake["GET /bare"] = 422 to """{"error":{"type":"invalid"}}"""
+        fake["GET /early"] = 101 to "{}"
         assertEquals(ServerAnswer.Failed(409, "session_closed", "closed"), server.get("/closed", null))
         assertEquals(ServerAnswer.Failed(400, null, "bad thing"), server.get("/old", null))
         assertEquals(ServerAnswer.Failed(502, null, "HTTP 502"), server.get("/html", null))
+        assertEquals(ServerAnswer.Failed(422, "invalid", "HTTP 422"), server.get("/bare", null), "no message")
+        assertEquals(ServerAnswer.Failed(101, null, "HTTP 101"), server.get("/early", null), "below 200")
     }
 
     @Test

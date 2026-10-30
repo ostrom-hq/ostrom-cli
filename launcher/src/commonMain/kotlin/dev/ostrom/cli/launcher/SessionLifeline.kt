@@ -45,7 +45,10 @@ class SessionLifeline(
 
     private suspend fun reopen(closed: String) {
         val answer = server.post(Routes.reopen(closed), objectOf("launchId" to launchId), agentToken, REOPEN_MILLIS)
-        val body = (answer as? ServerAnswer.Ok)?.body ?: return
+        val body = when (answer) {
+            is ServerAnswer.Ok -> answer.body
+            is ServerAnswer.Failed -> return
+        }
         val session = body.child("session") ?: body
         val id = session.text("id")
         if (id.isNullOrEmpty()) return
@@ -110,10 +113,11 @@ class SessionLifeline(
             return
         }
         val receipt = (answer as ServerAnswer.Ok).body.child("receipt")
-        val id = receipt?.text("id") ?: "?"
+        val receiptId = receipt?.text("id")
+        val id = receiptId ?: "?"
         val valid = if (answer.body.child("verification")?.flag("ok") == true) "signature valid" else "NOT verified"
         say("workflow receipt $id ($valid) · package ${pack.version}")
-        if (receipt?.text("id") == null) return
+        if (receiptId == null) return
         when (val bundle = server.get(Routes.bundle(id), agentToken, BUNDLE_MILLIS)) {
             is ServerAnswer.Ok -> {
                 val path = join(kept, "$id.json")
