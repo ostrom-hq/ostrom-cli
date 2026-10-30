@@ -102,4 +102,14 @@ class McpBridgeTest {
         assertFalse(answers.isNotEmpty())
         McpBridge(BridgeTarget(1, "t", "s"), http, console) // the default reader is stdin
     }
+
+    @Test
+    fun anAnswerBelowTheSuccessRangeIsNoAnswer() {
+        answers += Result.success(LoopbackResponse(101, """{"jsonrpc":"2.0","id":1,"result":{}}"""))
+        serve("""{"id":1}""")
+        assertEquals(
+            """{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"Ostrom: Ostrom answered 101"}}""",
+            written.toString().trim(),
+        )
+    }
 }
