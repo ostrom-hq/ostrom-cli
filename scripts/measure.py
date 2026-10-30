@@ -9,9 +9,11 @@ figures are an upper bound of the binary's start-up. `inside` is the time the ho
 (OSTROM_HOOK_TIMING=1: from entering the hook runner to the reply written). Results go to stdout and, in GitHub
 Actions, to the job summary. Exits 1 when the median hook time is above --max-hook-ms.
 
-The budget is measured on the hook of an ordinary tool call (`ls`), which is most of an agent's calls: the gate reads
-it and lets it through without starting anything. A `git push` is measured too and shown, not held to the budget: the
-gate then runs `git` to read what the push sends (outside a session, as here, it refuses with exit 2).
+The budget is measured on the hook of an ordinary tool call (`ls`), which is most of an agent's calls. Outside a
+session, as here, there is no relay to read Ostrom's signed policy from, so the gate holds the call (exit 2) after
+reading and parsing it: the figure is the hook's start-up. The same hook in a real session (the relay asked, the
+policy's signature checked) is held to the same budget by e2e/run.py. A `git push` is measured too and shown, not
+held to the budget.
 """
 import argparse
 import os
@@ -63,7 +65,7 @@ def main():
     args = parser.parse_args()
 
     env = dict(os.environ, OSTROM_HOOK_TIMING="1")
-    hook_walls, hook_insides = run_many([args.binary, "hook", "gate"], args.runs, stdin=EVENT, env=env)
+    hook_walls, hook_insides = run_many([args.binary, "hook", "gate"], args.runs, stdin=EVENT, env=env, accepted=(0, 2))
     push_walls, _ = run_many([args.binary, "hook", "gate"], args.runs, stdin=PUSH, env=env, accepted=(0, 2))
     push_median, push_p90 = describe(push_walls)
     version_walls, _ = run_many([args.binary, "version"], args.runs)
