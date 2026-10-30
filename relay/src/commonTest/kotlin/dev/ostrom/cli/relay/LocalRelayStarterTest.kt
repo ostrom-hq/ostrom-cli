@@ -61,8 +61,10 @@ class LocalRelayStarterTest {
                 val refused = agent.get("${relay.url}/api/v1/gates/catalog") { bearerAuth("not-the-token") }
                 assertEquals(HttpStatusCode.Unauthorized, refused.status)
 
+                assertTrue(Regex("[0-9a-f]{64}").matches(relay.clientToken), "the agent's own, drawn apart (S2-25)")
+                assertTrue(relay.clientToken != relay.token)
                 agent.preparePost("${relay.url}/v1/messages") {
-                    header("x-api-key", relay.token)
+                    header("x-api-key", relay.clientToken)
                     contentType(ContentType.Application.Json)
                     setBody("""{"stream":true}""")
                 }.execute { response ->

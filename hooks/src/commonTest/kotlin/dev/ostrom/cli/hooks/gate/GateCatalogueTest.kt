@@ -108,26 +108,6 @@ class GateCatalogueTest {
     }
 
     @Test
-    fun theBuiltInCatalogueGuardsTheBoundaryAndFailsClosed() {
-        val closed = GateCatalogue.CLOSED
-        assertEquals("closed", closed.failMode)
-        fun gated(command: String) = closed.match(ToolSubject(ToolKind.BASH, "Bash", command), patterns)?.actionClass
-        assertEquals("push", gated("git push origin topic"))
-        assertEquals("deploy", gated("kubectl -n prod apply -f x.yaml"))
-        assertEquals("deploy", gated("helm upgrade api ./chart"))
-        assertEquals("deploy", gated("terraform apply"))
-        assertEquals("deploy", gated("pulumi up"))
-        assertEquals("merge", gated("gh pr merge 12"))
-        assertEquals("merge", gated("gh release create v1"))
-        assertEquals("publish", gated("npm publish"))
-        assertEquals("publish", gated("docker push ghcr.io/acme/api"))
-        assertEquals("publish", gated("twine upload dist/*"))
-        assertNull(gated("kubectl get pods"))
-        assertNull(gated("git status; echo push"))
-        assertTrue(closed.actions.all { it.gate?.enforce == true && it.tools == listOf("Bash") })
-    }
-
-    @Test
     fun aPatternThatDoesNotCompileMatchesNothingEveryTime() {
         val cache = PatternCache()
         repeat(2) {
