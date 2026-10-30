@@ -79,9 +79,11 @@ interface SecretStore {
     fun write(name: String, secret: String)
 
     /**
-     * Forgets the secret called [name]; nothing happens when there is none.
+     * Forgets the secret called [name] in every store of this device that may hold it: the system store and the
+     * encrypted file a Linux used while it had no Secret Service (`ostrom logout`). Nothing happens where there is
+     * none, or no such store.
      *
-     * @throws SecretStoreException When the store refuses it.
+     * @throws SecretStoreException When a store that holds secrets refuses it.
      */
     fun delete(name: String)
 }
@@ -109,10 +111,39 @@ internal fun secretStoreOf(
     files: FileStore,
     user: String = currentUserId(),
 ): SecretStore {
-    if (vault != null && vault.isAvailable()) return VaultSecretStore(vault)
-    val directory = environment.configDirectory ?: throw SecretStoreException(NO_SECRET_STORE)
-    val material = machineKeyMaterial(files, user) ?: throw SecretStoreException(NO_SECRET_STORE)
-    return EncryptedFileSecretStore(files, (directory.toPath() / SECRETS_FILE).toString(), material)
+    val file = { encryptedFileStore(environment, files, user) }
+    if (vault != null && vault.isAvailable()) return SystemSecretStore(VaultSecretStore(vault), file)
+    return file() ?: throw SecretStoreException(NO_SECRET_STORE)
+}
+
+/** The encrypted file of the CLI folder, or null without a CLI folder or a machine identifier to key it with. */
+private fun encryptedFileStore(environment: Environment, files: FileStore, user: String): SecretStore? {
+    val directory = environment.configDirectory ?: return null
+    return machineKeyMaterial(files, user)
+        ?.let { EncryptedFileSecretStore(files, (directory.toPath() / SECRETS_FILE).toString(), it) }
+}
+
+/**
+ * The system store [primary], which reads and writes every secret, and the encrypted file [leftovers] may give: the
+ * one a Linux used while it had no Secret Service (login over SSH, then a desktop session). [delete] forgets the name
+ * in both, so that no token stays on disk after `ostrom logout`; the file is only opened then, never on the way to a
+ * read or a write.
+ */
+internal class SystemSecretStore(
+    private val primary: SecretStore,
+    private val leftovers: () -> SecretStore?,
+) : SecretStore {
+    override val backend: SecretBackend
+        get() = primary.backend
+
+    override fun read(name: String): String? = primary.read(name)
+
+    override fun write(name: String, secret: String) = primary.write(name, secret)
+
+    override fun delete(name: String) {
+        primary.delete(name)
+        leftovers()?.delete(name)
+    }
 }
 
 /** The service name every secret of the CLI is filed under in the system store. */
@@ -228,13 +259,14 @@ internal class EncryptedFileSecretStore(
 
     override fun write(name: String, secret: String) {
         requireName(name)
-        val sealed = cipher.encryptBlocking(secret.encodeToByteArray(), name.encodeToByteArray())
-        save(storedEntries() + (name to Base64.encode(sealed)))
+        val sealed = Base64.encode(cipher.encryptBlocking(secret.encodeToByteArray(), name.encodeToByteArray()))
+        update { it + (name to sealed) }
     }
 
     override fun delete(name: String) {
-        val entries = storedEntries()
-        if (name in entries) save(entries - name)
+        // No file, nothing to forget: no lock file is left behind either.
+        if (!files.exists(path)) return
+        update { if (name in it) it - name else null }
     }
 
     /** The secret sealed in [sealed], or null when it does not open here (another machine, a damaged file). */
@@ -263,13 +295,21 @@ internal class EncryptedFileSecretStore(
         .filter { ' ' in it }
         .associate { it.substringBefore(' ') to it.substringAfter(' ') }
 
-    private fun save(entries: Map<String, String>) {
-        val lines = entries.entries.joinToString("") { (name, sealed) -> "$name $sealed\n" }
+    /**
+     * Rewrites the file with [change] of its entries (null: nothing to write), holding the file's lock from the read
+     * to the write, so that two `ostrom login` at once both keep their token.
+     */
+    private fun update(change: (Map<String, String>) -> Map<String, String>?) {
         try {
-            files.write(path, "$HEADER\n$lines")
+            files.exclusive(path) { change(storedEntries())?.let(::save) }
         } catch (e: FileWriteException) {
             throw SecretStoreException("Could not write ${e.path}: check that the folder is yours and writable.", e)
         }
+    }
+
+    private fun save(entries: Map<String, String>) {
+        val lines = entries.entries.joinToString("") { (name, sealed) -> "$name $sealed\n" }
+        files.write(path, "$HEADER\n$lines")
     }
 
     private fun requireName(name: String) {
