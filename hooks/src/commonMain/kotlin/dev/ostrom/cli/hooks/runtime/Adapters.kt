@@ -17,8 +17,8 @@ import okio.Path.Companion.toPath
 
 /**
  * [OstromCalls] through the launcher's local relay (`OSTROM_RELAY_URL`, `http://127.0.0.1:<port>`), with the
- * session's own token (`OSTROM_RELAY_TOKEN`): the relay holds the device's credential and forwards to Ostrom only the
- * routes a hook may call (audit A12).
+ * relay's capability for the hooks (read from `OSTROM_RELAY_TOKEN_FILE`, never from the agent's environment, S2-25):
+ * the relay holds the device's credential and forwards to Ostrom only the routes a hook may call (audit A12).
  */
 class RelayCalls(
     private val relayUrl: String?,
