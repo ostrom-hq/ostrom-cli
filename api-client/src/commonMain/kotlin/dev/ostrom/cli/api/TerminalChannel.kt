@@ -64,13 +64,12 @@ class TerminalChannels(
                 header(HttpHeaders.UserAgent, userAgent)
                 header(HttpHeaders.Authorization, "Bearer $token")
             }
-        } catch (e: CancellationException) {
-            throw e
         } catch (e: IOException) {
             throw ServerUnreachableException(url, e)
         } catch (e: IllegalStateException) {
-            // a refused upgrade, and the Curl and WinHttp engines' failed connections, are IllegalStateException
-            throw ServerUnreachableException(url, e)
+            // a refused upgrade, and the Curl and WinHttp engines' failed connections, are IllegalStateException; so is
+            // a cancellation, which goes on as it is
+            throw if (e is CancellationException) e else ServerUnreachableException(url, e)
         }
         return KtorTerminalChannel(session)
     }

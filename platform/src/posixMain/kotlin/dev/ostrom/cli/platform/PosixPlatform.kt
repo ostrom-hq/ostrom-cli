@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+// One actual per expect of the module, as in jvmMain and mingwMain: their number follows the platform API.
 @file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+@file:Suppress("TooManyFunctions")
 
 package dev.ostrom.cli.platform
 

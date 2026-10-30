@@ -48,14 +48,16 @@ class CloudSessionUseCase(
 ) {
     /** Starts [start] with [token], waits until it runs, then attaches; returns the exit code. */
     suspend fun start(start: CloudStart, token: String): Int {
-        if (start.agent.command !in CLOUD_AGENTS) {
-            val names = CLOUD_AGENTS.joinToString()
-            say("ostrom: ${start.agent.displayName} does not run in Ostrom's cloud yet ($names do)")
-            return USAGE
-        }
         val repo = start.repo?.let(::gitHubUrl)
-        if (start.repo != null && repo == null) {
-            say("ostrom: the repository to clone must be on GitHub: --repo owner/name or https://github.com/owner/name")
+        val problem = when {
+            start.agent.command !in CLOUD_AGENTS ->
+                "${start.agent.displayName} does not run in Ostrom's cloud yet (${CLOUD_AGENTS.joinToString()} do)"
+            start.repo != null && repo == null ->
+                "the repository to clone must be on GitHub: --repo owner/name or https://github.com/owner/name"
+            else -> null
+        }
+        if (problem != null) {
+            say("ostrom: $problem")
             return USAGE
         }
         val body = objectOf("agent" to start.agent.command, "model" to start.model, "repo" to repo)
@@ -184,17 +186,19 @@ class CloudSessionUseCase(
         }
         is TerminalOutput.Control -> {
             val connected = parseObject(output.text)?.get("connected")
-            when {
-                connected == JsonPrimitive(false) && !lost -> notice("the session's machine is reconnecting…", true)
-                connected == JsonPrimitive(true) && lost -> notice("the session's machine is back.", false)
-                else -> lost
+            val notice = when {
+                connected == JsonPrimitive(false) && !lost -> "the session's machine is reconnecting…"
+                connected == JsonPrimitive(true) && lost -> "the session's machine is back."
+                else -> null
+            }
+            // a notice turns the state over; anything else leaves it
+            if (notice == null) {
+                lost
+            } else {
+                terminal.write("\r\n[ostrom] $notice\r\n".encodeToByteArray())
+                !lost
             }
         }
-    }
-
-    private fun notice(text: String, lost: Boolean): Boolean {
-        terminal.write("\r\n[ostrom] $text\r\n".encodeToByteArray())
-        return lost
     }
 
     /** The exit code once the terminal is given back, said in plain words. */
@@ -209,12 +213,6 @@ class CloudSessionUseCase(
         }
         say(if (outcome.second == OK) outcome.first else "ostrom: ${outcome.first}")
         return outcome.second
-    }
-
-    /** A failure that may pass: Ostrom unreachable for a moment, failing (5xx) or asking to slow down (429). */
-    private fun passing(answer: ServerAnswer.Failed): Boolean {
-        val status = answer.status
-        return status == null || status == TOO_MANY || status >= SERVER_ERROR
     }
 
     /** The exit code of a refused or failed call, said. */
@@ -232,6 +230,12 @@ class CloudSessionUseCase(
 
     /** The agents Ostrom's cloud runs, and the session's constants. */
     companion object {
+        /** A failure that may pass: Ostrom unreachable for a moment, failing (5xx) or asking to slow down (429). */
+        private fun passing(answer: ServerAnswer.Failed): Boolean {
+            val status = answer.status
+            return status == null || status == TOO_MANY || status >= SERVER_ERROR
+        }
+
         /** Agents with a cloud image (contract `CloudSession.agent`). */
         val CLOUD_AGENTS = listOf("claude", "codex", "opencode", "gemini")
 
