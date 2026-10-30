@@ -3,6 +3,7 @@ package dev.ostrom.cli.commands
 
 import dev.ostrom.cli.platform.ConfigKey
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -32,6 +33,14 @@ class ConfigValuesTest {
             "http://[::ffff:a.b.c.d]",
         )
         for (url in refused) assertFalse(isServerUrl(url), url)
+    }
+
+    @Test
+    fun theOrganisationIsANameWithoutSpaces() {
+        assertNull(configValueProblem(ConfigKey.ORG, "acme"))
+        val refused = "org must be an organisation's short name or id, without spaces."
+        assertEquals(refused, configValueProblem(ConfigKey.ORG, " "))
+        assertEquals(refused, configValueProblem(ConfigKey.ORG, "acme corp"))
     }
 
     @Test

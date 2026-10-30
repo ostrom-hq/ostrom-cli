@@ -93,7 +93,9 @@ S2-39): signed with the manifest, so a downgrade to a version with a known hole 
 `release-floor.txt` at the root of the repository (or `RELEASE_FLOOR`), `MAJOR.MINOR.PATCH`, never above the version
 released (`latest-json.sh` refuses it). **Raise it in the release that fixes a security hole**, to that release's
 version. The CLI reads the floor of the latest release, never the old release's own manifest, and refuses any move
-back when the latest release publishes none.
+back when the latest release publishes none. Each binary also carries the floor of `release-floor.txt` at its build
+(`BuildInfo.FLOOR`) and never installs below it: an old `latest.json` served again, still signed but with a lower
+floor, cannot lower it. A signed expiry date of the manifest, to refuse a replayed one outright, is not there yet.
 
 `latest.json.sig` is the **base64 (one line) of the raw 64-byte Ed25519 signature of the exact bytes of `latest.json`**
 (no hashing first, no canonicalisation: verify the bytes as downloaded). `ostrom update` must:

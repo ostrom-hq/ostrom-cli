@@ -114,7 +114,7 @@ class OstromCliTest : CliKit() {
         val help = console.out.toString()
         val commands = listOf(
             "claude", "status", "inbox", "approve", "receipts", "verify",
-            "harness", "login", "doctor", "invite", "policy",
+            "harness", "login", "init", "doctor", "invite", "members", "policy",
         )
         for (command in commands) {
             assertTrue(Regex("""\n\s+$command\s""").containsMatchIn(help), "$command missing from:\n$help")
@@ -122,7 +122,7 @@ class OstromCliTest : CliKit() {
         // Help may wrap: compare with every run of spaces and line breaks made one space.
         val flat = help.replace(Regex("""\s+"""), " ")
         assertTrue(flat.contains(" status Everything about you, this repository and this device (coming soon) "), flat)
-        val harness = " harness The harness of your team: rules, hooks, skills, approvals (coming soon) "
+        val harness = " harness The workflows your agents start with: rules, checks, approvals login "
         assertTrue(flat.contains(harness), flat)
         assertTrue(flat.contains(" config Settings of this device doctor "), flat)
         // built commands never say « (coming soon) » (DOCS-VERITE)
@@ -149,7 +149,6 @@ class OstromCliTest : CliKit() {
     fun aDeclaredCommandNotBuiltYetExitsWith70() {
         assertEquals(70, cli().run(arrayOf("status", "--json")))
         assertEquals("ostrom status: not implemented yet.\n", console.err.toString())
-        assertEquals(70, cli().run(arrayOf("harness", "add", "git-safety", "--set", "a=b", "--yes")))
         assertEquals(70, cli().run(arrayOf("logs")))
         assertEquals(64, cli().run(arrayOf("approve")))
     }
@@ -175,7 +174,7 @@ class OstromCliTest : CliKit() {
         assertEquals(0, cli.run(arrayOf("config", "unset", "default_agent")))
         assertEquals(1, cli.run(arrayOf("config", "get", "default_agent")))
         assertEquals(64, cli.run(arrayOf("config", "set", "colour", "never")))
-        val keys = "server, default_agent, color, editor, telemetry, telemetry_id"
+        val keys = "server, org, default_agent, color, editor, telemetry, telemetry_id"
         assertTrue(console.err.contains("Unknown key \"colour\". Keys: $keys."), console.err.toString())
     }
 
@@ -269,9 +268,9 @@ class OstromCliTest : CliKit() {
     fun aGroupWithoutDefaultPrintsItsHelp() {
         assertEquals(0, cli().run(arrayOf("harness")))
         assertTrue(console.out.contains("enforce"), console.out.toString())
-        assertEquals(70, cli().run(arrayOf("members")))
-        assertTrue(console.err.endsWith("ostrom members list: not implemented yet.\n"), console.err.toString())
-        assertEquals(70, cli().run(arrayOf("policy")))
+        console.out.clear()
+        assertEquals(0, cli().run(arrayOf("policy", "rules")))
+        assertTrue(console.out.contains("accept"), console.out.toString())
     }
 
     @Test

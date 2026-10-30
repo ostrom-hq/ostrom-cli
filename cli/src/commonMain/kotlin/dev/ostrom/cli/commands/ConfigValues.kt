@@ -15,6 +15,11 @@ internal fun configValueProblem(key: ConfigKey, value: String): String? = when (
         "server must be an http:// or https:// URL with a host, such as https://ostrom.example or " +
             "http://[::1]:8080 (a port from 1 to 65535; no user, query or fragment)."
     }
+    ConfigKey.ORG -> if (value.isNotBlank() && value.none { it.isWhitespace() }) {
+        null
+    } else {
+        "org must be an organisation's short name or id, without spaces."
+    }
     ConfigKey.DEFAULT_AGENT -> if (Agent.of(value) != null) {
         null
     } else {

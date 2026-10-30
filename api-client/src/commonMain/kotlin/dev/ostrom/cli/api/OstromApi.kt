@@ -30,6 +30,8 @@ data class ServerResponse(val status: Int, val body: String, val millis: Long)
  * @property body A JSON body, sent as `application/json`, or null.
  * @property token The bearer token of the call, or null for an anonymous one.
  * @property timeoutMillis How long the whole call may take.
+ * @property org The organisation the call acts in, sent as `Ostrom-Org`; null to let the server resolve the only
+ * membership (or the organisation the token is bound to).
  */
 data class ServerRequest(
     val method: String,
@@ -37,7 +39,11 @@ data class ServerRequest(
     val body: String? = null,
     val token: String? = null,
     val timeoutMillis: Long = REQUEST_TIMEOUT_MILLIS,
+    val org: String? = null,
 )
+
+/** The header naming the organisation a call acts in (`OstromOrg` parameter of the contract). */
+const val ORG_HEADER = "Ostrom-Org"
 
 /**
  * The refusal this response carries, the contract's `ApiError` body (`{"error":{"type","message"}}`), or null when the
@@ -113,6 +119,7 @@ class OstromApiImpl(
                 header(HttpHeaders.UserAgent, userAgent)
                 header(TRACEPARENT_HEADER, trace.traceparent())
                 if (request.token != null) header(HttpHeaders.Authorization, "Bearer ${request.token}")
+                if (request.org != null) header(ORG_HEADER, request.org)
                 if (request.body != null) setBody(TextContent(request.body, ContentType.Application.Json))
                 timeout { requestTimeoutMillis = request.timeoutMillis }
             }
