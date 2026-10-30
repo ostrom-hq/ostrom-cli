@@ -221,6 +221,24 @@ def scenario_completion(machine):
         handle.write(machine.run("completion", "bash").stdout)
     loaded = subprocess.run(["bash", "-c", f"source {script} && complete -p ostrom"], capture_output=True, text=True)
     check(loaded.returncode == 0 and "ostrom" in loaded.stdout, "bash loads it and completes ostrom")
+    for words, expected, never in (
+            (["ostrom", ""], ["receipts", "doctor"], ["hook", "wait", "mcp", "check"]),
+            (["ostrom", "completion", ""], ["bash", "zsh", "fish", "powershell"], []),
+            (["ostrom", "receipts", "--server", "list", ""], ["list", "show"], ["--local"]),
+            (["ostrom", "doctor", "--j"], ["--json"], ["--help"])):
+        line = " ".join(f"'{word}'" for word in words)
+        probe = (f"source {script}; COMP_WORDS=({line}); COMP_CWORD={len(words) - 1}; _ostrom; "
+                 'printf "%s\\n" "${COMPREPLY[@]}"')
+        offered = subprocess.run(["bash", "-c", probe], capture_output=True, text=True).stdout.split()
+        good = all(word in offered for word in expected) and not any(word in offered for word in never)
+        check(good, f"bash completes {' '.join(words)!r} (offered {offered[:8]})")
+    fish = shutil.which("fish")
+    if fish is None:
+        print("  skip  fish is not on this machine")
+    else:
+        probe = f"{machine.binary} completion fish | source; complete -C 'ostrom completion '"
+        offered = subprocess.run([fish, "--no-config", "-c", probe], capture_output=True, text=True).stdout.split()
+        check("powershell" in offered, f"fish completes 'ostrom completion ' (offered {offered[:8]})")
     pwsh = shutil.which("pwsh")
     if pwsh is None:
         print("  skip  PowerShell is not on this machine")
