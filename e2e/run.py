@@ -94,7 +94,8 @@ def scenario_claude(binary, work):
     server_process, server, log = start_server(work, package=True)
     try:
         home, agents, repo = setup(work)
-        done, report = launch(binary, server, home, agents, repo, work, "claude", ["-p", "hello"])
+        done, report = launch(binary, server, home, agents, repo, work, "claude", ["-p", "hello"],
+                              {"E2E_TIMED_RUNS": "30"})
         check(done.returncode == 3, f"the agent's exit code is ostrom's (got {done.returncode})")
         environment = report["environment"]
         check("OSTROM_TOKEN" not in environment, "the device token never reaches the agent")
@@ -112,6 +113,10 @@ def scenario_claude(binary, work):
         check(gated["code"] == 2,
               f"the package never removes what Ostrom's signed policy gates (exit {gated['code']}: "
               f"{gated['stderr'][:200]})")
+        timing = report["timing"]
+        check(timing["median"] < HOOK_BUDGET_MS,
+              f"in a session, ostrom hook gate on a harmless tool (relay asked, signed policy checked): median "
+              f"{timing['median']:.1f} ms (p95 {timing['p95']:.1f}) < {HOOK_BUDGET_MS} ms")
         tampered = hooks[("PreToolUse", "echo after-tampering")]
         check(tampered["code"] == 2 and "not the one Ostrom signed and laid down" in tampered["stderr"],
               f"a package rewritten by the agent holds every action (exit {tampered['code']}: "
@@ -170,6 +175,8 @@ def scenario_codex(binary, work):
 
 
 def budgets(binary, work):
+    """Start-up. Outside a session the gate holds every call (no relay): its budget in a session is checked by
+    scenario_claude."""
     print("time budgets")
     event = json.dumps({"hook_event_name": "PreToolUse", "session_id": "s", "cwd": work,
                         "tool_name": "Read", "tool_input": {"file_path": "README.md"}})
@@ -184,7 +191,8 @@ def budgets(binary, work):
         return statistics.median(times), sorted(times)[int(len(times) * 0.95) - 1]
 
     hook, hook95 = median([binary, "hook", "gate"], event)
-    check(hook < HOOK_BUDGET_MS, f"ostrom hook gate: median {hook:.1f} ms (p95 {hook95:.1f}) < {HOOK_BUDGET_MS} ms")
+    check(hook < HOOK_BUDGET_MS,
+          f"ostrom hook gate outside a session: median {hook:.1f} ms (p95 {hook95:.1f}) < {HOOK_BUDGET_MS} ms")
     start, start95 = median([binary, "version"], "")
     check(start < START_BUDGET_MS, f"ostrom version: median {start:.1f} ms (p95 {start95:.1f}) < {START_BUDGET_MS} ms")
 
