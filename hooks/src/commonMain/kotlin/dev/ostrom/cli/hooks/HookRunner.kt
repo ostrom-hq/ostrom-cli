@@ -32,9 +32,11 @@ class HookRunnerImpl(
             console.err("usage: ostrom hook gate|session|gates-refresh (stdin: the hook event)\n")
             return USAGE
         }
-        val input = when (kind) {
-            HookKind.GATES_REFRESH -> null
-            else -> (console.readStandardInput(MAX_EVENT_BYTES, READ_TIMEOUT_MILLIS) as? StandardInput.Read)?.bytes
+        // gates-refresh is started detached by a hook, with nothing piped in: it never reads stdin.
+        val input = if (kind == HookKind.GATES_REFRESH) {
+            null
+        } else {
+            (console.readStandardInput(MAX_EVENT_BYTES, READ_TIMEOUT_MILLIS) as? StandardInput.Read)?.bytes
         }
         val reply = processor.process(kind, input, environment["OSTROM_HOOK_DIALECT"] ?: "claude")
         console.out(reply.stdout)

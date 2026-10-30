@@ -31,6 +31,18 @@ internal actual fun isTerminal(descriptor: Int): Boolean = System.console() != n
 // coverage: test-only JVM target; the shipped native actual is measured by the start-up test of the real binary.
 @ExcludeFromCoverage
 internal actual fun readStdin(buffer: ByteArray, timeoutMillis: Int): Int {
+    // System.in has no deadline: read on a daemon thread and give up at the deadline, as the native shim does.
+    var result = READ_TIMEOUT
+    val reader = Thread { result = readAllOfStdin(buffer) }
+    reader.isDaemon = true
+    reader.start()
+    reader.join(timeoutMillis.toLong())
+    return if (reader.isAlive) READ_TIMEOUT else result
+}
+
+// coverage: test-only JVM target, see readStdin.
+@ExcludeFromCoverage
+private fun readAllOfStdin(buffer: ByteArray): Int {
     var total = 0
     while (total < buffer.size) {
         val count = System.`in`.read(buffer, total, buffer.size - total)
@@ -70,4 +82,53 @@ internal actual fun restrictToOwner(path: String) {
     if (Files.getFileStore(file).supportsFileAttributeView("posix")) {
         Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-------"))
     }
+}
+
+// coverage: test-only JVM target; the shipped native actual is tested in posixTest and mingwTest.
+@ExcludeFromCoverage
+internal actual fun captureOutput(
+    command: List<String>,
+    capacity: Int,
+    timeoutMillis: Int,
+): CaptureResult = try {
+    val process = ProcessBuilder(command).redirectErrorStream(false).start()
+    val output = process.inputStream.readBytes()
+    if (!process.waitFor(timeoutMillis.toLong(), java.util.concurrent.TimeUnit.MILLISECONDS)) {
+        process.destroyForcibly()
+        CaptureResult.TimedOut
+    } else {
+        CaptureResult.Exited(process.exitValue(), output.decodeToString(0, minOf(output.size, capacity)))
+    }
+} catch (_: IOException) {
+    CaptureResult.NotFound
+}
+
+// coverage: test-only JVM target; the shipped native actual is tested in posixTest and mingwTest.
+@ExcludeFromCoverage
+internal actual fun spawnDetached(command: List<String>): Boolean = try {
+    ProcessBuilder(command).start()
+    true
+} catch (_: IOException) {
+    false
+}
+
+// coverage: test-only JVM target; the shipped native actual is tested in posixTest and by the end-to-end bench.
+@ExcludeFromCoverage
+internal actual fun tcpExchange(
+    port: Int,
+    request: ByteArray,
+    capacity: Int,
+    timeoutMillis: Int,
+): Pair<Int, ByteArray> = try {
+    java.net.Socket().use { socket ->
+        socket.connect(java.net.InetSocketAddress("127.0.0.1", port), timeoutMillis)
+        socket.soTimeout = timeoutMillis
+        socket.getOutputStream().write(request)
+        val bytes = socket.getInputStream().readBytes()
+        (if (bytes.size >= capacity) TCP_TOO_LARGE else bytes.size) to bytes
+    }
+} catch (_: java.net.SocketTimeoutException) {
+    TCP_TIMED_OUT to ByteArray(0)
+} catch (_: IOException) {
+    TCP_UNREACHABLE to ByteArray(0)
 }

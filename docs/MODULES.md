@@ -110,7 +110,7 @@ receiving Ctrl-C, stdin read through `PeekNamedPipe`, UTF-8 output on the consol
 
 ## ostrom-core
 
-`api-client` will depend on `dev.ostrom:ostrom-core`, read from GitHub Packages
+`api-client` will depend on `dev.ostrom:ostrom-api` (the API models of ostrom-core), read from GitHub Packages
 (`maven.pkg.github.com/ostrom-hq/ostrom-core`, with `GITHUB_ACTOR` / `GITHUB_TOKEN`, or `gpr.user` / `gpr.key` in
 `~/.gradle/gradle.properties`). Set `ostromCoreVersion` in `gradle.properties` once a version is published. A clone of
 ostrom-core next to this one (`../ostrom-core`, or `../../ostrom-core` from a worktree) replaces the package through

@@ -50,6 +50,7 @@ class OstromCli(private val dependencies: CliDependencies) {
         val agents = Agent.entries.map { AgentCommand(it) }
         val implemented = listOf(ConfigCommand(dependencies), DoctorCommand(dependencies), VersionCommand(dependencies))
         val plumbing = listOf(HookCommand(dependencies), McpCommand(dependencies))
-        return root.subcommands(agents + pendingCommands(implemented) + plumbing + HelpCommand(dependencies))
+        val help = HelpCommand(dependencies) { root.getFormattedHelp().orEmpty() }
+        return root.subcommands(agents + pendingCommands(implemented) + plumbing + help)
     }
 }

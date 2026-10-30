@@ -78,4 +78,3 @@ private fun quoteWindowsArgument(argument: String): String =
         repeat(backslashes * 2) { append('\\') }
         append('"')
     }
-}

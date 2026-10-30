@@ -24,7 +24,7 @@ kotlin {
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.engine.defaults)
             implementation(libs.coroutines.core)
-            if (ostromCoreVersion != null) api("dev.ostrom:ostrom-core:$ostromCoreVersion")
+            if (ostromCoreVersion != null) api("dev.ostrom:ostrom-api:$ostromCoreVersion")
         }
         commonTest.dependencies {
             implementation(projects.platform)
