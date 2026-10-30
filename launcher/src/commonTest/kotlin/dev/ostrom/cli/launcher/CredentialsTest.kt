@@ -69,6 +69,23 @@ class CredentialsTest {
     }
 
     @Test
+    fun aFileThatCannotBeRewrittenNeverStopsTheCommand() {
+        files.texts[path] = """{"https://a.example":{"token":"from-file","login":"alice"}}"""
+        files.failWrites = true
+        assertEquals(Credentials("from-file", "alice"), store().saved("https://a.example"))
+        assertEquals(mapOf("https://a.example" to "from-file"), kept)
+        val said = "! The device token of https://a.example is in macOS Keychain now, but $path could not be " +
+            "rewritten (disk full): remove its token from that file"
+        assertEquals(listOf(said), notices)
+    }
+
+    @Test
+    fun forgettingAServerWithoutEntryWritesNoFile() {
+        store().forget("https://a.example")
+        assertTrue(path !in files.texts)
+    }
+
+    @Test
     fun theStoresTokenWinsAndTheFilesIsRemovedAllTheSame() {
         files.texts[path] = """{"https://a.example":{"token":"old","login":"alice"}}"""
         kept["https://a.example"] = "new"

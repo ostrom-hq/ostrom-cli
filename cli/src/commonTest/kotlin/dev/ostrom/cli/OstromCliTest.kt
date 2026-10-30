@@ -52,6 +52,16 @@ class OstromCliTest : CliKit() {
     }
 
     @Test
+    fun dryRunIsHandedToTheLaunch() {
+        signIn("/home/maya/.config/ostrom")
+        assertEquals(7, cli(environment = withServer).run(arrayOf("codex", "--dry-run", "--repo", "acme/api")))
+        assertEquals(LaunchRequest(Agent.CODEX, emptyList(), "acme/api", null, dryRun = true), launches.single().first)
+        assertEquals(64, cli(environment = withServer).run(arrayOf("claude", "--cloud", "--dry-run")))
+        assertTrue(console.err.contains("it does not go with --cloud"), console.err.toString())
+        assertEquals(1, launches.size, "nothing launched")
+    }
+
+    @Test
     fun theServerIsTheOptionsTheEnvironmentsOrTheOneOfLogin() {
         signIn("/home/maya/.config/ostrom", "https://cfg.example")
         val home = mapOf("HOME" to "/home/maya")
@@ -133,8 +143,6 @@ class OstromCliTest : CliKit() {
         assertEquals("ostrom status: not implemented yet.\n", console.err.toString())
         assertEquals(70, cli().run(arrayOf("harness", "add", "git-safety", "--set", "a=b", "--yes")))
         assertEquals(70, cli().run(arrayOf("receipts")))
-        assertEquals(70, cli().run(arrayOf("codex", "--dry-run")))
-        assertTrue(console.err.endsWith("ostrom codex --dry-run: not implemented yet.\n"), console.err.toString())
         assertEquals(64, cli().run(arrayOf("approve")))
     }
 
@@ -450,6 +458,21 @@ class OstromCliTest : CliKit() {
     }
 
     @Test
+    fun aFolderThatCannotBeWrittenAfterTheSignInIsExit73() {
+        val home = mapOf("HOME" to "/home/maya")
+        // config.toml is a folder with something in it: the token is kept, the server cannot be
+        fileSystem.createDirectories("/home/maya/.config/ostrom/config.toml/x".toPath())
+        assertEquals(73, cli(environment = home, api = serverOf(deviceFlow)).run(arrayOf("login")))
+        val path = "/home/maya/.config/ostrom/config.toml"
+        assertTrue(console.err.endsWith("ostrom: signed in, but could not write $path\n"), console.err.toString())
+        // credentials.json is a folder too: the login cannot be kept
+        fileSystem.delete("/home/maya/.config/ostrom/credentials.json".toPath())
+        fileSystem.createDirectories("/home/maya/.config/ostrom/credentials.json/x".toPath())
+        assertEquals(73, cli(environment = home, api = serverOf(deviceFlow)).run(arrayOf("login")))
+        assertTrue(console.err.contains("ostrom: signed in, but could not write /home/maya/.config/ostrom ("))
+    }
+
+    @Test
     fun theSignInPageMustBeOnTheGitHubConfigured() {
         // S2-35: OSTROM_GITHUB_WEB_URL names the GitHub of a GitHub Enterprise; github.com's page is then refused
         val enterprise = withServer + ("OSTROM_GITHUB_WEB_URL" to "https://ghe.acme.example/")
@@ -519,6 +542,17 @@ class OstromCliTest : CliKit() {
         assertEquals(0, cli(environment = withServer, api = serverOf(emptyMap())).run(arrayOf("logout")))
         assertTrue(console.err.contains("! The server could not be told"), console.err.toString())
         assertOut("✓ Signed out @maya.")
+        // a server that cannot be reached at all: the same, the token forgotten
+        signIn("/home/maya/.config/ostrom")
+        val down: (String) -> OstromApi = { url ->
+            object : OstromApi {
+                override suspend fun get(path: String): ServerResponse =
+                    throw ServerUnreachableException(url + path, Exception("refused"))
+                override suspend fun send(request: ServerRequest) = get(request.path)
+            }
+        }
+        assertEquals(0, cli(environment = withServer, api = down).run(arrayOf("logout")))
+        assertTrue(secretsKept.isEmpty(), secretsKept.toString())
     }
 
     @Test
