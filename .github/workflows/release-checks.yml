@@ -1,0 +1,101 @@
+name: Release checks
+
+# Everything the release pipeline relies on, tested on every pull request: the installers, the manifest generators,
+# the workflows' syntax and the runner image.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: release-checks-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  installers:
+    name: installers
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck and actionlint
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck jq
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7
+          sudo mv actionlint /usr/local/bin/
+      - name: shellcheck
+        run: shellcheck -x -S warning -s sh install/install.sh scripts/release/*.sh scripts/release/tests/*.sh install/tests/*.sh
+      - name: actionlint
+        run: actionlint
+      - name: Release script tests (manifests, signing, Homebrew, Scoop, winget)
+        run: sh scripts/release/tests/run.sh
+      - name: install.sh against a fake release (good and bad checksums)
+        run: sh install/tests/install.test.sh
+
+  installers-macos:
+    name: install.sh on macOS
+    runs-on: macos-15
+    timeout-minutes: 10
+    if: github.event_name != 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install jq
+      - run: sh scripts/release/tests/run.sh && sh install/tests/install.test.sh
+
+  installer-windows:
+    name: install.ps1 (Pester)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pester
+        shell: pwsh
+        run: |
+          Install-Module Pester -MinimumVersion 5.5 -Force -SkipPublisherCheck
+          $config = New-PesterConfiguration
+          $config.Run.Path = 'install/tests'
+          $config.Run.Exit = $true
+          $config.Output.Verbosity = 'Detailed'
+          Invoke-Pester -Configuration $config
+
+  runner-image:
+    name: runner image (amd64, not pushed)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Cache the Kotlin/Native toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: konan-linux-${{ hashFiles('gradle/libs.versions.toml') }}
+      - name: Install libcurl (Ktor's Linux engine)
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+      - name: Link the linuxX64 release binary
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./gradlew :cli:linkReleaseExecutableLinuxX64
+      - name: Build the image
+        run: |
+          mkdir -p image-context/amd64
+          cp cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe image-context/amd64/ostrom
+          docker build -f docker/runner/Dockerfile --build-arg TARGETARCH=amd64 -t ostrom-runner:ci image-context
+      - name: The CLI runs in the image
+        run: docker run --rm ostrom-runner:ci version
+      - name: The agents run in the image
+        run: |
+          docker run --rm --entrypoint claude ostrom-runner:ci --version
+          docker run --rm --entrypoint codex ostrom-runner:ci --version
+          docker run --rm --entrypoint rg ostrom-runner:ci --version
+          test "$(docker run --rm --entrypoint id ostrom-runner:ci -u)" = 10001
