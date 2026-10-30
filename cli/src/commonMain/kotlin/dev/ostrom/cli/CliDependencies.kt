@@ -158,26 +158,12 @@ class CliDependencies(
                     blocking = Dispatchers.IO,
                     userAgent = USER_AGENT,
                 ),
-                gateWait = {
-                    val relay = RelayCalls(
-                        environment["OSTROM_RELAY_URL"],
-                        GateWait.tokenOf { environment[it] },
-                        LoopbackHttpImpl(),
-                    )
-                    val started = TimeSource.Monotonic.markNow()
-                    GateWait(relay, { started.elapsedNow().inWholeMilliseconds }, ::pause, console::err)
-                },
+                gateWait = { gateWait(environment, console) },
                 sleep = { delay(it) },
                 capture = ProcessCaptureImpl(),
                 readLine = ::readlnOrNull,
                 openUrl = BrowserOpener(ProcessLauncherImpl(), environment.operatingSystem)::open,
-                selfUpdate = SelfUpdate(
-                    DownloadsImpl(USER_AGENT),
-                    FileSystem.SYSTEM,
-                    TarUnpacker(ProcessLauncherImpl(), environment["SystemRoot"]),
-                    { console.out("$it\n") },
-                    AgentSessionsImpl(environment, FileSystem.SYSTEM, temporary, LoopbackHttpImpl()),
-                ),
+                selfUpdate = selfUpdate(environment, console, temporary),
                 postHogKey = BuildInfo.POSTHOG_KEY,
                 secrets = secrets,
                 sendStatistics = { url, body -> statistics.send(url, body) },
@@ -185,6 +171,23 @@ class CliDependencies(
         }
 
         private val USER_AGENT = "ostrom/${BuildInfo.VERSION}"
+
+        /** `ostrom wait`: asks through the relay of the session this process runs in. */
+        private fun gateWait(environment: Environment, console: Console): GateWait {
+            val token = GateWait.tokenOf { environment[it] }
+            val relay = RelayCalls(environment["OSTROM_RELAY_URL"], token, LoopbackHttpImpl())
+            val started = TimeSource.Monotonic.markNow()
+            return GateWait(relay, { started.elapsedNow().inWholeMilliseconds }, ::pause, console::err)
+        }
+
+        /** `ostrom update`, on this binary and the system's own files. */
+        private fun selfUpdate(environment: Environment, console: Console, temporary: String) = SelfUpdate(
+            DownloadsImpl(USER_AGENT),
+            FileSystem.SYSTEM,
+            TarUnpacker(ProcessLauncherImpl(), environment["SystemRoot"]),
+            { console.out("$it\n") },
+            AgentSessionsImpl(environment, FileSystem.SYSTEM, temporary, LoopbackHttpImpl()),
+        )
 
         /** The hook runner alone, for the fast path of `main` (nothing else is built). */
         fun hookRunner(console: Console, environment: Environment): HookRunner {
