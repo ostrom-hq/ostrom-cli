@@ -1,0 +1,101 @@
+package = run.ostrom.cli.platform.interop
+---
+#include <errno.h>
+#include <poll.h>
+#include <signal.h>
+#include <spawn.h>
+#include <string.h>
+#include <sys/wait.h>
+#include <time.h>
+#include <unistd.h>
+#ifdef __APPLE__
+#include <crt_externs.h>
+#define OSTROM_ENVIRON (*_NSGetEnviron())
+#else
+extern char **environ;
+#define OSTROM_ENVIRON environ
+#endif
+
+/*
+ * Starts `file` (looked up on PATH) with `argv`, sharing stdin, stdout, stderr and the terminal, and waits for it.
+ * While the child runs, this process ignores SIGINT and SIGQUIT (the child gets them from the terminal, with their
+ * default action), like system(3). Returns 0 and sets *exit_code (128 + signal when killed), 1 when the executable is
+ * not found, 2 on any other failure.
+ */
+static inline int ostrom_spawn_wait(const char *file, char *const argv[], int *exit_code) {
+    struct sigaction ignore, old_int, old_quit;
+    memset(&ignore, 0, sizeof ignore);
+    ignore.sa_handler = SIG_IGN;
+    sigemptyset(&ignore.sa_mask);
+    sigaction(SIGINT, &ignore, &old_int);
+    sigaction(SIGQUIT, &ignore, &old_quit);
+
+    posix_spawnattr_t attributes;
+    posix_spawnattr_init(&attributes);
+    sigset_t defaults;
+    sigemptyset(&defaults);
+    sigaddset(&defaults, SIGINT);
+    sigaddset(&defaults, SIGQUIT);
+    posix_spawnattr_setsigdefault(&attributes, &defaults);
+    posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETSIGDEF);
+
+    pid_t pid;
+    int spawned = posix_spawnp(&pid, file, NULL, &attributes, argv, OSTROM_ENVIRON);
+    posix_spawnattr_destroy(&attributes);
+    int result = 2;
+    if (spawned == ENOENT) {
+        result = 1;
+    } else if (spawned == 0) {
+        int status = 0;
+        pid_t waited;
+        do { waited = waitpid(pid, &status, 0); } while (waited < 0 && errno == EINTR);
+        if (waited == pid && WIFEXITED(status)) { *exit_code = WEXITSTATUS(status); result = 0; }
+        else if (waited == pid && WIFSIGNALED(status)) { *exit_code = 128 + WTERMSIG(status); result = 0; }
+    }
+    sigaction(SIGINT, &old_int, NULL);
+    sigaction(SIGQUIT, &old_quit, NULL);
+    return result;
+}
+
+/*
+ * Reads all of stdin into `buffer` within `timeout_ms`. Returns the byte count, -1 on a read error, -2 at the
+ * deadline, -3 when the input does not fit in `capacity`, -4 when stdin is a terminal (nobody is piping an event).
+ */
+static inline int ostrom_read_stdin(unsigned char *buffer, int capacity, int timeout_ms) {
+    if (isatty(STDIN_FILENO)) return -4;
+    struct timespec start, now;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    int total = 0;
+    for (;;) {
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        long elapsed = (now.tv_sec - start.tv_sec) * 1000L + (now.tv_nsec - start.tv_nsec) / 1000000L;
+        if (elapsed >= timeout_ms) return -2;
+        struct pollfd input = {STDIN_FILENO, POLLIN, 0};
+        int ready = poll(&input, 1, (int)(timeout_ms - elapsed));
+        if (ready < 0 && errno == EINTR) continue;
+        if (ready < 0) return -1;
+        if (ready == 0) return -2;
+        if (input.revents & (POLLERR | POLLNVAL)) return -1;
+        ssize_t count = read(STDIN_FILENO, buffer + total, (size_t)(capacity - total));
+        if (count < 0 && (errno == EINTR || errno == EAGAIN)) continue;
+        if (count < 0) return -1;
+        if (count == 0) return total;
+        total += (int)count;
+        if (total >= capacity) return -3;
+    }
+}
+
+/* Writes all of `bytes` to the file descriptor `fd` (1 stdout, 2 stderr). Returns 0, or -1 on error. */
+static inline int ostrom_write(int fd, const unsigned char *bytes, int length) {
+    int offset = 0;
+    while (offset < length) {
+        ssize_t written = write(fd, bytes + offset, (size_t)(length - offset));
+        if (written < 0 && errno == EINTR) continue;
+        if (written <= 0) return -1;
+        offset += (int)written;
+    }
+    return 0;
+}
+
+/* 1 when the file descriptor is a terminal. */
+static inline int ostrom_is_terminal(int fd) { return isatty(fd); }

@@ -1,0 +1,169 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  GRADLE_OPTS: -Dorg.gradle.daemon=false
+
+jobs:
+  linux:
+    name: Linux build (linuxX64 tested, linuxArm64 and mingwX64 cross-compiled)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Cache the Kotlin/Native toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: konan-linux-${{ hashFiles('gradle/libs.versions.toml') }}
+      - name: Install libcurl (Ktor's Linux engine)
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+      - name: Test linuxX64, link the other targets
+        env:
+          OSTROM_NETWORK_TESTS: '1'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          ./gradlew --continue
+          linuxX64Test
+          linkDebugTestLinuxArm64 linkDebugTestMingwX64
+          :cli:linkReleaseExecutableLinuxX64 :cli:linkReleaseExecutableLinuxArm64 :cli:linkReleaseExecutableMingwX64
+      - name: Measure start-up and sizes
+        run: >-
+          python3 scripts/measure.py --label linuxX64
+          --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
+          --sizes cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe cli/build/bin/linuxArm64/releaseExecutable/ostrom.kexe cli/build/bin/mingwX64/releaseExecutable/ostrom.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ostrom-linuxX64
+          path: cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ostrom-linuxArm64
+          path: cli/build/bin/linuxArm64/releaseExecutable/ostrom.kexe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ostrom-mingwX64
+          path: cli/build/bin/mingwX64/releaseExecutable/ostrom.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tests-linuxArm64
+          path: '*/build/bin/linuxArm64/debugTest/test.kexe'
+          retention-days: 3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tests-mingwX64
+          path: '*/build/bin/mingwX64/debugTest/test.exe'
+          retention-days: 3
+
+  linux-arm64:
+    name: linuxArm64 tests (binaries cross-compiled on Linux x64)
+    needs: linux
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: tests-linuxArm64
+          path: tests
+      - uses: actions/download-artifact@v4
+        with:
+          name: ostrom-linuxArm64
+          path: bin
+      - name: Install libcurl (Ktor's Linux engine)
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+      - name: Run every module's tests
+        env:
+          OSTROM_NETWORK_TESTS: '1'
+        run: |
+          set -e
+          test "$(uname -m)" = aarch64
+          for binary in $(find tests -name test.kexe | sort); do
+            echo "::group::$binary"
+            chmod +x "$binary"
+            "$binary"
+            echo "::endgroup::"
+          done
+      - name: Measure start-up
+        run: chmod +x bin/ostrom.kexe && python3 scripts/measure.py --label linuxArm64 --binary bin/ostrom.kexe
+
+  windows:
+    name: mingwX64 tests (binaries cross-compiled on Linux x64)
+    needs: linux
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: tests-mingwX64
+          path: tests
+      - uses: actions/download-artifact@v4
+        with:
+          name: ostrom-mingwX64
+          path: bin
+      - name: Run every module's tests
+        shell: pwsh
+        env:
+          OSTROM_NETWORK_TESTS: '1'
+        run: |
+          $failed = $false
+          foreach ($binary in Get-ChildItem -Recurse -Filter test.exe tests | Sort-Object FullName) {
+            Write-Host "::group::$($binary.FullName)"
+            & $binary.FullName
+            if ($LASTEXITCODE -ne 0) { $failed = $true }
+            Write-Host "::endgroup::"
+          }
+          if ($failed) { exit 1 }
+      - name: Measure start-up
+        run: python scripts/measure.py --label mingwX64 --binary bin/ostrom.exe --max-hook-ms 40
+
+  macos:
+    name: macosArm64 build and tests (main only)
+    if: github.event_name != 'pull_request'
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Cache the Kotlin/Native toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: konan-macos-${{ hashFiles('gradle/libs.versions.toml') }}
+      - name: Test macosArm64, link the release binary
+        env:
+          OSTROM_NETWORK_TESTS: '1'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./gradlew macosArm64Test :cli:linkReleaseExecutableMacosArm64
+      - name: Measure start-up and size
+        run: >-
+          python3 scripts/measure.py --label macosArm64
+          --binary cli/build/bin/macosArm64/releaseExecutable/ostrom.kexe
+          --sizes cli/build/bin/macosArm64/releaseExecutable/ostrom.kexe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ostrom-macosArm64
+          path: cli/build/bin/macosArm64/releaseExecutable/ostrom.kexe
