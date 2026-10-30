@@ -52,6 +52,13 @@ hook route: 403 otherwise (S2-25).
 (`GET /api/v1/gates/{id}?wait=`, 55 s at most per read, the relay's 70 s bound): the agent's shell inherits the
 relay's URL and capability, never a token of Ostrom.
 
+Security decision (30/10/2026 09:45): the agent's capability is exported a second time as `OSTROM_RELAY_CLIENT`,
+because Codex's default shell policy drops every variable named like a token, key or secret, and `ostrom wait` runs in
+that shell. Every command of the agent can therefore read it. This is accepted: it is the agent's own capability, for
+this session only, on the loopback; it opens the agent's MCP servers, its inference and the read of a gate, never a
+hook route (the hooks' capability stays in its private file, S2-25), and it never reaches Ostrom's server. Refused
+alternative: a second private file for `ostrom wait`, which a command of the agent could read just the same.
+
 - Every request needs a capability (`Authorization: Bearer`, `x-api-key` or `x-ostrom-local-token`, compared in
   constant time): 401 otherwise. An `Origin` header or a `Host` that is not the loopback: 403.
 - Only an allow-list is forwarded, everything else is 404 (never an open proxy): the hook routes
