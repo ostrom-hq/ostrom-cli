@@ -25,6 +25,17 @@ private fun CliDependencies.serverOf(option: String?, directory: String): String
     (option ?: environment["OSTROM_URL"] ?: ConfigStoreImpl(files, configFile(directory)).get(ConfigKey.SERVER)
         ?: DEFAULT_SERVER).trimEnd('/')
 
+/**
+ * Refuses an account command inside an agent's session: the agent would sign the developer out, or point the device
+ * at another server (security audit S2-32).
+ */
+private fun CliDependencies.outsideSessions(command: String) {
+    if (!environment["OSTROM_LAUNCH_ID"].isNullOrEmpty()) {
+        val message = "ostrom: ostrom $command does not run inside an agent's session: run it in your own terminal"
+        throw PrintMessage(message, ExitCode.USAGE.code, true)
+    }
+}
+
 /** The CLI folder, or exit 73. */
 private fun CliDependencies.directory(): String = environment.configDirectory
     ?: throw PrintMessage("ostrom: no folder for ostrom's files: set OSTROM_HOME", ExitCode.CANNOT_WRITE.code, true)
@@ -36,6 +47,7 @@ internal class LoginCommand(private val dependencies: CliDependencies) : CliktCo
     val server by option("--server", help = "Ostrom server URL (else OSTROM_URL, else the one of ostrom login)")
 
     override fun run() {
+        dependencies.outsideSessions("login")
         val directory = dependencies.directory()
         val serverUrl = dependencies.serverOf(server, directory)
         val login = DeviceLogin(
@@ -62,10 +74,12 @@ internal class LogoutCommand(private val dependencies: CliDependencies) : CliktC
     val server by option("--server", help = "Ostrom server URL (else OSTROM_URL, else the one of ostrom login)")
 
     override fun run() {
+        dependencies.outsideSessions("logout")
         val directory = dependencies.directory()
         val serverUrl = dependencies.serverOf(server, directory)
         val store: CredentialStore = dependencies.credentials(directory)
-        val credentials = store.load(serverUrl)
+        // the saved entry, never OSTROM_TOKEN: a CI token in the environment is not this device's session
+        val credentials = store.saved(serverUrl)
         if (credentials == null) {
             dependencies.console.out("Not signed in. Nothing to do.\n")
             throw ProgramResult(ExitCode.OK.code)
@@ -73,7 +87,8 @@ internal class LogoutCommand(private val dependencies: CliDependencies) : CliktC
         val api = ServerJson(ApiServerTransport(dependencies.api(serverUrl)))
         val answer = runBlocking { api.post(LOGOUT, objectOf(), credentials.token) }
         store.forget(serverUrl)
-        if (answer is ServerAnswer.Failed) {
+        // a session already expired or revoked (401) has nothing left to revoke
+        if (answer is ServerAnswer.Failed && answer.status != UNAUTHORIZED) {
             val why = answer.message
             dependencies.console.err("! The server could not be told ($why). The session expires on its own.\n")
         }
@@ -83,6 +98,7 @@ internal class LogoutCommand(private val dependencies: CliDependencies) : CliktC
 
     private companion object {
         const val LOGOUT = "/api/v1/auth/logout"
+        const val UNAUTHORIZED = 401
     }
 }
 
