@@ -9,7 +9,8 @@ import dev.ostrom.cli.ExitCode
 
 /**
  * A command of the spec that is declared (name, help, options, arguments) but not built yet. It says so on stderr
- * and exits with [ExitCode.NOT_IMPLEMENTED], so a script or an agent can tell it from a real failure. Its help ends
+ * and exits with [ExitCode.NOT_IMPLEMENTED], so a script or an agent can tell it from a real failure (an option not
+ * built yet of a built command exits with [ExitCode.USAGE] instead, [notImplemented]). Its help ends
  * with « (coming soon) », so the reference generated from `--help` never presents it as shipped.
  *
  * @param summary The one-line help of the command.
@@ -68,8 +69,10 @@ open class GroupCommand(
  * of a built command (the [path] ends with it, `--cloud`) exits 64, a usage this version does not have.
  */
 internal fun notImplemented(path: List<String>): PrintMessage {
-    val code = if (path.last().startsWith("-")) ExitCode.USAGE else ExitCode.NOT_IMPLEMENTED
-    return PrintMessage("${path.joinToString(" ")}: not implemented yet.", code.code, printError = true)
+    val option = path.last().startsWith("-")
+    val what = if (option) "not in this version of ostrom yet" else "not implemented yet"
+    val code = if (option) ExitCode.USAGE else ExitCode.NOT_IMPLEMENTED
+    return PrintMessage("${path.joinToString(" ")}: $what.", code.code, printError = true)
 }
 
 /** The end of the help of a command declared but not built yet. */

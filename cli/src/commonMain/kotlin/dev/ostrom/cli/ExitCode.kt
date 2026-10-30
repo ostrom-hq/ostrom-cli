@@ -15,7 +15,7 @@ enum class ExitCode(val code: Int) {
     /** Incomplete, cancelled, or a no. */
     INCOMPLETE(2),
 
-    /** Bad usage: unknown option or agent, a question without a terminal. */
+    /** Bad usage: unknown option or agent, an option this version does not have yet, a question without a terminal. */
     USAGE(64),
 
     /** Sign-in required. */

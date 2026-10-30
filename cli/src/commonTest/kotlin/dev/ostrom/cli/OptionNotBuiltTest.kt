@@ -10,7 +10,7 @@ class OptionNotBuiltTest : CliKit() {
     @Test
     fun anOptionNotBuiltYetExitsWith64() {
         assertEquals(64, cli().run(arrayOf("claude", "--cloud", "-p", "hello")))
-        assertEquals("ostrom claude --cloud: not implemented yet.\n", console.err.toString())
+        assertEquals("ostrom claude --cloud: not in this version of ostrom yet.\n", console.err.toString())
     }
 
     @Test
