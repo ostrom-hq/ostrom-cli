@@ -23,20 +23,16 @@ internal class UpdateCommand(private val dependencies: CliDependencies) : CliktC
 
     override fun run() {
         val updates = dependencies.selfUpdate
-        val code = if (rollback) {
-            updates.rollback(dependencies.executable)
-        } else {
-            val environment = dependencies.environment
-            val request = UpdateRequest(
-                current = BuildInfo.VERSION,
-                target = releaseTarget(environment),
-                executable = dependencies.executable,
-                releases = releasesUrl(environment),
-                version = version,
-                checkOnly = check,
-            )
-            runBlocking { updates.update(request) }
-        }
+        val environment = dependencies.environment
+        val request = UpdateRequest(
+            current = BuildInfo.VERSION,
+            target = releaseTarget(environment),
+            executable = dependencies.executable,
+            releases = releasesUrl(environment),
+            version = version,
+            checkOnly = check,
+        )
+        val code = runBlocking { if (rollback) updates.rollback(request) else updates.update(request) }
         throw ProgramResult(code)
     }
 }
