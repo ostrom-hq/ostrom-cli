@@ -23,7 +23,11 @@ interface LaunchFiles {
     /** The text of [path], or null when it cannot be read. */
     fun read(path: String): String?
 
-    /** Writes [text] to [path], its folders created. */
+    /**
+     * Writes [text] to [path], its folders created: into a new file beside it, given its mode while still empty, then
+     * renamed over [path] in one step, so that a token or an envelope is never readable by others, nor half written
+     * (security audit S2-36).
+     */
     fun write(path: String, text: String, access: FileAccess = FileAccess.SHARED)
 
     /** Creates the folder [path] (and its parents), usable by its owner only (0700). */
@@ -59,13 +63,17 @@ class LaunchFilesImpl(
 
     override fun write(path: String, text: String, access: FileAccess) {
         val file = path.toPath()
-        fileSystem.createDirectories(requireNotNull(file.parent) { "$path is a root, not a file." })
-        fileSystem.write(file) { writeUtf8(text) }
+        val parent = requireNotNull(file.parent) { "$path is a root, not a file." }
+        fileSystem.createDirectories(parent)
+        val staging = parent / ".${file.name}.ostrom-new"
+        fileSystem.write(staging) { }
         when (access) {
             FileAccess.SHARED -> Unit
-            FileAccess.PRIVATE -> restrict(path, false)
-            FileAccess.EXECUTABLE -> restrict(path, true)
+            FileAccess.PRIVATE -> restrict(staging.toString(), false)
+            FileAccess.EXECUTABLE -> restrict(staging.toString(), true)
         }
+        fileSystem.write(staging) { writeUtf8(text) }
+        fileSystem.atomicMove(staging, file)
     }
 
     override fun createPrivateDirectory(path: String) {

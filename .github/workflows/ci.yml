@@ -1,14 +1,15 @@
-# CI of ostrom-cli (ostrom-core CONVENTIONS.md section 11). Pull requests: Linux only, two required checks,
-# `coverage` (detekt, conventions, jvmTest + koverVerify 100 %) and `native-tests` (linuxX64Test, the linuxArm64 and
-# mingwX64 links, the release binaries and the hook start-up budget). On main and on demand (full_validation), the
-# cross-compiled test binaries also run on linuxArm64 and Windows runners, and macosArm64 is built and tested.
+# CI of ostrom-cli (ostrom-core CONVENTIONS.md section 11). Pull requests: Linux only, one required check `ci`
+# (conventions, detekt, jvmTest + koverVerify 100 %, linuxX64Test, the linuxArm64 and mingwX64 links, the release
+# binaries and the hook start-up budget). On main and on demand (full_validation), the cross-compiled test binaries
+# also run on linuxArm64 and Windows runners, and macosArm64 is built and tested. No run on tags: the release workflow
+# publishes, and a cache in a publishing workflow is refused by zizmor (cache poisoning).
 name: CI
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
-    tags: ['[0-9]*']
   workflow_dispatch:
     inputs:
       full_validation:
@@ -25,50 +26,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
-  coverage:
-    timeout-minutes: 30
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
-        with:
-          distribution: temurin
-          java-version: '21'
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
-        with:
-          cache-provider: basic
-      - name: Never serve a test task from the cache (ENG-032)
-        run: |
-          mkdir -p ~/.gradle/init.d
-          cat > ~/.gradle/init.d/always-run-tests.gradle.kts <<'KTS'
-          allprojects {
-              tasks.withType<AbstractTestTask>().configureEach {
-                  outputs.cacheIf { false }
-                  outputs.upToDateWhen { false }
-              }
-          }
-          KTS
-      - run: python3 scripts/check-conventions.py --self-test && python3 scripts/check-conventions.py
-      - name: detekt, JVM tests, coverage
-        env:
-          OSTROM_NETWORK_TESTS: '1'
-        run: ./gradlew --continue detekt jvmTest koverXmlReport koverVerify
-      - name: Lines and branches not covered
-        if: failure()
-        run: python3 scripts/uncovered.py
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with:
-          name: coverage-reports
-          path: '**/build/reports/**'
-          retention-days: 7
-
-  native-tests:
-    timeout-minutes: 45
+  ci:
+    # Drafts do not use runners (orchestrator, 03:10): the run starts when the PR is marked ready.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    timeout-minutes: 60
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -98,14 +63,25 @@ jobs:
               }
           }
           KTS
-      - name: linuxX64 tests; linuxArm64 and mingwX64 test binaries; release binaries
+      - run: python3 scripts/check-conventions.py --self-test && python3 scripts/check-conventions.py
+      - name: detekt, JVM tests and coverage (100 % lines and branches); linuxX64 tests; other targets linked
         env:
           OSTROM_NETWORK_TESTS: '1'
         run: >-
           ./gradlew --continue
+          detekt jvmTest koverXmlReport koverVerify
           linuxX64Test
           linkDebugTestLinuxArm64 linkDebugTestMingwX64
           :cli:linkReleaseExecutableLinuxX64 :cli:linkReleaseExecutableLinuxArm64 :cli:linkReleaseExecutableMingwX64
+      - name: Lines and branches not covered
+        if: failure()
+        run: python3 scripts/uncovered.py
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: coverage-reports
+          path: '**/build/reports/**'
+          retention-days: 7
       - name: Hook start-up budget (15 ms median) and binary sizes
         run: >-
           python3 scripts/measure.py --label linuxX64
@@ -147,7 +123,7 @@ jobs:
           python3 e2e/run.py --binary bin/linuxX64/releaseExecutable/ostrom.kexe
 
   linux-arm64:
-    needs: native-tests
+    needs: ci
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.full_validation)
     timeout-minutes: 15
     runs-on: ubuntu-24.04-arm
@@ -177,7 +153,7 @@ jobs:
           python3 scripts/measure.py --label linuxArm64 --binary bin/linuxArm64/releaseExecutable/ostrom.kexe
 
   windows:
-    needs: native-tests
+    needs: ci
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.full_validation)
     timeout-minutes: 15
     runs-on: windows-latest

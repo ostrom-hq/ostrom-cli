@@ -22,10 +22,10 @@ object LaunchVariables {
     /** The agent (`claude-code`, `codex`…). */
     const val AGENT = "OSTROM_AGENT"
 
-    /** This binary, for the detached `ostrom hook gates-refresh` and `ostrom wait`. */
-    const val BIN = "OSTROM_BIN"
+    /** The git the hooks run, resolved by the launcher: not the first `git` the agent could put on its PATH (S2-28). */
+    const val GIT = "OSTROM_GIT"
 
-    /** The copy of the gate catalogue. */
+    /** The package's copy of the gate catalogue: the hook only adds what it gates (S2-20). */
     const val GATES = "OSTROM_GATES"
 
     /** Where the launch keeps its Ostrom session id. */
@@ -45,9 +45,6 @@ object LaunchVariables {
 
     /** The hook protocol of the agent family (`claude`, `grok`, `gemini`, `hermes`). */
     const val HOOK_DIALECT = "OSTROM_HOOK_DIALECT"
-
-    /** How long the SessionEnd hook waits for Ostrom, in milliseconds (Codex cuts its hook at 3 s). */
-    const val SESSION_END_MS = "OSTROM_SESSION_END_MS"
 
     /** The session's settings, for an MCP server started with a filtered environment. */
     const val SESSION_SETTINGS = "OSTROM_SESSION_SETTINGS"

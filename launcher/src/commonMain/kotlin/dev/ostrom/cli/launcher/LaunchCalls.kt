@@ -10,14 +10,17 @@ internal data class Launch(val launchId: String, val agentToken: String)
 internal class LaunchCalls(private val dependencies: LaunchDependencies) {
     private val trust = PackageTrust(dependencies.server, dependencies.files, dependencies.clock::now, dependencies.say)
 
-    /** The organisation's policy: stops a refused launch, says its note; a server that cannot say lets it go. */
+    /**
+     * The organisation's policy: stops a refused launch, says its note. A policy that cannot be read stops the launch
+     * too: an error of Ostrom never lets an agent the organisation may refuse start (security audit S2-34).
+     */
     suspend fun checkPolicy(agent: Agent, model: String?, site: LaunchSite) {
         val query = "agent=${Routes.encode(ostromName(agent))}&dev=${Routes.encode(site.credentials.login)}" +
             model?.let { "&model=${Routes.encode(it)}" }.orEmpty()
         val answer = dependencies.server.get("${Routes.POLICY}?$query", site.credentials.token, POLICY_MILLIS)
         if (answer is ServerAnswer.Failed) {
-            dependencies.say("ostrom: policy not checked (${answer.message})")
-            return
+            val reason = "your organisation's policy could not be checked (${answer.message}): the agent is not started"
+            stop(UNREACHABLE, reason)
         }
         val body = (answer as ServerAnswer.Ok).body
         if (body.flag("allowed") == false) {
@@ -57,13 +60,6 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
                 stop(SIGNATURE_REFUSED, "session package refused: ${outcome.reason}. The agent is not started.")
         }
 
-    /** Keeps the gate catalogue of [repo] in [gates], for the first gate hook of the session. */
-    suspend fun prefetchCatalogue(repo: String, agentToken: String, gates: String) {
-        val path = "${Routes.CATALOG}?repo=${Routes.encode(repo)}"
-        val answer = dependencies.server.get(path, agentToken, CATALOG_MILLIS)
-        if (answer is ServerAnswer.Ok) dependencies.files.write(gates, answer.body.toString())
-    }
-
     /** The organisation's MCP servers the relay serves, by name. */
     suspend fun mcpServers(site: LaunchSite): List<String> =
         when (val answer = dependencies.server.get(Routes.MCP_SERVERS, site.credentials.token, MCP_MILLIS)) {
@@ -85,7 +81,6 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
         const val FORBIDDEN = 403
         const val POLICY_MILLIS = 5_000L
         const val LAUNCH_MILLIS = 10_000L
-        const val CATALOG_MILLIS = 5_000L
         const val MCP_MILLIS = 5_000L
         val MCP_NAME = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
     }

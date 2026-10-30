@@ -20,8 +20,9 @@ sealed interface PackageOutcome {
 /**
  * Fetches the session package and verifies it before anything is written (prototype `package::fetch`): the format,
  * the SHA-256 of the exact payload bytes, the Ed25519 signature with the instance key pinned on first use per server
- * (`<config>/server-keys.json`), then the SHA-256 of every file. The envelope is kept in `<config>/packages/` so that
- * `ostrom verify` can check the package a receipt cites without the network.
+ * (`<config>/server-keys.json`), that the signed payload is the package of the repository asked for (security audit
+ * S2-33: another repository's package is not this session's), then the SHA-256 of every file. The envelope is kept in
+ * `<config>/packages/` so that `ostrom verify` can check the package a receipt cites without the network.
  *
  * @param now The time of a pin, ISO 8601.
  * @param say Writes a line for the developer (stderr).
@@ -43,7 +44,7 @@ class PackageTrust(
         val outcome = when (val answer = server.get(route, token, FETCH_MILLIS)) {
             is ServerAnswer.Failed ->
                 if (answer.status == NOT_FOUND) PackageOutcome.None else PackageOutcome.Refused(answer.message)
-            is ServerAnswer.Ok -> verify(answer.body, serverUrl, configDirectory).also { verified ->
+            is ServerAnswer.Ok -> verify(answer.body, serverUrl, repo, configDirectory).also { verified ->
                 if (verified is PackageOutcome.Verified) {
                     val kept = join(configDirectory, "packages", "${verified.pack.digest}.json")
                     files.write(kept, answer.body.toString(), FileAccess.PRIVATE)
@@ -53,7 +54,12 @@ class PackageTrust(
         return outcome
     }
 
-    private suspend fun verify(envelope: JsonObject, serverUrl: String, configDirectory: String): PackageOutcome {
+    private suspend fun verify(
+        envelope: JsonObject,
+        serverUrl: String,
+        repo: String,
+        configDirectory: String,
+    ): PackageOutcome {
         val payload = envelope.text("payload")
         val refusal = payload?.let { refusalOf(envelope, it) }
         return when {
@@ -61,7 +67,7 @@ class PackageTrust(
             refusal != null -> PackageOutcome.Refused(refusal)
             else -> when (val pin = pinnedKey(serverUrl, configDirectory, envelope.text("kid").orEmpty())) {
                 is Pin.Refused -> PackageOutcome.Refused(pin.reason)
-                is Pin.Key -> signed(envelope, payload, pin.pem)
+                is Pin.Key -> signed(envelope, payload, pin.pem, repo)
             }
         }
     }
@@ -76,7 +82,7 @@ class PackageTrust(
     }
 
     @OptIn(ExperimentalEncodingApi::class)
-    private fun signed(envelope: JsonObject, payload: String, publicKeyPem: String): PackageOutcome {
+    private fun signed(envelope: JsonObject, payload: String, publicKeyPem: String, repo: String): PackageOutcome {
         val bytes = payload.encodeToByteArray()
         val signature = try {
             Base64.decode(envelope.text("signature").orEmpty())
@@ -88,6 +94,8 @@ class PackageTrust(
             !ed25519Verify(publicKeyPem, bytes, signature) ->
                 PackageOutcome.Refused("the package signature is not valid")
             body == null -> PackageOutcome.Refused("the payload is not a JSON object")
+            body.text("repo") != repo ->
+                PackageOutcome.Refused("the package was signed for ${body.text("repo")}, not $repo")
             else -> checkFiles(SessionPackage(body, sha256Hex(bytes)))
         }
     }
