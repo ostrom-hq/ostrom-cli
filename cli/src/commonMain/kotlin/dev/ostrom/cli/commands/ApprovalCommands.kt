@@ -26,8 +26,12 @@ private fun stop(code: ExitCode, message: String) = PrintMessage(message, code.c
 /** The body of a 2xx answer, or the exit code and message the spec gives a failure (CLI.md § 2.4). */
 internal fun ServerAnswer.orStop(serverUrl: String, notFound: String): JsonObject = when (this) {
     is ServerAnswer.Ok -> body
-    is ServerAnswer.Failed -> throw when (status) {
-        null -> stop(ExitCode.UNREACHABLE, "Ostrom is unreachable at $serverUrl. $CHECK_NETWORK")
+    is ServerAnswer.Failed -> throw failure(status ?: UNANSWERED, message, serverUrl, notFound)
+}
+
+private fun failure(status: Int, message: String, serverUrl: String, notFound: String): PrintMessage =
+    when (status) {
+        UNANSWERED -> stop(ExitCode.UNREACHABLE, "Ostrom is unreachable at $serverUrl. $CHECK_NETWORK")
         UNAUTHORIZED -> stop(ExitCode.SIGN_IN_REQUIRED, "ostrom: not signed in to $serverUrl: run `ostrom login`")
         FORBIDDEN -> stop(ExitCode.REFUSED, message)
         NOT_FOUND -> stop(ExitCode.NOT_FOUND, notFound)
@@ -36,8 +40,9 @@ internal fun ServerAnswer.orStop(serverUrl: String, notFound: String): JsonObjec
         in CLIENT_ERRORS -> stop(ExitCode.FAILED, "Ostrom refused: $message")
         else -> stop(ExitCode.UNREACHABLE, "Ostrom could not answer: $message")
     }
-}
 
+/** No HTTP status: the server was not reached. */
+private const val UNANSWERED = 0
 private const val UNAUTHORIZED = 401
 private const val FORBIDDEN = 403
 private const val NOT_FOUND = 404
