@@ -132,7 +132,8 @@ jobs:
         run: |
           test "$(uname -m)" = aarch64
           find tests -name test.kexe -print0 | sort -z | while IFS= read -r -d '' t; do
-            echo "::group::$t"; chmod 755 "$t"; "$t"; echo "::endgroup::"
+            # stdin is the list being read: a test that reads its stdin must never eat the next binaries' names
+            echo "::group::$t"; chmod 755 "$t"; "$t" < /dev/null; echo "::endgroup::"
           done
       - name: Hook start-up budget
         run: >-

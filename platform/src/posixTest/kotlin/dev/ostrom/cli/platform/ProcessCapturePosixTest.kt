@@ -4,6 +4,8 @@ package dev.ostrom.cli.platform
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeSource
 
 /** Real children on macOS and Linux: output, exit code, missing executable, deadline, detached child. */
 class ProcessCapturePosixTest {
@@ -27,6 +29,21 @@ class ProcessCapturePosixTest {
         assertEquals(CaptureResult.NotFound, capture.capture(listOf("ostrom-no-such-executable-4f2c"), 1_000))
         assertEquals(CaptureResult.TimedOut, capture.capture(listOf("sleep", "5"), 200))
         assertEquals(CaptureResult.Exited(137, ""), capture.capture(listOf("sh", "-c", "kill -9 \$\$"), 5_000))
+    }
+
+    @Test
+    fun aChildThatClosesItsOutputAndStaysIsStillKilledAtTheDeadline() {
+        val start = TimeSource.Monotonic.markNow()
+        assertEquals(CaptureResult.TimedOut, capture.capture(listOf("sh", "-c", "exec >&-; sleep 30"), 300))
+        assertTrue(start.elapsedNow() < 5.seconds, "waited ${start.elapsedNow()}")
+    }
+
+    @Test
+    fun aChildThatExitsWhileItsOwnChildKeepsThePipeIsNotWaitedPast() {
+        val start = TimeSource.Monotonic.markNow()
+        val result = capture.capture(listOf("sh", "-c", "sleep 30 & echo done"), 10_000)
+        assertEquals(CaptureResult.Exited(0, "done\n"), result)
+        assertTrue(start.elapsedNow() < 5.seconds, "waited ${start.elapsedNow()}")
     }
 
     @Test
