@@ -68,11 +68,13 @@ interface OstromApi {
  *
  * @param baseUrl The server, e.g. `https://ostrom.run`, without a trailing slash.
  * @param userAgent Sent with every call, e.g. `ostrom/0.1.0`.
+ * @param trace The trace of this command, sent as `traceparent` so that the server continues it.
  */
 class OstromApiImpl(
     private val baseUrl: String,
     private val userAgent: String,
     private val client: HttpClient = defaultHttpClient(),
+    private val trace: TraceContext = TraceContext(),
 ) : OstromApi {
     override suspend fun get(path: String): ServerResponse = send(ServerRequest("GET", path))
 
@@ -83,6 +85,7 @@ class OstromApiImpl(
             val response = client.request(url) {
                 method = HttpMethod.parse(request.method)
                 header(HttpHeaders.UserAgent, userAgent)
+                header(TRACEPARENT_HEADER, trace.traceparent())
                 if (request.token != null) header(HttpHeaders.Authorization, "Bearer ${request.token}")
                 if (request.body != null) setBody(TextContent(request.body, ContentType.Application.Json))
                 timeout { requestTimeoutMillis = request.timeoutMillis }
