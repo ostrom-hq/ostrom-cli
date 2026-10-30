@@ -182,7 +182,7 @@ internal class ReceiptsShowCommand(private val dependencies: CliDependencies) : 
 
 /** `ostrom receipts pull <id>`: the bundle of a receipt, kept in `<config>/receipts/<id>.json` to verify offline. */
 internal class ReceiptsPullCommand(private val dependencies: CliDependencies) : CliktCommand(name = "pull") {
-    override fun help(context: Context) = "Download a receipt with its package and keys, to verify it offline"
+    override fun help(context: Context) = "Download a receipt and pin its server's key, to verify it offline"
 
     val id by argument("id")
     val server by option("--server", help = SERVER_HELP)
@@ -195,19 +195,26 @@ internal class ReceiptsPullCommand(private val dependencies: CliDependencies) : 
         if (bundle.text("format") != BUNDLE_FORMAT) {
             throw refuse(ExitCode.FAILED, "Ostrom answered something that is not a receipt bundle.")
         }
-        val receiptId = bundle.child("receipt")?.text("id")
-        if (receiptId != id) {
-            throw refuse(ExitCode.FAILED, "Ostrom answered the bundle of receipt ${receiptId ?: "?"}, not of $id.")
+        val receipt = bundle.child("receipt")
+        if (receipt == null || receipt.text("id") != id) {
+            val named = receipt?.text("id") ?: "?"
+            throw refuse(ExitCode.FAILED, "Ostrom answered the bundle of receipt $named, not of $id.")
         }
-        val path = join(dependencies.directory(), "receipts", "$id.json")
+        val directory = dependencies.directory()
+        writing { dependencies.files.write(join(directory, "receipts", "$id.json"), pretty(bundle)) }
+        dependencies.console.out("✓ Saved $id with its package and keys.\n")
+        writing { ServerKeyPin(dependencies.files, dependencies.console).pin(signed, receipt, directory) }
+    }
+
+    /** Runs [block], which writes a file, or exits 73 naming the file it could not write. */
+    private fun writing(block: () -> Unit) {
         val unwritten = try {
-            dependencies.files.write(path, pretty(bundle))
+            block()
             null
         } catch (e: FileWriteException) {
             e.path
         }
         if (unwritten != null) throw refuse(ExitCode.CANNOT_WRITE, "Could not write $unwritten.")
-        dependencies.console.out("✓ Saved $id with its package and keys.\n")
     }
 }
 
