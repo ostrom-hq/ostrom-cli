@@ -4,6 +4,8 @@ package dev.ostrom.cli.launcher
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import okio.IOException
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * The launcher's side of a session while the agent runs and after it ends: a sign of life every 20 s, a new segment
@@ -27,7 +29,13 @@ class SessionLifeline(
     suspend fun keepAlive(everyMillis: Long) {
         while (true) {
             delay(everyMillis)
-            beat()
+            try {
+                beat()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: IOException) {
+                // a segment that could not be written down: the next sign of life tries again, and the agent runs on
+            }
         }
     }
 

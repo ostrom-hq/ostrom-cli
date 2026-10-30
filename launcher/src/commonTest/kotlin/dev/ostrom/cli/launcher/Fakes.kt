@@ -39,14 +39,17 @@ class MemoryFiles : LaunchFiles {
 
     override fun read(path: String) = texts[path]
 
+    var failWrites = false
+
     override fun write(path: String, text: String, access: FileAccess) {
+        if (failWrites) throw IOException("disk full")
         texts[path] = text
         this.access[path] = access
     }
 
     override fun createPrivateDirectory(path: String) {
         if (failDirectories) throw IOException("read-only file system")
-        directories += path
+        if (!directories.add(path)) throw IOException("$path already exists")
     }
 
     override fun list(path: String): List<String> {

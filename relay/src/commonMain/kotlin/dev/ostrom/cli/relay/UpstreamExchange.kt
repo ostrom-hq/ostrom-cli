@@ -34,7 +34,9 @@ internal const val LAUNCH_HEADER = "x-ostrom-launch"
 internal class UpstreamExchange(private val notices: FailureNotices) {
     /**
      * Sends the request [build] describes with [client] and hands the response to [receive] while its body is still
-     * open (streamed); answers [call] with a 502 when no response came within [timeout].
+     * open (streamed); answers [call] with a 502 when no response came within [timeout]. A failure once Ostrom has
+     * answered (its body cut, or the agent gone while it was written to) is no outage and no recovery either: the user
+     * is not told Ostrom is unreachable, and the agent gets the 502 only if its response has not begun.
      */
     suspend fun run(
         call: ApplicationCall,
@@ -43,12 +45,18 @@ internal class UpstreamExchange(private val notices: FailureNotices) {
         build: HttpRequestBuilder.() -> Unit,
         receive: suspend (HttpResponse) -> Unit,
     ) {
-        val failure = attempt(client, timeout, build, receive)
-        if (failure == null) {
-            notices.reachable()
-        } else {
-            notices.unreachable(failure)
-            call.respondText(unreachableBody(failure), ContentType.Application.Json, HttpStatusCode.BadGateway)
+        var answered = false
+        val failure = attempt(client, timeout, build) { response ->
+            answered = true
+            receive(response)
+        }
+        when {
+            failure == null -> notices.reachable()
+            answered && call.response.isCommitted -> Unit
+            else -> {
+                if (!answered) notices.unreachable(failure)
+                call.respondText(unreachableBody(failure), ContentType.Application.Json, HttpStatusCode.BadGateway)
+            }
         }
     }
 

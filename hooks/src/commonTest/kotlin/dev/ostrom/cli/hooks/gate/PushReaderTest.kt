@@ -81,6 +81,10 @@ class PushReaderTest {
         }
         assertContains(refusal(r, "git push origin nope"), "names no commit")
         assertContains(refusal(r, "bash -c 'git push origin main'"), "plain")
+        assertContains(refusal(r, "echo 'git push origin main' | /bin/sh"), "plain", "a shell reading its input")
+        assertContains(refusal(r, "git push origin 'refs/heads/*:refs/heads/*'"), "every matching branch")
+        assertNull(r.read("/r", "git commit -m 'document the git push flow'"), "a message is only text")
+        assertNull(r.read("/r", "grep -rn 'git push' docs/"))
         assertTrue(
             assertFailsWith<UnreadablePushException> { r.read("/r", "git push origin main; git push upstream main") }
                 .message.orEmpty().contains("two remotes"),
@@ -140,6 +144,10 @@ class PushReaderTest {
         assertEquals(emptyList(), r.destinations("/r", "ls"))
         assertFailsWith<UnreadablePushException> { r.destinations("/r", "bash -c 'git push'") }
         assertFailsWith<UnreadablePushException> { r.destinations("/r", "git push --all") }
+        assertFailsWith<UnreadablePushException>("a pattern lands anywhere") {
+            r.destinations("/r", "git push origin '+refs/heads/*:refs/heads/*'")
+        }
+        assertEquals(emptyList(), r.destinations("/r", "gh pr create --body 'then git push'"))
         assertEquals(listOf("main"), r.destinations("/elsewhere", "git -C /r push"), "the -C folder is where git reads")
     }
 

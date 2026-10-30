@@ -5,6 +5,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class LoopbackTest {
     private fun response(text: String) = text.encodeToByteArray()
@@ -21,6 +22,30 @@ class LoopbackTest {
             "GET / HTTP/1.1\r\nHost: 127.0.0.1:1\r\nConnection: close\r\n\r\n",
             HttpMessages.encode(LoopbackRequest("GET", "/"), 1).decodeToString(),
         )
+        assertEquals(
+            "POST /x HTTP/1.1\r\nHost: 127.0.0.1:1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            HttpMessages.encode(LoopbackRequest("POST", "/x"), 1).decodeToString(),
+            "a request without a body says so",
+        )
+    }
+
+    @Test
+    fun aRequestThatWouldSaySomethingElseOnceWrittenIsNeverSent() {
+        val unsent = LoopbackHttpImpl { _, _, _, _ -> error("nothing is sent") }
+        val requests = listOf(
+            LoopbackRequest("GET", "/a\r\nX-Injected: 1"),
+            LoopbackRequest("GET", "/a b"),
+            LoopbackRequest("GET", "a"),
+            LoopbackRequest("G T", "/"),
+            LoopbackRequest("GET", "/", mapOf("X" to "1\r\nX-Injected: 2")),
+            LoopbackRequest("GET", "/", mapOf("Bad Name" to "1")),
+            LoopbackRequest("POST", "/", mapOf("Content-Type" to "text/plain"), "x"),
+        )
+        for (request in requests) {
+            val failure = unsent.exchange(1, request, 1).exceptionOrNull() as LoopbackException
+            assertEquals(LoopbackFailure.UNWRITABLE, failure.failure, request.toString())
+        }
+        assertTrue(HttpMessages.isWritable(LoopbackRequest("GET", "/x?a=%20", mapOf("Authorization" to "Bearer t"))))
     }
 
     @Test
@@ -31,7 +56,8 @@ class LoopbackTest {
         val gone = HttpMessages.decode(response("HTTP/1.0 404 Not Found\r\n\r\ngone"))
         assertEquals(LoopbackResponse(404, "gone"), gone)
         val short = HttpMessages.decode(response("HTTP/1.1 500 x\r\nContent-Length: 9\r\n\r\nab"))
-        assertEquals(LoopbackResponse(500, "ab"), short)
+        assertNull(short, "a relay that died midway is no answer")
+        assertNull(HttpMessages.decode(response("HTTP/1.1 200 x\r\nContent-Length: -1\r\n\r\nab")), "a negative length")
         val nan = HttpMessages.decode(response("HTTP/1.1 200 x\r\ncontent-length: x\r\n\r\nab"))
         assertEquals(LoopbackResponse(200, "ab"), nan)
         val identity = HttpMessages.decode(response("HTTP/1.1 200 x\r\nTransfer-Encoding: identity\r\n\r\nab"))
@@ -46,6 +72,10 @@ class LoopbackTest {
         assertNull(HttpMessages.decode(response(head + "4\r\nab")), "a chunk cut short")
         assertNull(HttpMessages.decode(response(head + "zz\r\nab\r\n")), "a size that is not hex")
         assertNull(HttpMessages.decode(response(head + "2\r\nab\r\n")), "no last chunk")
+        assertNull(HttpMessages.decode(response(head + "-1\r\nab\r\n0\r\n\r\n")), "a negative size")
+        assertNull(HttpMessages.decode(response(head + "7fffffff\r\nab\r\n")), "a size past the end")
+        val many = (1..2_000).joinToString("") { "1\r\nx\r\n" } + "0\r\n\r\n"
+        assertEquals(2_000, HttpMessages.decode(response(head + many))?.body?.length, "many small chunks")
     }
 
     @Test

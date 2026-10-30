@@ -103,5 +103,16 @@ class DeviceLoginTest {
         assertEquals("  Open https://github.com/login/device and enter it.", said.last())
         assertEquals(listOf(5_000L), waits)
         assertEquals("""{"deviceCode":""}""", calls.last().body)
+        start = ServerReply(200, """{"deviceCode":"dc","interval":{},"expiresIn":[1]}""")
+        polls += ServerReply(200, """{"token":"t","login":"l"}""")
+        assertEquals(LoginOutcome.SignedIn(Credentials("t", "l")), signIn(), "fields of the wrong kind are defaults")
+        assertEquals(5_000L, waits.last())
+    }
+
+    @Test
+    fun aServerLostWhileWaitingStopsTheSignIn() = runTest {
+        polls += ServerReply(null, "connection reset")
+        val unreachable = "Ostrom is unreachable at https://api.ostrom.run. Check your network, or the --server URL."
+        assertEquals(LoginOutcome.Stopped(69, unreachable), signIn())
     }
 }
