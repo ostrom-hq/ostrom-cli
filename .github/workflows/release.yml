@@ -52,7 +52,9 @@ jobs:
             version="$REF_NAME"
             publish=true
           else
-            version="${INPUT_VERSION:-$(tr -d ' \n\r' < release-floor.txt)-dryrun}"
+            version="$INPUT_VERSION"
+            # an unreadable floor stops here (set -e), never a bare `-dryrun`
+            [ -n "$version" ] || version="$(tr -d ' \n\r' < release-floor.txt)-dryrun"
             publish=false
           fi
           case "$version" in
