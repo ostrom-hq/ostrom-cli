@@ -29,19 +29,27 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-/** `ostrom verify` and `ostrom receipts list|show|pull`, end to end on a fake file system and a fake server. */
-/** A secret store with nothing in it: the token of these tests is the one `credentials.json` holds. */
-private object NoSecrets : SecretStore {
+/** A secret store in memory: the device token of these tests. */
+private class MemorySecrets : SecretStore {
+    val kept = mutableMapOf<String, String>()
+
     override val backend = SecretBackend.KEYCHAIN
 
-    override fun read(name: String): String? = null
+    override fun read(name: String): String? = kept[name]
 
-    override fun write(name: String, secret: String) = Unit
+    override fun write(name: String, secret: String) {
+        kept[name] = secret
+    }
 
-    override fun delete(name: String) = Unit
+    override fun delete(name: String) {
+        kept -= name
+    }
 }
 
+/** `ostrom verify` and `ostrom receipts list|show|pull`, end to end on a fake file system and a fake server. */
 class ReceiptCommandsTest {
+    private val secrets = MemorySecrets()
+
     private class FakeConsole : Console {
         val out = StringBuilder()
         val err = StringBuilder()
@@ -99,7 +107,7 @@ class ReceiptCommandsTest {
             mcpServer = { object : McpServer { override fun serve() = 0 } },
             credentials = { directory ->
                 val path = (directory.toPath() / "credentials.json").toString()
-                FileCredentialStore(LaunchFilesImpl(fileSystem) { _, _ -> }, path, { NoSecrets }) { withServer[it] }
+                FileCredentialStore(LaunchFilesImpl(fileSystem) { _, _ -> }, path, { secrets }, {}) { withServer[it] }
             },
             workingDirectory = { "/work/acme" },
             executable = "/opt/ostrom",
@@ -118,8 +126,10 @@ class ReceiptCommandsTest {
 
     private fun read(path: String) = fileSystem.read(path.toPath()) { readUtf8() }
 
-    private fun signIn() =
-        write("$home/credentials.json", """{"https://ostrom.example":{"token":"ost_1","login":"maya"}}""")
+    private fun signIn() {
+        write("$home/credentials.json", """{"https://ostrom.example":{"login":"maya"}}""")
+        secrets.kept["https://ostrom.example"] = "ost_1"
+    }
 
     private fun pin() {
         val pem = JsonPrimitive(ReceiptBundleVector.PUBLIC_KEY_PEM)
