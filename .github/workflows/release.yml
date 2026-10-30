@@ -18,6 +18,7 @@ on:
 
 permissions:
   contents: read
+  packages: read # dev.ostrom artifacts of ostrom-core on GitHub Packages, read by the builds
 
 concurrency:
   group: release-${{ github.ref }}
