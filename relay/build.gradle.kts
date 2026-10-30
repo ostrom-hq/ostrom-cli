@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: Apache-2.0
+import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
+import org.jetbrains.kotlin.konan.target.Family
+
+plugins {
+    id("ostrom.kmp")
+}
+
+kotlin {
+    targets.withType<KotlinNativeTarget>().configureEach {
+        if (konanTarget.family == Family.LINUX) {
+            // Keeps OpenSSL (linked by Ktor's Curl engine) usable until exit, as api-client does; see tls_exit.def.
+            compilations.getByName("main").cinterops.create("tlsExit") {
+                definitionFile.set(project.file("src/nativeInterop/cinterop/tls_exit.def"))
+            }
+        }
+    }
+    sourceSets {
+        commonMain.dependencies {
+            implementation(projects.platform)
+            implementation(libs.ktor.server.core)
+            implementation(libs.ktor.server.cio)
+            implementation(libs.ktor.client.core)
+            implementation(libs.ktor.client.engine.defaults)
+        }
+        commonTest.dependencies {
+            implementation(libs.ktor.server.test.host)
+            implementation(libs.ktor.client.mock)
+        }
+    }
+}
