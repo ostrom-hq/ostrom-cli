@@ -1,169 +1,227 @@
+# CI of ostrom-cli (ostrom-core CONVENTIONS.md section 11). Pull requests: Linux only, two required checks,
+# `coverage` (detekt, conventions, jvmTest + koverVerify 100 %) and `native-tests` (linuxX64Test, the linuxArm64 and
+# mingwX64 links, the release binaries and the hook start-up budget). On main and on demand (full_validation), the
+# cross-compiled test binaries also run on linuxArm64 and Windows runners, and macosArm64 is built and tested.
 name: CI
 
 on:
   pull_request:
   push:
     branches: [main]
+    tags: ['[0-9]*']
   workflow_dispatch:
+    inputs:
+      full_validation:
+        description: 'Also run linuxArm64, Windows and macOS'
+        type: boolean
+        default: false
+
+env:
+  ORG_GRADLE_PROJECT_ostromVersion: ${{ github.ref_type == 'tag' && github.ref_name || '0.1.0-SNAPSHOT' }}
+  KOTLIN_VERSION: '2.4.21'
+  GRADLE_OPTS: -Dorg.gradle.daemon=false
 
 permissions:
   contents: read
-  packages: read
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
-env:
-  GRADLE_OPTS: -Dorg.gradle.daemon=false
+  cancel-in-progress: true
 
 jobs:
-  linux:
-    name: Linux build (linuxX64 tested, linuxArm64 and mingwX64 cross-compiled)
+  coverage:
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: '21'
-      - uses: gradle/actions/setup-gradle@v4
-      - name: Cache the Kotlin/Native toolchain
-        uses: actions/cache@v4
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
-          path: ~/.konan
-          key: konan-linux-${{ hashFiles('gradle/libs.versions.toml') }}
-      - name: Install libcurl (Ktor's Linux engine)
-        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
-      - name: Test linuxX64, link the other targets
+          cache-provider: basic
+      - name: Never serve a test task from the cache (ENG-032)
+        run: |
+          mkdir -p ~/.gradle/init.d
+          cat > ~/.gradle/init.d/always-run-tests.gradle.kts <<'KTS'
+          allprojects {
+              tasks.withType<AbstractTestTask>().configureEach {
+                  outputs.cacheIf { false }
+                  outputs.upToDateWhen { false }
+              }
+          }
+          KTS
+      - run: python3 scripts/check-conventions.py --self-test && python3 scripts/check-conventions.py
+      - name: detekt, JVM tests, coverage
         env:
           OSTROM_NETWORK_TESTS: '1'
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./gradlew --continue detekt jvmTest koverXmlReport koverVerify
+      - name: Lines and branches not covered
+        if: failure()
+        run: python3 scripts/uncovered.py
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: coverage-reports
+          path: '**/build/reports/**'
+          retention-days: 7
+
+  native-tests:
+    timeout-minutes: 45
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+      # The Kotlin/Native toolchain and its dependencies (~1 GB) are not in the Gradle cache.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ runner.arch }}-${{ env.KOTLIN_VERSION }}-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: konan-${{ runner.os }}-${{ runner.arch }}-${{ env.KOTLIN_VERSION }}-
+      - name: Install native link dependencies
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+      - name: Never serve a test task from the cache (ENG-032)
+        run: |
+          mkdir -p ~/.gradle/init.d
+          cat > ~/.gradle/init.d/always-run-tests.gradle.kts <<'KTS'
+          allprojects {
+              tasks.withType<AbstractTestTask>().configureEach {
+                  outputs.cacheIf { false }
+                  outputs.upToDateWhen { false }
+              }
+          }
+          KTS
+      - name: linuxX64 tests; linuxArm64 and mingwX64 test binaries; release binaries
+        env:
+          OSTROM_NETWORK_TESTS: '1'
         run: >-
           ./gradlew --continue
           linuxX64Test
           linkDebugTestLinuxArm64 linkDebugTestMingwX64
           :cli:linkReleaseExecutableLinuxX64 :cli:linkReleaseExecutableLinuxArm64 :cli:linkReleaseExecutableMingwX64
-      - name: Measure start-up and sizes
+      - name: Hook start-up budget (15 ms median) and binary sizes
         run: >-
           python3 scripts/measure.py --label linuxX64
           --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
-          --sizes cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe cli/build/bin/linuxArm64/releaseExecutable/ostrom.kexe cli/build/bin/mingwX64/releaseExecutable/ostrom.exe
-      - uses: actions/upload-artifact@v4
+          --sizes cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
+          cli/build/bin/linuxArm64/releaseExecutable/ostrom.kexe
+          cli/build/bin/mingwX64/releaseExecutable/ostrom.exe
+      - name: The bench's build contract
+        run: ./ci/build-linux.sh && ldd dist/ostrom
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: ostrom-linuxX64
-          path: cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ostrom-linuxArm64
-          path: cli/build/bin/linuxArm64/releaseExecutable/ostrom.kexe
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ostrom-mingwX64
-          path: cli/build/bin/mingwX64/releaseExecutable/ostrom.exe
-      - uses: actions/upload-artifact@v4
+          name: ostrom-binaries
+          path: cli/build/bin/*/releaseExecutable/ostrom.*
+          retention-days: 7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: tests-linuxArm64
           path: '*/build/bin/linuxArm64/debugTest/test.kexe'
-          retention-days: 3
-      - uses: actions/upload-artifact@v4
+          retention-days: 2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: tests-mingwX64
           path: '*/build/bin/mingwX64/debugTest/test.exe'
-          retention-days: 3
+          retention-days: 2
 
   linux-arm64:
-    name: linuxArm64 tests (binaries cross-compiled on Linux x64)
-    needs: linux
-    runs-on: ubuntu-24.04-arm
+    needs: native-tests
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.full_validation)
     timeout-minutes: 15
+    runs-on: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: tests-linuxArm64
           path: tests
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: ostrom-linuxArm64
+          name: ostrom-binaries
           path: bin
       - name: Install libcurl (Ktor's Linux engine)
         run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
-      - name: Run every module's tests
+      - name: Every module's tests, cross-compiled on Linux x64
         env:
           OSTROM_NETWORK_TESTS: '1'
         run: |
-          set -e
           test "$(uname -m)" = aarch64
-          for binary in $(find tests -name test.kexe | sort); do
-            echo "::group::$binary"
-            chmod +x "$binary"
-            "$binary"
-            echo "::endgroup::"
+          find tests -name test.kexe -print0 | sort -z | while IFS= read -r -d '' t; do
+            echo "::group::$t"; chmod 755 "$t"; "$t"; echo "::endgroup::"
           done
-      - name: Measure start-up
-        run: chmod +x bin/ostrom.kexe && python3 scripts/measure.py --label linuxArm64 --binary bin/ostrom.kexe
+      - name: Hook start-up budget
+        run: >-
+          chmod 755 bin/linuxArm64/releaseExecutable/ostrom.kexe &&
+          python3 scripts/measure.py --label linuxArm64 --binary bin/linuxArm64/releaseExecutable/ostrom.kexe
 
   windows:
-    name: mingwX64 tests (binaries cross-compiled on Linux x64)
-    needs: linux
-    runs-on: windows-latest
+    needs: native-tests
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.full_validation)
     timeout-minutes: 15
+    runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: tests-mingwX64
           path: tests
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: ostrom-mingwX64
+          name: ostrom-binaries
           path: bin
-      - name: Run every module's tests
+      - name: Every module's tests, cross-compiled on Linux x64
         shell: pwsh
         env:
           OSTROM_NETWORK_TESTS: '1'
         run: |
           $failed = $false
-          foreach ($binary in Get-ChildItem -Recurse -Filter test.exe tests | Sort-Object FullName) {
-            Write-Host "::group::$($binary.FullName)"
-            & $binary.FullName
+          foreach ($t in Get-ChildItem -Recurse -Filter test.exe tests | Sort-Object FullName) {
+            Write-Host "::group::$($t.FullName)"
+            & $t.FullName
             if ($LASTEXITCODE -ne 0) { $failed = $true }
             Write-Host "::endgroup::"
           }
           if ($failed) { exit 1 }
-      - name: Measure start-up
-        run: python scripts/measure.py --label mingwX64 --binary bin/ostrom.exe --max-hook-ms 40
+      # Process creation costs more on Windows: the budget there is 40 ms, the 15 ms one is Linux's.
+      - name: Hook start-up
+        run: python scripts/measure.py --label mingwX64 --binary bin/mingwX64/releaseExecutable/ostrom.exe --max-hook-ms 40
 
   macos:
-    name: macosArm64 build and tests (main only)
-    if: github.event_name != 'pull_request'
-    runs-on: macos-15
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.full_validation)
     timeout-minutes: 45
+    runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: '21'
-      - uses: gradle/actions/setup-gradle@v4
-      - name: Cache the Kotlin/Native toolchain
-        uses: actions/cache@v4
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.konan
-          key: konan-macos-${{ hashFiles('gradle/libs.versions.toml') }}
-      - name: Test macosArm64, link the release binary
+          key: konan-${{ runner.os }}-${{ runner.arch }}-${{ env.KOTLIN_VERSION }}-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: konan-${{ runner.os }}-${{ runner.arch }}-${{ env.KOTLIN_VERSION }}-
+      - name: macosArm64 tests and release binary
         env:
           OSTROM_NETWORK_TESTS: '1'
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./gradlew macosArm64Test :cli:linkReleaseExecutableMacosArm64
-      - name: Measure start-up and size
+      - name: Hook start-up budget and size
         run: >-
           python3 scripts/measure.py --label macosArm64
           --binary cli/build/bin/macosArm64/releaseExecutable/ostrom.kexe
           --sizes cli/build/bin/macosArm64/releaseExecutable/ostrom.kexe
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ostrom-macosArm64
           path: cli/build/bin/macosArm64/releaseExecutable/ostrom.kexe
+          retention-days: 7

@@ -1,0 +1,257 @@
+package dev.ostrom.cli
+
+import dev.ostrom.cli.api.OstromApi
+import dev.ostrom.cli.api.ServerResponse
+import dev.ostrom.cli.api.ServerUnreachableException
+import dev.ostrom.cli.hooks.HookRunner
+import dev.ostrom.cli.mcp.McpServer
+import dev.ostrom.cli.platform.Console
+import dev.ostrom.cli.platform.Environment
+import dev.ostrom.cli.platform.ExecutableFinder
+import dev.ostrom.cli.platform.FileStoreImpl
+import dev.ostrom.cli.platform.OperatingSystem
+import dev.ostrom.cli.platform.StandardInput
+import okio.Path.Companion.toPath
+import okio.fakefilesystem.FakeFileSystem
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+
+class OstromCliTest {
+    private class FakeConsole : Console {
+        val out = StringBuilder()
+        val err = StringBuilder()
+        override fun out(text: String) {
+            out.append(text)
+        }
+
+        override fun err(text: String) {
+            err.append(text)
+        }
+
+        override val isInteractive = false
+        override fun readStandardInput(maxBytes: Int, timeoutMillis: Int): StandardInput = error("not used")
+    }
+
+    private class FakeEnvironment(private val values: Map<String, String>) : Environment {
+        override fun get(name: String) = values[name]
+        override val operatingSystem = OperatingSystem.LINUX
+        override val architecture = "x64"
+    }
+
+    private val console = FakeConsole()
+    private val fileSystem = FakeFileSystem()
+    private val hookCalls = mutableListOf<List<String>>()
+    private val withServer = mapOf("HOME" to "/home/maya", "OSTROM_URL" to "https://ostrom.example")
+
+    /** A server that answers every request with [status] after [millis]. */
+    private fun serverAnswering(status: Int, millis: Long): (String) -> OstromApi = {
+        object : OstromApi {
+            override suspend fun get(path: String) = ServerResponse(status, "", millis)
+        }
+    }
+
+    /** Asserts that stdout contains [text], showing all of it otherwise. */
+    private fun assertOut(text: String) = assertTrue(console.out.contains(text), console.out.toString())
+
+    private fun cli(
+        environment: Map<String, String> = mapOf("HOME" to "/home/maya"),
+        installed: Set<String> = setOf("git", "claude"),
+        api: (String) -> OstromApi = { error("no server in this test") },
+    ) = OstromCli(
+        CliDependencies(
+            console = console,
+            environment = FakeEnvironment(environment),
+            files = FileStoreImpl(fileSystem),
+            finder = object : ExecutableFinder {
+                override fun find(name: String) = if (name in installed) "/usr/bin/$name" else null
+            },
+            api = api,
+            hookRunner = object : HookRunner {
+                override fun run(arguments: List<String>): Int = 0.also { hookCalls += arguments }
+            },
+            mcpServer = { object : McpServer { override fun serve() = 0 } },
+        ),
+    )
+
+    @Test
+    fun versionPrintsTheVersionAndThePlatform() {
+        assertEquals(0, cli().run(arrayOf("version")))
+        assertEquals("ostrom ${BuildInfo.VERSION} (kotlin-native, Linux x64)\n", console.out.toString())
+    }
+
+    @Test
+    fun noArgumentIsTheHomeScreenNeverTheRawHelp() {
+        assertEquals(0, cli().run(emptyArray()))
+        val home = console.out.toString()
+        assertTrue(home.startsWith("Ostrom ${BuildInfo.VERSION}\nNot signed in. Next: ostrom login\n"), home)
+        assertOut("Start an agent   ostrom claude   (also: codex, opencode, gemini, grok, hermes, pi)")
+    }
+
+    @Test
+    fun helpListsTheCommandsButNotThePlumbing() {
+        assertEquals(0, cli().run(arrayOf("--help")))
+        val help = console.out.toString()
+        val commands = listOf(
+            "claude", "status", "inbox", "approve", "receipts", "verify",
+            "harness", "login", "doctor", "invite", "policy",
+        )
+        for (command in commands) {
+            assertTrue(Regex("""\n\s+$command\s""").containsMatchIn(help), "$command missing from:\n$help")
+        }
+        for (hidden in listOf("wait", "hook", "mcp", "check")) {
+            assertTrue(!Regex("""\n\s+$hidden\s""").containsMatchIn(help), "$hidden should be hidden:\n$help")
+        }
+    }
+
+    @Test
+    fun helpPlumbingListsTheHiddenCommands() {
+        assertEquals(0, cli().run(arrayOf("help", "plumbing")))
+        assertTrue(console.out.contains("ostrom hook gate|session|gates-refresh"))
+    }
+
+    @Test
+    fun anUnknownCommandIsAUsageError() {
+        assertEquals(64, cli().run(arrayOf("cluade")))
+        assertTrue(console.err.contains("claude"), console.err.toString())
+    }
+
+    @Test
+    fun aDeclaredCommandNotBuiltYetExitsWith70() {
+        assertEquals(70, cli().run(arrayOf("status", "--json")))
+        assertEquals(70, cli().run(arrayOf("harness", "add", "git-safety", "--set", "a=b", "--yes")))
+        assertEquals(70, cli().run(arrayOf("receipts")))
+        assertEquals(70, cli().run(arrayOf("claude", "--resume", "-p", "hello")))
+        assertEquals(64, cli().run(arrayOf("approve")))
+    }
+
+    @Test
+    fun hookIsHandedToTheHookRunner() {
+        assertEquals(0, cli().run(arrayOf("hook", "gate")))
+        assertEquals(listOf(listOf("gate")), hookCalls)
+    }
+
+    @Test
+    fun configSetGetListUnset() {
+        val cli = cli()
+        assertEquals(0, cli.run(arrayOf("config", "set", "default_agent", "codex")))
+        assertEquals("✓ default_agent = codex\n", console.out.toString())
+        console.out.clear()
+        assertEquals(0, cli.run(arrayOf("config", "get", "default_agent")))
+        assertEquals("codex\n", console.out.toString())
+        console.out.clear()
+        assertEquals(0, cli.run(arrayOf("config")))
+        assertTrue(console.out.contains("default_agent  codex\n"), console.out.toString())
+        assertTrue(console.out.contains("server         (not set)\n"), console.out.toString())
+        assertEquals(0, cli.run(arrayOf("config", "unset", "default_agent")))
+        assertEquals(1, cli.run(arrayOf("config", "get", "default_agent")))
+        assertEquals(64, cli.run(arrayOf("config", "set", "colour", "never")))
+        assertTrue(console.err.contains("Unknown key \"colour\". Keys: server, default_agent, color, editor."))
+    }
+
+    @Test
+    fun configWithoutAHomeFolderCannotBeWritten() {
+        assertEquals(73, cli(environment = emptyMap()).run(arrayOf("config", "set", "color", "never")))
+    }
+
+    @Test
+    fun doctorWithoutServerOnlyWarns() {
+        assertEquals(0, cli().run(arrayOf("doctor")))
+        val report = console.out.toString()
+        assertTrue(report.contains("  ✓ Config folder /home/maya/.config/ostrom is writable\n"), report)
+        assertTrue(report.contains("  ! Not signed in. Run ostrom login.\n"), report)
+        assertTrue(report.contains("  ✓ Agents found: claude\n"), report)
+        assertTrue(report.endsWith("0 problems, 2 warnings.\n"), report)
+    }
+
+    @Test
+    fun doctorFailsWhenTheServerIsUnreachableOrGitIsMissing() {
+        val down: (String) -> OstromApi = { url ->
+            object : OstromApi {
+                override suspend fun get(path: String): ServerResponse =
+                    throw ServerUnreachableException(url + path, Exception("refused"))
+            }
+        }
+        val code = cli(environment = withServer, installed = emptySet(), api = down).run(arrayOf("doctor", "--json"))
+        assertEquals(1, code)
+        val json = console.out.toString()
+        assertTrue(json.contains(""""status":"problem","message":"ostrom.example unreachable"""), json)
+        assertTrue(json.contains(""""problems":2"""), json)
+    }
+
+    @Test
+    fun doctorReportsAReachableServer() {
+        assertEquals(0, cli(environment = withServer, api = serverAnswering(200, 84)).run(arrayOf("doctor")))
+        assertOut("  ✓ ostrom.example reachable (84 ms)\n")
+    }
+
+    @Test
+    fun aGroupWithoutDefaultPrintsItsHelp() {
+        assertEquals(0, cli().run(arrayOf("harness")))
+        assertTrue(console.out.contains("enforce"), console.out.toString())
+        assertEquals(70, cli().run(arrayOf("members")))
+        assertEquals(70, cli().run(arrayOf("policy")))
+    }
+
+    @Test
+    fun helpWithoutTopicIsTheRootHelpAndAnUnknownTopicIsAUsageError() {
+        assertEquals(0, cli().run(arrayOf("help")))
+        assertTrue(console.out.contains("Commands:"), console.out.toString())
+        assertEquals(64, cli().run(arrayOf("help", "nope")))
+        assertTrue(console.err.contains("Unknown help topic \"nope\". Topics: plumbing."))
+    }
+
+    @Test
+    fun mcpServesOnStdioAndItsWorkflowServerIsNotBuiltYet() {
+        assertEquals(0, cli().run(arrayOf("mcp")))
+        assertEquals(70, cli().run(arrayOf("mcp", "workflow")))
+    }
+
+    @Test
+    fun aConfigFileThatCannotBeWrittenIsExit73() {
+        fileSystem.createDirectories("/home/maya".toPath())
+        fileSystem.write("/home/maya/.config".toPath()) { writeUtf8("a file where the folder should be") }
+        assertEquals(73, cli().run(arrayOf("config", "set", "color", "never")))
+        val error = console.err.toString()
+        assertTrue(error.startsWith("Could not write ") && error.endsWith("config.toml.\n"), error)
+    }
+
+    @Test
+    fun doctorSaysWhenTheConfigFolderIsMissingOrBlocked() {
+        assertEquals(1, cli(environment = emptyMap()).run(arrayOf("doctor")))
+        assertOut("  ✗ No home folder is known: set HOME (USERPROFILE on Windows).\n")
+        console.out.clear()
+        fileSystem.createDirectories("/home/maya".toPath())
+        fileSystem.write("/home/maya/.config".toPath()) { writeUtf8("") }
+        assertEquals(1, cli().run(arrayOf("doctor")))
+        assertOut("  ✗ Cannot write /home/maya/.config/ostrom: check its owner and permissions.\n")
+    }
+
+    @Test
+    fun doctorCountsOneProblemAndOneWarningInTheSingular() {
+        val code = cli(environment = withServer, installed = setOf("claude"), api = serverAnswering(204, 3))
+            .run(arrayOf("doctor"))
+        assertEquals(1, code)
+        val expected = "  ✗ git not found: install git, agents need it.\n" +
+            "  ✓ Agents found: claude\n1 problem, 1 warning.\n"
+        assertTrue(console.out.endsWith(expected), console.out.toString())
+    }
+
+    @Test
+    fun doctorReportsAServerInTroubleAndNoAgent() {
+        val failing = cli(installed = setOf("git"), api = serverAnswering(502, 12))
+        failing.run(arrayOf("config", "set", "server", "https://ostrom.example/"))
+        console.out.clear()
+        assertEquals(1, failing.run(arrayOf("doctor")))
+        assertOut("  ✗ ostrom.example answers 502: the server is in trouble, try again later.\n")
+        assertOut("  ! No agent installed (claude, codex, opencode, gemini, grok, hermes, pi).")
+    }
+
+    @Test
+    fun theRealWiringBuildsEveryDependency() {
+        val dependencies = CliDependencies.create()
+        dependencies.api("https://ostrom.example")
+        dependencies.mcpServer()
+        assertTrue(dependencies.configFile("/x").endsWith("config.toml"))
+    }
+}

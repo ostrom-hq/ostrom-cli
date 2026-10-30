@@ -1,4 +1,4 @@
-package = run.ostrom.cli.platform.interop
+package = dev.ostrom.cli.platform.interop
 linkerOpts = -lkernel32
 ---
 #include <windows.h>

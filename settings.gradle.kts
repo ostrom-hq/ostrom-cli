@@ -19,7 +19,7 @@ dependencyResolutionManagement {
                 username = providers.gradleProperty("gpr.user").orElse(providers.environmentVariable("GITHUB_ACTOR")).orNull
                 password = providers.gradleProperty("gpr.key").orElse(providers.environmentVariable("GITHUB_TOKEN")).orNull
             }
-            content { includeGroup("run.ostrom") }
+            content { includeGroup("dev.ostrom") }
         }
     }
 }

@@ -1,5 +1,5 @@
 plugins {
-    id("ostrom.native-module")
+    id("ostrom.kmp")
 }
 
 kotlin {

@@ -1,4 +1,4 @@
-package = run.ostrom.cli.platform.interop
+package = dev.ostrom.cli.platform.interop
 ---
 #include <errno.h>
 #include <poll.h>
