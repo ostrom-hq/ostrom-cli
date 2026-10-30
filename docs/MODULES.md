@@ -10,7 +10,7 @@ all Ostrom repositories are in `ostrom-core/docs/CONVENTIONS.md`; this page only
 | Module | Package | Holds | Depends on |
 | --- | --- | --- | --- |
 | `platform` | `dev.ostrom.cli.platform` | everything that touches the OS: processes sharing the terminal, stdin with a deadline, unbuffered stdout/stderr, environment, files, `config.toml`, PATH lookup | okio |
-| `hooks` | `dev.ostrom.cli.hooks` | `ostrom hook gate\|session\|gates-refresh`: event parsing (all agents' dialects), the gate, the reply | `platform` |
+| `hooks` | `dev.ostrom.cli.hooks` | `ostrom hook gate\|session`: event parsing (all agents' dialects), the gate, the reply | `platform` |
 | `api-client` | `dev.ostrom.cli.api` | the server over HTTPS (Ktor, platform engine) | ostrom-core (once published) |
 | `launcher` | `dev.ostrom.cli.launcher` | the agents (`Agent`) and starting one in this terminal | `platform` |
 | `mcp` | `dev.ostrom.cli.mcp` | the local MCP server on stdio (`ostrom mcp`) | `platform` |
@@ -22,8 +22,8 @@ Rules that keep the binary fast and the modules apart:
   Linux, `windows.def` for Windows). Shared POSIX Kotlin lives in `src/posixMain`, added to `macosMain` and
   `linuxMain`; Windows code in `src/mingwMain`.
 - `hooks` stays light: no Clikt, no Ktor, no coroutines. `main` sends `ostrom hook …` straight to `HookRunner` before
-  building anything else (`cli/.../Main.kt`). A hook that needs the server reads a local cache and refreshes it in a
-  detached `ostrom hook gates-refresh`, as the prototype does; it never waits on the network.
+  building anything else (`cli/.../Main.kt`). A hook reaches Ostrom only through the launcher's local relay, which
+  answers the gate catalogue from its own memory; the hook trusts no cache on disk the agent could edit (S2-20).
 - Interfaces and their implementation: `XxxRepository` / `XxxRepositoryImpl`, `XxxUseCase` with
   `operator fun invoke`, KDoc on everything public, no `!!`, a `CancellationException` is always rethrown
   (`ostrom-core/docs/CONVENTIONS.md`).
