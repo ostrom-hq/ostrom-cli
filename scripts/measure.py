@@ -2,18 +2,21 @@
 # SPDX-License-Identifier: Apache-2.0
 """Measures a built `ostrom` binary: start-up of `ostrom hook gate` and `ostrom version`, and binary sizes.
 
-Usage: measure.py --binary PATH --label TARGET [--runs N] [--max-hook-ms MS] [--sizes FILE...]
+Usage: measure.py --binary PATH --label TARGET [--runs N] [--max-hook-ms MS] [--max-push-ms MS] [--sizes FILE...]
 
 The wall time includes Python's own process spawn (well under a millisecond on Linux, more on Windows), so the
 figures are an upper bound of the binary's start-up. `inside` is the time the hook reports itself
 (OSTROM_HOOK_TIMING=1: from entering the hook runner to the reply written). Results go to stdout and, in GitHub
-Actions, to the job summary. Exits 1 when the median hook time is above --max-hook-ms.
+Actions, to the job summary. Exits 1 when the median hook time is above --max-hook-ms, or the median `git push` time
+above --max-push-ms when given.
 
 The budget is measured on the hook of an ordinary tool call (`ls`), which is most of an agent's calls. Outside a
 session, as here, there is no relay to read Ostrom's signed policy from, so the gate holds the call (exit 2) after
 reading and parsing it: the figure is the hook's start-up. The same hook in a real session (the relay asked, the
-policy's signature checked) is held to the same budget by e2e/run.py. A `git push` is measured too and shown, not
-held to the budget.
+policy's signature checked) is held to the same budget by e2e/run.py. In a session a `git push` runs `git` to read the
+branch it sends, so it has a budget of its own, --max-push-ms (40 ms, held on the Linux runner only, decision of
+30/10/2026 08:10). Outside a session, as here, the gate holds the push before running `git`: the figure is a ceiling
+check of that path, not the cost of `git` in a large repository.
 """
 import argparse
 import os
@@ -61,6 +64,7 @@ def main():
     parser.add_argument("--label", required=True)
     parser.add_argument("--runs", type=int, default=100)
     parser.add_argument("--max-hook-ms", type=float, default=15.0)
+    parser.add_argument("--max-push-ms", type=float, default=None)
     parser.add_argument("--sizes", nargs="*", default=[])
     args = parser.parse_args()
 
@@ -95,6 +99,10 @@ def main():
             handle.write(text + "\n")
     if hook_median > args.max_hook_ms:
         raise SystemExit(f"ostrom hook gate takes {hook_median:.2f} ms (median), above {args.max_hook_ms} ms")
+    if args.max_push_ms is not None and push_median > args.max_push_ms:
+        raise SystemExit(
+            f"ostrom hook gate on a git push takes {push_median:.2f} ms (median), above {args.max_push_ms} ms"
+        )
 
 
 if __name__ == "__main__":

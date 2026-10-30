@@ -107,12 +107,6 @@ internal class HarnessRemoveCommand : PendingCommand("remove", "Remove a harness
     val yes by yesOption()
 }
 
-internal class LoginCommand : PendingCommand("login", "Sign in with GitHub") {
-    val server by serverOption()
-}
-
-internal class LogoutCommand : PendingCommand("logout", "Sign out this device (receipts are kept)")
-
 internal class InitCommand : PendingCommand("init", "Set up this repository (admin: the organisation)")
 
 internal class UpdateCommand : PendingCommand("update", "Update ostrom (signed release)") {
@@ -161,8 +155,8 @@ internal class CheckCommand : PendingCommand("check", "Run a workflow check (use
 }
 
 /**
- * Every top-level command after the agents, in the order of the help screen, with the [implemented] ones (config,
- * doctor, telemetry, version) at their place.
+ * Every top-level command after the agents, in the order of the help screen, with the [implemented] ones (login,
+ * logout, config, doctor, telemetry, version) at their place.
  */
 fun pendingCommands(implemented: List<CliktCommand>): List<CliktCommand> {
     fun named(name: String) = implemented.first { it.commandName == name }
@@ -178,8 +172,8 @@ fun pendingCommands(implemented: List<CliktCommand>): List<CliktCommand> {
             HarnessListCommand(), HarnessShowCommand(), HarnessAddCommand(),
             HarnessEnforceCommand(), HarnessUpdateCommand(), HarnessRemoveCommand(),
         ),
-        LoginCommand(),
-        LogoutCommand(),
+        named("login"),
+        named("logout"),
         InitCommand(),
         named("config"),
         named("doctor"),

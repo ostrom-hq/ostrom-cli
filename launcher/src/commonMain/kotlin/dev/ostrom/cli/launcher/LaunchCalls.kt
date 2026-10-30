@@ -11,6 +11,27 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
     private val trust = PackageTrust(dependencies.server, dependencies.files, dependencies.clock::now, dependencies.say)
 
     /**
+     * `--dry-run`: every read a launch makes before the agent starts, and the harness that would apply (the package,
+     * verified, says itself; then the MCP servers), with nothing written, no launch created and nothing started. A read
+     * that would stop the launch stops the dry run with the same code. Not checked: the agent's own setup, which a
+     * launch writes in a folder of its own.
+     */
+    suspend fun dryRun(agent: Agent, repo: String, model: String?, site: LaunchSite): Int {
+        val pack = packageOf(repo, site, keep = false)
+        instanceKeys()
+        val mcp = (mcpServers(site) + pack?.mcpServers.orEmpty()).distinct()
+        dependencies.say("ostrom: MCP servers: " + if (mcp.isEmpty()) "none" else mcp.joinToString())
+        val modelPart = if (model == null) "" else ", model $model"
+        val name = agent.displayName
+        // what was not tried is said too: a dry run never reads as a launch that cannot fail
+        dependencies.say(
+            "ostrom: dry run for $repo$modelPart: the policy, the package and the instance's keys check out; no " +
+                "launch was asked of Ostrom and $name was not started",
+        )
+        return 0
+    }
+
+    /**
      * The organisation's policy: stops a refused launch, says its note. A policy that cannot be read stops the launch
      * too: an error of Ostrom never lets an agent the organisation may refuse start (security audit S2-34).
      */
@@ -57,8 +78,8 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
     }
 
     /** The verified session package of [repo], null without one; a refused one stops the launch. */
-    suspend fun packageOf(repo: String, site: LaunchSite): SessionPackage? =
-        when (val outcome = trust.fetch(site.serverUrl, site.credentials.token, repo, site.configDirectory)) {
+    suspend fun packageOf(repo: String, site: LaunchSite, keep: Boolean): SessionPackage? =
+        when (val outcome = trust.fetch(site.serverUrl, site.credentials.token, repo, site.configDirectory, keep)) {
             is PackageOutcome.Verified -> outcome.pack.also { dependencies.say("ostrom: ${it.summary()}") }
             PackageOutcome.None -> null.also {
                 dependencies.say("ostrom: no session package for $repo; your organisation's gates apply")
