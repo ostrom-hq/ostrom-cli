@@ -93,6 +93,7 @@ class ReceiptCommandsTest {
             agents = AgentRunner { _, _ -> 0 },
             sleep = {},
             readLine = { null },
+            openUrl = { false },
         ),
     )
 
