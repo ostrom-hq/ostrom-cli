@@ -102,6 +102,7 @@ class GateHookTest {
         assertEquals(HookReply(), hook().handle(event("Read", """{"file_path":"/w/a"}""")))
         assertEquals(HookReply(), hook().handle(bash("npm run lint")))
         assertEquals(HookReply(), hook().handle(bash("git status")))
+        assertEquals(HookReply(), hook().handle(buildJsonObject { put("hook_event_name", "PreToolUse") }), "no tool")
         assertTrue(calls.calls.isEmpty())
         assertFalse("/s/session.refused.json" in files.texts)
     }
@@ -152,7 +153,7 @@ class GateHookTest {
         assertTrue(no.stderr.startsWith("Ostrom: omar said no to \"Push to main\" (gate \"Release\", receipt R2)."))
         answer("""{"id":"G1","status":"rejected"}""")
         assertContains(hook().handle(bash("git push origin main")).stderr, "receipt -")
-        answer("""{"status":"pending","gate":{"approvers":["ana","bo",3]}}""")
+        answer("""{"status":"pending","gate":{"approvers":["ana","bo",3,{}]}}""")
         assertContains(hook().handle(bash("git push origin main")).stderr, "`ostrom wait ?`")
         assertContains(hook().handle(bash("git push origin main")).stderr, "needs a yes from ana or bo (gate \"Main\")")
         answer("""{"status":"shadow"}""")
