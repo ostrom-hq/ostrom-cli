@@ -25,7 +25,6 @@ import dev.ostrom.cli.relay.LocalRelayStarter
 import dev.ostrom.cli.relay.RelayConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
-import kotlinx.io.IOException
 import okio.fakefilesystem.FakeFileSystem
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -38,7 +37,7 @@ class LaunchWiringTest {
 
         override suspend fun send(request: ServerRequest): ServerResponse {
             sent += request
-            if (request.path == "/down") throw ServerUnreachableException("u", IOException("connection refused"))
+            if (request.path == "/down") throw ServerUnreachableException("u", IllegalStateException("connection refused"))
             return ServerResponse(201, """{"ok":true}""", 3)
         }
     }
