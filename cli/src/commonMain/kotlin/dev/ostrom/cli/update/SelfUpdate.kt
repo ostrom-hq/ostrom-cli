@@ -58,8 +58,8 @@ private fun refuseIn(sessions: AgentSessions) {
     sessions.running()?.let {
         stop(
             ExitCode.REFUSED,
-            "✗ ostrom does not update itself inside an agent's session ($it). Nothing was changed. Run ostrom " +
-                "update in your own terminal once the session has ended.",
+            "✗ ostrom does not update itself while an agent's session runs ($it): its hooks run this binary. " +
+                "Nothing was changed. Run ostrom update once the sessions have ended.",
         )
     }
 }
@@ -101,6 +101,10 @@ class SelfUpdate(
 ) {
     /** Runs [request]; the exit code. */
     suspend fun update(request: UpdateRequest): Int = try {
+        // the version goes into the release's address: only a version, never a path or a query
+        if (request.version != null && SemVer.of(request.version) == null) {
+            stop(ExitCode.USAGE, "ostrom update: ${request.version} is not a version (1.2.3 or v1.2.3).")
+        }
         if (!request.checkOnly) refuseIn(sessions)
         val asset = manifest(request)
         when {
@@ -108,8 +112,10 @@ class SelfUpdate(
                 ExitCode.OK.code.also { say("✓ ostrom ${request.current} is up to date.") }
             asset.version == request.current ->
                 ExitCode.OK.code.also { say("✓ ostrom ${request.current} is already installed.") }
-            request.checkOnly ->
-                ExitCode.OK.code.also { say("! ostrom ${asset.version} is available. Run ostrom update.") }
+            request.checkOnly -> ExitCode.OK.code.also {
+                val run = if (request.version == null) "ostrom update" else "ostrom update --version ${asset.version}"
+                say("! ostrom ${asset.version} is available. Run $run.")
+            }
             else -> {
                 val floor = if (request.version == null) asset.floor else manifest(request.copy(version = null)).floor
                 floorRefusal(asset.version, request.current, floor)?.let { stop(ExitCode.REFUSED, it) }
@@ -146,9 +152,15 @@ class SelfUpdate(
         val swap = "$binary.swap".toPath()
         return try {
             fileSystem.atomicMove(binary, swap)
-            fileSystem.atomicMove(previous, binary)
+            try {
+                fileSystem.atomicMove(previous, binary)
+            } catch (failure: IOException) {
+                // never an installation without its binary: the running one goes back
+                fileSystem.atomicMove(swap, binary)
+                throw failure
+            }
             fileSystem.atomicMove(swap, previous)
-            fileSystem.write(keptVersionOf(binary)) { writeUtf8(current) }
+            keep(binary, current)
             say("✓ Back to the previous ostrom. Run ostrom update to come back.")
             ExitCode.OK.code
         } catch (failure: IOException) {
@@ -157,16 +169,36 @@ class SelfUpdate(
         }
     }
 
+    /**
+     * Records [version] as the one kept for `--rollback`. When it cannot be written, the old record is removed: a
+     * rollback then refuses (version not recorded) rather than checking the floor against the wrong version.
+     */
+    private fun keep(binary: Path, version: String) {
+        try {
+            fileSystem.write(keptVersionOf(binary)) { writeUtf8(version) }
+        } catch (failure: IOException) {
+            fileSystem.delete(keptVersionOf(binary), mustExist = false)
+            say("! The version kept for ostrom update --rollback could not be recorded: ${failure.message}")
+        }
+    }
+
     private suspend fun manifest(request: UpdateRequest): Asset {
-        val folder = if (request.version == null) "latest/download" else "download/${request.version}"
+        val folder = if (request.version == null) "latest/download" else "download/${request.version.removePrefix("v")}"
         val url = "${request.releases.trimEnd('/')}/$folder/latest.json"
         val manifest = fetch(url, MAX_MANIFEST_BYTES, request)
         val signature = fetch("$url.sig", MAX_SIGNATURE_BYTES, request)
         if (!ed25519Verify(releaseKeyPem, manifest, decoded(signature.decodeToString().trim()))) {
-            stop(ExitCode.FAILED, "✗ The release signature does not match. Nothing was changed.")
+            stop(ExitCode.SIGNATURE_REFUSED, "✗ The release signature does not match. Nothing was changed.")
         }
         val body = parseObject(manifest.decodeToString()) ?: unreadable()
         val version = body.text("version") ?: unreadable()
+        // a signed manifest of another release, served where this one was asked, is a replay
+        if (request.version != null && version.removePrefix("v") != request.version.removePrefix("v")) {
+            stop(
+                ExitCode.SIGNATURE_REFUSED,
+                "✗ The release at $url is signed for ostrom $version, not ${request.version}. Nothing was changed.",
+            )
+        }
         val entry = body.child("assets")?.child(request.target)
             ?: stop(ExitCode.NOT_FOUND, "No ostrom $version is built for ${request.target}.")
         return assetOf(version, entry, body.text("floor"))
@@ -189,7 +221,7 @@ class SelfUpdate(
         managerOf(binary)?.let { stop(ExitCode.USAGE, "This ostrom is managed by $it.") }
         val archive = fetch(asset.url, MAX_BINARY_BYTES, request)
         if (archive.size.toLong() != asset.size || sha256Hex(archive) != asset.sha256) {
-            stop(ExitCode.FAILED, "✗ The download does not match its signed checksum. Nothing was changed.")
+            stop(ExitCode.SIGNATURE_REFUSED, "✗ The download does not match its signed checksum. $UNCHANGED")
         }
         val work = "$binary.update".toPath()
         try {
@@ -202,28 +234,40 @@ class SelfUpdate(
                 stop(ExitCode.FAILED, "✗ The archive does not hold ${binary.name}. Nothing was changed.")
             }
             swap(binary, fresh)
-            fileSystem.write(keptVersionOf(binary)) { writeUtf8(request.current) }
         } catch (failure: IOException) {
             stop(ExitCode.CANNOT_WRITE, "ostrom could not write next to $binary: ${failure.message}")
         } finally {
             fileSystem.deleteRecursively(work, mustExist = false)
         }
+        keep(binary, request.current)
         val running = request.current
         say("✓ Updated ostrom $running → ${asset.version} (signature checked).")
         say("  Running sessions keep $running until they end.")
         return ExitCode.OK.code
     }
 
+    /**
+     * [fresh] in place of [binary], which is kept as the previous one. The version kept before stays aside until the
+     * swap is done, so a failure leaves both as they were.
+     */
     private fun swap(binary: Path, fresh: Path) {
         val previous = previousOf(binary)
-        fileSystem.delete(previous, mustExist = false)
-        fileSystem.atomicMove(binary, previous)
+        val older = "$previous.old".toPath()
+        val hadPrevious = fileSystem.exists(previous)
+        if (hadPrevious) fileSystem.atomicMove(previous, older)
         try {
-            fileSystem.atomicMove(fresh, binary)
+            fileSystem.atomicMove(binary, previous)
+            try {
+                fileSystem.atomicMove(fresh, binary)
+            } catch (failure: IOException) {
+                fileSystem.atomicMove(previous, binary)
+                throw failure
+            }
         } catch (failure: IOException) {
-            fileSystem.atomicMove(previous, binary)
+            if (hadPrevious) fileSystem.atomicMove(older, previous)
             throw failure
         }
+        fileSystem.delete(older, mustExist = false)
     }
 
     private suspend fun fetch(url: String, maxBytes: Long, request: UpdateRequest): ByteArray {

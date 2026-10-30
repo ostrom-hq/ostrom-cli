@@ -7,6 +7,7 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.headersOf
 import kotlinx.coroutines.test.runTest
 import kotlinx.io.IOException
 import kotlin.coroutines.cancellation.CancellationException
@@ -37,6 +38,13 @@ class DownloadsTest {
         val file = assertIs<Download.Bytes>(downloads.fetch("https://releases.example/a.tar.gz", 3))
         assertContentEquals(byteArrayOf(1, 2, 3), file.bytes)
         assertEquals(Download.TooLarge(2), downloads.fetch("https://releases.example/a.tar.gz", 2))
+    }
+
+    @Test
+    fun aFileSaidToBeTooLargeIsNotRead() = runTest {
+        val declared = headersOf(HttpHeaders.ContentLength, "4294967296")
+        val downloads = downloads(MockEngine { respond(byteArrayOf(1), HttpStatusCode.OK, declared) })
+        assertEquals(Download.TooLarge(16), downloads.fetch("https://releases.example/latest.json", 16))
     }
 
     @Test

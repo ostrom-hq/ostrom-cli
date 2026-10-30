@@ -10,6 +10,10 @@ base=https://example.test/releases
 out=$(RELEASE_DATE=2026-10-30T10:00:00Z sh "$script" 1.2.3 "$base" "$tmp/dist")
 assert_eq "valid JSON" "1.2.3" "$(printf '%s' "$out" | jq -r .version)"
 assert_eq "date" "2026-10-30T10:00:00Z" "$(printf '%s' "$out" | jq -r .date)"
+assert_eq "floor from the file" "$(tr -d ' \n' < "$here/../floor")" "$(printf '%s' "$out" | jq -r .floor)"
+raised=$(RELEASE_FLOOR=1.2.0 sh "$script" 1.2.3 "$base" "$tmp/dist")
+assert_eq "floor from RELEASE_FLOOR" "1.2.0" "$(printf '%s' "$raised" | jq -r .floor)"
+assert_fails "a floor that is not a version is an error" env RELEASE_FLOOR=1.2 sh "$script" 1.2.3 "$base" "$tmp/dist"
 assert_eq "four targets" "linux-arm64,linux-x64,macos-arm64,windows-x64" \
   "$(printf '%s' "$out" | jq -r '.assets | keys | join(",")')"
 assert_eq "url layout" "$base/download/1.2.3/ostrom-1.2.3-linux-x64.tar.gz" \
