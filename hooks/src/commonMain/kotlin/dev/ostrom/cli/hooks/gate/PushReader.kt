@@ -116,6 +116,8 @@ class PushReader(private val git: GitRunner, private val home: String) {
             listOf(barePush(directory, remote, branch))
         } else {
             positional.map { spec ->
+                // `refs/heads/*:refs/heads/*` sends every matching branch, main among them: where it lands is unread
+                if ('*' in spec) throw UnreadablePushException(PATTERN)
                 force = force || spec.startsWith("+")
                 refOf(directory, spec.trimStart('+'), branch, read.delete, lenient)
             }
@@ -162,8 +164,6 @@ class PushReader(private val git: GitRunner, private val home: String) {
     }
 
     private fun refOf(directory: String, spec: String, branch: String, delete: Boolean, lenient: Boolean): PushRef {
-        // `refs/heads/*:refs/heads/*` sends every matching branch, main among them: where it lands cannot be read
-        if ('*' in spec) throw UnreadablePushException(PATTERN)
         val source = spec.substringBefore(':')
         val target = spec.substringAfter(':', "")
         if (delete || source.isEmpty()) return PushRef("", shortRef(target.ifEmpty { source }))
