@@ -53,6 +53,24 @@ private class Stop(val code: ExitCode, val text: String) : Exception(text)
 /** Stops [SelfUpdate] with [code], saying [text]. */
 private fun stop(code: ExitCode, text: String): Nothing = throw Stop(code, text)
 
+/** Stops [SelfUpdate] when an agent's session runs (S2-39): the agent never updates the ostrom of its own hooks. */
+private fun refuseIn(sessions: AgentSessions) {
+    sessions.running()?.let {
+        stop(
+            ExitCode.REFUSED,
+            "✗ ostrom does not update itself inside an agent's session ($it). Nothing was changed. Run ostrom " +
+                "update in your own terminal once the session has ended.",
+        )
+    }
+}
+
+/** The text of [path], or null when it cannot be read. */
+private fun FileSystem.textOf(path: Path): String? = try {
+    read(path) { readUtf8() }
+} catch (_: IOException) {
+    null
+}
+
 /** The signed release manifest's entry for one target, and the version floor the manifest publishes, if any. */
 private class Asset(val version: String, val url: String, val sha256: String, val size: Long, val floor: String?)
 
@@ -83,7 +101,7 @@ class SelfUpdate(
 ) {
     /** Runs [request]; the exit code. */
     suspend fun update(request: UpdateRequest): Int = try {
-        if (!request.checkOnly) refuseInASession()
+        if (!request.checkOnly) refuseIn(sessions)
         val asset = manifest(request)
         when {
             request.version == null && !newer(asset.version, request.current) ->
@@ -108,14 +126,14 @@ class SelfUpdate(
      * is checked against the latest release's signed floor first, so the release must be reachable.
      */
     suspend fun rollback(request: UpdateRequest): Int = try {
-        refuseInASession()
+        refuseIn(sessions)
         val binary = request.executable?.toPath()
         if (binary == null || !fileSystem.exists(previousOf(binary))) {
             stop(ExitCode.NOT_FOUND, "No previous version of ostrom is kept on this device.")
         }
-        val kept = readText(keptVersionOf(binary))?.trim()
+        val recorded = fileSystem.textOf(keptVersionOf(binary))
             ?: stop(ExitCode.REFUSED, "✗ The version of the ostrom kept is not recorded. $UNCHANGED $REINSTALL")
-        floorRefusal(kept, request.current, manifest(request.copy(version = null)).floor)
+        floorRefusal(recorded.trim(), request.current, manifest(request.copy(version = null)).floor)
             ?.let { stop(ExitCode.REFUSED, it) }
         swapBack(binary, request.current)
     } catch (stopped: Stop) {
@@ -137,22 +155,6 @@ class SelfUpdate(
             say("ostrom could not swap its binary: ${failure.message}")
             ExitCode.CANNOT_WRITE.code
         }
-    }
-
-    private fun refuseInASession() {
-        sessions.running()?.let {
-            stop(
-                ExitCode.REFUSED,
-                "✗ ostrom does not update itself inside an agent's session ($it). Nothing was changed. Run ostrom " +
-                    "update in your own terminal once the session has ended.",
-            )
-        }
-    }
-
-    private fun readText(path: Path): String? = try {
-        fileSystem.read(path) { readUtf8() }
-    } catch (_: IOException) {
-        null
     }
 
     private suspend fun manifest(request: UpdateRequest): Asset {
@@ -181,8 +183,9 @@ class SelfUpdate(
     private fun unreadable(): Nothing = stop(ExitCode.FAILED, "✗ The release manifest cannot be read. $UNCHANGED")
 
     private suspend fun install(request: UpdateRequest, asset: Asset): Int {
-        val binary = request.executable?.toPath()
+        val executable = request.executable
             ?: stop(ExitCode.CANNOT_WRITE, "ostrom cannot find its own binary. Reinstall it with the installer.")
+        val binary = executable.toPath()
         managerOf(binary)?.let { stop(ExitCode.USAGE, "This ostrom is managed by $it.") }
         val archive = fetch(asset.url, MAX_BINARY_BYTES, request)
         if (archive.size.toLong() != asset.size || sha256Hex(archive) != asset.sha256) {

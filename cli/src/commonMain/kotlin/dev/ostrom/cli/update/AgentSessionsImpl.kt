@@ -25,7 +25,7 @@ class AgentSessionsImpl(
     private val http: LoopbackHttp,
 ) : AgentSessions {
     override fun running(): String? {
-        val variable = VARIABLES.firstOrNull { !environment[it].isNullOrEmpty() }
+        val variable = SESSION_VARIABLES.firstOrNull { !environment[it].isNullOrEmpty() }
         return if (variable != null) "$variable is set" else liveRelay()
     }
 
@@ -45,16 +45,17 @@ class AgentSessionsImpl(
         } catch (_: IOException) {
             null
         }
-        val url = parseObject(settings)?.text("OSTROM_RELAY_URL")
-        val port = url?.let { PORT.matchEntire(it.trimEnd('/')) }?.groupValues?.get(1)?.toInt()
-        return port != null && http.exchange(port, LoopbackRequest("GET", "/"), PROBE_MILLIS).isSuccess
-    }
-
-    private companion object {
-        val VARIABLES = listOf("OSTROM_LAUNCH_ID", "OSTROM_RELAY_URL", "OSTROM_SESSION_FILE", "OSTROM_RELAY_TOKEN")
-        const val RUN_PREFIX = "ostrom-run-"
-        const val SETTINGS = "session-env.json"
-        const val PROBE_MILLIS = 500
-        val PORT = Regex("http://127\\.0\\.0\\.1:(\\d{1,5})")
+        val url = parseObject(settings)?.text("OSTROM_RELAY_URL").orEmpty()
+        val match = LOOPBACK_URL.matchEntire(url.trimEnd('/'))
+        return match != null && http.exchange(match.groupValues[1].toInt(), PROBE, PROBE_MILLIS).isSuccess
     }
 }
+
+/** The variables `ostrom <agent>` gives the agent: any of them set is a session. */
+private val SESSION_VARIABLES =
+    listOf("OSTROM_LAUNCH_ID", "OSTROM_RELAY_URL", "OSTROM_SESSION_FILE", "OSTROM_RELAY_TOKEN")
+private const val RUN_PREFIX = "ostrom-run-"
+private const val SETTINGS = "session-env.json"
+private const val PROBE_MILLIS = 500
+private val PROBE = LoopbackRequest("GET", "/")
+private val LOOPBACK_URL = Regex("http://127\\.0\\.0\\.1:(\\d{1,5})")
