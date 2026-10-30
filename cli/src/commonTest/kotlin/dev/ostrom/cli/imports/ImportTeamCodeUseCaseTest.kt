@@ -88,11 +88,22 @@ class ImportTeamCodeUseCaseTest {
     @Test
     fun aMemberWithoutEmailNorUsernameMatchesNoOne() = runTest {
         // never the Ostrom member without a login: null is not a name
-        val nameless = batch("members", listOf("id", "username", "email"), listOf("m3", null, null))
+        val nameless = batch(
+            "members",
+            listOf("id", "username", "email"),
+            listOf("m3", null, null),
+            listOf("m4", "", null),
+            listOf("m5", "ann", null),
+            listOf(null, "bo", null),
+        )
         val tables = CaptureResult.Exited(0, nameless)
-        replies["GET /api/v1/members"] = ServerReply(200, """{"items":[{"id":"u-5"}]}""")
+        // an Ostrom member without id is no one to map to; a last page may say "next" with nothing in it
+        val ostrom = """{"items":[{"id":"u-5"},{"login":"ann"},{"id":"u-8","login":"bo"}],"next":""}"""
+        replies["GET /api/v1/members"] = ServerReply(200, ostrom)
         assertEquals(0, import(mysql = FakeMysql(FULL_SCHEMA, tables)))
-        assertEquals(parseObject("{}"), parseObject(calls.last().body)?.child("memberMap"))
+        // a TeamCode row without id (never in a real table) is kept under no id rather than dropped in silence
+        assertEquals(parseObject("""{"":"u-8"}"""), parseObject(calls.last().body)?.child("memberMap"))
+        assertEquals(1, calls.count { it.path.startsWith("/api/v1/members") })
     }
 
     @Test

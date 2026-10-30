@@ -65,13 +65,11 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
         "(${commandOf(variant, configOf(variant)).ifEmpty { "none" }}) is not one Ostrom installs a package with " +
         "(${LAUNCHERS.keys.joinToString()}), or it names no package."
 
-    private fun unreadablePolicy(variant: Row) = "MCP server ${variant["target"]} (${variant["name"]}): its tool " +
-        "policy is not a list of tool names in TeamCode."
-
     private fun configOf(variant: Row) = parseObject(variant["config"]) ?: JsonObject(emptyMap())
 
     private fun server(variant: Row, policy: Row?, tools: List<String>): Map<String, Any?>? {
-        val id = variant["id"].orEmpty()
+        // id, variant_id and member_id are required columns: a row read always has them
+        val id = variant["id"]
         val config = configOf(variant)
         val stdio = (variant["transport"] ?: config.text("transport")).equals("stdio", ignoreCase = true)
         val launch = if (stdio) launchOf(variant, config) ?: return null else null
@@ -117,8 +115,8 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
     }
 
     private fun assignment(row: Row): Map<String, Any?> {
-        val variant = row["variant_id"].orEmpty()
-        val member = row["member_id"].orEmpty()
+        val variant = row["variant_id"]
+        val member = row["member_id"]
         val context = "variant:$team:$variant:$member"
         return mapOf(
             "memberId" to member,
@@ -145,14 +143,13 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
             credential?.text("refreshToken"),
         )
         if (expires == null || fields.any { it.isNullOrEmpty() }) return null
-        val (provider, accountId, access, refresh) = fields
         return mapOf(
-            "provider" to provider,
-            "providerAccountId" to accountId,
+            "provider" to fields[0],
+            "providerAccountId" to fields[1],
             "label" to label,
             "email" to row["email"],
-            "accessToken" to access,
-            "refreshToken" to refresh,
+            "accessToken" to fields[2],
+            "refreshToken" to fields.last(),
             "expiresAt" to Instant.fromEpochMilliseconds(expires).toString(),
             "disabled" to (row["disabled"] == "1"),
         )
@@ -163,6 +160,9 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
 
     /** The registries and lists TeamCode stores. */
     companion object {
+        private fun unreadablePolicy(variant: Row) = "MCP server ${variant["target"]} (${variant["name"]}): its " +
+            "tool policy is not a list of tool names in TeamCode."
+
         private const val INCOMPLETE = "no provider, account id, tokens or expiry in TeamCode: it could never sign in."
 
         /** The registry an MCP host installs a stdio server's package from, by the command TeamCode runs. */

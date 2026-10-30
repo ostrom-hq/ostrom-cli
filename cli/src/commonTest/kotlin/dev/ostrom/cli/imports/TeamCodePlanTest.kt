@@ -102,15 +102,17 @@ class TeamCodePlanTest {
         val policies = listOf(
             mapOf("variant_id" to "d", "mode" to "allow", "tools" to """["x","y"]"""),
             mapOf("variant_id" to "f", "mode" to "deny", "tools" to """["x",1,{"y":2}]"""),
+            mapOf("variant_id" to "g", "mode" to "deny", "tools" to """{"x":true}"""),
         )
-        val all = variants + unreadable
+        val all = variants + unreadable + mapOf("id" to "g", "target" to "db", "name" to "w", "config" to "{}")
         val (body, skipped) = plan(TeamCodeTables(emptyList(), all, emptyList(), policies, emptyList()))
         val servers = body.items("mcpServers")
         assertEquals(listOf("\"d\""), servers.map { it["id"].toString() })
         assertEquals("[\"x\",\"y\"]", servers.single()["tools"].toString())
-        assertEquals(4, skipped.size)
+        assertEquals(5, skipped.size)
         assertTrue(skipped.first().contains("its command (npx)"), skipped.first())
-        assertEquals("MCP server db (z): its tool policy is not a list of tool names in TeamCode.", skipped.last())
+        assertEquals("MCP server db (z): its tool policy is not a list of tool names in TeamCode.", skipped[3])
+        assertEquals("MCP server db (w): its tool policy is not a list of tool names in TeamCode.", skipped.last())
         val none = mapOf("id" to "e", "target" to "t", "name" to "n", "config" to """{"transport":"stdio"}""")
         val nothing = plan(TeamCodeTables(emptyList(), listOf(none), emptyList(), emptyList(), emptyList())).skipped
         assertTrue(nothing.single().contains("its command (none)"), nothing.single())
@@ -145,14 +147,16 @@ class TeamCodePlanTest {
         val bare =
             mapOf("id" to "a1", "display_name" to "Half", "provider" to "anthropic", "credential_envelope" to null)
         val empty = bare + ("display_name" to "Empty") + ("credential_envelope" to "")
+        val nameless = bare - "display_name"
         // a member no one in Ostrom stands for: their secret is not opened, even with another key
         val other = assertNotNull(TeamCodeKey.of("AQECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="))
         val nobody = mapOf("member_id" to "m9", "variant_id" to "v2", "member_secret" to Sealed.MEMBER)
-        val tables = TeamCodeTables(emptyList(), emptyList(), listOf(nobody), emptyList(), listOf(bare, empty))
+        val accounts = listOf(bare, empty, nameless)
+        val tables = TeamCodeTables(emptyList(), emptyList(), listOf(nobody), emptyList(), accounts)
         val (body, skipped) = TeamCodePlan(other, "default").request(tables, mapOf("m1" to "u-1"))
         assertEquals(emptyList(), body.items("assignments"))
         val why = "no provider, account id, tokens or expiry in TeamCode: it could never sign in."
-        assertEquals(listOf("account Half: $why", "account Empty: $why"), skipped)
+        assertEquals(listOf("account Half: $why", "account Empty: $why", "account : $why"), skipped)
     }
 
     @Test
