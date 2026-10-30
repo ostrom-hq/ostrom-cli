@@ -604,17 +604,39 @@ class OstromCliTest {
     fun aServerIsReachedOverHttpsOrOnThisMachineOnly() {
         // 09:45: the one-time code and the token never travel in clear
         val home = mapOf("HOME" to "/home/maya")
-        for (url in listOf("http://ostrom.example", "http://localhost.evil.example", "ftp://ostrom.example")) {
+        for (url in listOf("http://ostrom.example", "http://localhost.evil.example", "http://localhost@evil.example")) {
+            console.err.clear()
             assertEquals(64, cli(environment = home, api = serverOf(deviceFlow)).run(arrayOf("login", "--server", url)))
-            assertTrue(console.err.contains("ostrom: $url is not an HTTPS address"), console.err.toString())
+            val said = "ostrom: $url is not an HTTPS address: the sign-in code and the token would travel in clear."
+            assertTrue(console.err.startsWith(said), console.err.toString())
         }
-        val clear = home + ("OSTROM_URL" to "http://ostrom.example")
-        assertEquals(64, cli(environment = clear).run(arrayOf("logout")))
+        // a password in the address is never printed
+        console.err.clear()
+        val secret = arrayOf("login", "--server", "http://deploy:s3cret@ostrom.example")
+        assertEquals(64, cli(environment = home).run(secret))
+        assertTrue(console.err.startsWith("ostrom: http://ostrom.example is not"), console.err.toString())
         assertTrue(requests.isEmpty(), "nothing was sent")
-        for (url in listOf("http://localhost:8080/", "http://127.0.0.1:4000", "http://[::1]:9", "http://localhost")) {
+        // the scheme in any case, as `ostrom config set server` reads it
+        val local = listOf("HTTPS://ostrom.example", "http://localhost:8080/", "HTTP://127.0.0.1:4000", "http://[::1]:9")
+        for (url in local) {
             assertEquals(0, cli(environment = home, api = serverOf(deviceFlow)).run(arrayOf("login", "--server", url)))
             assertEquals(url.trimEnd('/'), requests.last().first)
         }
+    }
+
+    @Test
+    fun logoutFromAServerInClearForgetsTheTokenButDoesNotTellIt() {
+        val clear = mapOf("HOME" to "/home/maya", "OSTROM_URL" to "http://ostrom.example")
+        signIn("/home/maya/.config/ostrom", server = "http://ostrom.example")
+        assertEquals(64, cli(environment = clear, api = serverOf(emptyMap())).run(arrayOf("logout")))
+        assertTrue(requests.isEmpty(), "the server is not told")
+        assertTrue(secretsKept.isEmpty(), "the token is forgotten")
+        assertTrue(console.err.startsWith("ostrom: http://ostrom.example is not an HTTPS address: the token"))
+        // nor does an agent start with it
+        console.err.clear()
+        signIn("/home/maya/.config/ostrom", server = "http://ostrom.example")
+        assertEquals(64, cli(environment = clear).run(arrayOf("claude")))
+        assertTrue(console.err.toString().contains("the device's token would travel in clear"), console.err.toString())
     }
 
     @Test

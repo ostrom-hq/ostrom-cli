@@ -23,24 +23,33 @@ import dev.ostrom.cli.platform.FileWriteException
 import kotlinx.coroutines.runBlocking
 import okio.IOException
 
-/**
- * The server of an account command: `--server`, else `OSTROM_URL`, else the one of the last login, else Ostrom's.
- * Only over HTTPS, or `http://` to this machine (a server run for development): the one-time code and the token
- * never travel in clear (exit 64 otherwise).
- */
+/** The server of an account command: `--server`, else `OSTROM_URL`, else the one of the last login, else Ostrom's. */
 private fun CliDependencies.serverOf(option: String?, directory: String): String {
     val saved = { ConfigStoreImpl(files, configFile(directory)).get(ConfigKey.SERVER) }
-    val url = (option ?: environment["OSTROM_URL"] ?: saved() ?: DEFAULT_SERVER).trimEnd('/')
-    if (!url.startsWith("https://") && LOCAL_HTTP.matchEntire(url) == null) {
-        val message = "ostrom: $url is not an HTTPS address: the sign-in code and the token would travel in clear. " +
+    return (option ?: environment["OSTROM_URL"] ?: saved() ?: DEFAULT_SERVER).trimEnd('/')
+}
+
+/**
+ * True when [url] would carry the device's codes and token in clear: not `https://`, nor `http://` to this machine (a
+ * server run for development). The scheme is read in any case, like `ostrom config set server` reads it.
+ */
+internal fun inClear(url: String): Boolean = !HTTPS.matches(url) && !LOCAL_HTTP.matches(url)
+
+/** Stops a command whose server is [inClear] (exit 64), naming it without the user and password it may hold. */
+internal fun refuseInClear(url: String, what: String) {
+    if (inClear(url)) {
+        val shown = url.replace(USER_INFO, "//")
+        val message = "ostrom: $shown is not an HTTPS address: $what would travel in clear. " +
             "Use https:// (http:// only for localhost, 127.0.0.1 or [::1])"
         throw PrintMessage(message, ExitCode.USAGE.code, true)
     }
-    return url
 }
 
+private val HTTPS = Regex("https://.*", RegexOption.IGNORE_CASE)
+
 /** `http://` to this machine, with or without a port and a path. */
-private val LOCAL_HTTP = Regex("""http://(localhost|127\.0\.0\.1|\[::1])(:\d{1,5})?(/.*)?""")
+private val LOCAL_HTTP = Regex("""http://(localhost|127\.0\.0\.1|\[::1])(:\d{1,5})?(/.*)?""", RegexOption.IGNORE_CASE)
+private val USER_INFO = Regex("//[^/@]*@")
 
 /**
  * Refuses an account command inside an agent's session: the agent would sign the developer out, or point the device
@@ -67,6 +76,7 @@ internal class LoginCommand(private val dependencies: CliDependencies) : CliktCo
         dependencies.outsideSessions("login")
         val directory = dependencies.directory()
         val serverUrl = dependencies.serverOf(server, directory)
+        refuseInClear(serverUrl, "the sign-in code and the token")
         val login = DeviceLogin(
             ServerJson(ApiServerTransport(dependencies.api(serverUrl))),
             dependencies.environment["OSTROM_GITHUB_WEB_URL"]?.trimEnd('/') ?: "https://github.com",
@@ -112,6 +122,11 @@ internal class LogoutCommand(private val dependencies: CliDependencies) : CliktC
         val store: CredentialStore = dependencies.credentials(directory)
         // the saved entry, never OSTROM_TOKEN: a CI token in the environment is not this device's session
         val credentials = store.saved(serverUrl)
+        if (inClear(serverUrl)) {
+            // signed out here all the same: the token is forgotten, only the server is not told
+            store.forget(serverUrl)
+            refuseInClear(serverUrl, "the token")
+        }
         if (credentials == null) {
             // S2-32: a token left only in the other store (the encrypted file of an SSH session) is forgotten too
             store.forget(serverUrl)
