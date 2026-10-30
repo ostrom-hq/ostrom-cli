@@ -94,13 +94,21 @@ class OstromCliTest {
         }
     }
 
-    /** A secret store in [backend] that keeps nothing (doctor only reads where it is). */
+    /** What the test's secret store keeps, by name. */
+    private val secretsKept = mutableMapOf<String, String>()
+
+    /** A secret store in [backend], in memory ([secretsKept]). */
     private fun storeIn(backend: SecretBackend): () -> SecretStore = {
         object : SecretStore {
             override val backend = backend
-            override fun read(name: String): String? = null
-            override fun write(name: String, secret: String) = Unit
-            override fun delete(name: String) = Unit
+            override fun read(name: String): String? = secretsKept[name]
+            override fun write(name: String, secret: String) {
+                secretsKept[name] = secret
+            }
+
+            override fun delete(name: String) {
+                secretsKept -= name
+            }
         }
     }
 
@@ -130,7 +138,7 @@ class OstromCliTest {
             mcpBridge = { target -> object : McpServer { override fun serve() = 5.also { bridged += target } } },
             credentials = { directory ->
                 val path = (directory.toPath() / "credentials.json").toString()
-                FileCredentialStore(LaunchFilesImpl(fileSystem) { _, _ -> }, path) { environment[it] }
+                FileCredentialStore(LaunchFilesImpl(fileSystem) { _, _ -> }, path, secrets) { environment[it] }
             },
             workingDirectory = { "/work/acme" },
             executable = executable,
@@ -571,7 +579,8 @@ class OstromCliTest {
         assertOut("Next: cd into a repository and run ostrom claude\n")
         assertEquals(listOf(1_000L), waits)
         val credentials = fileSystem.read("/home/maya/.config/ostrom/credentials.json".toPath()) { readUtf8() }
-        assertTrue("ost_new" in credentials && "maya-k" in credentials, credentials)
+        assertTrue("ost_new" !in credentials && "maya-k" in credentials, credentials)
+        assertEquals(mapOf("https://api.ostrom.run" to "ost_new"), secretsKept, "the token in the secret store")
         val config = fileSystem.read("/home/maya/.config/ostrom/config.toml".toPath()) { readUtf8() }
         assertTrue("https://api.ostrom.run" in config, config)
         // the next login goes to the same server, and the option wins over both
@@ -617,6 +626,14 @@ class OstromCliTest {
         assertTrue("ost_1" !in credentials, credentials)
         assertEquals(0, cli(environment = withServer, api = serverOf(logout)).run(arrayOf("logout")))
         assertOut("Not signed in. Nothing to do.\n")
+    }
+
+    @Test
+    fun aSecretStoreThatDoesNotAnswerStopsTheCommandWithItsReason() {
+        signIn("/home/maya/.config/ostrom")
+        val locked: () -> SecretStore = { throw SecretStoreException("the Keychain is locked") }
+        assertEquals(69, cli(environment = withServer, secrets = locked).run(arrayOf("logout")))
+        assertEquals("ostrom: the secret store did not answer: the Keychain is locked\n", console.err.toString())
     }
 
     @Test

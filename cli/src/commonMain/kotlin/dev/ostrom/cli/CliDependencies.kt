@@ -109,17 +109,19 @@ class CliDependencies(
             val finder = ExecutableFinderImpl(environment)
             val api = { url: String -> OstromApiImpl(url, USER_AGENT, trace = trace) }
             val launchFiles = LaunchFilesImpl()
+            val files = FileStoreImpl()
+            val secrets = { systemSecretStore(environment, files) }
             return CliDependencies(
                 console = console,
                 environment = environment,
-                files = FileStoreImpl(),
+                files = files,
                 finder = finder,
                 api = api,
                 hookRunner = hookRunner(console, environment),
                 mcpServer = { McpServerImpl(McpDispatcher(BuildInfo.VERSION), console) },
                 mcpBridge = { McpBridge(it, LoopbackHttpImpl(), console) },
                 credentials = { directory ->
-                    FileCredentialStore(launchFiles, join(directory, "credentials.json")) { environment[it] }
+                    FileCredentialStore(launchFiles, join(directory, "credentials.json"), secrets) { environment[it] }
                 },
                 workingDirectory = { FileSystem.SYSTEM.canonicalize(".".toPath()).toString() },
                 executable = currentExecutable(),
@@ -137,6 +139,7 @@ class CliDependencies(
                 ),
                 sleep = { delay(it) },
                 postHogKey = BuildInfo.POSTHOG_KEY,
+                secrets = secrets,
                 sendStatistics = { url, body -> statistics.send(url, body) },
             )
         }

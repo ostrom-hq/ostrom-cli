@@ -102,6 +102,8 @@ class OstromApiTest {
         // A client without a connection of its own (a fake) closes as a no-op.
         object : OstromApi {
             override suspend fun get(path: String) = ServerResponse(200, "", 0)
+
+            override suspend fun send(request: ServerRequest) = ServerResponse(200, "", 0)
         }.close()
     }
 
