@@ -37,7 +37,8 @@ class LaunchWiringTest {
 
         override suspend fun send(request: ServerRequest): ServerResponse {
             sent += request
-            if (request.path == "/down") throw ServerUnreachableException("u", IllegalStateException("connection refused"))
+            val refused = IllegalStateException("connection refused")
+            if (request.path == "/down") throw ServerUnreachableException("u", refused)
             return ServerResponse(201, """{"ok":true}""", 3)
         }
     }
