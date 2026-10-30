@@ -25,7 +25,8 @@ internal class OstromHelpFormatter(context: Context) : MordantHelpFormatter(cont
             val help = super.formatHelp(error, prolog, epilog, parameters, programName).trimEnd()
             return "$help\n\nRun '${command.joinToString(" ")} --help' for usage.\n"
         }
-        val guide = guideOf(command.drop(1).joinToString(" "))?.render()
+        // the guides are those of the ostrom tree: another command (a test's) has none
+        val guide = if (command.first() == ROOT) guideOf(command.drop(1).joinToString(" "))?.render() else null
         val end = listOf(epilog, guide.orEmpty()).filter { it.isNotBlank() }.joinToString("\n\n")
         return super.formatHelp(null, prolog, end, parameters, programName)
     }
@@ -33,3 +34,6 @@ internal class OstromHelpFormatter(context: Context) : MordantHelpFormatter(cont
     /** The end keeps its lines: one example per line, aligned. */
     override fun renderEpilog(epilog: String) = Text(epilog, whitespace = Whitespace.PRE_WRAP)
 }
+
+/** The name of the root of the tree the guides are written for. */
+private const val ROOT = "ostrom"
