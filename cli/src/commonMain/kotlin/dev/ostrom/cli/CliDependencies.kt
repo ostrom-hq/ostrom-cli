@@ -30,6 +30,7 @@ import dev.ostrom.cli.platform.ExecutableFinderImpl
 import dev.ostrom.cli.platform.FileStore
 import dev.ostrom.cli.platform.FileStoreImpl
 import dev.ostrom.cli.platform.LoopbackHttpImpl
+import dev.ostrom.cli.platform.ProcessCapture
 import dev.ostrom.cli.platform.ProcessCaptureImpl
 import dev.ostrom.cli.platform.ProcessLauncherImpl
 import dev.ostrom.cli.platform.SecretStore
@@ -57,6 +58,7 @@ import okio.Path.Companion.toPath
  * @property temporaryDirectory Where a launch makes its private folder.
  * @property agents Runs `ostrom <agent>`.
  * @property sleep Waits the given milliseconds (the device flow of login; virtual in tests).
+ * @property capture Runs short child processes and reads their output (`mysql` for `ostrom import teamcode`).
  * @property readLine Reads a line the developer typed, or null at the end of the input.
  * @property openUrl Opens a page in the developer's browser; false when it could not.
  * @property secrets Opens the secret store of this device (system store, or encrypted file). Each call chooses and
@@ -81,6 +83,7 @@ class CliDependencies(
     val temporaryDirectory: String,
     val agents: AgentRunner,
     val sleep: suspend (Long) -> Unit,
+    val capture: ProcessCapture,
     val readLine: () -> String?,
     val openUrl: (String) -> Boolean,
     val postHogKey: String,
@@ -143,6 +146,7 @@ class CliDependencies(
                     userAgent = USER_AGENT,
                 ),
                 sleep = { delay(it) },
+                capture = ProcessCaptureImpl(),
                 readLine = ::readlnOrNull,
                 openUrl = BrowserOpener(ProcessLauncherImpl(), environment.operatingSystem)::open,
                 postHogKey = BuildInfo.POSTHOG_KEY,

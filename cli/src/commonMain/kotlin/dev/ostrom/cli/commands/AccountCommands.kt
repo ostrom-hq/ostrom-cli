@@ -29,10 +29,33 @@ internal fun CliDependencies.serverOf(option: String?, directory: String): Strin
         ?: DEFAULT_SERVER).trimEnd('/')
 
 /**
+ * True when [url] would carry the device's codes and token in clear: not `https://`, nor `http://` to this machine (a
+ * server run for development). The scheme is read in any case, like `ostrom config set server` reads it.
+ */
+internal fun inClear(url: String): Boolean = !HTTPS.matches(url) && !LOCAL_HTTP.matches(url)
+
+/** Stops a command whose server is [inClear] (exit 64), naming it without the user and password it may hold. */
+internal fun refuseInClear(url: String, what: String) {
+    if (inClear(url)) {
+        val shown = url.replace(USER_INFO, "//")
+        val message = "ostrom: $shown is not an HTTPS address: $what would travel in clear. " +
+            "Use https:// (http:// only for localhost, 127.0.0.1 or [::1])"
+        throw PrintMessage(message, ExitCode.USAGE.code, true)
+    }
+}
+
+private val HTTPS = Regex("https://.*", RegexOption.IGNORE_CASE)
+
+/** `http://` to this machine, with or without a port and a path. */
+private val LOCAL_HTTP = Regex("""http://(localhost|127\.0\.0\.1|\[::1])(:\d{1,5})?(/.*)?""", RegexOption.IGNORE_CASE)
+// up to the last @ before the path: a password may hold one
+private val USER_INFO = Regex("//[^/]*@")
+
+/**
  * Refuses an account command inside an agent's session: the agent would sign the developer out, or point the device
  * at another server (security audit S2-32).
  */
-private fun CliDependencies.outsideSessions(command: String) {
+internal fun CliDependencies.outsideSessions(command: String) {
     if (!environment[LaunchVariables.LAUNCH_ID].isNullOrEmpty()) {
         val message = "ostrom: ostrom $command does not run inside an agent's session: run it in your own terminal"
         throw PrintMessage(message, ExitCode.USAGE.code, true)
@@ -53,9 +76,14 @@ internal class LoginCommand(private val dependencies: CliDependencies) : CliktCo
         dependencies.outsideSessions("login")
         val directory = dependencies.directory()
         val serverUrl = dependencies.serverOf(server, directory)
+        refuseInClear(serverUrl, "the sign-in code and the token")
+        // the console the server sends to: OSTROM_CONSOLE_URL, else the server's with app. for api.
+        val console = dependencies.environment["OSTROM_CONSOLE_URL"]
+            ?: serverUrl.replaceFirst("://api.", "://app.", ignoreCase = true)
         val login = DeviceLogin(
             ServerJson(ApiServerTransport(dependencies.api(serverUrl))),
             dependencies.environment["OSTROM_GITHUB_WEB_URL"]?.trimEnd('/') ?: "https://github.com",
+            console,
             dependencies.sleep,
         ) { dependencies.console.err("$it\n") }
         when (val outcome = runBlocking { login.signIn(serverUrl) }) {
@@ -98,6 +126,11 @@ internal class LogoutCommand(private val dependencies: CliDependencies) : CliktC
         val store: CredentialStore = dependencies.credentials(directory)
         // the saved entry, never OSTROM_TOKEN: a CI token in the environment is not this device's session
         val credentials = store.saved(serverUrl)
+        if (inClear(serverUrl)) {
+            // signed out here all the same: the token is forgotten, only the server is not told
+            store.forget(serverUrl)
+            refuseInClear(serverUrl, "the token")
+        }
         if (credentials == null) {
             // S2-32: a token left only in the other store (the encrypted file of an SSH session) is forgotten too
             store.forget(serverUrl)

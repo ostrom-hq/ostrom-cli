@@ -16,6 +16,18 @@ expect fun sha256Hex(bytes: ByteArray): String
  */
 expect fun ed25519Verify(publicKeyPem: String, data: ByteArray, signature: ByteArray): Boolean
 
+/**
+ * Opens an AES-256-GCM box: the 12-byte nonce, then the ciphertext and its 16-byte tag, as TeamCode seals its
+ * credentials (`CredentialCipher`), read by `ostrom import teamcode`.
+ *
+ * @param key The 32-byte key.
+ * @param sealed Nonce ‖ ciphertext ‖ tag.
+ * @param associatedData The context the box is bound to.
+ *
+ * @return The plaintext, or null when the key, the context or the bytes do not match.
+ */
+expect fun aesGcmOpen(key: ByteArray, sealed: ByteArray, associatedData: ByteArray): ByteArray?
+
 /** [bytes] in lower-case hex. */
 internal fun hex(bytes: ByteArray): String = buildString(bytes.size * 2) {
     for (byte in bytes) {
