@@ -25,8 +25,9 @@ interface CredentialStore {
 
 /**
  * [CredentialStore] in `<config>/credentials.json` (0600), one entry per server. `OSTROM_TOKEN` (with `OSTROM_DEV`)
- * wins when set, for CI; the launcher removes it from the agent's environment. The system keychain replaces the file
- * when the socle's vault lands (QUESTIONS.md).
+ * wins when set, for CI; the launcher removes it from the agent's environment, and inside an agent's session it is
+ * never read (security audit S2-32: a token the agent put there would speak for the developer). The system keychain
+ * replaces the file when the socle's vault lands (QUESTIONS.md).
  */
 class FileCredentialStore(
     private val files: LaunchFiles,
@@ -34,7 +35,8 @@ class FileCredentialStore(
     private val variable: (String) -> String?,
 ) : CredentialStore {
     override fun load(server: String): Credentials? {
-        val token = variable(LaunchVariables.DEVICE_TOKEN)
+        val inSession = variable(LaunchVariables.LAUNCH_ID) != null
+        val token = if (inSession) null else variable(LaunchVariables.DEVICE_TOKEN)
         val login = variable(LaunchVariables.DEV) ?: UNKNOWN
         return if (token.isNullOrEmpty()) saved(server) else Credentials(token, login)
     }

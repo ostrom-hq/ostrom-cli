@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # Builds the linuxX64 release binary and leaves it at dist/ostrom (contract of the end-to-end bench, ostrom-e2e).
 # The binary honours OSTROM_URL, OSTROM_HOME and OSTROM_HOOK_DIALECT today; OSTROM_TOKEN and
 # OSTROM_CLAUDE_BIN / OSTROM_CODEX_BIN come with login and the launcher.

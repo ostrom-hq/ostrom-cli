@@ -12,16 +12,9 @@ class RelayTargetTest {
     fun everyHookRouteOfTheAllowListIsAHook() {
         val posts = listOf(
             "/api/v1/sessions",
-            "/api/v1/sessions/s-1/end",
-            "/api/v1/sessions/s-1/alive",
             "/api/v1/sessions/s-1/reopen",
             "/api/v1/sessions/s-1/seen",
-            "/api/v1/sessions/s-1/workflow-receipt",
             "/api/v1/gates",
-            "/api/v1/gates/g_1/consume",
-            "/api/v1/gates/g_1/reserve",
-            "/api/v1/gates/g_1/release",
-            "/api/v1/checks",
             "/api/v1/notifications",
         )
         for (path in posts) {
@@ -36,6 +29,14 @@ class RelayTargetTest {
         val refused = listOf(
             HttpMethod.Post to "/api/v1/launches",
             HttpMethod.Post to "/api/v1/sessions/s-1/delete",
+            // S2-25, S2-29: the agent can neither end its session nor use a yes up
+            HttpMethod.Post to "/api/v1/sessions/s-1/end",
+            HttpMethod.Post to "/api/v1/sessions/s-1/alive",
+            HttpMethod.Post to "/api/v1/sessions/s-1/workflow-receipt",
+            HttpMethod.Post to "/api/v1/gates/g_1/consume",
+            HttpMethod.Post to "/api/v1/gates/g_1/reserve",
+            HttpMethod.Post to "/api/v1/gates/g_1/release",
+            HttpMethod.Post to "/api/v1/checks",
             HttpMethod.Post to "/api/v1/gates/catalog",
             HttpMethod.Post to "/api/v1/gates/a.b/consume",
             HttpMethod.Post to "/api/v1/sessions/",
@@ -49,6 +50,14 @@ class RelayTargetTest {
         for ((method, path) in refused) {
             assertEquals(RelayTarget.NotFound, resolveTarget(method, path, config), "${method.value} $path")
         }
+    }
+
+    @Test
+    fun thePackagesCatalogueIsAnsweredByTheRelayItself() {
+        val packaged = relayConfig(gateCatalog = """{"actions":[]}""")
+        val catalog = resolveTarget(HttpMethod.Get, "/api/v1/gates/catalog", packaged)
+        assertEquals(RelayTarget.Catalog("""{"actions":[]}"""), catalog)
+        assertEquals(RelayTarget.NotFound, resolveTarget(HttpMethod.Post, "/api/v1/gates/catalog", packaged))
     }
 
     @Test

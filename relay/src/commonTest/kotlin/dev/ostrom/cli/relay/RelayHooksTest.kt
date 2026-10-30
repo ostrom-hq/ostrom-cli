@@ -32,19 +32,12 @@ class RelayHooksTest {
         val ostrom = FakeOstrom { respond("""{"ok":true}""", HttpStatusCode.Created, json) }
         val routes = listOf(
             HttpMethod.Post to "/api/v1/sessions",
-            HttpMethod.Post to "/api/v1/sessions/s-1/end",
-            HttpMethod.Post to "/api/v1/sessions/s-1/alive",
             HttpMethod.Post to "/api/v1/sessions/s-1/reopen",
             HttpMethod.Post to "/api/v1/sessions/s-1/seen",
-            HttpMethod.Post to "/api/v1/sessions/s-1/workflow-receipt",
             HttpMethod.Post to "/api/v1/gates",
             HttpMethod.Get to "/api/v1/gates/catalog?repo=octo&ref=main",
             HttpMethod.Get to "/api/v1/gates/g-1?wait=30",
             HttpMethod.Get to "/api/v1/gates/g-1",
-            HttpMethod.Post to "/api/v1/gates/g-1/consume",
-            HttpMethod.Post to "/api/v1/gates/g-1/reserve",
-            HttpMethod.Post to "/api/v1/gates/g-1/release",
-            HttpMethod.Post to "/api/v1/checks",
             HttpMethod.Post to "/api/v1/notifications",
         )
         relayTest(ostrom) {
@@ -80,6 +73,21 @@ class RelayHooksTest {
     }
 
     @Test
+    fun thePackagesVerifiedCatalogueIsAnsweredFromMemoryNeverAskedOfOstrom() {
+        // S2-20: the agent cannot edit what the relay holds, and the call does not leave the machine
+        val ostrom = FakeOstrom { respond("""{"actions":[{"class":"served"}]}""", HttpStatusCode.OK, json) }
+        val catalogue = """{"actions":[{"class":"push","tools":["Bash"],"patterns":["git push"]}]}"""
+        relayTest(ostrom, relayConfig(gateCatalog = catalogue)) {
+            val response = client.get("/api/v1/gates/catalog?repo=octo") { bearerAuth(TOKEN) }
+            assertEquals(HttpStatusCode.OK, response.status)
+            assertEquals(catalogue, response.bodyAsText())
+            assertEquals(ContentType.Application.Json, response.contentType()?.withoutParameters())
+            assertEquals(HttpStatusCode.Unauthorized, client.get("/api/v1/gates/catalog").status)
+        }
+        assertTrue(ostrom.requests.isEmpty())
+    }
+
+    @Test
     fun anAnswerWithoutContentTypeComesBackAsJsonWithItsStatus() {
         val ostrom = FakeOstrom { respond("""{"error":{"type":"gate_not_found"}}""", HttpStatusCode.NotFound) }
         relayTest(ostrom) {
@@ -96,6 +104,8 @@ class RelayHooksTest {
         relayTest(ostrom) {
             val refused = listOf(
                 HttpMethod.Post to "/api/v1/launches",
+                HttpMethod.Post to "/api/v1/sessions/s-1/end",
+                HttpMethod.Post to "/api/v1/gates/g-1/consume",
                 HttpMethod.Get to "/api/v1/me",
                 HttpMethod.Put to "/api/v1/sessions",
                 HttpMethod.Post to "/v1/messages",
@@ -216,7 +226,7 @@ class RelayHooksTest {
     fun anEngineFailureIsUnreachableToo() {
         val ostrom = FakeOstrom { error("TLS handshake failed") }
         relayTest(ostrom) {
-            val response = client.post("/api/v1/checks") { bearerAuth(TOKEN) }
+            val response = client.post("/api/v1/notifications") { bearerAuth(TOKEN) }
             assertEquals(HttpStatusCode.BadGateway, response.status)
             assertTrue(response.bodyAsText().contains("Ostrom is unreachable (no connection)"))
         }

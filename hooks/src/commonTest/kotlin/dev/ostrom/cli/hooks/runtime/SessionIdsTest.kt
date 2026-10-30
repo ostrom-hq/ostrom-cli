@@ -50,21 +50,6 @@ class SessionIdsTest {
     }
 
     @Test
-    fun aYesIsUsedUpByTheActionItWasGivenFor() {
-        val files = FakeFiles()
-        val ids = SessionIds("/s/session", files)
-        assertEquals(null, ids.takeYes("git push"), "no yes yet")
-        ids.rememberYes("git push", "g1")
-        ids.rememberYes("git push up", "g2")
-        assertEquals("g1", ids.takeYes("git push"))
-        assertEquals(null, ids.takeYes("git push"), "one yes, one action")
-        assertEquals("g2", ids.takeYes("git push up"))
-        val none = SessionIds(null, files)
-        none.rememberYes("x", "g3")
-        assertEquals(null, none.takeYes("x"), "without a session file nothing is kept")
-    }
-
-    @Test
     fun aDamagedFileReadsAsEmpty() {
         val files = FakeFiles(mutableMapOf("/s/session.map.json" to "{", "/s/session.refused.json" to "[1]"))
         val ids = SessionIds("/s/session", files)

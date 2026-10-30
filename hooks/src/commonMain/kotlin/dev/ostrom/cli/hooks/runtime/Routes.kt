@@ -3,7 +3,8 @@ package dev.ostrom.cli.hooks.runtime
 
 /**
  * The routes of Ostrom the hooks call, all in one place (ostrom-core `api/openapi.yaml`, under `/api/v1`). The
- * launcher's relay forwards these and nothing else.
+ * launcher's relay forwards these and nothing else. A hook never uses up a yes nor ends a session (S2-25, S2-29):
+ * Ostrom uses the yes up when it sees the push land, and the launcher, not the agent, ends the session.
  */
 object Routes {
     /** `POST`: start a session or a segment (SessionStart). */
@@ -12,20 +13,11 @@ object Routes {
     /** `POST`: ask the gate of an action (PreToolUse). */
     const val GATES = "/api/v1/gates"
 
-    /** `POST`: a check of the workflow package ran. */
-    const val CHECKS = "/api/v1/checks"
-
     /** `POST`: a notification of the workflow package, sent by Ostrom. */
     const val NOTIFICATIONS = "/api/v1/notifications"
 
     /** `GET`: the gates of [repository] and the actions they cover. */
     fun catalog(repository: String) = "/api/v1/gates/catalog?repo=${Urls.encode(repository)}"
-
-    /** `POST`: a yes served the action it was given for. */
-    fun consume(gateId: String) = "/api/v1/gates/${Urls.encode(gateId)}/consume"
-
-    /** `POST`: end a session; the server signs its receipt. */
-    fun end(sessionId: String) = session(sessionId, "end")
 
     /** `POST`: open a new segment chained to a closed session. */
     fun reopen(sessionId: String) = session(sessionId, "reopen")

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.commands
 
 import com.github.ajalt.clikt.core.CliktCommand
