@@ -355,7 +355,7 @@ class ReceiptCommandsTest {
         pin()
         val routes = mapOf("GET /api/v1/receipts/W-e2e/bundle" to (200 to ReceiptBundleVector.BUNDLE))
         assertEquals(0, cli(routes).run(arrayOf("receipts", "pull", "W-e2e")))
-        assertEquals("✓ Saved W-e2e with its package and keys.\n", console.out.toString())
+        assertEquals("✓ Saved W-e2e with its package.\n", console.out.toString())
         assertEquals(bundle, Json.parseToJsonElement(read("$home/receipts/W-e2e.json")))
         assertEquals(0, cli(routes = null).run(arrayOf("verify", "W-e2e")))
     }
@@ -410,7 +410,7 @@ class ReceiptCommandsTest {
         )
         assertEquals(0, cli(mapOf(pulled, key)).run(arrayOf("receipts", "pull", "W-e2e")))
         assertEquals(
-            "✓ Saved W-e2e with its package and keys.\n" +
+            "✓ Saved W-e2e with its package.\n" +
                 "✓ Pinned Ostrom's signing key ${ReceiptBundleVector.KID} for https://ostrom.example (first use).\n",
             console.out.toString(),
         )
@@ -430,18 +430,26 @@ class ReceiptCommandsTest {
         pin()
         val kept = read("$home/server-keys.json")
         assertEquals(0, cli(mapOf(pulled)).run(arrayOf("receipts", "pull", "W-e2e")))
-        assertEquals("✓ Saved W-e2e with its package and keys.\n", console.out.toString())
+        assertEquals("✓ Saved W-e2e with its package.\n", console.out.toString())
         assertEquals(kept, read("$home/server-keys.json"), "the same key is not written again")
-        write("$home/server-keys.json", """{"https://ostrom.example":{"kid":"0000000000000000","publicKeyPem":"p"}}""")
-        val other = read("$home/server-keys.json")
-        assertEquals(0, cli(mapOf(pulled)).run(arrayOf("receipts", "pull", "W-e2e")))
-        assertEquals(
-            "ostrom: this receipt is signed with key ${ReceiptBundleVector.KID}, but this device pinned key " +
-                "0000000000000000 for https://ostrom.example. The pin is kept: a new Ostrom key is pinned again on " +
-                "purpose, by deleting its entry in $home/server-keys.json\n",
-            console.err.toString(),
+        val pinnedOther = mapOf(
+            """{"kid":"0000000000000000","publicKeyPem":"p"}""" to "key 0000000000000000",
+            """{"kid":"${ReceiptBundleVector.KID}"}""" to "key ${ReceiptBundleVector.KID}",
+            """{"publicKeyPem":"p"}""" to "no usable key",
         )
-        assertEquals(other, read("$home/server-keys.json"))
+        for ((entry, what) in pinnedOther) {
+            write("$home/server-keys.json", """{"https://ostrom.example":$entry}""")
+            val other = read("$home/server-keys.json")
+            console.err.clear()
+            assertEquals(2, cli(mapOf(pulled)).run(arrayOf("receipts", "pull", "W-e2e")), entry)
+            assertEquals(
+                "ostrom: this receipt is signed with key ${ReceiptBundleVector.KID}, but this device pinned $what " +
+                    "for https://ostrom.example. The pin is kept: a new Ostrom key is pinned again on purpose, by " +
+                    "deleting its entry in $home/server-keys.json\n",
+                console.err.toString(),
+            )
+            assertEquals(other, read("$home/server-keys.json"), "kept as it was")
+        }
         assertTrue(requests.none { it.path == "/api/v1/receipts/keys" }, "a pinned server is never asked its keys")
     }
 
@@ -450,15 +458,20 @@ class ReceiptCommandsTest {
         signIn()
         val missing = "ostrom: https://ostrom.example does not publish the key ${ReceiptBundleVector.KID} of this " +
             "receipt: `ostrom verify` needs it with --key FILE (GET /api/v1/receipts/keys of your Ostrom)\n"
+        val kid = ReceiptBundleVector.KID
+        // a real Ed25519 key, but not the one the receipt names: its kid is not $kid
+        val anotherKey = "-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEA${"A".repeat(43)}=\\n-----END PUBLIC KEY-----"
         val answers = listOf(
             published(),
-            published("""{"kid":"${ReceiptBundleVector.KID}"}"""),
+            published("""{"kid":"$kid"}"""),
+            published("""{"kid":"$kid","publicKeyPem":"not a PEM"}"""),
+            published("""{"kid":"$kid","publicKeyPem":"$anotherKey"}"""),
             keys to (200 to "{}"),
             keys to (500 to "{}"),
         )
         for (answer in answers) {
             console.err.clear()
-            assertEquals(0, cli(mapOf(pulled, answer)).run(arrayOf("receipts", "pull", "W-e2e")), answer.toString())
+            assertEquals(2, cli(mapOf(pulled, answer)).run(arrayOf("receipts", "pull", "W-e2e")), answer.toString())
             assertEquals(missing, console.err.toString(), answer.toString())
         }
         assertFalse(fileSystem.exists("$home/server-keys.json".toPath()), "nothing is pinned")
@@ -467,9 +480,14 @@ class ReceiptCommandsTest {
     @Test
     fun aReceiptThatNamesNoKeyPinsNothing() {
         signIn()
-        for (signature in listOf(null, "ed25519;sha256=00;sig=00")) {
+        for (signature in listOf(null, "ed25519;sha256=00;sig=00", "ed25519;kid=;sha256=00;sig=00")) {
             val routes = mapOf("GET /api/v1/receipts/W-e2e/bundle" to (200 to bundleSigned(signature)))
-            assertEquals(0, cli(routes).run(arrayOf("receipts", "pull", "W-e2e")))
+            console.err.clear()
+            assertEquals(2, cli(routes).run(arrayOf("receipts", "pull", "W-e2e")), signature)
+            assertEquals(
+                "ostrom: this receipt names no signing key: `ostrom verify` will say its signature is not valid\n",
+                console.err.toString(),
+            )
         }
         assertTrue(requests.none { it.path == "/api/v1/receipts/keys" })
         assertFalse(fileSystem.exists("$home/server-keys.json".toPath()))

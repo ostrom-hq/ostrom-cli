@@ -180,7 +180,11 @@ internal class ReceiptsShowCommand(private val dependencies: CliDependencies) : 
     }
 }
 
-/** `ostrom receipts pull <id>`: the bundle of a receipt, kept in `<config>/receipts/<id>.json` to verify offline. */
+/**
+ * `ostrom receipts pull <id>`: the bundle of a receipt, kept in `<config>/receipts/<id>.json` to verify offline, and
+ * the key it is signed with pinned for its server on first use. Exit 0 when `verify` can check it offline, 2 when it
+ * is kept but its key is not pinned (said), 73 when a file cannot be written.
+ */
 internal class ReceiptsPullCommand(private val dependencies: CliDependencies) : CliktCommand(name = "pull") {
     override fun help(context: Context) = "Download a receipt and pin its server's key, to verify it offline"
 
@@ -202,19 +206,17 @@ internal class ReceiptsPullCommand(private val dependencies: CliDependencies) : 
         }
         val directory = dependencies.directory()
         writing { dependencies.files.write(join(directory, "receipts", "$id.json"), pretty(bundle)) }
-        dependencies.console.out("✓ Saved $id with its package and keys.\n")
-        writing { ServerKeyPin(dependencies.files, dependencies.console).pin(signed, receipt, directory) }
+        dependencies.console.out("✓ Saved $id with its package.\n")
+        val pin = ServerKeyPin(dependencies.files, dependencies.console)
+        val verifiable = writing { pin.pin(signed, receipt, directory) }
+        if (!verifiable) throw ProgramResult(ExitCode.INCOMPLETE.code)
     }
 
     /** Runs [block], which writes a file, or exits 73 naming the file it could not write. */
-    private fun writing(block: () -> Unit) {
-        val unwritten = try {
-            block()
-            null
-        } catch (e: FileWriteException) {
-            e.path
-        }
-        if (unwritten != null) throw refuse(ExitCode.CANNOT_WRITE, "Could not write $unwritten.")
+    private fun <T> writing(block: () -> T): T = try {
+        block()
+    } catch (e: FileWriteException) {
+        throw refuse(ExitCode.CANNOT_WRITE, "Could not write ${e.path}.")
     }
 }
 
