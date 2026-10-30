@@ -13,8 +13,10 @@ above --max-push-ms when given.
 The budget is measured on the hook of an ordinary tool call (`ls`), which is most of an agent's calls. Outside a
 session, as here, there is no relay to read Ostrom's signed policy from, so the gate holds the call (exit 2) after
 reading and parsing it: the figure is the hook's start-up. The same hook in a real session (the relay asked, the
-policy's signature checked) is held to the same budget by e2e/run.py. A `git push` runs `git` to read the branch it
-sends, so it has a budget of its own, --max-push-ms (40 ms on the Linux runner, decision of 30/10/2026 08:10).
+policy's signature checked) is held to the same budget by e2e/run.py. In a session a `git push` runs `git` to read the
+branch it sends, so it has a budget of its own, --max-push-ms (40 ms, held on the Linux runner only, decision of
+30/10/2026 08:10). Outside a session, as here, the gate holds the push before running `git`: the figure is a ceiling
+check of that path, not the cost of `git` in a large repository.
 """
 import argparse
 import os
