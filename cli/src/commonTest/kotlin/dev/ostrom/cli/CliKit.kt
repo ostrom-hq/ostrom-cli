@@ -6,12 +6,14 @@ import dev.ostrom.cli.api.OstromApi
 import dev.ostrom.cli.api.ServerRequest
 import dev.ostrom.cli.api.ServerResponse
 import dev.ostrom.cli.hooks.HookRunner
+import dev.ostrom.cli.hooks.runtime.GateWait
 import dev.ostrom.cli.imports.FakeMysql
 import dev.ostrom.cli.launch.AgentRunner
 import dev.ostrom.cli.launcher.FileCredentialStore
 import dev.ostrom.cli.launcher.LaunchFilesImpl
 import dev.ostrom.cli.launcher.LaunchRequest
 import dev.ostrom.cli.launcher.LaunchSite
+import dev.ostrom.cli.mcp.BridgeTarget
 import dev.ostrom.cli.mcp.McpServer
 import dev.ostrom.cli.platform.Console
 import dev.ostrom.cli.platform.Environment
@@ -66,6 +68,7 @@ open class CliKit {
     protected val waits = mutableListOf<Long>()
     protected val typed = ArrayDeque<String>()
     protected val opened = mutableListOf<String>()
+    protected val bridged = mutableListOf<BridgeTarget>()
     protected var browser = true
     protected val releaseUrls = mutableListOf<String>()
     protected val noRelay = object : LoopbackHttp {
@@ -108,6 +111,7 @@ open class CliKit {
         installed: Set<String> = setOf("git", "claude"),
         api: (String) -> OstromApi = { error("no server in this test") },
         executable: String? = "/opt/ostrom",
+        gateWait: () -> GateWait = { error("no gate wait in this test") },
         capture: ProcessCapture = FakeMysql(),
         secrets: () -> SecretStore = storeIn(SecretBackend.KEYCHAIN),
         postHogKey: String = "",
@@ -124,6 +128,7 @@ open class CliKit {
                 override fun run(arguments: List<String>): Int = 0.also { hookCalls += arguments }
             },
             mcpServer = { object : McpServer { override fun serve() = 0 } },
+            mcpBridge = { target -> object : McpServer { override fun serve() = 5.also { bridged += target } } },
             credentials = { directory ->
                 val path = (directory.toPath() / "credentials.json").toString()
                 val files = LaunchFilesImpl(fileSystem) { _, _ -> }
@@ -136,6 +141,7 @@ open class CliKit {
             sleep = { waits += it },
             readLine = { typed.removeFirstOrNull() },
             openUrl = { url -> browser.also { opened += url } },
+            gateWait = gateWait,
             selfUpdate = SelfUpdate(
                 downloads = { url, _ -> Download.Missing(404).also { releaseUrls += url } },
                 fileSystem = fileSystem,

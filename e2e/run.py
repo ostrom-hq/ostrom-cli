@@ -153,7 +153,7 @@ def scenario_codex(binary, work):
     try:
         home, agents, repo = setup(work)
         done, report = launch(binary, server, home, agents, repo, work, "codex", ["exec", "fix it"],
-                              {"E2E_EXIT": "0"})
+                              {"E2E_EXIT": "0", "E2E_OSTROM": os.path.abspath(binary)})
         check(done.returncode == 0, f"codex ends with 0 (got {done.returncode})")
         check(report["arguments"][0] == "exec", "the subcommand comes first")
         check(report["arguments"][-1] == "fix it", "the prompt comes last")
@@ -164,12 +164,19 @@ def scenario_codex(binary, work):
         check(gated["code"] == 2,
               f"without a package Ostrom's catalogue gates (exit {gated['code']}: {gated['stderr'][:200]})")
         check("--dangerously-bypass-hook-trust" not in report["arguments"], "no package: no hook trust asked")
+        waited = hooks.get(("wait", "G-e2e"))
+        check(waited is not None and waited["code"] == 0
+              and waited["stdout"].startswith("approved by @lena (receipt R-gate). Run the same command again now."),
+              f"ostrom wait reads the yes (got {waited})")
         end = [hook for hook in report["hooks"] if hook["event"] == "SessionEnd"][0]
         check(end["code"] == 0, "the end hook answers")
         seen = requests(log)
         check(any(r["path"].endswith("/end") for r in seen), "the session is ended")
         check(any(r["path"] == "/api/v1/gates/catalog/signed" for r in seen),
               "the relay asks Ostrom for its signed policy")
+        read = [r for r in seen if r["path"] == "/api/v1/gates/G-e2e"]
+        check(len(read) == 1 and read[0]["query"] == "wait=5" and read[0]["token"] == "agt_e2e_launch",
+              f"ostrom wait asks through the relay, with the launch's token (got {read})")
     finally:
         server_process.kill()
 

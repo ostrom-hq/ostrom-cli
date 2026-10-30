@@ -16,6 +16,7 @@ import dev.ostrom.cli.launch.AgentRunner
 import dev.ostrom.cli.launcher.Agent
 import dev.ostrom.cli.launcher.Credentials
 import dev.ostrom.cli.launcher.LaunchRequest
+import dev.ostrom.cli.mcp.BridgeTarget
 import dev.ostrom.cli.mcp.McpServer
 import dev.ostrom.cli.platform.ExecutableFinder
 import dev.ostrom.cli.platform.FileStoreImpl
@@ -34,6 +35,8 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class OstromCliTest : CliKit() {
+    private val noSessions = AgentSessions { null }
+
     @Test
     fun anAgentRunsWithTheServerAndTheCredentialsOfThisDevice() {
         signIn("/home/maya/.config/ostrom")
@@ -122,6 +125,9 @@ class OstromCliTest : CliKit() {
         val harness = " harness The harness of your team: rules, hooks, skills, approvals (coming soon) "
         assertTrue(flat.contains(harness), flat)
         assertTrue(flat.contains(" config Settings of this device doctor "), flat)
+        // built commands never say « (coming soon) » (DOCS-VERITE)
+        assertTrue(flat.contains(" telemetry Anonymous usage statistics (off unless you turn them on) "), flat)
+        assertTrue(!flat.contains("(off unless you turn them on) (coming soon)"), flat)
         for (hidden in listOf("wait", "hook", "mcp", "check")) {
             assertTrue(!Regex("""\n\s+$hidden\s""").containsMatchIn(help), "$hidden should be hidden:\n$help")
         }
@@ -248,6 +254,19 @@ class OstromCliTest : CliKit() {
     }
 
     @Test
+    fun doctorProbesTheHealthRouteOfTheContract() {
+        val asked = mutableListOf<String>()
+        val server: (String) -> OstromApi = { _ ->
+            object : OstromApi {
+                override suspend fun get(path: String) = ServerResponse(200, "", 1).also { asked += path }
+                override suspend fun send(request: ServerRequest) = get(request.path)
+            }
+        }
+        assertEquals(0, cli(environment = withServer, api = server).run(arrayOf("doctor")))
+        assertEquals(listOf("/api/v1/health"), asked)
+    }
+
+    @Test
     fun aGroupWithoutDefaultPrintsItsHelp() {
         assertEquals(0, cli().run(arrayOf("harness")))
         assertTrue(console.out.contains("enforce"), console.out.toString())
@@ -317,12 +336,15 @@ class OstromCliTest : CliKit() {
         dependencies.mcpServer()
         val nowhere = UpdateRequest("1.0.0", "linux-x64", "/nowhere-ostrom/ostrom", "https://releases.example")
         assertEquals(66, runBlocking { dependencies.selfUpdate.rollback(nowhere) })
+        dependencies.mcpBridge(BridgeTarget(1, "t", "ostrom"))
         // Nothing listens on the discard port of the loopback: the sender is built on this first send and drops the
         // refused connection.
         runBlocking { dependencies.sendStatistics("http://127.0.0.1:9/batch/", "{}") }
         assertTrue(dependencies.configFile("/x").endsWith("config.toml"))
         assertTrue(dependencies.workingDirectory().isNotEmpty())
         assertEquals(null, dependencies.credentials("/nowhere-ostrom").load("https://ostrom.example")?.login)
+        assertEquals(64, dependencies.gateWait().await("not an id!", 1).exitCode, "never sent")
+        pause(1)
     }
 
     @Test
@@ -607,17 +629,13 @@ class OstromCliTest : CliKit() {
             executable = null,
             temporaryDirectory = "/tmp",
             agents = AgentRunner { _, _ -> 0 },
+            gateWait = { error("no gate wait in this test") },
             sleep = {},
+            mcpBridge = { object : McpServer { override fun serve() = 0 } },
             capture = FakeMysql(),
             readLine = { null },
             openUrl = { false },
-            selfUpdate = SelfUpdate(
-                { _, _ -> Download.Missing(404) },
-                fileSystem,
-                { _, _ -> false },
-                {},
-                AgentSessions { null },
-            ),
+            selfUpdate = SelfUpdate({ _, _ -> Download.Missing(404) }, fileSystem, { _, _ -> false }, {}, noSessions),
             postHogKey = "",
             sendStatistics = { _, _ -> },
         )
