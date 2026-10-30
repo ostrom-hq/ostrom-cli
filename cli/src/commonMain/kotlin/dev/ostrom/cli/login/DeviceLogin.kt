@@ -27,11 +27,16 @@ sealed interface LoginOutcome {
  * `ostrom login`: the device flow of Ostrom's GitHub app, through the server (`POST /api/v1/auth/device`, then
  * `POST /api/v1/auth/device/token` every `interval` seconds until the developer said yes on GitHub).
  *
+ * The page the developer is sent to must be GitHub's (security audit S2-35): a server that is not Ostrom cannot send
+ * them to a look-alike page to collect their code.
+ *
+ * @param githubWeb GitHub's web address (`https://github.com`, or `OSTROM_GITHUB_WEB_URL`), without a trailing slash.
  * @param sleep Waits the given milliseconds (virtual in tests).
  * @param say Prints a line for the developer.
  */
 class DeviceLogin(
     private val server: ServerJson,
+    private val githubWeb: String,
     private val sleep: suspend (Long) -> Unit,
     private val say: (String) -> Unit,
 ) {
@@ -42,8 +47,15 @@ class DeviceLogin(
         val body = (start as ServerAnswer.Ok).body
         val deviceCode = body.text("deviceCode") ?: ""
         val userCode = body.text("userCode") ?: "?"
+        val page = body.text("verificationUri") ?: "$githubWeb/login/device"
+        if (!page.startsWith("$githubWeb/")) {
+            return LoginOutcome.Stopped(
+                UNREACHABLE,
+                "$serverUrl sent a sign-in page that is not GitHub's ($page). Check the --server URL.",
+            )
+        }
         say("! Copy your one-time code: $userCode")
-        say("  Open ${body.text("verificationUri") ?: "https://github.com/login/device"} and enter it.")
+        say("  Open $page and enter it.")
         val interval = (body["interval"] as? JsonPrimitive)?.intOrNull ?: DEFAULT_INTERVAL_SECONDS
         val expiresIn = (body["expiresIn"] as? JsonPrimitive)?.intOrNull ?: DEFAULT_EXPIRY_SECONDS
         return poll(deviceCode, interval * MILLIS, expiresIn * MILLIS, serverUrl)
