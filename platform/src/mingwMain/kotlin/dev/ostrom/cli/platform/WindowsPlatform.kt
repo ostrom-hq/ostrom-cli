@@ -61,14 +61,30 @@ internal actual fun restrictToOwner(path: String) = Unit
 
 internal actual fun restrictToOwnerExecutable(path: String) = Unit
 
+/**
+ * [command] with its program resolved on the PATH alone. CreateProcessW given a bare name looks in the application's
+ * folder and the current one first: a `git.exe` checked into the repository an agent works in would run instead of
+ * git. A program with a folder in its name is kept as given; null when the PATH has none.
+ */
+private fun onThePath(command: List<String>): List<String>? {
+    val program = command.first()
+    val found = if ('\\' in program || '/' in program) {
+        program
+    } else {
+        ExecutableFinderImpl(EnvironmentImpl()).find(program)
+    }
+    return found?.let { listOf(it) + command.drop(1) }
+}
+
 internal actual fun captureOutput(
     command: List<String>,
     capacity: Int,
     timeoutMillis: Int,
 ): CaptureResult = memScoped {
+    val resolved = onThePath(command) ?: return CaptureResult.NotFound
     val exitCode = alloc<IntVar>()
     val output = ByteArray(capacity)
-    val line = windowsCommandLine(command).wcstr
+    val line = windowsCommandLine(resolved).wcstr
     val count = output.usePinned {
         ostrom_capture_w(line, it.addressOf(0).reinterpret(), capacity, timeoutMillis, exitCode.ptr)
     }
@@ -76,7 +92,8 @@ internal actual fun captureOutput(
 }
 
 internal actual fun spawnDetached(command: List<String>): Boolean = memScoped {
-    ostrom_spawn_detached_w(windowsCommandLine(command).wcstr) == 0
+    val resolved = onThePath(command)
+    resolved != null && ostrom_spawn_detached_w(windowsCommandLine(resolved).wcstr) == 0
 }
 
 internal actual fun tcpExchange(

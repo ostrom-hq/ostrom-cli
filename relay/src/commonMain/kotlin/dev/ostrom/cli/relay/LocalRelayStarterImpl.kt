@@ -30,8 +30,6 @@ class LocalRelayStarterImpl(
             // The agent's stdout belongs to the agent: Ktor's own messages never reach it (silentLogger).
             environment = applicationEnvironment { log = silentLogger(notices) },
             configure = {
-                // Rebinds at once after a stop, even while closed connections sit in TIME_WAIT.
-                reuseAddress = true
                 connectors.add(EngineConnectorBuilder().apply { host = LOOPBACK; port = 0 })
             },
         ) { relayModule(config, token, upstream, notices) }

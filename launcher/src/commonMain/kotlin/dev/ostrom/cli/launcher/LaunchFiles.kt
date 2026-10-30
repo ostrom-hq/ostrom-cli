@@ -30,7 +30,12 @@ interface LaunchFiles {
      */
     fun write(path: String, text: String, access: FileAccess = FileAccess.SHARED)
 
-    /** Creates the folder [path] (and its parents), usable by its owner only (0700). */
+    /**
+     * Creates the folder [path] (and its parents), usable by its owner only (0700). [path] itself must not exist yet: a
+     * folder someone else made first in a shared temporary folder (or a link there) is never written into.
+     *
+     * @throws okio.IOException When [path] exists or cannot be made.
+     */
     fun createPrivateDirectory(path: String)
 
     /** The names of the entries of the folder [path], sorted; empty when it does not exist. */
@@ -77,7 +82,9 @@ class LaunchFilesImpl(
     }
 
     override fun createPrivateDirectory(path: String) {
-        fileSystem.createDirectories(path.toPath())
+        val folder = path.toPath()
+        folder.parent?.let { fileSystem.createDirectories(it) }
+        fileSystem.createDirectory(folder, mustCreate = true)
         restrict(path, true)
     }
 

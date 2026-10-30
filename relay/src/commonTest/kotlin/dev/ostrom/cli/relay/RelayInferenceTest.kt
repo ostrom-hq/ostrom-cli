@@ -19,12 +19,15 @@ import io.ktor.http.contentType
 import io.ktor.http.headersOf
 import io.ktor.utils.io.ByteChannel
 import io.ktor.utils.io.writeStringUtf8
+import io.ktor.utils.io.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlinx.io.IOException
 import kotlin.time.Duration.Companion.milliseconds
 
 class RelayInferenceTest {
@@ -129,16 +132,50 @@ class RelayInferenceTest {
                 setBody(untyped)
             }
             assertEquals(HttpStatusCode.OK, chat.status)
-            val models = client.get("/v1/models") { bearerAuth(TOKEN) }
+            val models = client.get("/v1/models?limit=2&after_id=m-1") { bearerAuth(TOKEN) }
             assertEquals("""{"data":[]}""", models.bodyAsText())
             val (sentChat, sentModels) = ostrom.requests
             assertEquals("$SERVER/api/v1/inference/v1/chat/completions", sentChat.url.toString())
             assertEquals(ContentType.Application.Json, sentChat.body.contentType, "An untyped body is sent as JSON")
             assertEquals("""{"model":"m"}""", sentChat.body.toByteArray().decodeToString())
-            assertEquals("$SERVER/api/v1/inference/v1/models", sentModels.url.toString())
+            val listing = "$SERVER/api/v1/inference/v1/models?limit=2&after_id=m-1"
+            assertEquals(listing, sentModels.url.toString(), "With its query")
             assertEquals(HttpMethod.Get, sentModels.method)
             assertEquals(0, sentModels.body.toByteArray().size)
         }
+    }
+
+    @Test
+    fun aStreamCutMidwayBreaksTheAgentsConnectionWithoutAnOutageNotice() {
+        val upstream = ByteChannel(autoFlush = true)
+        val ostrom = FakeOstrom { respond(upstream, HttpStatusCode.OK, streamHeaders) }
+        val reports = mutableListOf<String>()
+        relayTest(ostrom, config = relayConfig(inference = true), reports = reports) {
+            coroutineScope {
+                launch {
+                    upstream.writeStringUtf8(events.first())
+                    delay(50.milliseconds)
+                    upstream.cancel(IOException("cut"))
+                }
+                val whole = try {
+                    client.post("/v1/messages") {
+                        bearerAuth(TOKEN)
+                        setBody("{}")
+                    }.bodyAsText() == events.joinToString("")
+                } catch (_: IOException) {
+                    false
+                }
+                assertFalse(whole, "A cut answer never passes for a whole one")
+            }
+        }
+        assertTrue(reports.none { "unreachable" in it }, reports.toString())
+    }
+
+    @Test
+    fun anUnreadableContentTypeIsSentAsJson() {
+        assertEquals(ContentType.Application.Json, contentTypeOf(null))
+        assertEquals(ContentType.Application.Json, contentTypeOf("not a type"))
+        assertEquals(ContentType.Text.Plain, contentTypeOf("text/plain"))
     }
 
     @Test
@@ -151,6 +188,7 @@ class RelayInferenceTest {
                 setBody(ByteArray(4 * 1024 * 1024 + 1))
             }
             assertEquals(HttpStatusCode.PayloadTooLarge, response.status)
+            assertEquals("close", response.headers[HttpHeaders.Connection], "The unread rest is never a request")
         }
         assertTrue(ostrom.requests.isEmpty())
     }

@@ -25,8 +25,13 @@ class RootCommand(private val dependencies: CliDependencies) : CliktCommand(name
     /** Plain output; the NO_COLOR variable does the same. */
     val noColor by option("--no-color", help = "No colours (also NO_COLOR)").flag()
 
+    /** The top-level subcommand the parsed line invoked; null for `ostrom` alone, or when the line did not parse. */
+    var invoked: String? = null
+        private set
+
     override fun run() {
-        if (currentContext.invokedSubcommand != null) return
+        invoked = currentContext.invokedSubcommand?.commandName
+        if (invoked != null) return
         val others = Agent.entries.drop(1).joinToString(", ") { it.command }
         dependencies.console.out(
             """
