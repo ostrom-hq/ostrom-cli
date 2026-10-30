@@ -16,8 +16,11 @@ object Routes {
     /** `POST`: a notification of the workflow package, sent by Ostrom. */
     const val NOTIFICATIONS = "/api/v1/notifications"
 
-    /** `GET`: the gates of [repository] and the actions they cover. */
-    fun catalog(repository: String) = "/api/v1/gates/catalog?repo=${Urls.encode(repository)}"
+    /**
+     * `GET`: the organisation's gate policy for [repository], signed by the instance with a short expiry
+     * (`ostrom.gates/1`, security audit S2-20); the relay keeps it in its memory for a few seconds.
+     */
+    fun signedCatalog(repository: String) = "/api/v1/gates/catalog/signed?repo=${Urls.encode(repository)}"
 
     /** `POST`: open a new segment chained to a closed session. */
     fun reopen(sessionId: String) = session(sessionId, "reopen")

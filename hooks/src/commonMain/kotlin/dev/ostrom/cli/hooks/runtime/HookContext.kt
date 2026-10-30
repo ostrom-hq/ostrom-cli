@@ -19,6 +19,13 @@ import dev.ostrom.cli.hooks.gate.ShellPaths
  * @property dialect The agent family whose hook protocol is spoken (`OSTROM_HOOK_DIALECT`, default `claude`).
  * @property git The `git` the launcher resolved (`OSTROM_GIT`), else `git`.
  * @property home The user's home folder, for `cd ~`.
+ * @property instanceKeys The instance's signing keys (`OSTROM_INSTANCE_KEYS`, the body of `GET /api/v1/instance/keys`
+ * the launcher read before the agent started), which the gate policy must be signed with (S2-20); null outside a
+ * session.
+ * @property packageSeal The SHA-256 of the session package's manifest (`OSTROM_PACKAGE_SEAL`, S2-33), or null.
+ * @property packageManifest The manifest of the session package (`OSTROM_PACKAGE_MANIFEST`), or null.
+ * @property relayTokenFile The file that holds the relay's capability for the hooks (`OSTROM_RELAY_TOKEN_FILE`): it is
+ * never in the agent's environment (S2-25); null outside a session.
  */
 data class HookContext(
     val repository: String,
@@ -33,6 +40,10 @@ data class HookContext(
     val dialect: String,
     val git: String,
     val home: String,
+    val instanceKeys: String?,
+    val packageSeal: String?,
+    val packageManifest: String?,
+    val relayTokenFile: String?,
 ) {
     /** Reads the session from the environment. */
     companion object {
@@ -54,6 +65,10 @@ data class HookContext(
                 dialect = variable("OSTROM_HOOK_DIALECT") ?: "claude",
                 git = variable("OSTROM_GIT") ?: "git",
                 home = variable("HOME") ?: variable("USERPROFILE").orEmpty(),
+                instanceKeys = variable("OSTROM_INSTANCE_KEYS"),
+                packageSeal = variable("OSTROM_PACKAGE_SEAL"),
+                packageManifest = variable("OSTROM_PACKAGE_MANIFEST"),
+                relayTokenFile = variable("OSTROM_RELAY_TOKEN_FILE"),
             )
         }
     }

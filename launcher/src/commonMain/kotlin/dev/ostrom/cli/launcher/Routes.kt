@@ -17,6 +17,9 @@ object Routes {
     /** `GET`: the public keys of the instance. */
     const val KEYS = "/api/v1/receipts/keys"
 
+    /** `GET`, unauthenticated: every signing key of the instance, which signs the hooks' gate policy (S2-20). */
+    const val INSTANCE_KEYS = "/api/v1/instance/keys"
+
     /** `GET`: the MCP servers of the organisation, relayed by Ostrom. */
     const val MCP_SERVERS = "/api/v1/mcp/servers"
 

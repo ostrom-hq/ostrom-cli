@@ -113,13 +113,14 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         calls.checkPolicy(agent, model, site)
         val launch = calls.createLaunch(repo, agent, model, site)
         val pack = calls.packageOf(repo, site)
+        val keys = calls.instanceKeys()
         val temporary = join(site.temporaryDirectory, "ostrom-run-${dependencies.clock.millis()}")
         try {
             dependencies.files.createPrivateDirectory(temporary)
         } catch (e: IOException) {
             stop(CANNOT_WRITE, "cannot create $temporary (${e.message})")
         }
-        val run = Run(request, site, adapter, executable, repo, top, model, launch, pack, temporary)
+        val run = Run(request, site, adapter, executable, repo, top, model, launch, pack, keys, temporary)
         return try {
             session(run)
         } finally {
@@ -139,9 +140,11 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         val model: String?,
         val launch: Launch,
         val pack: SessionPackage?,
+        val keys: String,
         val temporary: String,
     ) {
         val plugin = join(temporary, "plugin")
+        val relayTokenFile = join(temporary, "relay-token")
         val sessionFile = join(temporary, "session-id")
         val gates = join(plugin, "ostrom", "gates.json")
         val name = ostromName(request.agent)
@@ -150,7 +153,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
     private suspend fun session(run: Run): Int {
         val files = dependencies.files
         files.createPrivateDirectory(run.plugin)
-        val view = run.pack?.let { PackageLayout(files).layDown(it, run.plugin, run.temporary) }
+        val laid = run.pack?.let { PackageLayout(files).layDown(it, run.plugin, run.temporary) }
         val mcp = (calls.mcpServers(run.site) + run.pack?.mcpServers.orEmpty()).distinct()
         val inference = inferenceRelayed(run)
         val settings = RelaySettings(
@@ -163,8 +166,10 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
             run.pack?.gateCatalog,
         )
         return dependencies.relays.start(settings).use { relay ->
-            val prepared = prepare(run, RelayView(relay.url, relay.token, mcp, inference))
-            val environment = environmentOf(run, relay, view) + prepared.environment
+            // S2-25: the hooks' capability goes to a private file, the agent's environment only gets its own
+            files.write(run.relayTokenFile, relay.token, FileAccess.PRIVATE)
+            val prepared = prepare(run, RelayView(relay.url, relay.clientToken, mcp, inference))
+            val environment = environmentOf(run, relay, laid) + prepared.environment
             val settingsFile = join(run.temporary, SessionLayout.SESSION_SETTINGS)
             files.write(settingsFile, sessionSettings(environment).toString(), FileAccess.PRIVATE)
             val lifeline = SessionLifeline(
@@ -205,7 +210,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         }
     }
 
-    private fun environmentOf(run: Run, relay: SessionRelay, view: String?): Map<String, String?> {
+    private fun environmentOf(run: Run, relay: SessionRelay, laid: LaidPackage?): Map<String, String?> {
         val site = run.site
         // Only an absolute path names a folder: a bare name would put the working folder on the agent's PATH.
         val binary = site.executable.toPath()
@@ -215,7 +220,9 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         val path = listOfNotNull(folder?.toString(), inherited).joinToString(site.pathSeparator.toString())
         return mapOf(
             LaunchVariables.RELAY_URL to relay.url,
-            LaunchVariables.RELAY_TOKEN to relay.token,
+            LaunchVariables.RELAY_TOKEN to relay.clientToken,
+            LaunchVariables.RELAY_TOKEN_FILE to run.relayTokenFile,
+            LaunchVariables.INSTANCE_KEYS to run.keys,
             LaunchVariables.REPO to run.repo,
             LaunchVariables.DEV to site.credentials.login,
             LaunchVariables.AGENT to run.name,
@@ -228,7 +235,9 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
             "PWD" to site.cwd,
             LaunchVariables.LAUNCH_TOP to run.top,
             LaunchVariables.LAUNCH_ID to run.launch.launchId,
-            LaunchVariables.PACKAGE to view,
+            LaunchVariables.PACKAGE to laid?.view,
+            LaunchVariables.PACKAGE_SEAL to laid?.seal,
+            LaunchVariables.PACKAGE_MANIFEST to laid?.manifest,
             LaunchVariables.MODEL to run.model,
             // `ostrom wait` must be callable by the agent's shell: this binary's folder goes first on its PATH.
             "PATH" to path.ifEmpty { null },

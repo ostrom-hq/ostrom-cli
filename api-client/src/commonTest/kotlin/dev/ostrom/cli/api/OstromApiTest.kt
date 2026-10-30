@@ -123,6 +123,13 @@ class OstromApiTest {
     }
 
     @Test
+    fun anUnreachableServerSaysWhyInTheNetworksWords() {
+        assertEquals("connection refused", ServerUnreachableException("u", IOException("connection refused")).reason)
+        val bare = ServerUnreachableException("u", IOException())
+        assertTrue(bare.reason.endsWith("IOException"), "no message: its type")
+    }
+
+    @Test
     fun aRefusalBodyIsReadWithTheContractsApiError() {
         val refusal = ServerResponse(404, """{"error":{"type":"gate_not_found","message":"No such gate."},"x":1}""", 3)
         assertEquals("gate_not_found", refusal.apiError()?.type)
