@@ -93,7 +93,7 @@ class RunDoctorUseCaseImpl(
             ?: return DoctorCheck(CheckStatus.WARNING, "No server yet: ostrom login sets it.")
         val host = url.substringAfter("://").substringBefore('/')
         return try {
-            val response = api(url).use { it.get("/api/health") }
+            val response = api(url).use { it.get(HEALTH_ROUTE) }
             if (response.status < SERVER_ERROR) {
                 DoctorCheck(CheckStatus.OK, "$host reachable (${response.millis} ms)")
             } else {
@@ -128,6 +128,9 @@ class RunDoctorUseCaseImpl(
 
 /** The first HTTP status that means the server itself failed. */
 private const val SERVER_ERROR = 500
+
+/** The liveness route of the API contract (ostrom-core `api/openapi.yaml`), which the doctor probes. */
+internal const val HEALTH_ROUTE = "/api/v1/health"
 
 /** What to do when no home folder is known, the same for doctor and config. */
 internal const val NO_HOME = "No home folder is known: set HOME (USERPROFILE on Windows)."

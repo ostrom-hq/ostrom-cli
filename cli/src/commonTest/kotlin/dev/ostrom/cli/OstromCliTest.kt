@@ -119,6 +119,9 @@ class OstromCliTest : CliKit() {
         val harness = " harness The harness of your team: rules, hooks, skills, approvals (coming soon) "
         assertTrue(flat.contains(harness), flat)
         assertTrue(flat.contains(" config Settings of this device doctor "), flat)
+        // built commands never say « (coming soon) » (DOCS-VERITE)
+        assertTrue(flat.contains(" telemetry Anonymous usage statistics (off unless you turn them on) "), flat)
+        assertTrue(!flat.contains("(off unless you turn them on) (coming soon)"), flat)
         for (hidden in listOf("wait", "hook", "mcp", "check")) {
             assertTrue(!Regex("""\n\s+$hidden\s""").containsMatchIn(help), "$hidden should be hidden:\n$help")
         }
@@ -242,6 +245,19 @@ class OstromCliTest : CliKit() {
     fun doctorReportsAReachableServer() {
         assertEquals(0, cli(environment = withServer, api = serverAnswering(200, 84)).run(arrayOf("doctor")))
         assertOut("  ✓ ostrom.example reachable (84 ms)\n")
+    }
+
+    @Test
+    fun doctorProbesTheHealthRouteOfTheContract() {
+        val asked = mutableListOf<String>()
+        val server: (String) -> OstromApi = { _ ->
+            object : OstromApi {
+                override suspend fun get(path: String) = ServerResponse(200, "", 1).also { asked += path }
+                override suspend fun send(request: ServerRequest) = get(request.path)
+            }
+        }
+        assertEquals(0, cli(environment = withServer, api = server).run(arrayOf("doctor")))
+        assertEquals(listOf("/api/v1/health"), asked)
     }
 
     @Test
