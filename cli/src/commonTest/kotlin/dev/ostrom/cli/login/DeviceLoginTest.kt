@@ -9,8 +9,12 @@ import dev.ostrom.cli.launcher.ServerTransport
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /** The device flow of `ostrom login` against a scripted server: each poll takes the next answer. */
+private const val CONSOLE = "https://app.ostrom.run"
+
 class DeviceLoginTest {
     private val said = mutableListOf<String>()
     private val waits = mutableListOf<Long>()
@@ -27,9 +31,17 @@ class DeviceLoginTest {
         if (call.path == "/api/v1/auth/device") start else polls.removeFirst()
     }
 
-    private suspend fun signIn() =
-        DeviceLogin(ServerJson(transport), "https://github.com", { waits += it }) { said += it }
-            .signIn("https://api.ostrom.run")
+    private suspend fun signIn(serverUrl: String = "https://api.ostrom.run") =
+        DeviceLogin(ServerJson(transport), "https://github.com", CONSOLE, { waits += it }) { said += it }
+            .signIn(serverUrl)
+
+    /** Whether a flow whose page is [page] signs in on [serverUrl] (else the page was refused). */
+    private suspend fun shown(page: String, serverUrl: String = "https://api.ostrom.run"): Boolean {
+        start = ServerReply(200, """{"deviceCode":"dc","userCode":"X","verificationUri":"$page"}""")
+        polls.clear()
+        polls += ServerReply(200, """{"token":"ost_new","login":"maya-k"}""")
+        return signIn(serverUrl) is LoginOutcome.SignedIn
+    }
 
     private fun pending() = ServerReply(428, """{"error":{"type":"authorization_pending","message":"waiting"}}""")
 
@@ -80,20 +92,54 @@ class DeviceLoginTest {
     }
 
     @Test
+    fun aSignInPageOfTheServersOwnOriginOrItsConsoleIsShown() = runTest {
+        // decision of 30/10/2026: the server sends to its console's /device page, of its own origin
+        for (page in listOf(
+            "https://github.com/login/device",
+            "https://api.ostrom.run/device",
+            "https://API.Ostrom.run:443/device?from=cli",
+            "https://app.ostrom.run/device",
+            "https://app.ostrom.run#device",
+        )) {
+            assertTrue(shown(page), page)
+        }
+        // another host, a neighbour subdomain, a look-alike, another port, a user in front, a page in clear
+        for (page in listOf(
+            "https://evil.example/device",
+            "https://login.ostrom.run/device",
+            "https://api.ostrom.run.evil.example/device",
+            "https://api.ostrom.run:8443/device",
+            "https://api.ostrom.run@evil.example/device",
+            "http://api.ostrom.run/device",
+            "http://app.ostrom.run/device",
+            "ftp://api.ostrom.run/device",
+            "/device",
+        )) {
+            assertFalse(shown(page), page)
+        }
+        // in clear, only to this machine, on the very port of the server
+        assertTrue(shown("http://localhost:8080/device", "http://localhost:8080"))
+        assertTrue(shown("http://[::1]:8080/device", "http://[::1]:8080/"))
+        assertFalse(shown("http://localhost:9090/device", "http://localhost:8080"))
+        assertFalse(shown("http://ostrom.lan/device", "http://ostrom.lan"))
+    }
+
+    @Test
     fun aSignInPageThatIsNotGitHubsIsNeverShown() = runTest {
         // S2-35: a server that is not Ostrom could send the developer to a look-alike page for their code
         for (page in listOf("https://github.com.evil.example/login/device", "http://github.com/login/device")) {
             start = ServerReply(200, """{"deviceCode":"dc","userCode":"X","verificationUri":"$page"}""")
             val stopped = LoginOutcome.Stopped(
                 69,
-                "https://api.ostrom.run sent a sign-in page that is not GitHub's ($page). Check the --server URL.",
+                "https://api.ostrom.run sent a sign-in page that is neither GitHub's nor its own ($page). " +
+                    "Check the --server URL.",
             )
             assertEquals(stopped, signIn())
         }
         // an escape sequence after GitHub's address could rewrite the line the developer reads
         val escaped = "https://github.com/login/device\\u001b[2K\\u007f"
         start = ServerReply(200, """{"deviceCode":"dc","userCode":"X","verificationUri":"$escaped"}""")
-        val cleaned = "https://api.ostrom.run sent a sign-in page that is not GitHub's " +
+        val cleaned = "https://api.ostrom.run sent a sign-in page that is neither GitHub's nor its own " +
             "(https://github.com/login/device[2K). Check the --server URL."
         assertEquals(LoginOutcome.Stopped(69, cleaned), signIn())
         assertEquals(emptyList(), said, "the code is never shown")

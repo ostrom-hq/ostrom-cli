@@ -17,6 +17,7 @@ import dev.ostrom.cli.commands.DenyCommand
 import dev.ostrom.cli.commands.DoctorCommand
 import dev.ostrom.cli.commands.HelpCommand
 import dev.ostrom.cli.commands.HookCommand
+import dev.ostrom.cli.commands.ImportTeamCodeCommand
 import dev.ostrom.cli.commands.InboxCommand
 import dev.ostrom.cli.commands.LoginCommand
 import dev.ostrom.cli.commands.LogoutCommand
@@ -29,6 +30,7 @@ import dev.ostrom.cli.commands.RootCommand
 import dev.ostrom.cli.commands.TelemetryCommand
 import dev.ostrom.cli.commands.VerifyCommand
 import dev.ostrom.cli.commands.VersionCommand
+import dev.ostrom.cli.commands.WaitCommand
 import dev.ostrom.cli.commands.pendingCommands
 import dev.ostrom.cli.launcher.Agent
 import dev.ostrom.cli.platform.SecretStoreException
@@ -125,8 +127,9 @@ class OstromCli(private val dependencies: CliDependencies) {
             DoctorCommand(dependencies),
             TelemetryCommand(dependencies),
             VersionCommand(dependencies),
+            ImportTeamCodeCommand(dependencies),
         )
-        val plumbing = listOf(HookCommand(dependencies), McpCommand(dependencies))
+        val plumbing = listOf(WaitCommand(dependencies), HookCommand(dependencies), McpCommand(dependencies))
         // The root always has a help screen: no null to handle.
         val help = HelpCommand(dependencies) { "${root.getFormattedHelp()}" }
         return root.subcommands(agents + pendingCommands(implemented) + plumbing + help)

@@ -4,6 +4,7 @@ package dev.ostrom.cli.hooks.runtime
 import dev.ostrom.cli.hooks.gate.GitRunner
 import dev.ostrom.cli.platform.CaptureResult
 import dev.ostrom.cli.platform.LoopbackException
+import dev.ostrom.cli.platform.LoopbackFailure
 import dev.ostrom.cli.platform.LoopbackHttp
 import dev.ostrom.cli.platform.LoopbackRequest
 import dev.ostrom.cli.platform.LoopbackResponse
@@ -35,7 +36,10 @@ class RelayCalls(
         } else {
             http.exchange(port, request, timeoutMillis).fold(
                 onSuccess = ::resultOf,
-                onFailure = { CallResult.Failed((it as LoopbackException).failure.message, CallResult.UNREACHABLE) },
+                onFailure = {
+                    val failure = (it as LoopbackException).failure
+                    CallResult.Failed(failure.message, CallResult.UNREACHABLE, failure == LoopbackFailure.UNREACHABLE)
+                },
             )
         }
     }

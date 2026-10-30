@@ -7,6 +7,8 @@ import dev.ostrom.cli.api.StatisticsSender
 import dev.ostrom.cli.api.TraceContext
 import dev.ostrom.cli.hooks.HookRunner
 import dev.ostrom.cli.hooks.HookRunnerImpl
+import dev.ostrom.cli.hooks.runtime.GateWait
+import dev.ostrom.cli.hooks.runtime.RelayCalls
 import dev.ostrom.cli.hooks.runtime.SessionHooks
 import dev.ostrom.cli.launch.AgentRunner
 import dev.ostrom.cli.launch.AgentRunnerImpl
@@ -28,6 +30,7 @@ import dev.ostrom.cli.platform.ExecutableFinderImpl
 import dev.ostrom.cli.platform.FileStore
 import dev.ostrom.cli.platform.FileStoreImpl
 import dev.ostrom.cli.platform.LoopbackHttpImpl
+import dev.ostrom.cli.platform.ProcessCapture
 import dev.ostrom.cli.platform.ProcessCaptureImpl
 import dev.ostrom.cli.platform.ProcessLauncherImpl
 import dev.ostrom.cli.platform.SecretStore
@@ -38,8 +41,10 @@ import dev.ostrom.cli.telemetry.UsageStatistics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import okio.FileSystem
 import okio.Path.Companion.toPath
+import kotlin.time.TimeSource
 
 /**
  * Everything the commands use, built once in `main` and replaced by fakes in tests. Plain constructor wiring rather
@@ -53,7 +58,9 @@ import okio.Path.Companion.toPath
  * @property executable This binary, or null when the system does not say.
  * @property temporaryDirectory Where a launch makes its private folder.
  * @property agents Runs `ostrom <agent>`.
+ * @property gateWait Builds `ostrom wait`, which asks through the session's relay.
  * @property sleep Waits the given milliseconds (the device flow of login; virtual in tests).
+ * @property capture Runs short child processes and reads their output (`mysql` for `ostrom import teamcode`).
  * @property readLine Reads a line the developer typed, or null at the end of the input.
  * @property openUrl Opens a page in the developer's browser; false when it could not.
  * @property secrets Opens the secret store of this device (system store, or encrypted file). Each call chooses and
@@ -76,7 +83,9 @@ class CliDependencies(
     val executable: String?,
     val temporaryDirectory: String,
     val agents: AgentRunner,
+    val gateWait: () -> GateWait,
     val sleep: suspend (Long) -> Unit,
+    val capture: ProcessCapture,
     val readLine: () -> String?,
     val openUrl: (String) -> Boolean,
     val postHogKey: String,
@@ -137,7 +146,17 @@ class CliDependencies(
                     blocking = Dispatchers.IO,
                     userAgent = USER_AGENT,
                 ),
+                gateWait = {
+                    val relay = RelayCalls(
+                        environment["OSTROM_RELAY_URL"],
+                        GateWait.tokenOf { environment[it] },
+                        LoopbackHttpImpl(),
+                    )
+                    val started = TimeSource.Monotonic.markNow()
+                    GateWait(relay, { started.elapsedNow().inWholeMilliseconds }, ::pause, console::err)
+                },
                 sleep = { delay(it) },
+                capture = ProcessCaptureImpl(),
                 readLine = ::readlnOrNull,
                 openUrl = BrowserOpener(ProcessLauncherImpl(), environment.operatingSystem)::open,
                 postHogKey = BuildInfo.POSTHOG_KEY,
@@ -161,3 +180,6 @@ class CliDependencies(
         }
     }
 }
+
+/** Blocks the thread [millis] milliseconds: `ostrom wait` runs as a plain command, never inside a hook. */
+internal fun pause(millis: Long) = runBlocking { delay(millis) }

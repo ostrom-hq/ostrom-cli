@@ -7,6 +7,9 @@ import java.security.MessageDigest
 import java.security.Signature
 import java.security.spec.X509EncodedKeySpec
 import java.util.Base64
+import javax.crypto.Cipher
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.SecretKeySpec
 
 // The JVM target runs the common tests and measures their coverage; these actuals are the JDK's own Ed25519 and
 // SHA-256, checked by the same vectors as the shipped native ones (OpenSSL 3).
@@ -27,3 +30,18 @@ actual fun ed25519Verify(publicKeyPem: String, data: ByteArray, signature: ByteA
 } catch (_: IllegalArgumentException) {
     false
 }
+
+/** AES-256-GCM, by this platform's library. */
+actual fun aesGcmOpen(key: ByteArray, sealed: ByteArray, associatedData: ByteArray): ByteArray? = try {
+    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+    cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(TAG_BITS, sealed, 0, NONCE_BYTES))
+    cipher.updateAAD(associatedData)
+    cipher.doFinal(sealed, NONCE_BYTES, sealed.size - NONCE_BYTES)
+} catch (_: GeneralSecurityException) {
+    null
+} catch (_: IllegalArgumentException) {
+    null
+}
+
+private const val TAG_BITS = 128
+private const val NONCE_BYTES = 12
