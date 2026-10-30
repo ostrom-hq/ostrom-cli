@@ -22,9 +22,14 @@ import dev.ostrom.cli.commands.InboxCommand
 import dev.ostrom.cli.commands.LoginCommand
 import dev.ostrom.cli.commands.LogoutCommand
 import dev.ostrom.cli.commands.McpCommand
+import dev.ostrom.cli.commands.ReceiptsCommand
+import dev.ostrom.cli.commands.ReceiptsListCommand
+import dev.ostrom.cli.commands.ReceiptsPullCommand
+import dev.ostrom.cli.commands.ReceiptsShowCommand
 import dev.ostrom.cli.commands.RootCommand
 import dev.ostrom.cli.commands.TelemetryCommand
 import dev.ostrom.cli.commands.UpdateCommand
+import dev.ostrom.cli.commands.VerifyCommand
 import dev.ostrom.cli.commands.VersionCommand
 import dev.ostrom.cli.commands.WaitCommand
 import dev.ostrom.cli.commands.pendingCommands
@@ -111,6 +116,12 @@ class OstromCli(private val dependencies: CliDependencies) {
             InboxCommand(dependencies),
             ApproveCommand(dependencies),
             DenyCommand(dependencies),
+            ReceiptsCommand(dependencies).subcommands(
+                ReceiptsListCommand(dependencies),
+                ReceiptsShowCommand(dependencies),
+                ReceiptsPullCommand(dependencies),
+            ),
+            VerifyCommand(dependencies),
             LoginCommand(dependencies),
             UpdateCommand(dependencies),
             LogoutCommand(dependencies),
