@@ -15,10 +15,10 @@ import kotlin.time.Clock
 
 /**
  * Pins, on `ostrom receipts pull`, the key a receipt is signed with for its server, so that `ostrom verify` checks it
- * offline afterwards: the same first-use pin as the launcher's (`PackageTrust`, both through `ServerKeyPins`), in `<config>/server-keys.json`. A key
- * already pinned for the server is never replaced: a receipt signed with another key is said, and `ostrom verify`
- * refuses it until the entry is deleted on purpose. Only an Ed25519 key whose computed kid is the receipt's is pinned:
- * a wrong answer of the server never becomes a pin that only a hand edit undoes.
+ * offline afterwards: the same first-use pin as the launcher's (`PackageTrust`), both by the rule of `ServerKeyPins`,
+ * in `<config>/server-keys.json`. A key already pinned for the server is never replaced: a receipt signed with another
+ * key is said, and `ostrom verify` refuses it until the entry is deleted on purpose. Only an Ed25519 key whose computed
+ * kid is the receipt's is pinned: a wrong answer of the server never becomes a pin that only a hand edit undoes.
  */
 internal class ServerKeyPin(
     private val files: FileStore,
@@ -41,7 +41,11 @@ internal class ServerKeyPin(
             pinned == null -> firstUse(signed, kid, path)
             ServerKeyPins.pinnedPem(pinned, kid) == null -> {
                 val other = pinned.text("kid")
-                val what = if (other == null) "no usable key" else "key $other"
+                val what = when (other) {
+                    null -> "no usable key"
+                    kid -> "an unusable key $kid"
+                    else -> "key $other"
+                }
                 "this receipt is signed with key $kid, but this device pinned $what for ${signed.serverUrl}. The " +
                     "pin is kept: a new Ostrom key is pinned again on purpose, by deleting its entry in $path"
             }

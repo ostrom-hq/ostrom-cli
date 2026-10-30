@@ -21,25 +21,39 @@ object ServerKeyPins {
     /** The pins of the file's [text], by server; none when there is no file or it is not a JSON object. */
     fun all(text: String?): JsonObject = parseObject(text) ?: JsonObject(emptyMap())
 
-    /** [pins] with [kid] and its [pem] pinned for [serverUrl] at [at]; a pin already there for it wins. */
+    /**
+     * [pins] with [kid] and its [pem] pinned for [serverUrl] at [at]. A pin already there for it wins; an entry that is
+     * not a pin (null, a string) is replaced, or the first use would say it pinned what it never wrote.
+     */
     fun withPin(pins: JsonObject, serverUrl: String, kid: String, pem: String, at: String): JsonObject =
-        JsonObject(mapOf(serverUrl to objectOf("kid" to kid, "publicKeyPem" to pem, "pinnedAt" to at)) + pins)
+        if (pins[serverUrl] is JsonObject) {
+            pins
+        } else {
+            JsonObject(pins + (serverUrl to objectOf("kid" to kid, "publicKeyPem" to pem, "pinnedAt" to at)))
+        }
 
-    /** The PEM of a server's [pinned] entry when it is the pin of [kid] with its key; null for any other pin. */
+    /**
+     * The PEM of a server's [pinned] entry when it is the pin of [kid] with its key, an Ed25519 key whose computed kid
+     * is [kid]; null for any other pin, a wrong key pinned by an older ostrom included.
+     */
     fun pinnedPem(pinned: JsonObject, kid: String): String? {
         val pem = pinned.text("publicKeyPem")
-        return if (pinned.text("kid") == kid) pem else null
+        return if (pinned.text("kid") == kid && pem != null && isKey(pem, kid)) pem else null
     }
 
     /**
-     * The PEM of [kid] in a server's key list (`GET /api/v1/receipts/keys`: `{"keys": [{"kid", "publicKeyPem"}]}`),
-     * only when it is an Ed25519 key whose kid, computed as the server computes it, is [kid]; null otherwise. A wrong
-     * answer of the server never becomes a pin that only a hand edit undoes.
+     * The PEM of [kid] in a server's key list (`GET /api/v1/receipts/keys`: `{"keys": [{"kid", "publicKeyPem"}]}`):
+     * the first listed under [kid] that is an Ed25519 key whose kid, computed as the server computes it, is [kid]; null
+     * when none is. A wrong answer of the server never becomes a pin that only a hand edit undoes.
      */
-    fun publishedKey(keyList: JsonObject, kid: String): String? {
-        val listed = keyList.list("keys").filterIsInstance<JsonObject>().firstOrNull { it.text("kid") == kid }
-        val pem = listed?.text("publicKeyPem")
-        val reading = pem?.let { TrustedKeys.fromPem(it, "") }
-        return if (reading is KeyReading.Keys && reading.keys.any { it.kid == kid }) pem else null
+    fun publishedKey(keyList: JsonObject, kid: String): String? =
+        keyList.list("keys").filterIsInstance<JsonObject>()
+            .filter { it.text("kid") == kid }
+            .mapNotNull { it.text("publicKeyPem") }
+            .firstOrNull { isKey(it, kid) }
+
+    private fun isKey(pem: String, kid: String): Boolean {
+        val reading = TrustedKeys.fromPem(pem, "")
+        return reading is KeyReading.Keys && reading.keys.any { it.kid == kid }
     }
 }
