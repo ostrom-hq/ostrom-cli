@@ -101,8 +101,8 @@ class AgentLaunchUseCaseTest {
         // S2-20: the instance's keys, read before the agent starts, are what the gate policy must be signed with
         assertEquals(KEYS, environment[LaunchVariables.INSTANCE_KEYS])
         assertNull(server.sent("GET ${Routes.INSTANCE_KEYS}").single().token, "a public route")
-        assertNull(environment[LaunchVariables.PACKAGE_SEAL], "no package, no seal")
-        assertNull(environment[LaunchVariables.PACKAGE_MANIFEST])
+        val noPackage = listOf(LaunchVariables.PACKAGE_SEAL, LaunchVariables.PACKAGE_MANIFEST, LaunchVariables.PACKAGE)
+        assertTrue(noPackage.all { environment[it] == null }, "no package, no seal")
         for (name in listOf(LaunchVariables.DEVICE_TOKEN, LaunchVariables.SERVER)) {
             assertTrue(environment.containsKey(name) && environment[name] == null, "$name is removed")
         }
@@ -114,7 +114,6 @@ class AgentLaunchUseCaseTest {
         assertEquals("alice", environment[LaunchVariables.DEV])
         assertEquals("L1", environment[LaunchVariables.LAUNCH_ID])
         assertEquals("", environment[LaunchVariables.HARNESS_VERSION])
-        assertNull(environment[LaunchVariables.PACKAGE])
         assertEquals("/usr/local/bin/git", environment[LaunchVariables.GIT], "S2-28: the hooks run the git found here")
         assertEquals(
             RelaySettings("https://ostrom.example", "agent-token", "ostrom/test", "L1", setOf("ostrom"), false),
