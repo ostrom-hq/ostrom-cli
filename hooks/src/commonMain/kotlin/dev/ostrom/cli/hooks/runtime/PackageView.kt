@@ -22,7 +22,8 @@ import kotlinx.serialization.json.jsonPrimitive
  *
  * @property kind `check`, `notify` or `gate`.
  * @property event `PreToolUse` or `PostToolUse`.
- * @property mode `enforce`, or `shadow` while the workflow is only proposed (reported, never run as a blocker).
+ * @property mode `shadow` while the workflow is only proposed (reported, never run as a blocker); anything else,
+ *   `enforce`, a mode this CLI does not know or none at all, blocks: a view the agent garbled never weakens a check.
  * @property scriptId The script a check runs, or null.
  * @property notifyId The notification Ostrom sends, or null.
  * @property order Its place in its workflow: the checks of one action run in this order.
@@ -39,8 +40,8 @@ data class CompiledHook(
     val notifyId: String?,
     val order: Int,
 ) {
-    /** Whether the hook blocks (`enforce`), not only reported (`shadow`). */
-    val enforced: Boolean get() = mode == ENFORCE
+    /** Whether the hook blocks: every mode but exactly `shadow`, which is only reported. */
+    val enforced: Boolean get() = mode != SHADOW
 
     /** Whether the tool call [subject] falls under the hook, read as the gate reads its catalogue's patterns. */
     fun matches(subject: ToolSubject, patterns: PatternCache): Boolean =
@@ -62,6 +63,9 @@ data class CompiledHook(
 
         /** The mode of a hook that blocks. */
         const val ENFORCE = "enforce"
+
+        /** The only mode of a hook that does not block: it is reported, never run as a blocker. */
+        const val SHADOW = "shadow"
     }
 }
 

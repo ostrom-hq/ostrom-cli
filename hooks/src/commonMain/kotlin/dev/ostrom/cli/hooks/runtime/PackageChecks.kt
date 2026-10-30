@@ -10,17 +10,15 @@ import dev.ostrom.cli.hooks.gate.PushReader
 import dev.ostrom.cli.hooks.gate.ToolKind
 import dev.ostrom.cli.hooks.gate.ToolSubject
 import dev.ostrom.cli.hooks.gate.UnreadablePushException
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.booleanOrNull
 import okio.ByteString.Companion.encodeUtf8
 
 /**
  * What the checks of a package reach outside themselves.
  *
- * @property files The package's files, the sandbox's copy of a script and the cache of passed checks.
+ * @property files The package's files and the sandbox's copy of a script.
  * @property calls Ostrom, through the launcher's relay: the run reports and the notifications.
  * @property git The real `git`, for the repository, HEAD and the commits a push sends.
  * @property checkouts The git operations whose exit status matters (clean tree, detached checkouts).
@@ -44,8 +42,14 @@ data class CheckPorts(
  * the package is not run and the action is refused. An enforced check that guards a push tests each commit the push
  * sends, never the working tree: in place when it is HEAD and the tree is clean, refused when HEAD has uncommitted
  * changes, otherwise in a detached worktree under `<tmp>/sbx`, removed afterwards. A push it cannot tie to commits is
- * refused. A pass is kept per script and commit in `<tmp>/check-cache.json`. A check in shadow is only reported. A
- * failure or a timeout refuses the action. A package changed since the launch refuses every action (S2-33).
+ * refused. A check in shadow is only reported; every other mode blocks, and an enforced check whose script is not in
+ * the package refuses the action. A failure or a timeout refuses the action. A package changed since the launch
+ * refuses every action (S2-33).
+ *
+ * A pass is kept per script and commit in this object's memory only, never on disk: every file the hook could keep
+ * it in (`<tmp>`, the relay's token file the key of an HMAC would come from) is readable and writable by the agent's
+ * own user, so a pass read back from one could be forged to skip an enforced check (S2-20). The hook process lives for
+ * one action, so a check runs again at each push: the price of a pass nobody can forge.
  *
  * After an action, Ostrom sends the package's notifications (never the machine). Reports and notifications are best
  * effort: a lost one never holds the agent.
@@ -65,6 +69,7 @@ class PackageChecks(
     private val location = CommandLocation(ports.git, session.home)
     private val pushes = PushReader(ports.git, session.home)
     private val patterns = PatternCache()
+    private val passes = mutableSetOf<String>()
     private val view: PackageView? by lazy { ports.files.read(viewPath)?.let(PackageView::parse) }
 
     override val digest: String? get() = view?.digest
@@ -72,7 +77,8 @@ class PackageChecks(
     override val context: String? get() = view?.context
 
     override fun guards(subject: ToolSubject): Boolean = view?.hooks.orEmpty().any {
-        it.event == CompiledHook.BEFORE && it.enforced && it.matches(subject, patterns)
+        it.kind == CompiledHook.CHECK && it.event == CompiledHook.BEFORE && it.enforced &&
+            it.matches(subject, patterns)
     }
 
     override fun beforeTool(event: JsonObject, subject: ToolSubject, cwd: String): HookReply? {
@@ -136,8 +142,6 @@ class PackageChecks(
         private val directory = location.directory(cwd, subject.text)
         private val repository = ports.git.run(directory, listOf("rev-parse", "--show-toplevel")).ifEmpty { cwd }
         private val sandbox = "${view.tmp}/sbx"
-        private val cachePath = "${view.tmp}/check-cache.json"
-        private val cache: MutableMap<String, Boolean> by lazy { readCache() }
 
         /** @return The refusal, or null when every check passed. */
         fun run(hooks: List<CompiledHook>): String? {
@@ -155,7 +159,7 @@ class PackageChecks(
         private fun runHook(hook: CompiledHook, push: Push?): String? {
             val script = view.script(hook.scriptId)
             return when {
-                script == null -> null
+                script == null -> if (hook.enforced) CheckTexts.missingScript(hook) else null
                 !hook.enforced -> {
                     report(hook, script, script.sha256, Report(null, SKIPPED, "", "not run (shadow)"))
                     null
@@ -170,7 +174,7 @@ class PackageChecks(
             val key = sha?.let { "${script.id}:commit:$it" }
             val head = sha ?: here
             return when {
-                key != null && cache[key] == true -> {
+                key != null && key in passes -> {
                     val passed = Report(0, PASSED, "passed earlier on the same commit", CACHED, head)
                     report(hook, script, script.sha256, passed)
                     null
@@ -186,12 +190,14 @@ class PackageChecks(
             }
         }
 
-        /** Another commit than HEAD: tested in a detached worktree of its own, removed afterwards (CORRECTIFS-3). */
+        /** Another commit than HEAD: tested in a detached worktree of its own, removed afterwards whatever happens. */
         private fun inCheckout(hook: CompiledHook, script: CompiledScript, sha: String): String? {
             val path = "$sandbox/wt-${sha.take(SHORT_SHA)}"
             ports.checkouts.remove(repository, path)
             return if (ports.checkouts.add(repository, path, sha)) {
-                verified(hook, script, path, sha, "${script.id}:commit:$sha").also {
+                try {
+                    verified(hook, script, path, sha, "${script.id}:commit:$sha")
+                } finally {
                     ports.checkouts.remove(repository, path)
                 }
             } else {
@@ -246,7 +252,7 @@ class PackageChecks(
             return when {
                 !run.started -> CheckTexts.couldNotRun(script.label, run.output)
                 outcome == PASSED -> {
-                    target.key?.let(::keep)
+                    target.key?.let(passes::add)
                     null
                 }
                 else -> CheckTexts.failed(script, run.exit, target.key?.let { target.head }, run.output)
@@ -272,21 +278,6 @@ class PackageChecks(
             writes.send(ids.of(agentSession), agentSession, REPORT_MILLIS) { id ->
                 Routes.CHECKS to JsonObject(mapOf("sessionId" to JsonPrimitive(id)) + body)
             }
-        }
-
-        private fun keep(key: String) {
-            cache[key] = true
-            ports.files.write(cachePath, JsonObject(cache.mapValues { JsonPrimitive(it.value) }).toString())
-        }
-
-        private fun readCache(): MutableMap<String, Boolean> {
-            val parsed = try {
-                ports.files.read(cachePath)?.let { Json.parseToJsonElement(it) as? JsonObject }
-            } catch (_: IllegalArgumentException) {
-                null
-            }
-            return parsed.orEmpty().filterValues { (it as? JsonPrimitive)?.booleanOrNull == true }
-                .mapValues { true }.toMutableMap()
         }
     }
 

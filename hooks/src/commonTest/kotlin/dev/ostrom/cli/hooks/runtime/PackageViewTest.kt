@@ -48,6 +48,8 @@ class PackageViewTest {
         assertNull(view?.script(null))
         assertTrue(check.enforced)
         assertFalse(notify.enforced)
+        assertTrue(blank.enforced, "a hook without a mode blocks")
+        assertTrue(check.copy(mode = "audit").enforced, "an unknown mode blocks")
     }
 
     @Test

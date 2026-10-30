@@ -15,6 +15,7 @@ import okio.ByteString.Companion.encodeUtf8
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -38,12 +39,13 @@ class PackageChecksTest {
         }
     }
 
-    private class Scripts(vararg runs: ScriptRun) : ScriptRunner {
+    private class Scripts(vararg runs: ScriptRun, private val breaks: Boolean = false) : ScriptRunner {
         private val queue = ArrayDeque(runs.toList())
         val requests = mutableListOf<ScriptRequest>()
 
         override fun run(request: ScriptRequest): ScriptRun {
             requests += request
+            check(!breaks) { "the runner broke" }
             return if (queue.size > 1) queue.removeFirst() else queue.first()
         }
     }
@@ -147,7 +149,7 @@ class PackageChecksTest {
         val request = ScriptRequest("s-test", "/t/sbx/s-test.sh", "/w", "/t/sbx", "/t", network = false, 30_000)
         assertEquals(listOf(request), scripts.requests)
         assertEquals(test, texts["/t/sbx/s-test.sh"], "the verified copy runs, not the file the agent can rewrite")
-        assertEquals("""{"s-test:commit:M":true}""", texts["/t/check-cache.json"])
+        assertNull(texts["/t/check-cache.json"], "a pass is never written where the agent could forge one")
         val (shadow, run) = reports()
         assertEquals(
             buildJsonObject {
@@ -184,23 +186,21 @@ class PackageChecksTest {
     }
 
     @Test
-    fun theKeptPassesAreReadBackAndOthersAreIgnored() {
-        texts["/t/check-cache.json"] = """{"s-test:commit:D":true,"s-test:commit:M":false,"x":{"y":1}}"""
-        assertNull(checks(listOf(tests)).before("git push origin main dev"))
-        assertEquals(1, scripts.requests.size, "only D was kept; M runs")
-        assertEquals("""{"s-test:commit:D":true,"s-test:commit:M":true}""", texts["/t/check-cache.json"])
-        for (broken in listOf("not json", "[1]")) {
-            texts["/t/check-cache.json"] = broken
-            assertNull(checks(listOf(tests)).before("git push origin main"))
-        }
-        assertEquals(3, scripts.requests.size, "an unreadable cache keeps nothing")
+    fun aPassForgedOnDiskIsNeverTrusted() {
+        texts["/t/check-cache.json"] = """{"s-test:commit:M":true,"s-test:commit:D":true}"""
+        assertNull(checks(listOf(tests)).before("git push origin main"))
+        assertEquals(1, scripts.requests.size, "the forged pass of M is ignored: the check runs")
+        assertEquals("passed", reports().single().text("outcome"))
+        assertNull(checks(listOf(tests)).before("git push origin main"))
+        assertEquals(2, scripts.requests.size, "a new hook process keeps no pass of the one before")
     }
 
     @Test
     fun aFailingCheckRefusesWithItsCommandAndTheTailOfItsOutput() {
         val output = (1..70).joinToString("\n") { "line $it" } + "\n"
         scripts = Scripts(ScriptRun(1, output, "macos sandbox-exec (no network, no write outside the repository)"))
-        val refusal = checks(listOf(tests)).before("git push origin main")
+        val checks = checks(listOf(tests))
+        val refusal = checks.before("git push origin main")
         val expected = "Ostrom: check \"Tests\" failed (exit 1) on commit M before this action, so the action was " +
             "not run. Command: npm test\n" + (46..70).joinToString("\n") { "line $it" } +
             "\nFix the cause in the code (never skip or weaken the check), commit, then run the same action again.\n"
@@ -209,7 +209,8 @@ class PackageChecksTest {
         val report = reports().single()
         assertEquals("failed", report.text("outcome"))
         assertEquals(60, report.text("outputTail").lines().size)
-        assertNull(texts["/t/check-cache.json"], "a failure is never kept")
+        assertEquals(refusal, checks.before("git push origin main"), "a failure is never kept: it runs again")
+        assertEquals(2, scripts.requests.size)
     }
 
     @Test
@@ -280,12 +281,24 @@ class PackageChecksTest {
 
     @Test
     fun anotherCommitIsTestedInADetachedWorktreeRemovedAfterwards() {
-        assertNull(checks(listOf(tests), head = "H").before("git push origin feature:main"))
+        val checks = checks(listOf(tests), head = "H")
+        assertNull(checks.before("git push origin feature:main"))
         val path = "/t/sbx/wt-0123456789ab"
         assertEquals(listOf("remove /w $path", "add /w $path $feature", "remove /w $path"), checkouts.log)
         assertEquals(path, scripts.requests.single().directory)
         assertEquals(feature, reports().single().text("head"))
-        assertEquals("""{"s-test:commit:$feature":true}""", texts["/t/check-cache.json"])
+        assertNull(checks.before("git push origin feature:main"))
+        assertEquals(1, scripts.requests.size, "the pass of the commit is kept for the rest of the hook's run")
+        assertEquals("cached", reports().last().text("sandbox"))
+    }
+
+    @Test
+    fun theWorktreeOfACommitIsRemovedEvenWhenItsCheckBreaks() {
+        scripts = Scripts(passed, breaks = true)
+        val checks = checks(listOf(tests), head = "H")
+        assertFailsWith<IllegalStateException> { checks.before("git push origin feature:main") }
+        val path = "/t/sbx/wt-0123456789ab"
+        assertEquals(listOf("remove /w $path", "add /w $path $feature", "remove /w $path"), checkouts.log)
     }
 
     @Test
@@ -339,10 +352,41 @@ class PackageChecksTest {
         val misplaced = checks(listOf(late, early))
         assertNull(misplaced.before("git push origin main"))
         misplaced.afterTool(event("git push origin main"), bash("git push origin main"))
-        assertNull(checks(listOf(orphan, tell)).before("git push origin main"), "a check without its script is skipped")
         assertNull(checks().before("ls"))
         assertEquals(emptyList(), calls.calls)
         assertEquals(emptyList(), scripts.requests)
+    }
+
+    @Test
+    fun anEnforcedCheckWithoutItsScriptRefusesAndAShadowOneIsSkipped() {
+        val orphan = hook("orphan", "check", "enforce", "\"scriptId\":\"gone\"", "npm publish")
+        val refusal = checks(listOf(orphan, tell)).before("npm publish")?.stderr
+        assertEquals(
+            "Ostrom: check orphan names a script (gone) the session's workflow package does not hold, so it cannot " +
+                "run and this action was not run. Restart the session (`ostrom <agent>`).\n",
+            refusal,
+        )
+        val unnamed = """{"id":"bare","nodeId":"n","kind":"check","event":"PreToolUse","tools":["Bash"],
+            "patterns":["npm publish"],"mode":"enforce"}"""
+        assertContains(checks(listOf(unnamed)).before("npm publish")?.stderr.orEmpty(), "names a script (none)")
+        val shadow = hook("orphan", "check", "shadow", "\"scriptId\":\"gone\"", "npm publish")
+        assertNull(checks(listOf(shadow)).before("npm publish"), "a shadow check never blocks")
+        assertEquals(emptyList(), reports())
+        assertEquals(emptyList(), scripts.requests)
+    }
+
+    @Test
+    fun aCheckWithAnUnknownOrMissingModeBlocks() {
+        scripts = Scripts(ScriptRun(1, "no\n", SandboxedScripts.NO_SANDBOX))
+        val unknown = hook("test", "check", "audit", "\"scriptId\":\"s-test\"", "npm publish")
+        val missing = """{"id":"m","nodeId":"n-m","kind":"check","event":"PreToolUse","tools":["Bash"],
+            "patterns":["npm publish"],"scriptId":"s-test"}"""
+        for (hook in listOf(unknown, missing)) {
+            val checks = checks(listOf(hook), head = "H")
+            assertTrue(checks.guards(bash("npm publish")))
+            assertContains(checks.before("npm publish")?.stderr.orEmpty(), "failed (exit 1)")
+        }
+        assertEquals(2, scripts.requests.size)
     }
 
     @Test
@@ -350,6 +394,9 @@ class PackageChecksTest {
         assertTrue(checks().guards(bash("git push origin main")))
         assertFalse(checks().guards(bash("ls")))
         assertFalse(checks(listOf(shadowLint, tell)).guards(bash("git push origin main")))
+        val early = """{"id":"e","nodeId":"e","kind":"notify","event":"PreToolUse","tools":["Bash"],"patterns":["git"],
+            "mode":"enforce","notifyId":"x"}"""
+        assertFalse(checks(listOf(early)).guards(bash("git push origin main")), "a notification guards nothing")
         texts.remove("/t/package.json")
         assertFalse(checks(viewText = null).guards(bash("git push origin main")), "no view, nothing guarded")
     }

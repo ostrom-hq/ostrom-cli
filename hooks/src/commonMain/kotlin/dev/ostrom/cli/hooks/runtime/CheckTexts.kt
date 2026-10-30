@@ -16,6 +16,11 @@ object CheckTexts {
         "Ostrom: the session's workflow package cannot be read ($path), so its checks cannot run and this " +
             "action was not run. Restart the session (`ostrom <agent>`)."
 
+    /** An enforced check whose script is not in the package: what it guards cannot be checked. */
+    fun missingScript(hook: CompiledHook) =
+        "Ostrom: check ${hook.id} names a script (${hook.scriptId ?: "none"}) the session's workflow package does " +
+            "not hold, so it cannot run and this action was not run. Restart the session (`ostrom <agent>`)."
+
     /** A push Ostrom cannot tie to the commits it sends. */
     fun unreadablePush(label: String, reason: String) =
         "Ostrom: check \"$label\" not run, so the action was not run: $reason"
