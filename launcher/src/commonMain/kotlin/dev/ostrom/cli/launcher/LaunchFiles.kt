@@ -83,7 +83,9 @@ class LaunchFilesImpl(
 
     override fun createPrivateDirectory(path: String) {
         val folder = path.toPath()
-        folder.parent?.let { fileSystem.createDirectories(it) }
+        // a root is never a launch's own folder (and okio's fake file system does not refuse to "create" it)
+        val parent = folder.parent ?: throw IOException("$path is a root, not a folder of its own")
+        fileSystem.createDirectories(parent)
         fileSystem.createDirectory(folder, mustCreate = true)
         restrict(path, true)
     }

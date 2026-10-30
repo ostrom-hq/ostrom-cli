@@ -68,7 +68,7 @@ class DeviceLoginTest {
     fun noInvitationAnUnreachableServerOrABrokenAnswerStop() = runTest {
         polls += ServerReply(403, """{"error":{"type":"forbidden","message":"@maya-k has no access yet"}}""")
         assertEquals(LoginOutcome.Stopped(77, "@maya-k has no access yet"), signIn())
-        polls += ServerReply(500, """{"error":{"type":"internal","message":"boom"}}""")
+        polls += ServerReply(400, """{"error":{"type":"bad_request","message":"boom"}}""")
         assertEquals(LoginOutcome.Stopped(69, "Ostrom could not sign you in: boom"), signIn())
         polls += ServerReply(200, """{"token":"ost_new"}""")
         assertEquals(LoginOutcome.Stopped(69, "Ostrom answered without a token. Try again later."), signIn())
@@ -90,29 +90,61 @@ class DeviceLoginTest {
             )
             assertEquals(stopped, signIn())
         }
+        // an escape sequence after GitHub's address could rewrite the line the developer reads
+        val escaped = "https://github.com/login/device\\u001b[2K\\u007f"
+        start = ServerReply(200, """{"deviceCode":"dc","userCode":"X","verificationUri":"$escaped"}""")
+        val cleaned = "https://api.ostrom.run sent a sign-in page that is not GitHub's " +
+            "(https://github.com/login/device[2K). Check the --server URL."
+        assertEquals(LoginOutcome.Stopped(69, cleaned), signIn())
         assertEquals(emptyList(), said, "the code is never shown")
-        assertEquals(listOf("/api/v1/auth/device", "/api/v1/auth/device"), calls.map { it.path })
+        assertEquals(List(3) { "/api/v1/auth/device" }, calls.map { it.path })
     }
 
     @Test
-    fun aStartWithoutItsFieldsFallsBackOnGitHubsDefaults() = runTest {
-        start = ServerReply(200, "{}")
-        polls += ServerReply(200, """{"token":"t","login":"l"}""")
-        assertEquals(LoginOutcome.SignedIn(Credentials("t", "l")), signIn())
-        assertEquals("! Copy your one-time code: ?", said.first())
-        assertEquals("  Open https://github.com/login/device and enter it.", said.last())
-        assertEquals(listOf(5_000L), waits)
-        assertEquals("""{"deviceCode":""}""", calls.last().body)
-        start = ServerReply(200, """{"deviceCode":"dc","interval":{},"expiresIn":[1]}""")
+    fun aStartWithoutAUsableCodeStopsAtOnce() = runTest {
+        val noCode = "https://api.ostrom.run answered without a usable sign-in code. Check the --server URL."
+        val escaped = """{"deviceCode":"dc","userCode":"\u001b[2J"}"""
+        for (body in listOf("{}", """{"deviceCode":"dc"}""", """{"userCode":"4F2C"}""", escaped)) {
+            start = ServerReply(200, body)
+            assertEquals(LoginOutcome.Stopped(69, noCode), signIn(), body)
+        }
+        assertEquals(emptyList(), said, "nothing is shown")
+        assertEquals(emptyList(), waits, "nothing is asked")
+    }
+
+    @Test
+    fun oddWaitsAreDefaultsOrKeptWithinBounds() = runTest {
+        start = ServerReply(200, """{"deviceCode":"dc","userCode":"AB","interval":{},"expiresIn":[1]}""")
         polls += ServerReply(200, """{"token":"t","login":"l"}""")
         assertEquals(LoginOutcome.SignedIn(Credentials("t", "l")), signIn(), "fields of the wrong kind are defaults")
-        assertEquals(5_000L, waits.last())
+        assertEquals("  Open https://github.com/login/device and enter it.", said.last(), "GitHub's page by default")
+        assertEquals(listOf(5_000L), waits)
+        // an interval of 0 would ask in a tight loop; one past a minute, or an expiry past 30 minutes, is cut
+        start = ServerReply(200, """{"deviceCode":"dc","userCode":"AB","interval":0,"expiresIn":2}""")
+        polls += pending()
+        polls += pending()
+        assertEquals(LoginOutcome.Stopped(1, "The code expired. Run ostrom login again."), signIn())
+        assertEquals(listOf(1_000L, 1_000L), waits.drop(1))
+        start = ServerReply(200, """{"deviceCode":"dc","userCode":"AB","interval":3600,"expiresIn":999999}""")
+        repeat(30) { polls += pending() }
+        assertEquals(LoginOutcome.Stopped(1, "The code expired. Run ostrom login again."), signIn())
+        assertEquals(List(30) { 60_000L }, waits.drop(3))
     }
 
     @Test
-    fun aServerLostWhileWaitingStopsTheSignIn() = runTest {
+    fun aServerLostWhileWaitingIsAskedAgainUntilTheCodeExpires() = runTest {
+        // the developer may already have entered the code: a blip, a 5xx or a 429 does not waste it
         polls += ServerReply(null, "connection reset")
+        polls += ServerReply(502, """{"error":{"type":"bad_gateway","message":"deploying"}}""")
+        polls += ServerReply(429, """{"error":{"type":"rate_limited","message":"later"}}""")
+        polls += ServerReply(200, """{"token":"ost_new","login":"maya-k"}""")
+        assertEquals(LoginOutcome.SignedIn(Credentials("ost_new", "maya-k")), signIn())
+        repeat(4) { polls += ServerReply(null, "connection reset") }
         val unreachable = "Ostrom is unreachable at https://api.ostrom.run. Check your network, or the --server URL."
-        assertEquals(LoginOutcome.Stopped(69, unreachable), signIn())
+        assertEquals(LoginOutcome.Stopped(69, unreachable), signIn(), "still lost when the code expires")
+        repeat(3) { polls += ServerReply(null, "connection reset") }
+        polls += pending()
+        val expired = LoginOutcome.Stopped(1, "The code expired. Run ostrom login again.")
+        assertEquals(expired, signIn(), "back before the expiry: the code expired")
     }
 }
