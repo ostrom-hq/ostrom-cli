@@ -7,6 +7,7 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -210,5 +211,50 @@ class SecretStoreTest {
         assertEquals(1, nullOnFailure { 1 })
         assertNull(nullOnFailure { error("tag check failed") })
         assertFailsWith<CancellationException> { nullOnFailure { throw CancellationException("stop") } }
+    }
+
+    @Test
+    fun forgettingASecretClearsTheSystemStoreAndTheFileOfATimeWithoutOne() {
+        machine()
+        // Signed in over SSH, with no Secret Service: the tokens went to the encrypted file.
+        val withoutService = secretStoreOf(FakeVault(available = false), home, files)
+        withoutService.write("https://ostrom.run", "osd_from_ssh")
+        withoutService.write("https://eu.ostrom.run", "osd_other")
+        // Back on the desktop, the Secret Service answers: login keeps the token there.
+        val store = secretStoreOf(FakeVault(), home, files)
+        store.write("https://ostrom.run", "osd_from_desktop")
+        store.delete("https://ostrom.run")
+        assertNull(store.read("https://ostrom.run"))
+        assertNull(withoutService.read("https://ostrom.run"), "no token is left on disk")
+        assertEquals("osd_other", withoutService.read("https://eu.ostrom.run"))
+        store.delete("https://ostrom.run")
+        withoutService.delete("https://ostrom.run")
+    }
+
+    @Test
+    fun forgettingWhereThereIsNoFileLeavesNoFileBehind() {
+        machine()
+        secretStoreOf(FakeVault(), home, files).delete("https://ostrom.run")
+        secretStoreOf(FakeVault(available = false), home, files).delete("https://ostrom.run")
+        assertFalse(fileSystem.exists("/home/maya/.config".toPath()), "neither a secrets file nor its lock")
+    }
+
+    @Test
+    fun aStoreThatRefusesToForgetNeverKeepsTheOtherOnesToken() {
+        machine()
+        val withoutService = secretStoreOf(FakeVault(available = false), home, files)
+        withoutService.write("https://ostrom.run", "osd_from_ssh")
+        // The system store is locked: the file's token is forgotten all the same, and the refusal is reported.
+        val locked = FakeVault().apply { failWith = VaultAnswer(3, code = -25308) }
+        assertFailsWith<SecretStoreException> { secretStoreOf(locked, home, files).delete("https://ostrom.run") }
+        assertNull(withoutService.read("https://ostrom.run"))
+        // A file this version cannot change: the system store's token is forgotten all the same.
+        files.write(secretsFile, "ostrom-secrets 2\nname value\n")
+        val vault = FakeVault()
+        val store = secretStoreOf(vault, home, files)
+        store.write("https://ostrom.run", "osd_from_desktop")
+        val newer = assertFailsWith<SecretStoreException> { store.delete("https://ostrom.run") }.message
+        assertTrue(newer.endsWith("update ostrom to change it."), newer)
+        assertTrue(vault.secrets.isEmpty())
     }
 }

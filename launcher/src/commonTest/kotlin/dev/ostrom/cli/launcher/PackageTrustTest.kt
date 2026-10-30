@@ -28,7 +28,8 @@ class PackageTrustTest {
         server[keysRoute] = 200 to keyList
     }
 
-    private suspend fun fetch() = trust.fetch("https://ostrom.example", "dev-token", "acme-api", config)
+    private suspend fun fetch(keep: Boolean = true) =
+        trust.fetch("https://ostrom.example", "dev-token", "acme-api", config, keep)
 
     private fun changed(vararg fields: Pair<String, Any?>): String {
         val envelope = checkNotNull(parseObject(PackageVector.ENVELOPE))
@@ -57,11 +58,23 @@ class PackageTrustTest {
     }
 
     @Test
+    fun aDryRunVerifiesThePackageButWritesNothing() = runTest {
+        serve()
+        assertIs<PackageOutcome.Verified>(fetch(keep = false))
+        assertEquals(emptyMap(), files.texts, "neither the envelope nor a pin")
+        val unpinned = "Ostrom's signing key ${PackageVector.KID} for https://ostrom.example is not pinned yet: " +
+            "the first launch pins it"
+        assertEquals(listOf(unpinned), said)
+        assertIs<PackageOutcome.Verified>(fetch(keep = false))
+        assertEquals(2, server.sent(keysRoute).size, "nothing pinned: the keys are read again")
+    }
+
+    @Test
     fun aPackageSignedForAnotherRepositoryIsRefused() = runTest {
         // S2-33: the server (or a proxy) answering another repository's valid package is not this session's
         serve()
         server["GET /api/v1/packages/current?repo=other"] = 200 to PackageVector.ENVELOPE
-        val refused = trust.fetch("https://ostrom.example", "dev-token", "other", config)
+        val refused = trust.fetch("https://ostrom.example", "dev-token", "other", config, keep = true)
         assertEquals(PackageOutcome.Refused("the package was signed for acme-api, not other"), refused)
         assertEquals(null, files.texts[join(config, "packages", "${PackageVector.DIGEST}.json")])
     }

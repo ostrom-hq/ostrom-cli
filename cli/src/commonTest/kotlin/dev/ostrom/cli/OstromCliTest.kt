@@ -215,6 +215,16 @@ class OstromCliTest {
     }
 
     @Test
+    fun dryRunIsHandedToTheLaunch() {
+        signIn("/home/maya/.config/ostrom")
+        assertEquals(7, cli(environment = withServer).run(arrayOf("codex", "--dry-run", "--repo", "acme/api")))
+        assertEquals(LaunchRequest(Agent.CODEX, emptyList(), "acme/api", null, dryRun = true), launches.single().first)
+        assertEquals(64, cli(environment = withServer).run(arrayOf("claude", "--cloud", "--dry-run")))
+        assertTrue(console.err.contains("it does not go with --cloud"), console.err.toString())
+        assertEquals(1, launches.size, "nothing launched")
+    }
+
+    @Test
     fun theServerIsTheOptionsTheEnvironmentsOrTheOneOfLogin() {
         signIn("/home/maya/.config/ostrom", "https://cfg.example")
         val home = mapOf("HOME" to "/home/maya")
@@ -297,8 +307,6 @@ class OstromCliTest {
         assertEquals(70, cli().run(arrayOf("harness", "add", "git-safety", "--set", "a=b", "--yes")))
         assertEquals(70, cli().run(arrayOf("receipts")))
         assertEquals(70, cli().run(arrayOf("claude", "--cloud", "-p", "hello")))
-        assertEquals(70, cli().run(arrayOf("codex", "--dry-run")))
-        assertTrue(console.err.endsWith("ostrom codex --dry-run: not implemented yet.\n"), console.err.toString())
         assertEquals(64, cli().run(arrayOf("approve")))
     }
 
