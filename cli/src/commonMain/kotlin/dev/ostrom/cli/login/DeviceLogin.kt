@@ -147,6 +147,7 @@ class DeviceLogin(
         private const val TOO_MANY = 429
         private val USER_CODE = Regex("[A-Za-z0-9-]{1,32}")
         // an Int? like the answer's status: a lost connection (no status) never gets here, so no null test either
+        @Suppress("MayBeConst") // a const cannot be an Int?, and an Int would bring the null test back
         private val PENDING: Int? = 428
         private const val FORBIDDEN = 403
         private const val EXPIRED = 1
