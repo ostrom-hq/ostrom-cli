@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+// One actual per expect of the module, as in posixMain and mingwMain: their number follows the platform API.
+@file:Suppress("TooManyFunctions")
+
 package dev.ostrom.cli.platform
 
 import java.io.IOException
@@ -84,4 +87,91 @@ internal actual fun restrictToOwner(path: String) {
     if (Files.exists(file) && Files.getFileStore(file).supportsFileAttributeView("posix")) {
         Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-------"))
     }
+}
+
+// coverage: test-only JVM target; the shipped native actual is tested in posixTest and mingwTest.
+@ExcludeFromCoverage
+internal actual fun captureOutput(
+    command: List<String>,
+    capacity: Int,
+    timeoutMillis: Int,
+): CaptureResult = try {
+    val process = quiet(ProcessBuilder(command)).start()
+    val output = java.io.ByteArrayOutputStream()
+    // read beside the wait, so the deadline holds while the child keeps its stdout open
+    val reader = Thread(Drain(process.inputStream, output, capacity)).apply {
+        isDaemon = true
+        start()
+    }
+    if (!process.waitFor(timeoutMillis.toLong(), java.util.concurrent.TimeUnit.MILLISECONDS)) {
+        process.destroyForcibly()
+        CaptureResult.TimedOut
+    } else {
+        reader.join(timeoutMillis.toLong())
+        val bytes = synchronized(output) { output.toByteArray() }
+        CaptureResult.Exited(process.exitValue(), bytes.decodeToString())
+    }
+} catch (_: IOException) {
+    // the JDK's wording of a missing program changes between versions: a child that cannot start is not found
+    CaptureResult.NotFound
+}
+
+/** Copies a child's output into [output], up to [capacity] bytes; a class, so no lambda escapes the exclusion. */
+// coverage: test-only JVM target, see captureOutput.
+@ExcludeFromCoverage
+private class Drain(
+    private val input: java.io.InputStream,
+    private val output: java.io.ByteArrayOutputStream,
+    private val capacity: Int,
+) : Runnable {
+    override fun run() = input.use {
+        val buffer = ByteArray(BUFFER_BYTES)
+        var count = it.read(buffer)
+        while (count >= 0) {
+            synchronized(output) { output.write(buffer, 0, minOf(count, capacity - output.size())) }
+            count = it.read(buffer)
+        }
+    }
+}
+
+/** stdin from the null device, stderr dropped: what the native shims do. */
+// coverage: test-only JVM target, see captureOutput.
+@ExcludeFromCoverage
+private fun quiet(builder: ProcessBuilder): ProcessBuilder {
+    val windows = System.getProperty("os.name").orEmpty().startsWith("Windows")
+    return builder
+        .redirectInput(ProcessBuilder.Redirect.from(java.io.File(if (windows) "NUL" else "/dev/null")))
+        .redirectError(ProcessBuilder.Redirect.DISCARD)
+}
+
+private const val BUFFER_BYTES = 8_192
+
+// coverage: test-only JVM target; the shipped native actual is tested in posixTest and mingwTest.
+@ExcludeFromCoverage
+internal actual fun spawnDetached(command: List<String>): Boolean = try {
+    quiet(ProcessBuilder(command)).redirectOutput(ProcessBuilder.Redirect.DISCARD).start()
+    true
+} catch (_: IOException) {
+    false
+}
+
+// coverage: test-only JVM target; the shipped native actual is tested in posixTest and by the end-to-end bench.
+@ExcludeFromCoverage
+internal actual fun tcpExchange(
+    port: Int,
+    request: ByteArray,
+    capacity: Int,
+    timeoutMillis: Int,
+): Pair<Int, ByteArray> = try {
+    java.net.Socket().use { socket ->
+        socket.connect(java.net.InetSocketAddress("127.0.0.1", port), timeoutMillis)
+        socket.soTimeout = timeoutMillis
+        socket.getOutputStream().write(request)
+        val bytes = socket.getInputStream().readBytes()
+        (if (bytes.size >= capacity) TCP_TOO_LARGE else bytes.size) to bytes
+    }
+} catch (_: java.net.SocketTimeoutException) {
+    TCP_TIMED_OUT to ByteArray(0)
+} catch (_: IOException) {
+    TCP_UNREACHABLE to ByteArray(0)
 }
