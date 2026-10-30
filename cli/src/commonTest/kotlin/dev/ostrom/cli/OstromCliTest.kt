@@ -136,7 +136,8 @@ class OstromCliTest {
             mcpServer = { object : McpServer { override fun serve() = 0 } },
             credentials = { directory ->
                 val path = (directory.toPath() / "credentials.json").toString()
-                FileCredentialStore(LaunchFilesImpl(fileSystem) { _, _ -> }, path, secrets) { environment[it] }
+                val files = LaunchFilesImpl(fileSystem) { _, _ -> }
+                FileCredentialStore(files, path, secrets, { console.err("$it\n") }) { environment[it] }
             },
             workingDirectory = { "/work/acme" },
             executable = executable,
@@ -149,11 +150,13 @@ class OstromCliTest {
         ),
     )
 
+    /** Signs this device in as `ost_1`, @maya: the token in the secret store, the login in `credentials.json`. */
     private fun signIn(directory: String, server: String = "https://ostrom.example") {
         fileSystem.createDirectories(directory.toPath())
         fileSystem.write(directory.toPath() / "credentials.json") {
-            writeUtf8("""{"$server":{"token":"ost_1","login":"maya"}}""")
+            writeUtf8("""{"$server":{"login":"maya"}}""")
         }
+        secretsKept[server] = "ost_1"
     }
 
     @Test
@@ -609,6 +612,25 @@ class OstromCliTest {
         assertTrue("ost_1" !in credentials, credentials)
         assertEquals(0, cli(environment = withServer, api = serverOf(logout)).run(arrayOf("logout")))
         assertOut("Not signed in. Nothing to do.\n")
+    }
+
+    @Test
+    fun logoutForgetsTheServerEvenWhenNoTokenIsRead() {
+        // S2-32: a token left only in the other store (the encrypted file of an SSH session) is forgotten too
+        val deleted = mutableListOf<String>()
+        val elsewhere: () -> SecretStore = {
+            object : SecretStore {
+                override val backend = SecretBackend.SECRET_SERVICE
+                override fun read(name: String): String? = null
+                override fun write(name: String, secret: String) = Unit
+                override fun delete(name: String) {
+                    deleted += name
+                }
+            }
+        }
+        assertEquals(0, cli(environment = withServer, secrets = elsewhere).run(arrayOf("logout")))
+        assertOut("Not signed in. Nothing to do.\n")
+        assertEquals(listOf("https://ostrom.example"), deleted)
     }
 
     @Test
