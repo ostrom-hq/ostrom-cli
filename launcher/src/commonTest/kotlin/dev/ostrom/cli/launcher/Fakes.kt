@@ -52,11 +52,10 @@ class MemoryFiles : LaunchFiles {
         if (!directories.add(path)) throw IOException("$path already exists")
     }
 
-    override fun list(path: String): List<String> {
-        val prefix = path + Path.DIRECTORY_SEPARATOR
-        return (texts.keys + directories + links.keys).filter { it.startsWith(prefix) }
-            .map { it.removePrefix(prefix).substringBefore(Path.DIRECTORY_SEPARATOR) }.distinct().sorted()
-    }
+    override fun list(path: String): List<String> =
+        (texts.keys + directories + links.keys).mapNotNull { below(path, it) }
+            .map { rest -> SEPARATORS.fold(rest) { name, separator -> name.substringBefore(separator) } }
+            .distinct().sorted()
 
     override fun exists(path: String) = path in texts || path in directories
 
@@ -67,9 +66,23 @@ class MemoryFiles : LaunchFiles {
 
     override fun deleteRecursively(path: String) {
         deleted += path
-        val under = { entry: String -> entry == path || entry.startsWith(path + Path.DIRECTORY_SEPARATOR) }
+        val under = { entry: String -> entry == path || below(path, entry) != null }
         texts.keys.removeAll(under)
         directories.removeAll(under)
         links.keys.removeAll(under)
+    }
+
+    /**
+     * What follows [path] in [entry], or null when [entry] is not under it. Okio keeps the separator a path was written
+     * with (on Windows, `"/tmp".toPath() / "a"` is `/tmp/a`), and Windows takes both: so does this double there. On
+     * POSIX a `\` is part of a name, as for the real file system.
+     */
+    private fun below(path: String, entry: String): String? {
+        val separator = SEPARATORS.firstOrNull { entry.startsWith(path + it) } ?: return null
+        return entry.removePrefix(path + separator)
+    }
+
+    private companion object {
+        val SEPARATORS = listOf("/", Path.DIRECTORY_SEPARATOR).distinct()
     }
 }
