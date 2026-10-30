@@ -72,16 +72,17 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
             }
         }
 
-    private companion object {
-        const val UNREACHABLE = 69
-        const val SIGN_IN_REQUIRED = 65
-        const val REFUSED = 77
-        const val SIGNATURE_REFUSED = 78
-        const val UNAUTHORIZED = 401
-        const val FORBIDDEN = 403
-        const val POLICY_MILLIS = 5_000L
-        const val LAUNCH_MILLIS = 10_000L
-        const val MCP_MILLIS = 5_000L
-        val MCP_NAME = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+    /** The routes, limits and names of a launch. */
+    companion object {
+        private const val UNREACHABLE = 69
+        private const val SIGN_IN_REQUIRED = 65
+        private const val REFUSED = 77
+        private const val SIGNATURE_REFUSED = 78
+        private const val UNAUTHORIZED = 401
+        private const val FORBIDDEN = 403
+        private const val POLICY_MILLIS = 5_000L
+        private const val LAUNCH_MILLIS = 10_000L
+        private const val MCP_MILLIS = 5_000L
+        private val MCP_NAME = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
     }
 }

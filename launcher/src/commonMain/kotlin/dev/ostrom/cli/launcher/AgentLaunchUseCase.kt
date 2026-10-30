@@ -168,7 +168,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
                 run.sessionFile,
                 dependencies.say,
             )
-            val every = run.site.variable(ALIVE_VARIABLE)?.toLongOrNull() ?: ALIVE_MILLIS
+            val every = run.site.variable(ALIVE_VARIABLE).orEmpty().toLongOrNull() ?: ALIVE_MILLIS
             val code = runAgent(listOf(run.executable) + prepared.arguments, environment, lifeline, every)
             lifeline.end(code, run.model, run.name, run.pack, join(run.site.configDirectory, "receipts"))
             code
@@ -194,7 +194,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         return try {
             run.adapter.prepare(layout, dependencies.files)
         } catch (e: AdapterException) {
-            stop(NO_ADAPTER, e.message.orEmpty())
+            stop(NO_ADAPTER, e.reason)
         }
     }
 
@@ -203,7 +203,9 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         // Only an absolute path names a folder: a bare name would put the working folder on the agent's PATH.
         val binary = site.executable.toPath()
         val folder = if (binary.isAbsolute) binary.parent else null
-        val path = site.variable("PATH").orEmpty()
+        // an empty entry would put the working folder on the agent's PATH: none is added
+        val inherited = site.variable("PATH")?.takeIf { it.isNotEmpty() }
+        val path = listOfNotNull(folder?.toString(), inherited).joinToString(site.pathSeparator.toString())
         return mapOf(
             LaunchVariables.RELAY_URL to relay.url,
             LaunchVariables.RELAY_TOKEN to relay.token,
@@ -222,7 +224,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
             LaunchVariables.PACKAGE to view,
             LaunchVariables.MODEL to run.model,
             // `ostrom wait` must be callable by the agent's shell: this binary's folder goes first on its PATH.
-            "PATH" to if (folder == null) path else "$folder${site.pathSeparator}$path",
+            "PATH" to path.ifEmpty { null },
             // Never in the agent's environment: the device token, and the server the hooks must not call directly.
             LaunchVariables.DEVICE_TOKEN to null,
             LaunchVariables.SERVER to null,
@@ -278,23 +280,26 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
             .mapValues { JsonPrimitive(it.value) },
     )
 
-    private companion object {
-        const val NO_ADAPTER = 70
-        const val CANNOT_WRITE = 73
-        const val AGENT_MISSING = 127
-        const val INFERENCE_MILLIS = 3_000L
-        const val GIT_MILLIS = 3_000
-        const val ALIVE_MILLIS = 20_000L
-        const val ALIVE_VARIABLE = "OSTROM_ALIVE_MS"
-        const val KEEP_VARIABLE = "OSTROM_KEEP_PLUGIN"
-        const val INFERENCE_VARIABLE = "OSTROM_INFERENCE"
-        val ON = setOf("on", "1", "true")
-        val OFF = setOf("off", "0", "false")
+    /** The variables and limits of a launch. */
+    companion object {
+        private const val NO_ADAPTER = 70
+        private const val CANNOT_WRITE = 73
+        private const val AGENT_MISSING = 127
+        private const val INFERENCE_MILLIS = 3_000L
+        private const val GIT_MILLIS = 3_000
+        private const val ALIVE_MILLIS = 20_000L
+        private const val ALIVE_VARIABLE = "OSTROM_ALIVE_MS"
+        private const val KEEP_VARIABLE = "OSTROM_KEEP_PLUGIN"
+        private const val INFERENCE_VARIABLE = "OSTROM_INFERENCE"
+        private val ON = setOf("on", "1", "true")
+        private val OFF = setOf("off", "0", "false")
 
-        fun missing(agent: Agent): String = "${agent.displayName} is not installed (`${agent.executable}` is not on " +
-            "your PATH)." + agent.installUrl?.let { " Install it: $it" }.orEmpty()
+        private fun missing(agent: Agent): String =
+            "${agent.displayName} is not installed (`${agent.executable}` is not on your PATH)." +
+                agent.installUrl?.let { " Install it: $it" }.orEmpty()
 
-        fun folderName(path: String): String = path.trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\')
+        private fun folderName(path: String): String =
+            path.trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\')
     }
 }
 
