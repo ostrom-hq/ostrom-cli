@@ -143,7 +143,7 @@ static inline int ostrom_capture(const char *file, char *const argv[], unsigned 
     if (spawned != 0) { close(fds[0]); return spawned == ENOENT ? -1 : -3; }
     struct timespec start;
     clock_gettime(CLOCK_MONOTONIC, &start);
-    int total = 0, timed_out = 0, status = 0;
+    int total = 0, timed_out = 0, status = 0, exited = 0;
     pid_t waited = 0;
     unsigned char drop[4096];
     for (;;) {
@@ -151,12 +151,14 @@ static inline int ostrom_capture(const char *file, char *const argv[], unsigned 
         if (left <= 0) { timed_out = 1; break; }
         struct pollfd output = {fds[0], POLLIN, 0};
         /* short slices while nothing comes: a child that exited is seen even if a grandchild keeps the pipe */
-        int ready = poll(&output, 1, left > 50 ? 50 : (int)left);
+        int ready = poll(&output, 1, exited ? 0 : left > 50 ? 50 : (int)left);
         if (ready < 0 && errno == EINTR) continue;
         if (ready < 0) break;
         if (ready == 0) {
+            /* once the child is gone, what it wrote just before is still in the pipe: drain it, then stop */
+            if (exited) break;
             waited = waitpid(pid, &status, WNOHANG);
-            if (waited == pid) break;
+            if (waited == pid) exited = 1;
             continue;
         }
         ssize_t count = total < capacity ? read(fds[0], out + total, (size_t)(capacity - total))

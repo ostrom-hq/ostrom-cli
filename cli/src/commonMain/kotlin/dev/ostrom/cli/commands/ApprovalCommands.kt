@@ -49,9 +49,7 @@ internal class InboxCommand(private val dependencies: CliDependencies) : CliktCo
 
     override fun run() {
         val signed = dependencies.signedIn(server)
-        val answer = runBlocking { signed.server.get("$APPROVALS?mine=true&status=pending", signed.token) }
-        val items = answer.orStop(signed.serverUrl, "No inbox on ${signed.serverUrl}.").list("items")
-            .filterIsInstance<JsonObject>()
+        val items = pages(signed)
         val console = dependencies.console
         when {
             json -> console.out(JsonArray(items).toString() + "\n")
@@ -60,10 +58,27 @@ internal class InboxCommand(private val dependencies: CliDependencies) : CliktCo
                 val requests = if (items.size == 1) "1 request waits" else "${items.size} requests wait"
                 console.out("$requests for your yes\n")
                 items.forEach { console.out("  ${line(it)}\n") }
-                val first = items.first().text("id")
-                console.out("Next: ostrom approve $first   or   ostrom deny $first\n")
+                items.first().text("id")?.let { first ->
+                    console.out("Next: ostrom approve $first   or   ostrom deny $first\n")
+                }
             }
         }
+    }
+
+    /** Every page of the inbox (`next` is the cursor of the following one), up to [MAX_PAGES]. */
+    private fun pages(signed: SignedIn): List<JsonObject> {
+        val items = mutableListOf<JsonObject>()
+        var cursor: String? = null
+        var page = 0
+        do {
+            val before = cursor?.let { "&before=${Routes.encode(it)}" }.orEmpty()
+            val answer = runBlocking { signed.server.get("$APPROVALS?mine=true&status=pending$before", signed.token) }
+            val body = answer.orStop(signed.serverUrl, "No inbox on ${signed.serverUrl}.")
+            items += body.list("items").filterIsInstance<JsonObject>()
+            cursor = body.text("next")?.takeIf { it.isNotEmpty() }
+            page++
+        } while (cursor != null && page < MAX_PAGES)
+        return items
     }
 
     private fun line(approval: JsonObject): String {
@@ -76,6 +91,11 @@ internal class InboxCommand(private val dependencies: CliDependencies) : CliktCo
             if (asked.isEmpty()) null else asked,
             if (commits == 0) null else if (commits == 1) "1 commit" else "$commits commits",
         ).filterNotNull().joinToString("  ")
+    }
+
+    private companion object {
+        /** A developer with more than this many pages of requests waiting reads them on the console. */
+        const val MAX_PAGES = 20
     }
 }
 
@@ -93,7 +113,8 @@ internal abstract class AnswerCommand(
     val server by option("--server", help = "Ostrom server URL (else OSTROM_URL, else the one of ostrom login)")
 
     override fun run() {
-        if (dependencies.environment[LaunchVariables.LAUNCH_ID] != null) {
+        // a courtesy, not the boundary: the agent can unset the variable, and the yes needs the passkey anyway
+        if (!dependencies.environment[LaunchVariables.LAUNCH_ID].isNullOrEmpty()) {
             throw stop(ExitCode.REFUSED, "ostrom $commandName: an agent session cannot answer. Use your own terminal.")
         }
         val signed = dependencies.signedIn(server)
@@ -109,7 +130,8 @@ internal abstract class AnswerCommand(
 
     private fun already(approval: JsonObject, status: String?): String = when (status) {
         "expired" -> "This request expired."
-        else -> "Already $status by @${approval.text("decidedBy") ?: "?"}."
+        null -> "This request no longer waits for an answer."
+        else -> "Already $status" + approval.text("decidedBy")?.let { " by @$it" }.orEmpty() + "."
     }
 
     private fun show(approval: JsonObject) {
@@ -119,10 +141,12 @@ internal abstract class AnswerCommand(
         val head = listOfNotNull(approval.text("title"), approval.text("repo"), by)
         console.out(head.joinToString(" · ") + "\n")
         approval.list("commitDetails").filterIsInstance<JsonObject>().forEach {
-            console.out("    ${"${it.text("sha")}".take(SHORT_SHA)} ${it.text("title")}\n")
+            val commit = listOfNotNull(it.text("sha")?.take(SHORT_SHA), it.text("title")).joinToString(" ")
+            if (commit.isNotEmpty()) console.out("    $commit\n")
         }
         approval.list("checks").filterIsInstance<JsonObject>().forEach {
-            console.out("    ${it.text("name")}: ${it.text("state")}\n")
+            val name = it.text("name") ?: "check"
+            console.out("    $name: ${it.text("state") ?: "unknown"}\n")
         }
     }
 
@@ -146,4 +170,8 @@ internal class DenyCommand(dependencies: CliDependencies) : AnswerCommand(depend
  * `api.<domain>` server (api.ostrom.run → app.ostrom.run), else the server itself.
  */
 internal fun consoleOf(dependencies: CliDependencies, serverUrl: String): String =
-    dependencies.environment["OSTROM_CONSOLE_URL"]?.trimEnd('/') ?: serverUrl.replaceFirst("://api.", "://app.")
+    // only a web page goes to the system's opener: a `file:` URL or a path would start whatever handles it
+    dependencies.environment["OSTROM_CONSOLE_URL"]?.trimEnd('/')?.takeIf { WEB.any(it::startsWith) }
+        ?: serverUrl.replaceFirst("://api.", "://app.")
+
+private val WEB = listOf("https://", "http://")
