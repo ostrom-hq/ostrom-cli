@@ -25,8 +25,16 @@ import okio.Path.Companion.toPath
  * What the developer asked: `ostrom <agent> [--repo R] [--model M] [agent arguments…]`.
  *
  * @property model The `--model` given to ostrom (passed on to the agent), or null.
+ * @property dryRun `--dry-run`: the checks of a launch and the harness that would apply, then exit 0 without starting
+ *   the agent, creating a launch or writing any file.
  */
-data class LaunchRequest(val agent: Agent, val arguments: List<String>, val repo: String?, val model: String?)
+data class LaunchRequest(
+    val agent: Agent,
+    val arguments: List<String>,
+    val repo: String?,
+    val model: String?,
+    val dryRun: Boolean = false,
+)
 
 /**
  * Where and as whom a launch runs.
@@ -111,8 +119,9 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         }
         val model = models.firstOrNull()
         calls.checkPolicy(agent, model, site)
+        if (request.dryRun) return calls.dryRun(agent, repo, model, site)
         val launch = calls.createLaunch(repo, agent, model, site)
-        val pack = calls.packageOf(repo, site)
+        val pack = calls.packageOf(repo, site, keep = true)
         val keys = calls.instanceKeys()
         val temporary = join(site.temporaryDirectory, "ostrom-run-${dependencies.clock.millis()}")
         try {
