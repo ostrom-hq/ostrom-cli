@@ -4,12 +4,21 @@ package dev.ostrom.cli.platform
 /**
  * The keys of `config.toml`: settings of this device only, never the organisation's policy (spec CLI.md § 2.2,
  * `ostrom config`).
+ *
+ * @property managedBy The command that changes the key when `ostrom config set | unset` must not (it keeps keys
+ *   consistent with each other); null for a key the user sets freely.
  */
-enum class ConfigKey(val key: String, val description: String) {
+enum class ConfigKey(val key: String, val description: String, val managedBy: String? = null) {
     SERVER("server", "URL of the Ostrom server (set by ostrom login)"),
     DEFAULT_AGENT("default_agent", "agent started by ostrom when none is named"),
     COLOR("color", "auto, always or never"),
     EDITOR("editor", "editor opened by commands that edit text"),
+    TELEMETRY(
+        "telemetry",
+        "anonymous usage statistics, on or off (off unless turned on: ostrom telemetry)",
+        TELEMETRY_COMMANDS,
+    ),
+    TELEMETRY_ID("telemetry_id", "random id of this install, sent with usage statistics only", TELEMETRY_COMMANDS),
     ;
 
     /** Lookup by key name. */
@@ -18,6 +27,8 @@ enum class ConfigKey(val key: String, val description: String) {
         fun of(key: String): ConfigKey? = entries.firstOrNull { it.key == key }
     }
 }
+
+private const val TELEMETRY_COMMANDS = "ostrom telemetry enable | disable"
 
 /** The device configuration, `config.toml` in the CLI folder. */
 interface ConfigStore {

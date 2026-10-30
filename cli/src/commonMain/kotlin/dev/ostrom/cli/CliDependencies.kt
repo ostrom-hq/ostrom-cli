@@ -3,6 +3,8 @@ package dev.ostrom.cli
 
 import dev.ostrom.cli.api.OstromApi
 import dev.ostrom.cli.api.OstromApiImpl
+import dev.ostrom.cli.api.StatisticsSender
+import dev.ostrom.cli.api.TraceContext
 import dev.ostrom.cli.hooks.HookRunner
 import dev.ostrom.cli.hooks.HookRunnerImpl
 import dev.ostrom.cli.hooks.runtime.SessionHooks
@@ -30,6 +32,7 @@ import dev.ostrom.cli.platform.ProcessCaptureImpl
 import dev.ostrom.cli.platform.ProcessLauncherImpl
 import dev.ostrom.cli.platform.currentExecutable
 import dev.ostrom.cli.relay.LocalRelayStarterImpl
+import dev.ostrom.cli.telemetry.UsageStatistics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import okio.FileSystem
@@ -47,6 +50,8 @@ import okio.Path.Companion.toPath
  * @property executable This binary, or null when the system does not say.
  * @property temporaryDirectory Where a launch makes its private folder.
  * @property agents Runs `ostrom <agent>`.
+ * @property postHogKey The usage statistics destination of this build; blank means none.
+ * @property sendStatistics Posts usage statistics (opt-in only).
  */
 @Suppress("LongParameterList") // The composition root: one parameter per dependency, each replaced in tests.
 class CliDependencies(
@@ -62,7 +67,14 @@ class CliDependencies(
     val executable: String?,
     val temporaryDirectory: String,
     val agents: AgentRunner,
+    val postHogKey: String,
+    val sendStatistics: suspend (url: String, body: String) -> Unit,
 ) {
+    /** The opt-in usage statistics. */
+    val usage: UsageStatistics by lazy {
+        UsageStatistics(environment, config, postHogKey, BuildInfo.VERSION, sendStatistics)
+    }
+
     /** The device configuration, or null when no home folder is known. */
     val config: ConfigStore? by lazy {
         environment.configDirectory?.let { ConfigStoreImpl(files, configFile(it)) }
@@ -77,8 +89,12 @@ class CliDependencies(
         fun create(): CliDependencies {
             val console = ConsoleImpl()
             val environment = EnvironmentImpl()
+            // One trace for the whole command, whatever the number of servers or calls it makes.
+            val trace = TraceContext()
+            // Built on first send only: with statistics off (the default) no HTTP client is made.
+            val statistics by lazy { StatisticsSender() }
             val finder = ExecutableFinderImpl(environment)
-            val api = { url: String -> OstromApiImpl(url, USER_AGENT) }
+            val api = { url: String -> OstromApiImpl(url, USER_AGENT, trace = trace) }
             val launchFiles = LaunchFilesImpl()
             return CliDependencies(
                 console = console,
@@ -105,6 +121,8 @@ class CliDependencies(
                     blocking = Dispatchers.IO,
                     userAgent = USER_AGENT,
                 ),
+                postHogKey = BuildInfo.POSTHOG_KEY,
+                sendStatistics = { url, body -> statistics.send(url, body) },
             )
         }
 
