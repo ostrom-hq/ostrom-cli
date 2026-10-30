@@ -74,6 +74,14 @@ class LoopbackTest {
         assertNull(HttpMessages.decode(response(head + "2\r\nab\r\n")), "no last chunk")
         assertNull(HttpMessages.decode(response(head + "-1\r\nab\r\n0\r\n\r\n")), "a negative size")
         assertNull(HttpMessages.decode(response(head + "7fffffff\r\nab\r\n")), "a size past the end")
+        assertNull(HttpMessages.decode(response(head + "2\r\nabXX1\r\nc\r\n0\r\n\r\n")), "data without its CRLF")
+        assertNull(HttpMessages.decode(response(head + "2\r\nab")), "data cut before its CRLF")
+        assertNull(HttpMessages.decode(response(head + "2\r\nab\r")), "data cut inside its CRLF")
+        assertNull(HttpMessages.decode(response(head + "2\r\nab\rX0\r\n\r\n")), "data followed by a lone CR")
+        val gzip = "HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip, chunked\r\n\r\n2\r\nab\r\n0\r\n\r\n"
+        assertNull(HttpMessages.decode(response(gzip)), "a coding the reader does not undo")
+        val listed = "HTTP/1.1 200 OK\r\nTransfer-Encoding: identity, chunked\r\n\r\n2\r\nab\r\n0\r\n\r\n"
+        assertEquals(LoopbackResponse(200, "ab"), HttpMessages.decode(response(listed)), "identity is no coding")
         val many = (1..2_000).joinToString("") { "1\r\nx\r\n" } + "0\r\n\r\n"
         assertEquals(2_000, HttpMessages.decode(response(head + many))?.body?.length, "many small chunks")
     }

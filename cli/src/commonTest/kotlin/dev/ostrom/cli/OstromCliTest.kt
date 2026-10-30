@@ -448,4 +448,32 @@ class OstromCliTest : CliKit() {
         assertTrue(console.err.contains("! The server could not be told"), console.err.toString())
         assertOut("✓ Signed out @maya.")
     }
+
+    @Test
+    fun logoutRevokesTheSavedSessionNeverTheEnvironmentsToken() {
+        signIn("/home/maya/.config/ostrom")
+        val ci = withServer + ("OSTROM_TOKEN" to "ost_ci") + ("OSTROM_DEV" to "bot")
+        // an expired session (401) had nothing left to revoke: no warning
+        val logout = mapOf("POST /api/v1/auth/logout" to (401 to """{"error":{"message":"expired"}}"""))
+        assertEquals(0, cli(environment = ci, api = serverOf(logout)).run(arrayOf("logout")))
+        assertEquals("ost_1", requests.single().second.token, "the device's own session")
+        assertOut("✓ Signed out @maya.")
+        assertTrue("could not be told" !in console.err.toString(), console.err.toString())
+        assertEquals(0, cli(environment = ci, api = serverOf(logout)).run(arrayOf("logout")))
+        assertOut("Not signed in. Nothing to do.\n")
+    }
+
+    @Test
+    fun anAgentsSessionCannotSignTheDeviceInOrOut() {
+        // S2-32: the agent's shell could sign the developer out, or point the device at another server
+        signIn("/home/maya/.config/ostrom")
+        val session = withServer + ("OSTROM_LAUNCH_ID" to "L1")
+        for (command in listOf("login", "logout")) {
+            assertEquals(64, cli(environment = session).run(arrayOf(command)))
+            val refusal = "ostrom $command does not run inside an agent's session: run it in your own terminal\n"
+            assertTrue(console.err.endsWith(refusal), console.err.toString())
+        }
+        assertEquals(emptyList(), requests, "nothing reaches the server")
+        assertEquals(0, cli(environment = withServer + ("OSTROM_LAUNCH_ID" to "")).run(arrayOf("logout")))
+    }
 }
