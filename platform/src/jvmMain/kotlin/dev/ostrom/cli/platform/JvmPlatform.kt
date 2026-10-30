@@ -31,10 +31,10 @@ internal actual fun isTerminal(descriptor: Int): Boolean = System.console() != n
 
 // coverage: test-only JVM target; the shipped native actual is measured by the start-up test of the real binary.
 @ExcludeFromCoverage
-internal actual fun readStdin(buffer: ByteArray, timeoutMillis: Int): Int {
+internal actual fun readStdin(buffer: ByteArray, offset: Int, timeoutMillis: Int): Int {
     // System.in has no deadline: read on a daemon thread and give up at the deadline, as the native shim does.
     var result = READ_TIMEOUT
-    val reader = Thread { result = readAllOfStdin(buffer) }
+    val reader = Thread { result = readAllOfStdin(buffer, offset) }
     reader.isDaemon = true
     reader.start()
     reader.join(timeoutMillis.toLong())
@@ -43,8 +43,8 @@ internal actual fun readStdin(buffer: ByteArray, timeoutMillis: Int): Int {
 
 // coverage: test-only JVM target, see readStdin.
 @ExcludeFromCoverage
-private fun readAllOfStdin(buffer: ByteArray): Int {
-    var total = 0
+private fun readAllOfStdin(buffer: ByteArray, offset: Int): Int {
+    var total = offset
     while (total < buffer.size) {
         val count = System.`in`.read(buffer, total, buffer.size - total)
         if (count < 0) return total

@@ -36,4 +36,14 @@ class ProcessLauncherPosixTest {
     fun aChildKilledByASignalEndsWith128PlusTheSignal() {
         assertEquals(ProcessResult.Exited(128 + 15), launcher.run(listOf("sh", "-c", "kill -TERM \$\$")))
     }
+
+    @Test
+    fun aTerminationOrAHangUpOfTheCliIsRelayedToTheChild() {
+        // The child signals its parent, this test: the CLI must pass it on and keep waiting, never die before the
+        // agent. Without the relay, the test binary itself would be killed.
+        val terminated = launcher.run(listOf("sh", "-c", "kill -TERM \$PPID; exec sleep 5"))
+        assertEquals(ProcessResult.Exited(128 + 15), terminated)
+        val hungUp = launcher.run(listOf("sh", "-c", "kill -HUP \$PPID; exec sleep 5"))
+        assertEquals(ProcessResult.Exited(128 + 1), hungUp)
+    }
 }

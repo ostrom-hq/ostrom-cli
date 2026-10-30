@@ -175,6 +175,34 @@ class OstromCliTest {
     }
 
     @Test
+    fun configSetRefusesAValueTheCliWouldMisread() {
+        val refused = listOf(
+            "server" to "ostrom.example" to "server must be an http:// or https:// URL",
+            "server" to "https://ostrom.example/a b" to "server must be",
+            "server" to "ftp://ostrom.example" to "server must be",
+            "default_agent" to "cursor" to "default_agent must be one of claude, codex, opencode, gemini",
+            "color" to "rainbow" to "color must be auto, always or never.",
+            "editor" to " " to "editor cannot be empty.",
+        )
+        for ((setting, message) in refused) {
+            val (key, value) = setting
+            console.err.clear()
+            assertEquals(64, cli().run(arrayOf("config", "set", key, value)), "$key = $value")
+            assertTrue(console.err.contains(message), console.err.toString())
+            assertTrue(fileSystem.allPaths.none { it.name == "config.toml" }, "nothing is saved")
+        }
+        val accepted = listOf(
+            "server" to "https://ostrom.example:8443/base/",
+            "server" to "http://localhost:8080",
+            "color" to "always",
+            "editor" to "code --wait",
+        )
+        for ((key, value) in accepted) {
+            assertEquals(0, cli().run(arrayOf("config", "set", key, value)), "$key = $value")
+        }
+    }
+
+    @Test
     fun configWithoutAHomeFolderCannotBeWritten() {
         assertEquals(73, cli(environment = emptyMap()).run(arrayOf("config", "set", "color", "never")))
     }
@@ -277,7 +305,7 @@ class OstromCliTest {
     @Test
     fun theRealWiringBuildsEveryDependency() {
         val dependencies = CliDependencies.create()
-        dependencies.api("https://ostrom.example")
+        dependencies.api("https://ostrom.example").close()
         dependencies.mcpServer()
         assertTrue(dependencies.configFile("/x").endsWith("config.toml"))
     }

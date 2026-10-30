@@ -16,19 +16,41 @@ extern char **environ;
 #define OSTROM_ENVIRON environ
 #endif
 
+/* The child being waited for, the target of the signals relayed by ostrom_relay_signal. */
+static volatile pid_t ostrom_child = 0;
+/* A signal that came before the child's pid was known (on another thread of the runtime), relayed once it is. */
+static volatile sig_atomic_t ostrom_pending_signal = 0;
+
+static void ostrom_relay_signal(int signal_number) {
+    if (ostrom_child > 0) kill(ostrom_child, signal_number);
+    else ostrom_pending_signal = signal_number;
+}
+
 /*
  * Starts `file` (looked up on PATH) with `argv`, sharing stdin, stdout, stderr and the terminal, and waits for it.
  * While the child runs, this process ignores SIGINT and SIGQUIT (the child gets them from the terminal, with their
- * default action), like system(3). Returns 0 and sets *exit_code (128 + signal when killed), 1 when the executable is
- * not found, 2 on any other failure.
+ * default action), like system(3), and relays SIGTERM and SIGHUP to the child (a closed terminal tab, a supervisor
+ * stopping the CLI) then keeps waiting, so that the agent never outlives the CLI. One that arrives before the
+ * child's pid is known (blocked on this thread, kept by the handler on another) is relayed as soon as it is. Returns 0 and sets *exit_code
+ * (128 + signal when killed), 1 when the executable is not found, 2 on any other failure.
  */
 static inline int ostrom_spawn_wait(const char *file, char *const argv[], int *exit_code) {
-    struct sigaction ignore, old_int, old_quit;
+    struct sigaction ignore, relay, old_int, old_quit, old_term, old_hup;
     memset(&ignore, 0, sizeof ignore);
     ignore.sa_handler = SIG_IGN;
     sigemptyset(&ignore.sa_mask);
+    memset(&relay, 0, sizeof relay);
+    relay.sa_handler = ostrom_relay_signal;
+    sigemptyset(&relay.sa_mask);
+    sigset_t relayed, previous_mask;
+    sigemptyset(&relayed);
+    sigaddset(&relayed, SIGTERM);
+    sigaddset(&relayed, SIGHUP);
+    sigprocmask(SIG_BLOCK, &relayed, &previous_mask);
     sigaction(SIGINT, &ignore, &old_int);
     sigaction(SIGQUIT, &ignore, &old_quit);
+    sigaction(SIGTERM, &relay, &old_term);
+    sigaction(SIGHUP, &relay, &old_hup);
 
     posix_spawnattr_t attributes;
     posix_spawnattr_init(&attributes);
@@ -36,12 +58,21 @@ static inline int ostrom_spawn_wait(const char *file, char *const argv[], int *e
     sigemptyset(&defaults);
     sigaddset(&defaults, SIGINT);
     sigaddset(&defaults, SIGQUIT);
+    sigaddset(&defaults, SIGTERM);
+    sigaddset(&defaults, SIGHUP);
     posix_spawnattr_setsigdefault(&attributes, &defaults);
-    posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETSIGDEF);
+    posix_spawnattr_setsigmask(&attributes, &previous_mask);
+    posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK);
 
     pid_t pid;
     int spawned = posix_spawnp(&pid, file, NULL, &attributes, argv, OSTROM_ENVIRON);
     posix_spawnattr_destroy(&attributes);
+    if (spawned == 0) {
+        ostrom_child = pid;
+        if (ostrom_pending_signal != 0) kill(pid, ostrom_pending_signal);
+    }
+    ostrom_pending_signal = 0;
+    sigprocmask(SIG_SETMASK, &previous_mask, NULL);
     int result = 2;
     if (spawned == ENOENT) {
         result = 1;
@@ -52,20 +83,24 @@ static inline int ostrom_spawn_wait(const char *file, char *const argv[], int *e
         if (waited == pid && WIFEXITED(status)) { *exit_code = WEXITSTATUS(status); result = 0; }
         else if (waited == pid && WIFSIGNALED(status)) { *exit_code = 128 + WTERMSIG(status); result = 0; }
     }
+    ostrom_child = 0;
     sigaction(SIGINT, &old_int, NULL);
     sigaction(SIGQUIT, &old_quit, NULL);
+    sigaction(SIGTERM, &old_term, NULL);
+    sigaction(SIGHUP, &old_hup, NULL);
     return result;
 }
 
 /*
- * Reads all of stdin into `buffer` within `timeout_ms`. Returns the byte count, -1 on a read error, -2 at the
- * deadline, -3 when the input does not fit in `capacity`, -4 when stdin is a terminal (nobody is piping an event).
+ * Reads the rest of stdin into `buffer`, from `offset` (the bytes an earlier call already read), within `timeout_ms`.
+ * Returns the byte count from the start of the buffer, -1 on a read error, -2 at the deadline, -3 when the buffer is
+ * full (more may follow: the caller grows it and calls again), -4 when stdin is a terminal (nobody pipes an event).
  */
-static inline int ostrom_read_stdin(unsigned char *buffer, int capacity, int timeout_ms) {
+static inline int ostrom_read_stdin(unsigned char *buffer, int capacity, int offset, int timeout_ms) {
     if (isatty(STDIN_FILENO)) return -4;
     struct timespec start, now;
     clock_gettime(CLOCK_MONOTONIC, &start);
-    int total = 0;
+    int total = offset;
     for (;;) {
         clock_gettime(CLOCK_MONOTONIC, &now);
         long elapsed = (now.tv_sec - start.tv_sec) * 1000L + (now.tv_nsec - start.tv_nsec) / 1000000L;

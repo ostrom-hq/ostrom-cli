@@ -31,8 +31,11 @@ fun ServerResponse.apiError(): ErrorDetail? = try {
 /** The server could not be reached (exit code 69). */
 class ServerUnreachableException(val url: String, cause: Throwable) : Exception(cause)
 
-/** The Ostrom server, over HTTPS. Typed endpoints come with the contract of ostrom-core. */
-interface OstromApi {
+/**
+ * The Ostrom server, over HTTPS. Typed endpoints come with the contract of ostrom-core. Closing it releases the HTTP
+ * engine and its thread: use it with `use { }`, or close it once the command is done.
+ */
+interface OstromApi : AutoCloseable {
     /**
      * Fetches [path] of the server.
      *
@@ -43,6 +46,9 @@ interface OstromApi {
      * @throws ServerUnreachableException When no response came (DNS, TLS, connection, timeout).
      */
     suspend fun get(path: String): ServerResponse
+
+    /** Releases the connection; a client without one has nothing to do. */
+    override fun close() = Unit
 }
 
 /**
@@ -72,6 +78,8 @@ class OstromApiImpl(
             throw ServerUnreachableException(url, e)
         }
     }
+
+    override fun close() = client.close()
 }
 
 private const val CONNECT_TIMEOUT_MILLIS = 5_000L

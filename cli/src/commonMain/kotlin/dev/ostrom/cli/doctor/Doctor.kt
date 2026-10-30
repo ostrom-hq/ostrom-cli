@@ -93,7 +93,7 @@ class RunDoctorUseCaseImpl(
             ?: return DoctorCheck(CheckStatus.WARNING, "No server yet: ostrom login sets it.")
         val host = url.substringAfter("://").substringBefore('/')
         return try {
-            val response = api(url).get("/api/health")
+            val response = api(url).use { it.get("/api/health") }
             if (response.status < SERVER_ERROR) {
                 DoctorCheck(CheckStatus.OK, "$host reachable (${response.millis} ms)")
             } else {

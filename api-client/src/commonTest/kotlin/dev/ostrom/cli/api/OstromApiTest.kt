@@ -53,9 +53,13 @@ class OstromApiTest {
     }
 
     @Test
-    fun theDefaultClientIsBuiltWithoutCallingAnything() {
-        OstromApiImpl("https://ostrom.example", "ostrom/0.1.0")
+    fun theDefaultClientIsBuiltWithoutCallingAnythingAndClosed() {
+        OstromApiImpl("https://ostrom.example", "ostrom/0.1.0").close()
         defaultHttpClient().close()
+        // A client without a connection of its own (a fake) closes as a no-op.
+        object : OstromApi {
+            override suspend fun get(path: String) = ServerResponse(200, "", 0)
+        }.close()
     }
 
     /**
@@ -65,7 +69,9 @@ class OstromApiTest {
     @Test
     fun aRealHttpsCallSucceeds() {
         if (EnvironmentImpl()["OSTROM_NETWORK_TESTS"] != "1") return
-        val response = runBlocking { OstromApiImpl("https://api.github.com", "ostrom-cli-tests").get("/zen") }
+        val response = runBlocking {
+            OstromApiImpl("https://api.github.com", "ostrom-cli-tests").use { it.get("/zen") }
+        }
         assertEquals(200, response.status, response.body)
         assertTrue(response.body.isNotBlank())
     }

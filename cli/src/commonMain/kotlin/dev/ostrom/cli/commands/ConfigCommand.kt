@@ -88,10 +88,11 @@ private class ConfigSet(dependencies: CliDependencies) : ConfigSubcommand("set",
     private val name by argument("key")
     private val value by argument("value")
 
-    override fun help(context: Context) = "Set a key"
+    override fun help(context: Context) = "Set a key (its value is checked first)"
 
     override fun run() {
         val key = key(name)
+        configValueProblem(key, value)?.let { fail(ExitCode.USAGE, it) }
         saving { store().set(key, value) }
         dependencies.console.out("✓ ${key.key} = $value\n")
     }

@@ -47,7 +47,8 @@ class ConfigStoreTest {
     @Test
     fun commentsTablesAndUnknownKeysAreReadAroundTheValues() {
         val values = parseToml(
-            "# device\n[ignored]\nserver = \"https://a.example\" # comment\ncolor=\"never\"\nbroken = 3\n",
+            "# device\nserver = \"https://a.example\" # comment\ncolor=\"never\"\nbroken = 3\n" +
+                "\"quoted\" = \"x\"\n[table]\neditor = \"in a table\"\n",
         )
         assertEquals(mapOf("server" to "https://a.example", "color" to "never"), values)
     }
@@ -86,5 +87,64 @@ class ConfigStoreTest {
     fun unsetWithoutAFileWritesAnEmptyOne() {
         store.unset(ConfigKey.COLOR)
         assertEquals(emptyMap(), store.list())
+    }
+
+    private val path = "/home/maya/.config/ostrom/config.toml".toPath()
+
+    private fun file(text: String) {
+        fileSystem.createDirectories(path.parent!!)
+        fileSystem.write(path) { writeUtf8(text) }
+    }
+
+    private fun written() = fileSystem.read(path) { readUtf8() }
+
+    @Test
+    fun writingChangesOnlyTheLineOfTheKey() {
+        val original = "# My device\n\nserver = 'https://old.example'  # from login\nretries = 3\n\n" +
+            "[agents.claude]\ncolor = \"inside a table\"\n"
+        file(original)
+        store.set(ConfigKey.SERVER, "https://new.example")
+        val replaced = original.replace(
+            "server = 'https://old.example'  # from login",
+            "server = \"https://new.example\"",
+        )
+        assertEquals(replaced, written())
+        store.set(ConfigKey.COLOR, "never")
+        assertEquals(
+            "# My device\n\nserver = \"https://new.example\"\nretries = 3\ncolor = \"never\"\n\n" +
+                "[agents.claude]\ncolor = \"inside a table\"\n",
+            written(),
+        )
+        assertEquals("never", store.get(ConfigKey.COLOR))
+        store.unset(ConfigKey.SERVER)
+        store.unset(ConfigKey.COLOR)
+        assertEquals("# My device\n\nretries = 3\n\n[agents.claude]\ncolor = \"inside a table\"\n", written())
+    }
+
+    @Test
+    fun aKeyAddedToAFileWithOnlyTablesGoesFirstAndAnEmptiedFileIsEmpty() {
+        file("[profile]\nname = \"x\"")
+        store.set(ConfigKey.EDITOR, "vim")
+        assertEquals("editor = \"vim\"\n[profile]\nname = \"x\"\n", written())
+        file("editor = \"vim\"\n")
+        store.unset(ConfigKey.EDITOR)
+        assertEquals("", written())
+    }
+
+    @Test
+    fun literalStringsAndUnicodeEscapesAreRead() {
+        assertEquals("C:\\no\\escape", unquoteToml("'C:\\no\\escape' # literal"))
+        assertNull(unquoteToml("'unterminated"))
+        assertEquals("é😀", unquoteToml("\"\\u00e9\\U0001F600\""))
+        assertEquals("\b\u000C", unquoteToml("\"\\b\\f\""))
+        // An escape TOML does not have is kept as written rather than refusing the file.
+        val invalid = "\"\\u12 \\U00110000 \\uzzzz \\uD800 \\u1\""
+        assertEquals("u12 U00110000 uzzzz uD800 u1", unquoteToml(invalid))
+    }
+
+    @Test
+    fun controlCharactersAreWrittenAsUnicodeEscapes() {
+        assertEquals("\"a\\u0000b\\u007f\"", quoteToml("a\u0000b\u007F"))
+        assertEquals("a\u0000b\u007F", unquoteToml(quoteToml("a\u0000b\u007F")))
     }
 }
