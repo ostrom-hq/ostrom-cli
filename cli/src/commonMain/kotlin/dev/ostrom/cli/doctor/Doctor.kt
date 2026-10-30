@@ -130,7 +130,7 @@ class RunDoctorUseCaseImpl(
 private const val SERVER_ERROR = 500
 
 /** The liveness route of the API contract (ostrom-core `api/openapi.yaml`), which the doctor probes. */
-internal const val HEALTH_ROUTE = "/api/health"
+internal const val HEALTH_ROUTE = "/api/v1/health"
 
 /** What to do when no home folder is known, the same for doctor and config. */
 internal const val NO_HOME = "No home folder is known: set HOME (USERPROFILE on Windows)."
