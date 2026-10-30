@@ -156,7 +156,7 @@ internal class CheckCommand : PendingCommand("check", "Run a workflow check (use
 
 /**
  * Every top-level command after the agents, in the order of the help screen, with the [implemented] ones (login,
- * logout, config, doctor, version, import teamcode) at their place.
+ * logout, config, doctor, telemetry, version, import teamcode) at their place.
  */
 fun pendingCommands(implemented: List<CliktCommand>): List<CliktCommand> {
     fun named(name: String) = implemented.first { it.commandName == name }
@@ -177,6 +177,7 @@ fun pendingCommands(implemented: List<CliktCommand>): List<CliktCommand> {
         InitCommand(),
         named("config"),
         named("doctor"),
+        named("telemetry"),
         UpdateCommand(),
         named("version"),
         InviteCommand(),
