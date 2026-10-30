@@ -87,6 +87,10 @@ static inline int ostrom_read_stdin(unsigned char *buffer, int capacity, int tim
 
 /* Writes all of `bytes` to the file descriptor `fd` (1 stdout, 2 stderr). Returns 0, or -1 on error. */
 static inline int ostrom_write(int fd, const unsigned char *bytes, int length) {
+    /* A reader that went away (an agent that closed the hook's pipe) gives EPIPE, not a silent death by SIGPIPE
+       that would lose a refusal's exit code. */
+    static int pipe_ready = 0;
+    if (!pipe_ready) { signal(SIGPIPE, SIG_IGN); pipe_ready = 1; }
     int offset = 0;
     while (offset < length) {
         ssize_t written = write(fd, bytes + offset, (size_t)(length - offset));

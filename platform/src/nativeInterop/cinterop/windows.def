@@ -74,16 +74,22 @@ static inline int ostrom_read_stdin(unsigned char *buffer, int capacity, int tim
 
 /* Writes UTF-8 `bytes` to stdout (fd 1) or stderr (fd 2). A console gets UTF-8 output. Returns 0, or -1 on error. */
 static inline int ostrom_write(int fd, const unsigned char *bytes, int length) {
-    static int console_ready = 0;
-    if (!console_ready) { SetConsoleOutputCP(CP_UTF8); console_ready = 1; }
     HANDLE output = GetStdHandle(fd == 2 ? STD_ERROR_HANDLE : STD_OUTPUT_HANDLE);
+    /* UTF-8 on a console for this write only: the user's shell keeps its own code page afterwards. */
+    UINT previous = GetConsoleOutputCP();
+    if (previous != 0) SetConsoleOutputCP(CP_UTF8);
+    int result = 0;
     int offset = 0;
     while (offset < length) {
         DWORD written = 0;
-        if (!WriteFile(output, bytes + offset, (DWORD)(length - offset), &written, NULL) || written == 0) return -1;
+        if (!WriteFile(output, bytes + offset, (DWORD)(length - offset), &written, NULL) || written == 0) {
+            result = -1;
+            break;
+        }
         offset += (int)written;
     }
-    return 0;
+    if (previous != 0) SetConsoleOutputCP(previous);
+    return result;
 }
 
 /* 1 when the standard handle (0, 1 or 2) is a console. */
