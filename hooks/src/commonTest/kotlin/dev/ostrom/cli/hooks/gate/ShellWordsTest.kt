@@ -14,7 +14,8 @@ class ShellWordsTest {
             listOf(listOf("git", "commit", "-m", "a && b"), listOf("git", "push")),
             ShellWords.segments("git commit -m 'a && b' && git push"),
         )
-        assertEquals(listOf(listOf("cd", "/x"), listOf("git", "push")), ShellWords.segments("cd /x && git push # current branch: main"))
+        val segments = ShellWords.segments("cd /x && git push # current branch: main")
+        assertEquals(listOf(listOf("cd", "/x"), listOf("git", "push")), segments)
     }
 
     @Test

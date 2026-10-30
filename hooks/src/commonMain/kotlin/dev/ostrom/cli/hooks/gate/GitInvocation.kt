@@ -28,8 +28,12 @@ data class GitInvocation(
      * repository or remote and git would write to another.
      */
     fun redirection(): String? {
-        val variable = environment.keys.firstOrNull { key -> REDIRECTING_VARIABLES.any { key == it || key.startsWith("${it}_") } }
-        val config = configs.firstOrNull { setting -> REDIRECTING_CONFIGS.any { it.matches(setting.substringBefore('=')) } }
+        val variable = environment.keys.firstOrNull { key ->
+            REDIRECTING_VARIABLES.any { key == it || key.startsWith("${it}_") }
+        }
+        val config = configs.firstOrNull { setting ->
+            REDIRECTING_CONFIGS.any { it.matches(setting.substringBefore('=')) }
+        }
         return when {
             variable != null -> "the environment variable $variable"
             gitDir != null -> "--git-dir"
@@ -106,7 +110,8 @@ data class GitInvocation(
         private val TRANSPARENT_PREFIXES = setOf("env", "command", "exec", "nohup", "time", "builtin")
 
         /** git's global options that take the next word as their value. */
-        private val OPTIONS_WITH_VALUE = setOf("-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--super-prefix")
+        private val OPTIONS_WITH_VALUE =
+            setOf("-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--super-prefix")
 
         /** Environment variables that change the repository, the work tree or the configuration git reads. */
         private val REDIRECTING_VARIABLES = listOf(

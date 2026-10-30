@@ -10,7 +10,7 @@ class RemoteUrlsTest {
         assertEquals("ostrom-hq/ostrom", RemoteUrls.slug("git@github.com:ostrom-hq/ostrom.git"))
         assertEquals("ostrom-hq/ostrom", RemoteUrls.slug("https://github.com/ostrom-hq/ostrom.git"))
         assertEquals("ostrom-hq/ostrom", RemoteUrls.slug("https://github.com/ostrom-hq/ostrom/"))
-        assertEquals("guimauvedigital/controlresell-core", RemoteUrls.slug("ssh://git@github.com/guimauvedigital/controlresell-core.git"))
+        assertEquals("acme/core", RemoteUrls.slug("ssh://git@github.com/acme/core.git"))
         assertEquals("gate-demo", RemoteUrls.slug("/tmp/remotes/gate-demo.git"))
         assertEquals("gate-demo", RemoteUrls.slug("../gate-demo"))
         assertEquals("repo", RemoteUrls.slug("C:\\remotes\\repo.git"))

@@ -11,7 +11,8 @@ class ToolSubjectTest {
     @Test
     fun aShellCommandOfEveryAgentIsReadAsBash() {
         assertEquals(ToolSubject(ToolKind.BASH, "Bash", "git push"), of("Bash", """{"command":"git push"}"""))
-        assertEquals(ToolSubject(ToolKind.BASH, "Bash", "git push origin main"), of("exec_command", """{"cmd":["git","push","origin","main"]}"""))
+        val codex = of("exec_command", """{"cmd":["git","push","origin","main"]}""")
+        assertEquals(ToolSubject(ToolKind.BASH, "Bash", "git push origin main"), codex)
         assertEquals(ToolSubject(ToolKind.BASH, "Bash", "a  b"), of("shell", """{"command":["a",1,"b"]}"""))
         assertEquals(ToolSubject(ToolKind.BASH, "Bash", ""), of("run_shell_command", """{"command":{"x":1}}"""))
         assertEquals(ToolSubject(ToolKind.BASH, "Bash", ""), of("terminal", """{"command":3}"""))
@@ -28,7 +29,8 @@ class ToolSubjectTest {
 
     @Test
     fun anMcpToolIsReadWithItsArguments() {
-        assertEquals(ToolSubject(ToolKind.MCP, "mcp", """mcp__gh__merge {"pr":3}"""), of("mcp__gh__merge", """{"pr":3}"""))
+        val merge = of("mcp__gh__merge", """{"pr":3}""")
+        assertEquals(ToolSubject(ToolKind.MCP, "mcp", """mcp__gh__merge {"pr":3}"""), merge)
         assertEquals(ToolSubject(ToolKind.MCP, "mcp", "mcp__x__y null"), ToolSubject.of("mcp__x__y", null))
     }
 

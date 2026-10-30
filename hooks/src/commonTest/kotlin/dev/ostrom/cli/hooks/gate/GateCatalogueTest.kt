@@ -24,7 +24,8 @@ class GateCatalogueTest {
     )
     private val patterns = PatternCache()
 
-    private fun match(kind: ToolKind, name: String, text: String) = catalogue.match(ToolSubject(kind, name, text), patterns)?.actionClass
+    private fun match(kind: ToolKind, name: String, text: String) =
+        catalogue.match(ToolSubject(kind, name, text), patterns)?.actionClass
 
     @Test
     fun theMostGuardedActionWinsThenTheFirst() {
@@ -39,7 +40,8 @@ class GateCatalogueTest {
         assertEquals("secrets", match(ToolKind.WRITE, "Write", "/w/.env"))
         assertNull(match(ToolKind.OTHER, "Read", "/w/.env"))
         assertEquals("merge", match(ToolKind.MCP, "mcp", "MCP__GitHub__merge_pr {\"main\":1}"))
-        assertNull(match(ToolKind.MCP, "mcp", "mcp__github__list {\"q\":\"mcp__github__merge\"}"), "arguments are not read")
+        val listing = match(ToolKind.MCP, "mcp", "mcp__github__list {\"q\":\"mcp__github__merge\"}")
+        assertNull(listing, "arguments are not read")
     }
 
     @Test

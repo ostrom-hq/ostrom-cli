@@ -19,7 +19,8 @@ object ShellPaths {
      * @param base The folder the command starts from.
      * @param path An absolute path, `~`, `~/…`, or a path relative to [base].
      * @param home The user's home folder, for `~`.
-     * @return The resulting path (not normalised: git and the file system read `a/./b` and `a/../b` as the shell would).
+     * @return The resulting path (not normalised: git and the file system read `a/./b` and `a/../b` as the shell
+     * would).
      */
     fun join(base: String, path: String, home: String): String = when {
         isAbsolute(path) -> path

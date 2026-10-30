@@ -35,7 +35,8 @@ data class ToolSubject(val kind: ToolKind, val name: String, val text: String) {
             "run_shell_command", "terminal",
         )
         private val WRITES = setOf(
-            "write", "edit", "multiedit", "apply_patch", "write_file", "replace", "edit_file", "search_replace", "patch",
+            "write", "edit", "multiedit", "apply_patch", "write_file", "replace", "edit_file", "search_replace",
+            "patch",
         )
         private const val MAX_TEXT = 2_000
 
@@ -47,12 +48,16 @@ data class ToolSubject(val kind: ToolKind, val name: String, val text: String) {
             val lower = tool.lowercase()
             val fields = input as? JsonObject
             return when {
-                lower in SHELLS -> ToolSubject(ToolKind.BASH, ToolKind.BASH.wire, commandOf(fields?.get("command") ?: fields?.get("cmd")))
+                lower in SHELLS -> {
+                    val command = fields?.get("command") ?: fields?.get("cmd")
+                    ToolSubject(ToolKind.BASH, ToolKind.BASH.wire, commandOf(command))
+                }
                 lower in WRITES -> {
                     val path = (fields?.get("file_path") ?: fields?.get("path")).stringOrNull()
                     ToolSubject(ToolKind.WRITE, ToolKind.WRITE.wire, path ?: input.toString().take(MAX_TEXT))
                 }
-                tool.startsWith("mcp__") -> ToolSubject(ToolKind.MCP, ToolKind.MCP.wire, "$tool ${input.toString().take(MAX_TEXT)}")
+                tool.startsWith("mcp__") ->
+                    ToolSubject(ToolKind.MCP, ToolKind.MCP.wire, "$tool ${input.toString().take(MAX_TEXT)}")
                 else -> ToolSubject(ToolKind.OTHER, tool, "")
             }
         }

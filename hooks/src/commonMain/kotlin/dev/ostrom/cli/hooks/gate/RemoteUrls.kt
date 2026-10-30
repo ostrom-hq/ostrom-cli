@@ -12,7 +12,8 @@ object RemoteUrls {
         val colon = trimmed.indexOf(':')
         val path = when {
             scheme >= 0 -> trimmed.substring(scheme + 3).substringAfter('/', "")
-            colon > 0 && '/' !in trimmed.substring(0, colon) && !ShellPaths.isAbsolute(trimmed) -> trimmed.substring(colon + 1)
+            colon > 0 && '/' !in trimmed.substring(0, colon) && !ShellPaths.isAbsolute(trimmed) ->
+                trimmed.substring(colon + 1)
             else -> return ShellPaths.fileName(trimmed)
         }
         val parts = path.split('/').filter { it.isNotEmpty() }
@@ -49,7 +50,8 @@ class CommandLocation(private val git: GitRunner, private val home: String) {
     }
 
     /** The top of the git repository [directory] is in (empty outside one), asked of git once per folder. */
-    fun top(directory: String): String = tops.getOrPut(directory) { git.run(directory, listOf("rev-parse", "--show-toplevel")) }
+    fun top(directory: String): String =
+        tops.getOrPut(directory) { git.run(directory, listOf("rev-parse", "--show-toplevel")) }
 
     /** The repository at the top-level folder [top]. */
     fun repositoryAt(top: String): RealRepository {

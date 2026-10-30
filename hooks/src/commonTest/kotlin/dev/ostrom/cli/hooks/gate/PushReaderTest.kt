@@ -1,6 +1,7 @@
 package dev.ostrom.cli.hooks.gate
 
 import kotlin.test.Test
+import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
@@ -72,12 +73,12 @@ class PushReaderTest {
     @Test
     fun aPushOstromCannotTieToCommitsIsRefusedWithWhatToDo() {
         val r = reader()
-        assertTrue(assertFailsWith<UnreadablePushException> { r.read("/r", "git commit -am fix && git push origin main") }.message.orEmpty().contains("own command"))
+        assertContains(refusal(r, "git commit -am fix && git push origin main"), "own command")
         for (option in listOf("--all", "--mirror", "--branches", "--tags")) {
-            assertTrue(assertFailsWith<UnreadablePushException> { r.read("/r", "git push $option") }.message.orEmpty().contains("by name"))
+            assertContains(refusal(r, "git push $option"), "by name")
         }
-        assertTrue(assertFailsWith<UnreadablePushException> { r.read("/r", "git push origin nope") }.message.orEmpty().contains("names no commit"))
-        assertTrue(assertFailsWith<UnreadablePushException> { r.read("/r", "bash -c 'git push origin main'") }.message.orEmpty().contains("plain"))
+        assertContains(refusal(r, "git push origin nope"), "names no commit")
+        assertContains(refusal(r, "bash -c 'git push origin main'"), "plain")
         assertTrue(
             assertFailsWith<UnreadablePushException> { r.read("/r", "git push origin main; git push upstream main") }
                 .message.orEmpty().contains("two remotes"),
@@ -86,26 +87,34 @@ class PushReaderTest {
 
     @Test
     fun aBarePushDrivenByTheConfigIsRefused() {
-        val pushSpec = reader(mapOf("/r|config --get-all remote.origin.push" to "+refs/heads/a:refs/heads/main\nrefs/heads/b"))
-        assertTrue(assertFailsWith<UnreadablePushException> { pushSpec.read("/r", "git push") }.message.orEmpty().contains("remote.origin.push (+refs/heads/a:refs/heads/main, refs/heads/b)"))
+        val pushSpec = reader(
+            mapOf("/r|config --get-all remote.origin.push" to "+refs/heads/a:refs/heads/main\nrefs/heads/b"),
+        )
+        assertContains(
+            refusal(pushSpec, "git push"),
+            "remote.origin.push (+refs/heads/a:refs/heads/main, refs/heads/b)",
+        )
         val mirror = reader(mapOf("/r|config --bool remote.origin.mirror" to "true"))
-        assertTrue(assertFailsWith<UnreadablePushException> { mirror.read("/r", "git push origin") }.message.orEmpty().contains("mirror"))
+        assertContains(refusal(mirror, "git push origin"), "mirror")
         val matching = reader(mapOf("/r|config push.default" to "matching"))
-        assertTrue(assertFailsWith<UnreadablePushException> { matching.read("/r", "git push") }.message.orEmpty().contains("matching"))
-        assertEquals(listOf(PushRef("M", "main")), reader(mapOf("/r|config push.default" to "simple")).read("/r", "git push")?.refs)
+        assertContains(refusal(matching, "git push"), "matching")
+        val simple = reader(mapOf("/r|config push.default" to "simple"))
+        assertEquals(listOf(PushRef("M", "main")), simple.read("/r", "git push")?.refs)
     }
 
     @Test
     fun aDetachedHeadMustNameTheTarget() {
         val detached = reader(drop = setOf("/r|symbolic-ref --quiet --short HEAD"))
-        assertTrue(assertFailsWith<UnreadablePushException> { detached.read("/r", "git push") }.message.orEmpty().contains("detached HEAD"))
-        assertTrue(assertFailsWith<UnreadablePushException> { detached.read("/r", "git push origin HEAD") }.message.orEmpty().contains("HEAD:main"))
+        assertContains(refusal(detached, "git push"), "detached HEAD")
+        assertContains(refusal(detached, "git push origin HEAD"), "HEAD:main")
         assertEquals(listOf(PushRef("M", "main")), detached.read("/r", "git push origin HEAD:main")?.refs)
     }
 
     @Test
     fun theRemoteComesFromTheBranchElseOrigin() {
-        val upstream = reader(mapOf("/r|config branch.main.remote" to "up", "/r|remote get-url up" to "https://github.com/u/core"))
+        val upstream = reader(
+            mapOf("/r|config branch.main.remote" to "up", "/r|remote get-url up" to "https://github.com/u/core"),
+        )
         assertEquals(Push("up", "u/core", listOf(PushRef("M", "main")), false), upstream.read("/r", "git push"))
         val noRemote = reader(drop = setOf("/r|config branch.main.remote", "/r|config branch.main.merge"))
         assertEquals(Push("origin", "o/core", listOf(PushRef("M", "main")), false), noRemote.read("/r", "git push"))
@@ -116,14 +125,16 @@ class PushReaderTest {
         val pushUrl = reader(mapOf("/r|remote get-url --push origin" to "git@github.com:attacker/elsewhere.git"))
         assertEquals("attacker/elsewhere", pushUrl.read("/r", "git push origin main")?.remoteRepository)
         val url = "https://github.com/x/y.git"
-        assertEquals(url, reader().read("/r", "git push $url main")?.remoteRepository, "a URL with no remote of that name")
+        val pushed = reader().read("/r", "git push $url main")
+        assertEquals(url, pushed?.remoteRepository, "a URL with no remote of that name")
     }
 
     @Test
     fun destinationsAreReadEvenBeforeTheCommitsExist() {
         val r = reader()
         assertEquals(listOf("main"), r.destinations("/r", "git commit -am x && git push origin HEAD"))
-        assertEquals(listOf("new-branch", "main"), r.destinations("/r", "git push origin new-branch && git push origin main"))
+        val both = r.destinations("/r", "git push origin new-branch && git push origin main")
+        assertEquals(listOf("new-branch", "main"), both)
         assertEquals(emptyList(), r.destinations("/r", "ls"))
         assertFailsWith<UnreadablePushException> { r.destinations("/r", "bash -c 'git push'") }
         assertFailsWith<UnreadablePushException> { r.destinations("/r", "git push --all") }
@@ -136,4 +147,7 @@ class PushReaderTest {
         assertEquals("v1", PushReader.shortRef("refs/tags/v1"))
         assertEquals("refs/notes/x", PushReader.shortRef("refs/notes/x"))
     }
+
+    private fun refusal(reader: PushReader, text: String): String =
+        assertFailsWith<UnreadablePushException> { reader.read("/r", text) }.message.orEmpty()
 }

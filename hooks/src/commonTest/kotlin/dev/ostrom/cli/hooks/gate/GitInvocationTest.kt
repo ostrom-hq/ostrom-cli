@@ -44,7 +44,8 @@ class GitInvocationTest {
         assertNull(parse("-x=1 git push"), "an option is not an assignment")
         assertNull(parse("1A=b git push"), "not a variable name")
         assertNull(parse("ls -x git push"), "an option after another program")
-        assertEquals(GitInvocation(emptyMap(), emptyList(), emptyList(), null, null, null, emptyList()), parse("git --version"))
+        val bare = GitInvocation(emptyMap(), emptyList(), emptyList(), null, null, null, emptyList())
+        assertEquals(bare, parse("git --version"))
     }
 
     @Test

@@ -15,8 +15,8 @@ data class PushRef(val sha: String, val destination: String)
  * @property remote The remote as written (`origin`), or the URL or path given in its place.
  * @property remoteRepository `owner/name` of where the push really goes (its push URL), else [remote].
  * @property refs The refs it updates, in order.
- * @property force Whether it may rewrite history (`--force`, `-f`, `+ref`, `--force-with-lease`, `--force-if-includes`):
- * a yes to a plain push never covers a forced one.
+ * @property force Whether it may rewrite history (`--force`, `-f`, `+ref`, `--force-with-lease`,
+ * `--force-if-includes`): a yes to a plain push never covers a forced one.
  */
 data class Push(val remote: String, val remoteRepository: String, val refs: List<PushRef>, val force: Boolean) {
     /** The distinct commits the push sends, sorted (deletions send none). */
@@ -62,7 +62,9 @@ class PushReader(private val git: GitRunner, private val home: String) {
             val invocation = checkNotNull(pushOf(segments[index]))
             val one = onePush(directoryOf(directory, invocation), invocation.arguments, lenient = false)
             if (remote.isNotEmpty() && remote != one.remote) {
-                throw UnreadablePushException("this command pushes to two remotes: push to one at a time, each as its own command.")
+                throw UnreadablePushException(
+                    "this command pushes to two remotes: push to one at a time, each as its own command.",
+                )
             }
             remote = one.remote
             refs += one.refs
@@ -72,9 +74,9 @@ class PushReader(private val git: GitRunner, private val home: String) {
     }
 
     /**
-     * Where a push lands, read even when it cannot be tied to commits yet (`git commit … && git push`, a branch created
-     * in the same command): the gate patterns read the command text, and `git push origin HEAD` from main never names
-     * main (audit A9).
+     * Where a push lands, read even when it cannot be tied to commits yet (`git commit … && git push`, a branch
+     * created in the same command): the gate patterns read the command text, and `git push origin HEAD` from main
+     * never names main (audit A9).
      *
      * @return The destinations, empty when the command has no push.
      * @throws UnreadablePushException When Ostrom cannot tell where it lands (`--all`, a push driven by the config…).
@@ -84,8 +86,9 @@ class PushReader(private val git: GitRunner, private val home: String) {
         val segments = ShellWords.segments(text)
         val pushes = segments.mapNotNull { pushOf(it) }
         if (pushes.isEmpty()) throw UnreadablePushException(NOT_PLAIN)
-        return pushes.flatMap { onePush(directoryOf(directory, it), it.arguments, lenient = true).refs.map(PushRef::destination) }
-            .distinct()
+        return pushes.flatMap { push ->
+            onePush(directoryOf(directory, push), push.arguments, lenient = true).refs.map(PushRef::destination)
+        }.distinct()
     }
 
     private fun directoryOf(directory: String, invocation: GitInvocation): String =
@@ -140,27 +143,33 @@ class PushReader(private val git: GitRunner, private val home: String) {
 
     /**
      * A push without a refspec: git may follow the configuration, not the current branch (`remote.<r>.push`,
-     * `remote.<r>.mirror`, `push.default=matching`), so it is refused; otherwise the current branch goes to its upstream.
+     * `remote.<r>.mirror`, `push.default=matching`), so it is refused; otherwise the current branch goes to its
+     * upstream.
      */
     private fun barePush(directory: String, remote: String, branch: String): PushRef {
         val configured = git.run(directory, listOf("config", "--get-all", "remote.$remote.push"))
         if (configured.isNotEmpty()) {
             throw UnreadablePushException(
-                "this push follows remote.$remote.push (${configured.lines().joinToString(", ")}), which Ostrom does not " +
-                    "read: name what you push (`git push $remote <branch>`), as its own command.",
+                "this push follows remote.$remote.push (${configured.lines().joinToString(", ")}), which Ostrom " +
+                    "does not read: name what you push (`git push $remote <branch>`), as its own command.",
             )
         }
         if (git.run(directory, listOf("config", "--bool", "remote.$remote.mirror")) == "true") {
-            throw UnreadablePushException("remote $remote is a mirror: every ref would be pushed. Push each branch by name, as its own command.")
+            throw UnreadablePushException(
+                "remote $remote is a mirror: every ref would be pushed. Push each branch by name, as its own command.",
+            )
         }
         if (git.run(directory, listOf("config", "push.default")) == "matching") {
             throw UnreadablePushException(
-                "push.default is \"matching\": a bare push sends every branch that exists on both sides. Name what you " +
-                    "push (`git push origin <branch>`), as its own command.",
+                "push.default is \"matching\": a bare push sends every branch that exists on both sides. Name what " +
+                    "you push (`git push origin <branch>`), as its own command.",
             )
         }
         if (branch.isEmpty()) {
-            throw UnreadablePushException("a bare `git push` from a detached HEAD: name what you push (`git push origin HEAD:main`), as its own command.")
+            throw UnreadablePushException(
+                "a bare `git push` from a detached HEAD: name what you push (`git push origin HEAD:main`), as its " +
+                    "own command.",
+            )
         }
         val upstream = git.run(directory, listOf("config", "branch.$branch.merge"))
         return PushRef(commitOf(directory, "HEAD"), if (upstream.isEmpty()) branch else shortRef(upstream))
@@ -180,7 +189,9 @@ class PushReader(private val git: GitRunner, private val home: String) {
         val destination = when {
             target.isNotEmpty() -> shortRef(target)
             source == "HEAD" || source == "@" -> branch.ifEmpty {
-                throw UnreadablePushException("`git push <remote> HEAD` from a detached HEAD: name the target (`HEAD:main`).")
+                throw UnreadablePushException(
+                    "`git push <remote> HEAD` from a detached HEAD: name the target (`HEAD:main`).",
+                )
             }
             else -> shortRef(source)
         }
