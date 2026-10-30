@@ -3,6 +3,8 @@ name: Release
 # Cut a release by pushing a bare-semver tag `X.Y.Z` (CONVENTIONS section 12, docs/RELEASES.md). `workflow_dispatch`
 # is a dry run: it builds, packs and signs everything, builds the runner image, and publishes nothing (no release, no
 # image push, no tap push). Never on pull requests (org CI rules, JOURNAL 03:10): rehearse with workflow_dispatch.
+# No cache of any kind (no actions/cache, setup-gradle cache disabled): what is released and signed is built from
+# scratch, never from a cache a pull request could have written (zizmor cache-poisoning).
 
 on:
   push:
@@ -65,12 +67,7 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
-        with: { cache-provider: basic }
-      - name: Cache the Kotlin/Native toolchain
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.konan
-          key: konan-linux-${{ hashFiles('gradle/libs.versions.toml') }}
+        with: { cache-disabled: true }
       - name: Install libcurl (Ktor's Linux engine)
         run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
       - name: Link the release executables
@@ -113,12 +110,7 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
-        with: { cache-provider: basic }
-      - name: Cache the Kotlin/Native toolchain
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.konan
-          key: konan-macos-${{ hashFiles('gradle/libs.versions.toml') }}
+        with: { cache-disabled: true }
       - name: Link the release executable
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -300,7 +292,9 @@ jobs:
           cp bins/linux-arm64/ostrom image-context/arm64/ostrom
           chmod 755 image-context/*/ostrom
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with: { cache-image: false }
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with: { cache-binary: false }
       - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         if: ${{ env.PUBLISH == 'true' }}
         with:
