@@ -6,10 +6,8 @@ plugins {
     id("ostrom.kmp")
 }
 
-// ostrom-core holds the models and the API contract. Until it publishes a version (gradle.properties,
-// ostromCoreVersion), this module only knows how to reach the server; a local clone of ostrom-core is used
-// instead of the package when it sits next to this clone (settings.gradle.kts).
-val ostromCoreVersion = providers.gradleProperty("ostromCoreVersion").orNull?.takeIf { it.isNotBlank() }
+// ostrom-core holds the models and the API contract, from GitHub Packages (gradle.properties, ostromCoreVersion).
+val ostromCoreVersion = providers.gradleProperty("ostromCoreVersion").get()
 
 kotlin {
     targets.withType<KotlinNativeTarget>().configureEach {
@@ -25,7 +23,7 @@ kotlin {
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.engine.defaults)
             implementation(libs.coroutines.core)
-            if (ostromCoreVersion != null) api("dev.ostrom:ostrom-api:$ostromCoreVersion")
+            api("dev.ostrom:ostrom-api:$ostromCoreVersion")
         }
         commonTest.dependencies {
             implementation(projects.platform)

@@ -24,7 +24,7 @@ interface FileStore {
     /** Deletes the file at [path]; nothing happens when it does not exist. */
     fun delete(path: String)
 
-    /** True when [path] exists. */
+    /** True when [path] exists; false when it does not, or cannot (a file in its path). */
     fun exists(path: String): Boolean
 
     /** The names of the entries of the folder [path], sorted; none when it does not exist or is not a folder. */
@@ -63,7 +63,12 @@ class FileStoreImpl(private val fileSystem: FileSystem = FileSystem.SYSTEM) : Fi
 
     override fun delete(path: String) = fileSystem.delete(path.toPath(), mustExist = false)
 
-    override fun exists(path: String): Boolean = fileSystem.exists(path.toPath())
+    override fun exists(path: String): Boolean = try {
+        fileSystem.exists(path.toPath())
+    } catch (_: IOException) {
+        // A file in its path ("not a directory"): nothing can be there, and the next write says why.
+        false
+    }
 
     override fun list(path: String): List<String> {
         val entries = fileSystem.listOrNull(path.toPath()) ?: return emptyList()
