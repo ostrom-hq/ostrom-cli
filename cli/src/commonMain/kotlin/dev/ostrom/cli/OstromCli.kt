@@ -32,6 +32,7 @@ import dev.ostrom.cli.commands.VerifyCommand
 import dev.ostrom.cli.commands.VersionCommand
 import dev.ostrom.cli.commands.WaitCommand
 import dev.ostrom.cli.commands.pendingCommands
+import dev.ostrom.cli.commands.setupCommands
 import dev.ostrom.cli.launcher.Agent
 import dev.ostrom.cli.platform.SecretStoreException
 import kotlinx.coroutines.runBlocking
@@ -128,7 +129,7 @@ class OstromCli(private val dependencies: CliDependencies) {
             TelemetryCommand(dependencies),
             VersionCommand(dependencies),
             ImportTeamCodeCommand(dependencies),
-        )
+        ) + setupCommands(dependencies)
         val plumbing = listOf(WaitCommand(dependencies), HookCommand(dependencies), McpCommand(dependencies))
         // The root always has a help screen: no null to handle.
         val help = HelpCommand(dependencies) { "${root.getFormattedHelp()}" }
