@@ -76,10 +76,7 @@ class UsageStatistics(
      * @param duration How long the command took.
      */
     suspend fun commandRun(command: String?, knownCommands: Set<String>, exitCode: Int, duration: Duration) {
-        // The common case (off) costs one read of the settings and no network: checked before anything else.
-        val store = config ?: return
-        if (command in PLUMBING || state() != UsageState.ON) return
-        val installId = store.get(ConfigKey.TELEMETRY_ID) ?: return
+        val installId = measuredInstallId(command) ?: return
         val name = when (command) {
             null -> "home"
             in knownCommands -> command
@@ -102,6 +99,19 @@ class UsageStatistics(
             )
         }
         send(BATCH_URL, body.toString())
+    }
+
+    /**
+     * The install id to send under, or null when nothing is sent: no settings, a plumbing command, statistics off, or
+     * no id yet. The common case (off) costs one read of the settings and no network: checked before anything else.
+     */
+    private fun measuredInstallId(command: String?): String? {
+        val store = config
+        return if (store != null && command !in PLUMBING && state() == UsageState.ON) {
+            store.get(ConfigKey.TELEMETRY_ID)
+        } else {
+            null
+        }
     }
 
     private fun properties(command: String, exitCode: Int, duration: Duration) = buildJsonObject {
