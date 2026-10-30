@@ -2,10 +2,12 @@ package dev.ostrom.cli.mcp
 
 import dev.ostrom.cli.platform.Console
 import dev.ostrom.cli.platform.StandardInput
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -121,5 +123,41 @@ class McpDispatcherTest {
         assertEquals(0, McpServerImpl(dispatcher, console) { lines.removeFirstOrNull() }.serve())
         McpServerImpl(dispatcher, console) // the default reader is stdin
         assertEquals(rpc(""""id":1,"result":{}}""") + "\n", written.toString())
+    }
+
+    @Test
+    fun aFailingToolIsAToolErrorAndTheServerGoesOn() {
+        fun failing(name: String, failure: Exception) = object : McpTool {
+            override val name = name
+            override val definition = JsonObject(emptyMap())
+            override fun call(arguments: JsonObject): JsonObject = throw failure
+        }
+        val server = McpDispatcher(
+            "0.1.0",
+            listOf(failing("io", IllegalStateException("disk full")), failing("bare", IllegalArgumentException())),
+        )
+        assertEquals(
+            rpc(""""id":1,"result":{"content":[{"type":"text","text":"io failed: disk full"}],"isError":true}}"""),
+            server.handle(rpc(""""id":1,"method":"tools/call","params":{"name":"io"}}""")),
+        )
+        val bareError = """{"type":"text","text":"bare failed: IllegalArgumentException"}"""
+        assertEquals(
+            rpc(""""id":2,"result":{"content":[$bareError],"isError":true}}"""),
+            server.handle(rpc(""""id":2,"method":"tools/call","params":{"name":"bare"}}""")),
+        )
+        assertEquals(rpc(""""id":3,"result":{}}"""), server.handle(rpc(""""id":3,"method":"ping"}""")))
+    }
+
+    @Test
+    fun aCancelledToolCallStaysCancelled() {
+        val cancelled = object : McpTool {
+            override val name = "slow"
+            override val definition = JsonObject(emptyMap())
+            override fun call(arguments: JsonObject): JsonObject = throw CancellationException("stop")
+        }
+        assertFailsWith<CancellationException> {
+            McpDispatcher("0.1.0", listOf(cancelled))
+                .handle(rpc(""""id":1,"method":"tools/call","params":{"name":"slow"}}"""))
+        }
     }
 }
