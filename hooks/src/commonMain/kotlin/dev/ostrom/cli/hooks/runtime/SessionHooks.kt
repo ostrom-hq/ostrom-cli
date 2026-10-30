@@ -4,6 +4,7 @@ package dev.ostrom.cli.hooks.runtime
 import dev.ostrom.cli.hooks.HookProcessor
 import dev.ostrom.cli.platform.Environment
 import dev.ostrom.cli.platform.LoopbackHttp
+import dev.ostrom.cli.platform.OperatingSystem
 import dev.ostrom.cli.platform.ProcessCapture
 import okio.FileSystem
 import okio.Path.Companion.toPath
@@ -27,16 +28,31 @@ object SessionHooks {
         val context = HookContext.read { environment[it] }
         // the relay's capability for the hooks is read from its file, never from the agent's environment (S2-25)
         val token = context.relayTokenFile?.let(files::read)?.trim()
+        // every call of the hook, the checks' included, ends within the agent's budget
+        val calls = BudgetedCalls.of(
+            RelayCalls(environment["OSTROM_RELAY_URL"], token, http),
+            environment["OSTROM_HOOK_BUDGET_MS"],
+            clock,
+        )
+        val git = CapturedGit(capture, context.git)
+        // the package's checks and notifications, when the launcher laid one down for the session
+        val checks = environment["OSTROM_PACKAGE"]?.let { view ->
+            val sandboxExec = environment.operatingSystem == OperatingSystem.MACOS &&
+                files.readStart(SandboxedScripts.SANDBOX_EXEC, 1) != null
+            // a check never outlives the agent's limit on its hook: past it, Grok runs the action unchecked
+            val budget = HookBudget.of(environment["OSTROM_HOOK_BUDGET_MS"], clock)
+            val home = context.home
+            val scripts = SandboxedScripts(capture, environment::get, sandboxExec, home, files::canonical, budget)
+            val checkouts = GitCheckouts(capture, context.git, budget)
+            PackageChecks(view, context, CheckPorts(files, calls, git, checkouts, scripts, clock))
+        } ?: NoWorkflowChecks
         val ports = HookPorts(
-            calls = BudgetedCalls.of(
-                RelayCalls(environment["OSTROM_RELAY_URL"], token, http),
-                environment["OSTROM_HOOK_BUDGET_MS"],
-                clock,
-            ),
+            calls = calls,
             files = files,
-            git = CapturedGit(capture, context.git),
+            git = git,
             canonical = files::canonical,
             workingDirectory = files.canonical(".".toPath().toString()),
+            checks = checks,
             now = clock,
         )
         return SessionHookProcessor(context, ports)

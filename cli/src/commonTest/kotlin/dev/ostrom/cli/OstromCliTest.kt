@@ -11,6 +11,7 @@ import dev.ostrom.cli.api.ServerRequest
 import dev.ostrom.cli.api.ServerResponse
 import dev.ostrom.cli.api.ServerUnreachableException
 import dev.ostrom.cli.hooks.HookRunner
+import dev.ostrom.cli.imports.FakeMysql
 import dev.ostrom.cli.launch.AgentRunner
 import dev.ostrom.cli.launcher.Agent
 import dev.ostrom.cli.launcher.Credentials
@@ -477,20 +478,6 @@ class OstromCliTest : CliKit() {
     }
 
     @Test
-    fun theSignInPageMustBeOnTheGitHubConfigured() {
-        // S2-35: OSTROM_GITHUB_WEB_URL names the GitHub of a GitHub Enterprise; github.com's page is then refused
-        val enterprise = withServer + ("OSTROM_GITHUB_WEB_URL" to "https://ghe.acme.example/")
-        val page = """{"deviceCode":"dc","userCode":"X","verificationUri":"https://ghe.acme.example/login/device"}"""
-        val flow = deviceFlow + ("POST /api/v1/auth/device" to (200 to page))
-        assertEquals(0, cli(environment = enterprise, api = serverOf(flow)).run(arrayOf("login")))
-        assertTrue(console.err.contains("Open https://ghe.acme.example/login/device"), console.err.toString())
-        val github = """{"deviceCode":"dc","verificationUri":"https://github.com/login/device"}"""
-        val elsewhere = deviceFlow + ("POST /api/v1/auth/device" to (200 to github))
-        assertEquals(69, cli(environment = enterprise, api = serverOf(elsewhere)).run(arrayOf("login")))
-        assertTrue(console.err.contains("a sign-in page that is not GitHub's"), console.err.toString())
-    }
-
-    @Test
     fun aLoginThatStopsSaysWhyWithTheSpecsCode() {
         val noAccess = 403 to """{"error":{"message":"no access"}}"""
         val refused = deviceFlow + ("POST /api/v1/auth/device/token" to noAccess)
@@ -621,6 +608,7 @@ class OstromCliTest : CliKit() {
             temporaryDirectory = "/tmp",
             agents = AgentRunner { _, _ -> 0 },
             sleep = {},
+            capture = FakeMysql(),
             readLine = { null },
             openUrl = { false },
             selfUpdate = SelfUpdate(

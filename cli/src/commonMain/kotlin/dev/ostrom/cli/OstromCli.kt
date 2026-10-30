@@ -17,6 +17,7 @@ import dev.ostrom.cli.commands.DenyCommand
 import dev.ostrom.cli.commands.DoctorCommand
 import dev.ostrom.cli.commands.HelpCommand
 import dev.ostrom.cli.commands.HookCommand
+import dev.ostrom.cli.commands.ImportTeamCodeCommand
 import dev.ostrom.cli.commands.InboxCommand
 import dev.ostrom.cli.commands.LoginCommand
 import dev.ostrom.cli.commands.LogoutCommand
@@ -116,6 +117,7 @@ class OstromCli(private val dependencies: CliDependencies) {
             DoctorCommand(dependencies),
             TelemetryCommand(dependencies),
             VersionCommand(dependencies),
+            ImportTeamCodeCommand(dependencies),
         )
         val plumbing = listOf(HookCommand(dependencies), McpCommand(dependencies))
         // The root always has a help screen: no null to handle.

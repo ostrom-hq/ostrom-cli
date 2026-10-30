@@ -6,6 +6,7 @@ import dev.ostrom.cli.api.OstromApi
 import dev.ostrom.cli.api.ServerRequest
 import dev.ostrom.cli.api.ServerResponse
 import dev.ostrom.cli.hooks.HookRunner
+import dev.ostrom.cli.imports.FakeMysql
 import dev.ostrom.cli.launch.AgentRunner
 import dev.ostrom.cli.launcher.FileCredentialStore
 import dev.ostrom.cli.launcher.LaunchFilesImpl
@@ -20,6 +21,7 @@ import dev.ostrom.cli.platform.LoopbackHttp
 import dev.ostrom.cli.platform.LoopbackRequest
 import dev.ostrom.cli.platform.LoopbackResponse
 import dev.ostrom.cli.platform.OperatingSystem
+import dev.ostrom.cli.platform.ProcessCapture
 import dev.ostrom.cli.platform.SecretBackend
 import dev.ostrom.cli.platform.SecretStore
 import dev.ostrom.cli.platform.StandardInput
@@ -106,6 +108,7 @@ open class CliKit {
         installed: Set<String> = setOf("git", "claude"),
         api: (String) -> OstromApi = { error("no server in this test") },
         executable: String? = "/opt/ostrom",
+        capture: ProcessCapture = FakeMysql(),
         secrets: () -> SecretStore = storeIn(SecretBackend.KEYCHAIN),
         postHogKey: String = "",
     ) = OstromCli(
@@ -140,6 +143,7 @@ open class CliKit {
                 say = { console.out("$it\n") },
                 sessions = AgentSessionsImpl(FakeEnvironment(environment), fileSystem, "/tmp", noRelay),
             ),
+            capture = capture,
             postHogKey = postHogKey,
             sendStatistics = { _, body -> statistics += body },
             secrets = secrets,
