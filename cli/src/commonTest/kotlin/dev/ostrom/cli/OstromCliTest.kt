@@ -651,7 +651,13 @@ class OstromCliTest {
         val github = """{"deviceCode":"dc","verificationUri":"https://github.com/login/device"}"""
         val elsewhere = deviceFlow + ("POST /api/v1/auth/device" to (200 to github))
         assertEquals(69, cli(environment = enterprise, api = serverOf(elsewhere)).run(arrayOf("login")))
-        assertTrue(console.err.contains("a sign-in page that is not GitHub's"), console.err.toString())
+        assertTrue(console.err.contains("a sign-in page that is neither GitHub's nor its own"), console.err.toString())
+        // the console of OSTROM_CONSOLE_URL is a page of Ostrom's own: the server sends there
+        val console = """{"deviceCode":"dc","userCode":"X","verificationUri":"https://console.ostrom.example/device"}"""
+        val consoleFlow = deviceFlow + ("POST /api/v1/auth/device" to (200 to console))
+        val withConsole = withServer + ("OSTROM_CONSOLE_URL" to "https://console.ostrom.example/")
+        assertEquals(0, cli(environment = withConsole, api = serverOf(consoleFlow)).run(arrayOf("login")))
+        assertTrue(console.err.contains("Open https://console.ostrom.example/device"), console.err.toString())
     }
 
     @Test
