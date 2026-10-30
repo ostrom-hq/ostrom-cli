@@ -8,7 +8,6 @@ import com.github.ajalt.clikt.parameters.arguments.optional
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.multiple
 import com.github.ajalt.clikt.parameters.options.option
-import dev.ostrom.cli.launcher.Agent
 
 // The commands of the spec (CLI.md § 2.1 and § 2.2) that are declared but not built yet. Each keeps the options and
 // arguments of the spec so that `--help` already documents it; its behaviour lands with the agent that owns it.
@@ -20,18 +19,6 @@ private fun CliktCommand.serverOption() =
 private fun CliktCommand.jsonOption() = option("--json", help = "Machine-readable output").flag()
 
 private fun CliktCommand.yesOption() = option("--yes", help = "Do not ask for confirmation").flag()
-
-/** `ostrom <agent>`: the developer's only entry point. */
-internal class AgentCommand(agent: Agent) :
-    PendingCommand(agent.command, "Start ${agent.displayName} under your team's harness") {
-    override val treatUnknownOptionsAsArgs = true
-    val repo by option("--repo", help = "Repository (else read from origin)")
-    val model by option("--model", help = "Model for the agent")
-    val cloud by option("--cloud", help = "Run the session in Ostrom's cloud, attached to this terminal").flag()
-    val dryRun by option("--dry-run", help = "Show the harness that would apply, then exit").flag()
-    val server by serverOption()
-    val agentArguments by argument("agent-args", help = "Passed to the agent as they are").multiple()
-}
 
 internal class StatusCommand : PendingCommand("status", "Everything about you, this repository and this device") {
     val json by jsonOption()

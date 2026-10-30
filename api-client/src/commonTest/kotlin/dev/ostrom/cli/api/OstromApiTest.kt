@@ -109,4 +109,10 @@ class OstromApiTest {
         assertEquals(200, response.status, response.body)
         assertTrue(response.body.isNotBlank())
     }
+
+    @Test
+    fun anUnreachableServerSaysWhyInTheNetworksWords() {
+        assertEquals("connection refused", ServerUnreachableException("u", IOException("connection refused")).reason)
+        assertTrue(ServerUnreachableException("u", IOException()).reason.endsWith("IOException"), "no message: its type")
+    }
 }

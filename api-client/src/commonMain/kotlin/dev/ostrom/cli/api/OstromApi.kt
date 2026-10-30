@@ -35,8 +35,14 @@ data class ServerRequest(
     val timeoutMillis: Long = REQUEST_TIMEOUT_MILLIS,
 )
 
-/** The server could not be reached (exit code 69). */
-class ServerUnreachableException(val url: String, cause: Throwable) : Exception(cause)
+/**
+ * The server could not be reached (exit code 69).
+ *
+ * @property reason Why, in the words of the network layer.
+ */
+class ServerUnreachableException(val url: String, cause: Throwable) : Exception(cause) {
+    val reason: String = cause.message ?: cause.toString()
+}
 
 /** The Ostrom server, over HTTPS. Typed endpoints come with the contract of ostrom-core. */
 interface OstromApi {

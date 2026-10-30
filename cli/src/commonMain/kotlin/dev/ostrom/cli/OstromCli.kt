@@ -47,7 +47,7 @@ class OstromCli(private val dependencies: CliDependencies) {
     /** The full tree, in the order of the help screen. */
     internal fun tree(): RootCommand {
         val root = RootCommand(dependencies)
-        val agents = Agent.entries.map { AgentCommand(it) }
+        val agents = Agent.entries.map { AgentCommand(it, dependencies) }
         val implemented = listOf(ConfigCommand(dependencies), DoctorCommand(dependencies), VersionCommand(dependencies))
         val plumbing = listOf(HookCommand(dependencies), McpCommand(dependencies))
         // The root always has a help screen: no null to handle.

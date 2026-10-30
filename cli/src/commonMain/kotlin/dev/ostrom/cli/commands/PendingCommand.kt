@@ -63,7 +63,7 @@ open class GroupCommand(
 }
 
 /** The error printed, through the CLI's console, by a command that is declared but not built yet (exit 70). */
-private fun notImplemented(path: List<String>) =
+internal fun notImplemented(path: List<String>) =
     PrintMessage("${path.joinToString(" ")}: not implemented yet.", ExitCode.NOT_IMPLEMENTED.code, printError = true)
 
 /** The end of the help of a command declared but not built yet. */
