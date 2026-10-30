@@ -60,7 +60,7 @@ class PushReader(private val git: GitRunner, private val home: String) {
         }
         if (problem != null) throw UnreadablePushException(problem)
         val ones = pushes.map { onePush(it.directoryIn(directory, home), it.arguments, lenient = false) }
-        val remote = ones.firstOrNull()?.remote ?: return null
+        val remote = (ones.firstOrNull() ?: return null).remote
         if (ones.any { it.remote != remote }) throw UnreadablePushException(TWO_REMOTES)
         return Push(remote, repositoryOf(directory, remote), ones.flatMap { it.refs }, ones.any { it.force })
     }
