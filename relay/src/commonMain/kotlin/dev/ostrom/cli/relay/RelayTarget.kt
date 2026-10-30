@@ -40,10 +40,14 @@ private const val SIGNED_GATE_CATALOG = "/api/v1/gates/catalog/signed"
 
 /**
  * The hook routes the relay forwards (CLI-AGENTS, `api/openapi.yaml` of ostrom-core), by method. Ending a session,
- * its sign of life, the use of a yes and the check runs are the launcher's and Ostrom's, never the agent's: the agent
- * holds the relay's capability, so none of them is on this list (security audit S2-25, S2-29).
+ * its sign of life and the use of a yes are the launcher's and Ostrom's, never the agent's: none of them is on this
+ * list (security audit S2-25, S2-29). A check run's report (`POST /api/v1/checks`, `reportCheck`) is the hooks', which
+ * run the package's checks: like every route here, [opens] lets it through with the hooks' capability, never with the
+ * agent's own. That keeps the agent's environment from reporting a run, not a determined agent: the hooks' capability
+ * file is readable by the agent's own user (S2-20), so a report is the developer machine's word, never a proof.
+ * Reading check runs (`GET /api/v1/checks`) is the console's, not a hook's: not on this list.
  */
-private val HOOK_POST = Regex("/api/v1/(sessions|gates|notifications)|/api/v1/sessions/$ID/(reopen|seen)")
+private val HOOK_POST = Regex("/api/v1/(sessions|gates|notifications|checks)|/api/v1/sessions/$ID/(reopen|seen)")
 private val HOOK_GET = Regex("/api/v1/gates/$ID")
 
 /** An MCP server name, as the server accepts it. */
