@@ -21,6 +21,9 @@ class RelayTargetTest {
             assertEquals(RelayTarget.Hook(longPoll = false), resolveTarget(HttpMethod.Post, path, config), path)
         }
         assertEquals(RelayTarget.Hook(longPoll = false), resolveTarget(HttpMethod.Get, "/api/v1/gates/catalog", config))
+        val signed = resolveTarget(HttpMethod.Get, "/api/v1/gates/catalog/signed", config)
+        assertEquals(RelayTarget.SignedCatalog, signed)
+        assertEquals(RelayTarget.NotFound, resolveTarget(HttpMethod.Post, "/api/v1/gates/catalog/signed", config))
         assertEquals(RelayTarget.Hook(longPoll = true), resolveTarget(HttpMethod.Get, "/api/v1/gates/g-1", config))
     }
 
