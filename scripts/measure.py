@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """Measures a built `ostrom` binary: start-up of `ostrom hook gate` and `ostrom version`, and binary sizes.
 
 Usage: measure.py --binary PATH --label TARGET [--runs N] [--max-hook-ms MS] [--sizes FILE...]
