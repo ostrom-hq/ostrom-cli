@@ -14,6 +14,7 @@ import dev.ostrom.cli.platform.OperatingSystem
 import dev.ostrom.cli.platform.ProcessCapture
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import okio.ByteString.Companion.encodeUtf8
 import okio.Path.Companion.toPath
 import okio.fakefilesystem.FakeFileSystem
 import kotlin.test.Test
@@ -43,9 +44,11 @@ class AdaptersTest {
         override fun detach(command: List<String>): Boolean = error("the hooks start nothing in the background")
     }
 
-    private class Variables(private val values: Map<String, String>) : Environment {
+    private class Variables(
+        private val values: Map<String, String>,
+        override val operatingSystem: OperatingSystem = OperatingSystem.LINUX,
+    ) : Environment {
         override fun get(name: String) = values[name]
-        override val operatingSystem = OperatingSystem.LINUX
         override val architecture = "x64"
     }
 
@@ -182,6 +185,47 @@ class AdaptersTest {
         val plain = SessionHooks.processor(Variables(emptyMap()), fileSystem, capture, http, SessionHooks::epochMillis)
         assertEquals(HookReply(), plain.process(HookKind.SESSION, null, "claude"))
         assertTrue(SessionHooks.epochMillis() > 1_700_000_000_000)
+    }
+
+    @Test
+    fun aLaidPackageRunsItsChecksThroughTheRealWiring() {
+        val script = "npm test\n"
+        val view = """{"digest":"sha256:p","tmp":"/t","hooks":[{"id":"h","nodeId":"n","kind":"check",
+            "event":"PreToolUse","tools":["Bash"],"patterns":["npm test"],"mode":"enforce","scriptId":"s"}],
+            "scripts":[{"id":"s","label":"Tests","path":"scripts/s.sh","command":"npm test","timeoutSec":5,
+            "sha256":"${script.encodeUtf8().sha256().hex()}"}]}"""
+        val signed = PolicyVectors.envelope(payload = PolicyVectors.PAYLOAD_R, signature = PolicyVectors.SIGNATURE_R)
+        for ((system, sandboxed) in listOf(
+            OperatingSystem.LINUX to false,
+            OperatingSystem.MACOS to true,
+            OperatingSystem.MACOS to false,
+        )) {
+            val fileSystem = FakeFileSystem()
+            fileSystem.createDirectories("/t/scripts".toPath())
+            fileSystem.write("/t/package.json".toPath()) { writeUtf8(view) }
+            fileSystem.write("/t/scripts/s.sh".toPath()) { writeUtf8(script) }
+            if (sandboxed) {
+                fileSystem.createDirectories("/usr/bin".toPath())
+                fileSystem.write("/usr/bin/sandbox-exec".toPath()) { writeUtf8("binary") }
+            }
+            val capture = Capture()
+            val http = answer(200, signed.toString())
+            val environment = Variables(
+                mapOf(
+                    "OSTROM_RELAY_URL" to "http://127.0.0.1:4100",
+                    "OSTROM_INSTANCE_KEYS" to PolicyVectors.KEYS,
+                    "OSTROM_REPO" to "r",
+                    "OSTROM_PACKAGE" to "/t/package.json",
+                ),
+                system,
+            )
+            val processor = SessionHooks.processor(environment, fileSystem, capture, http) { PolicyVectors.NOW }
+            val test = """{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"npm test"}}"""
+            assertEquals(HookReply(), processor.process(HookKind.GATE, test.encodeToByteArray(), "claude"))
+            val run = capture.captured.single { it.first() == "/usr/bin/env" }
+            assertEquals(sandboxed, "/usr/bin/sandbox-exec" in run, "$system")
+            assertEquals(Routes.CHECKS, http.sent.last().second.path)
+        }
     }
 
     @Test

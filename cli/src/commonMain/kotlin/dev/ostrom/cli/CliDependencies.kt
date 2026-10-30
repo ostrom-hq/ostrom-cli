@@ -59,6 +59,8 @@ import kotlin.time.TimeSource
  * @property agents Runs `ostrom <agent>`.
  * @property gateWait Builds `ostrom wait`, which asks through the session's relay.
  * @property sleep Waits the given milliseconds (the device flow of login; virtual in tests).
+ * @property readLine Reads a line the developer typed, or null at the end of the input.
+ * @property openUrl Opens a page in the developer's browser; false when it could not.
  * @property secrets Opens the secret store of this device (system store, or encrypted file). Each call chooses and
  * probes the store again (up to a second on Linux): a command calls it once and keeps the store; the hook's fast
  * path never calls it.
@@ -81,6 +83,8 @@ class CliDependencies(
     val agents: AgentRunner,
     val gateWait: () -> GateWait,
     val sleep: suspend (Long) -> Unit,
+    val readLine: () -> String?,
+    val openUrl: (String) -> Boolean,
     val postHogKey: String,
     val sendStatistics: suspend (url: String, body: String) -> Unit,
     val secrets: () -> SecretStore = { systemSecretStore(environment, files) },
@@ -149,6 +153,8 @@ class CliDependencies(
                     GateWait(relay, { started.elapsedNow().inWholeMilliseconds }, ::pause, console::err)
                 },
                 sleep = { delay(it) },
+                readLine = ::readlnOrNull,
+                openUrl = BrowserOpener(ProcessLauncherImpl(), environment.operatingSystem)::open,
                 postHogKey = BuildInfo.POSTHOG_KEY,
                 secrets = secrets,
                 sendStatistics = { url, body -> statistics.send(url, body) },

@@ -11,10 +11,13 @@ import com.github.ajalt.clikt.core.parse
 import com.github.ajalt.clikt.core.subcommands
 import dev.ostrom.cli.api.STATISTICS_TIMEOUT_MILLIS
 import dev.ostrom.cli.commands.AgentCommand
+import dev.ostrom.cli.commands.ApproveCommand
 import dev.ostrom.cli.commands.ConfigCommand
+import dev.ostrom.cli.commands.DenyCommand
 import dev.ostrom.cli.commands.DoctorCommand
 import dev.ostrom.cli.commands.HelpCommand
 import dev.ostrom.cli.commands.HookCommand
+import dev.ostrom.cli.commands.InboxCommand
 import dev.ostrom.cli.commands.LoginCommand
 import dev.ostrom.cli.commands.LogoutCommand
 import dev.ostrom.cli.commands.McpCommand
@@ -103,6 +106,9 @@ class OstromCli(private val dependencies: CliDependencies) {
         val root = RootCommand(dependencies)
         val agents = Agent.entries.map { AgentCommand(it, dependencies) }
         val implemented = listOf(
+            InboxCommand(dependencies),
+            ApproveCommand(dependencies),
+            DenyCommand(dependencies),
             LoginCommand(dependencies),
             LogoutCommand(dependencies),
             ConfigCommand(dependencies),
