@@ -165,7 +165,7 @@ class CliDependencies(
                 cloud = CloudRunnerImpl(
                     console = console,
                     api = api,
-                    channels = { url, path, token -> TerminalChannels(url, USER_AGENT).open(path, token) },
+                    channels = TerminalChannels.opener(USER_AGENT),
                     terminal = RawTerminalImpl(),
                     capture = ProcessCaptureImpl(),
                 ),

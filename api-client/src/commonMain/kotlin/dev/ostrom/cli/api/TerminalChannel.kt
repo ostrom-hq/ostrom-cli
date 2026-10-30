@@ -52,6 +52,12 @@ class TerminalChannels(
     private val userAgent: String,
     private val client: HttpClient = webSocketClient(),
 ) {
+    companion object {
+        /** Opens a terminal on the server of the call, `(serverUrl, path, token)`, with [userAgent]. */
+        fun opener(userAgent: String): suspend (String, String, String) -> TerminalChannel =
+            { url, path, token -> TerminalChannels(url, userAgent).open(path, token) }
+    }
+
     /**
      * @param path The terminal's path (`/api/v1/cloud/sessions/<id>/terminal`).
      * @param token The device token, sent on the upgrade.
