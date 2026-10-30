@@ -45,11 +45,12 @@ internal fun healthCheck(host: String, url: String, response: ServerResponse, co
 
 /** ` (database: down)`: the checks of an Ostrom health body that are not `ok`, or nothing. */
 private fun failing(body: JsonObject?): String {
-    val checks = body?.child("checks").orEmpty().mapNotNull { (name, state) ->
+    val checks = body?.child("checks") ?: return ""
+    val failed = checks.mapNotNull { (name, state) ->
         val shown = (state as? JsonPrimitive)?.content?.takeIf { PRINTABLE.matches(it) } ?: "?"
         "$name: $shown".takeIf { shown != "ok" && PRINTABLE.matches(name) }
     }
-    return if (checks.isEmpty()) "" else " (${checks.joinToString(", ")})"
+    return if (failed.isEmpty()) "" else " (${failed.joinToString(", ")})"
 }
 
 private fun versionCheck(reachable: String, server: String, contract: String): DoctorCheck {

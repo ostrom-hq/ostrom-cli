@@ -46,4 +46,18 @@ class HealthCheckTest {
         assertEquals(CheckStatus.OK, verdict.status)
         assertEquals("ostrom.example reachable (5 ms) · Ostrom 0.3.1", verdict.message)
     }
+
+    @Test
+    fun aServerInTroubleNamesOnlyTheChecksThatFailed() {
+        val trouble = "ostrom.example answers 503: the server is in trouble, try again later."
+        for (body in listOf("", "<html>bad gateway</html>", """{"status":"degraded","version":"0.3.1"}""",
+            """{"checks":"down"}""", """{"checks":{"database":"ok"}}""")) {
+            assertEquals(trouble, check(ServerResponse(503, body, 5), "0.3.0").message, body)
+        }
+        val failed = ServerResponse(503, """{"checks":{"database":"down","cache":"ok"}}""", 5)
+        assertEquals(
+            "ostrom.example answers 503: the server is in trouble (database: down), try again later.",
+            check(failed, "0.3.0").message,
+        )
+    }
 }
