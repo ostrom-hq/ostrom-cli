@@ -123,3 +123,25 @@ internal class LogoutCommand(private val dependencies: CliDependencies) : CliktC
 }
 
 private const val DEFAULT_SERVER = "https://api.ostrom.run"
+
+/**
+ * The signed-in device for a command that reads or writes on the server.
+ *
+ * @property serverUrl The server, without a trailing slash.
+ * @property token The device token.
+ * @property login The developer's GitHub login.
+ * @property server The server's JSON API.
+ */
+internal class SignedIn(val serverUrl: String, val token: String, val login: String, val server: ServerJson)
+
+/** The device signed in to the server of [option], or exit 65 with `ostrom login` to run. */
+internal fun CliDependencies.signedIn(option: String?): SignedIn {
+    val directory = directory()
+    val serverUrl = serverOf(option, directory)
+    val credentials = credentials(directory).load(serverUrl) ?: throw PrintMessage(
+        "ostrom: not signed in to $serverUrl: run `ostrom login`",
+        ExitCode.SIGN_IN_REQUIRED.code,
+        printError = true,
+    )
+    return SignedIn(serverUrl, credentials.token, credentials.login, ServerJson(ApiServerTransport(api(serverUrl))))
+}
