@@ -11,7 +11,7 @@ all Ostrom repositories are in `ostrom-core/docs/CONVENTIONS.md`; this page only
 | --- | --- | --- | --- |
 | `platform` | `dev.ostrom.cli.platform` | everything that touches the OS: processes sharing the terminal, stdin with a deadline, unbuffered stdout/stderr, environment, files, `config.toml`, PATH lookup | okio |
 | `hooks` | `dev.ostrom.cli.hooks` | `ostrom hook gate\|session`: event parsing (all agents' dialects), the gate, the reply | `platform` |
-| `api-client` | `dev.ostrom.cli.api` | the server over HTTPS (Ktor, platform engine) | ostrom-core (once published) |
+| `api-client` | `dev.ostrom.cli.api` | the server over HTTPS (Ktor, platform engine) | ostrom-core `api` |
 | `launcher` | `dev.ostrom.cli.launcher` | the agents (`Agent`) and starting one in this terminal | `platform` |
 | `mcp` | `dev.ostrom.cli.mcp` | the local MCP server on stdio (`ostrom mcp`) | `platform` |
 | `relay` | `dev.ostrom.cli.relay` | the launch's local relay on `127.0.0.1` (Ktor CIO): hooks, MCP and inference reach Ostrom through it | `platform` |
@@ -157,8 +157,14 @@ nothing anywhere else.
 
 ## ostrom-core
 
-`api-client` will depend on `dev.ostrom:ostrom-api` (the API models of ostrom-core), read from GitHub Packages
-(`maven.pkg.github.com/ostrom-hq/ostrom-core`, with `GITHUB_ACTOR` / `GITHUB_TOKEN`, or `gpr.user` / `gpr.key` in
-`~/.gradle/gradle.properties`). Set `ostromCoreVersion` in `gradle.properties` once a version is published. A clone of
-ostrom-core next to this one (`../ostrom-core`, or `../../ostrom-core` from a worktree) replaces the package through
-`includeBuild`, so a contract change can be tried here before it is released.
+`api-client` depends on `dev.ostrom:ostrom-api` (the API models of ostrom-core, `OstromJson`, `ApiError`). The version
+is `ostromCoreVersion` in `gradle.properties`, and `gradle/ostrom-core.ref` is the ostrom-core commit that published it:
+change both together.
+
+- Locally: from GitHub Packages (`maven.pkg.github.com/ostrom-hq/ostrom-core`, with `gpr.user` / `gpr.key` in
+  `~/.gradle/gradle.properties`, a token with `read:packages`), or from a clone at `../ostrom-core` with
+  `ostrom.core.local=true`, which `includeBuild`s it and substitutes `ostrom-api`, `ostrom-receipts` and
+  `ostrom-telemetry`.
+- In CI (`ci.yml`, `release.yml`): a repository's `GITHUB_TOKEN` cannot read another repository's Maven packages, so
+  ostrom-core is checked out at the commit of `gradle/ostrom-core.ref` with the read-only key `DEPLOY_KEY_CORE`, then
+  built through `ostrom.core.local` (JOURNAL 05:50).

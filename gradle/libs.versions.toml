@@ -10,6 +10,7 @@ clikt = "5.1.0"
 junit = "5.11.4"
 kover = "0.9.11"
 detekt = "1.23.8"
+cryptography = "0.6.0"
 
 [libraries]
 kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
@@ -30,6 +31,9 @@ ktor-server-test-host = { module = "io.ktor:ktor-server-test-host", version.ref 
 
 okio = { module = "com.squareup.okio:okio", version.ref = "okio" }
 okio-fakefilesystem = { module = "com.squareup.okio:okio-fakefilesystem", version.ref = "okio" }
+cryptography-core = { module = "dev.whyoleg.cryptography:cryptography-core", version.ref = "cryptography" }
+cryptography-openssl3 = { module = "dev.whyoleg.cryptography:cryptography-provider-openssl3-prebuilt", version.ref = "cryptography" }
+cryptography-jdk = { module = "dev.whyoleg.cryptography:cryptography-provider-jdk", version.ref = "cryptography" }
 clikt = { module = "com.github.ajalt.clikt:clikt", version.ref = "clikt" }
 
 junit-jupiter-engine = { module = "org.junit.jupiter:junit-jupiter-engine", version.ref = "junit" }

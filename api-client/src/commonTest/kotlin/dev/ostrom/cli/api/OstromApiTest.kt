@@ -55,9 +55,13 @@ class OstromApiTest {
     }
 
     @Test
-    fun theDefaultClientIsBuiltWithoutCallingAnything() {
-        OstromApiImpl("https://ostrom.example", "ostrom/0.1.0")
+    fun theDefaultClientIsBuiltWithoutCallingAnythingAndClosed() {
+        OstromApiImpl("https://ostrom.example", "ostrom/0.1.0").close()
         defaultHttpClient().close()
+        // A client without a connection of its own (a fake) closes as a no-op.
+        object : OstromApi {
+            override suspend fun get(path: String) = ServerResponse(200, "", 0)
+        }.close()
     }
 
     /**
@@ -68,9 +72,20 @@ class OstromApiTest {
     @Test
     fun aRealHttpsCallSucceeds() {
         if (EnvironmentImpl()["OSTROM_NETWORK_TESTS"] != "1") return
-        val response = runBlocking { OstromApiImpl("https://api.github.com", "ostrom-cli-tests").get("/zen") }
+        val response = runBlocking {
+            OstromApiImpl("https://api.github.com", "ostrom-cli-tests").use { it.get("/zen") }
+        }
         assertTrue(response.status in HTTP_ANSWERS, "status ${response.status}")
         assertTrue(response.body.isNotBlank())
+    }
+
+    @Test
+    fun aRefusalBodyIsReadWithTheContractsApiError() {
+        val refusal = ServerResponse(404, """{"error":{"type":"gate_not_found","message":"No such gate."},"x":1}""", 3)
+        assertEquals("gate_not_found", refusal.apiError()?.type)
+        assertEquals("No such gate.", refusal.apiError()?.message)
+        assertEquals(null, ServerResponse(502, "<html>Bad gateway</html>", 3).apiError())
+        assertEquals(null, ServerResponse(204, "", 3).apiError())
     }
 
     private companion object {
