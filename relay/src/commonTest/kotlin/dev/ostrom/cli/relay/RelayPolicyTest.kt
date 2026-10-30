@@ -67,7 +67,8 @@ class RelayPolicyTest {
         // S2-25: the capability in the agent's environment used to ask gates, open sessions and read the policy
         val ostrom = FakeOstrom { respond("{}", HttpStatusCode.OK, json) }
         relayTest(ostrom, relayConfig(inference = true), clientToken = CLIENT_TOKEN) {
-            for (hookPath in listOf("/api/v1/sessions", "/api/v1/gates")) {
+            // a check run reported by the agent itself would say the tests passed without running them
+            for (hookPath in listOf("/api/v1/sessions", "/api/v1/gates", "/api/v1/checks")) {
                 val refused = client.post(hookPath) { bearerAuth(CLIENT_TOKEN) }
                 assertEquals(HttpStatusCode.Forbidden, refused.status, hookPath)
                 assertEquals("This Ostrom capability does not open this route.", refused.bodyAsText())

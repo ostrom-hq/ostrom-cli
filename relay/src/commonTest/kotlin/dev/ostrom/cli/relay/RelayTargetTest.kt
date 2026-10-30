@@ -16,6 +16,7 @@ class RelayTargetTest {
             "/api/v1/sessions/s-1/seen",
             "/api/v1/gates",
             "/api/v1/notifications",
+            "/api/v1/checks",
         )
         for (path in posts) {
             assertEquals(RelayTarget.Hook(longPoll = false), resolveTarget(HttpMethod.Post, path, config), path)
@@ -39,7 +40,9 @@ class RelayTargetTest {
             HttpMethod.Post to "/api/v1/gates/g_1/consume",
             HttpMethod.Post to "/api/v1/gates/g_1/reserve",
             HttpMethod.Post to "/api/v1/gates/g_1/release",
-            HttpMethod.Post to "/api/v1/checks",
+            // reading check runs is the console's; a report is only POSTed, to the route itself
+            HttpMethod.Get to "/api/v1/checks",
+            HttpMethod.Post to "/api/v1/checks/c-1",
             HttpMethod.Post to "/api/v1/gates/catalog",
             HttpMethod.Post to "/api/v1/gates/a.b/consume",
             HttpMethod.Post to "/api/v1/sessions/",

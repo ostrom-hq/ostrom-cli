@@ -64,8 +64,9 @@ alternative: a second private file for `ostrom wait`, which a command of the age
 - Only an allow-list is forwarded, everything else is 404 (never an open proxy): the hook routes
   (`POST /api/v1/sessions`, `/sessions/{id}/reopen|seen`, `/api/v1/gates`, `/api/v1/notifications`, `GET
   /api/v1/gates/{id}` and `/gates/catalog`, as they are, 2 MiB, 15 s, 70 s for a gate wait; ending a session, its sign
-  of life, the use of a yes and check runs are the launcher's and Ostrom's, never forwarded for the agent, S2-25 and
-  S2-29), the catalogue of the verified package answered from memory when there is one, the organisation's gate
+  of life and the use of a yes are the launcher's and Ostrom's, never forwarded for the agent, S2-25 and S2-29; a check
+  run's report, `POST /api/v1/checks`, is forwarded for the hooks, which run the package's checks, with their
+  capability only, and reading check runs is not forwarded), the catalogue of the verified package answered from memory when there is one, the organisation's gate
   policy signed by the instance (`GET /api/v1/gates/catalog/signed`, kept 30 s in memory, a failure never kept; the
   hooks check its signature against `OSTROM_INSTANCE_KEYS` and its expiry at every call, and hold every action without
   one, S2-20 and S2-38), `POST /mcp/{server}` for the launch's servers (to `/api/v1/mcp/{server}`, streamed, 401/403 from
