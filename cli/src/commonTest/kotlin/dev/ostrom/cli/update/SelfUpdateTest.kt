@@ -208,6 +208,37 @@ class SelfUpdateTest {
     }
 
     @Test
+    fun theFloorThisBinaryWasBuiltWithHoldsUnderAnOldManifest() {
+        val own = "✗ ostrom 1.1.0 is below 1.2.0, the lowest version this ostrom allows. Nothing was changed."
+        assertEquals(own, floorRefusal("1.1.0", "1.3.0", "1.0.0", "1.2.0"), "a replayed manifest with a lower floor")
+        assertEquals(own, floorRefusal("1.1.0", "1.3.0", null, "1.2.0"))
+        assertEquals(null, floorRefusal("1.2.0", "1.3.0", "1.0.0", "1.2.0"), "at the floor is allowed")
+        assertEquals(null, floorRefusal("1.2.0", "1.3.0", "1.0.0", "junk"), "an unreadable built floor is none")
+    }
+
+    @Test
+    fun aRollbackBelowTheBuiltFloorIsRefused() = runTest {
+        serve(latest, "LATEST_FLOOR")
+        updater().update(request())
+        val guarded = SelfUpdate(
+            downloads = { url, _ -> routes[url]?.invoke() ?: Download.Missing(404) },
+            fileSystem = fake,
+            unpack = { _, into -> unpacked(into) },
+            say = { said += it },
+            sessions = { null },
+            releaseKeyPem = ReleaseVectors.KEY_PEM,
+            builtFloor = "9.0.0",
+        )
+        assertEquals(77, guarded.rollback(request(current = "9.9.9")))
+        assertEquals(
+            "✗ ostrom 1.0.0 is below 9.0.0, the lowest version this ostrom allows. Nothing was changed.",
+            said.last(),
+        )
+        assertEquals("new", text(binary), "nothing was swapped")
+        assertEquals("old", text("$binary.previous"))
+    }
+
+    @Test
     fun aManifestThatIsNotSignedByTheReleaseKeyChangesNothing() = runTest {
         serve(latest, "LATEST", signature = "SAME")
         assertEquals(78, updater().update(request()))

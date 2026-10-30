@@ -187,6 +187,7 @@ class CliDependencies(
             TarUnpacker(ProcessLauncherImpl(), environment["SystemRoot"]),
             { console.out("$it\n") },
             AgentSessionsImpl(environment, FileSystem.SYSTEM, temporary, LoopbackHttpImpl()),
+            builtFloor = BuildInfo.FLOOR,
         )
 
         /** The hook runner alone, for the fast path of `main` (nothing else is built). */

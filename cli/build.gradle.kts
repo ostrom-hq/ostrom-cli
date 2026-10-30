@@ -17,9 +17,15 @@ val generateBuildInfo by tasks.registering {
     val postHogKey = providers.gradleProperty("ostromPosthogKey").orElse("").get()
     // Written into a Kotlin string literal: only the characters a PostHog key has, so nothing can break or inject.
     require(Regex("[A-Za-z0-9_-]*").matches(postHogKey)) { "ostromPosthogKey has characters a PostHog key never has" }
+    // The release floor (security audit S2-39) this binary is built with: `ostrom update` never goes below it, even
+    // when an old manifest, signed but with a lower floor, is served again.
+    val floorFile = rootProject.layout.projectDirectory.file("release-floor.txt")
+    val floor = providers.fileContents(floorFile).asText.get().trim()
+    require(Regex("[0-9]+\\.[0-9]+\\.[0-9]+").matches(floor)) { "release-floor.txt is not a version: $floor" }
     val output = generatedBuildInfo
     inputs.property("version", version)
     inputs.property("postHogKey", postHogKey)
+    inputs.property("floor", floor)
     outputs.dir(output)
     doLast {
         val file = output.get().file("dev/ostrom/cli/BuildInfo.kt").asFile
@@ -37,6 +43,9 @@ val generateBuildInfo by tasks.registering {
             |
             |    /** The usage statistics destination (`-PostromPosthogKey`), blank when the build has none. */
             |    const val POSTHOG_KEY = "$postHogKey"
+            |
+            |    /** The lowest version `ostrom update` installs, from `release-floor.txt` at build time (S2-39). */
+            |    const val FLOOR = "$floor"
             |}
             |""".trimMargin(),
         )
