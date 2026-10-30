@@ -116,11 +116,7 @@ class SelfUpdate(
                 val run = if (request.version == null) "ostrom update" else "ostrom update --version ${asset.version}"
                 say("! ostrom ${asset.version} is available. Run $run.")
             }
-            else -> {
-                val floor = if (request.version == null) asset.floor else manifest(request.copy(version = null)).floor
-                floorRefusal(asset.version, request.current, floor)?.let { stop(ExitCode.REFUSED, it) }
-                install(request, asset)
-            }
+            else -> install(request, asset)
         }
     } catch (stopped: Stop) {
         say(stopped.text)
@@ -214,7 +210,10 @@ class SelfUpdate(
 
     private fun unreadable(): Nothing = stop(ExitCode.FAILED, "✗ The release manifest cannot be read. $UNCHANGED")
 
+    /** Installs [asset] when the latest release's floor allows it (S2-39). */
     private suspend fun install(request: UpdateRequest, asset: Asset): Int {
+        val floor = if (request.version == null) asset.floor else manifest(request.copy(version = null)).floor
+        floorRefusal(asset.version, request.current, floor)?.let { stop(ExitCode.REFUSED, it) }
         val executable = request.executable
             ?: stop(ExitCode.CANNOT_WRITE, "ostrom cannot find its own binary. Reinstall it with the installer.")
         val binary = executable.toPath()
