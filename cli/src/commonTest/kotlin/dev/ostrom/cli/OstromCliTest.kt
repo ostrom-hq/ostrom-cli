@@ -617,7 +617,8 @@ class OstromCliTest {
         assertTrue(console.err.startsWith("ostrom: http://ostrom.example is not"), console.err.toString())
         assertTrue(requests.isEmpty(), "nothing was sent")
         // the scheme in any case, as `ostrom config set server` reads it
-        val local = listOf("HTTPS://ostrom.example", "http://localhost:8080/", "HTTP://127.0.0.1:4000", "http://[::1]:9")
+        val local =
+            listOf("HTTPS://ostrom.example", "http://localhost:8080/", "HTTP://127.0.0.1:4000", "http://[::1]:9")
         for (url in local) {
             assertEquals(0, cli(environment = home, api = serverOf(deviceFlow)).run(arrayOf("login", "--server", url)))
             assertEquals(url.trimEnd('/'), requests.last().first)
