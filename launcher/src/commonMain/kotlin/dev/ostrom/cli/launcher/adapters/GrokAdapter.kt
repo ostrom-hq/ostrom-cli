@@ -80,7 +80,9 @@ class GrokAdapter : AgentAdapter {
     private companion object {
         const val TIMEOUT = 5
         const val OURS = "ostrom.json"
-        val PATHS = Regex("\\s*paths\\s*=\\s*\\[.*")
         const val BUDGET_MILLIS = "4000"
     }
 }
+
+/** The `paths = [` line of the developer's `[skills]` table. */
+private val PATHS = Regex("\\s*paths\\s*=\\s*\\[.*")

@@ -163,6 +163,14 @@ class MoreAdaptersTest {
     }
 
     @Test
+    fun hermesStartsFromItsOwnConfigWhenTheDeveloperHasNone() {
+        val launch = HermesAdapter().prepare(layout(arguments = listOf("-q", "hi")), files)
+        assertEquals(emptyList(), launch.notes)
+        val yaml = checkNotNull(files.texts[join("/tmp/run", "hermes-home", "config.yaml")])
+        assertTrue(yaml.startsWith("\n# --- Ostrom (this session only)\nhooks: "), yaml)
+    }
+
+    @Test
     fun hermesLeavesOutTheDevelopersHooksAndServersAndSaysSo() {
         // a YAML key appears once: a second `hooks:` would drop one of the two, or break the file
         val theirs = "model: x\nhooks:\n  pre_tool_call: []\n\n# mine\nmcp_servers:\n- a\n- b\ntheme: dark\n"
