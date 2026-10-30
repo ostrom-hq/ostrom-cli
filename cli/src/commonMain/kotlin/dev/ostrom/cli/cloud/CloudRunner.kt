@@ -48,13 +48,16 @@ class CloudRunnerImpl(
     private val terminal: RawTerminal,
     private val capture: ProcessCapture,
 ) : CloudRunner {
-    override suspend fun start(start: CloudStart, site: CloudSite): Int =
-        useCase(site).start(start.copy(repo = start.repo ?: originOf(site.cwd)), site.token)
+    // the client is closed with the command: its engine holds a thread and the connection pool
+    override suspend fun start(start: CloudStart, site: CloudSite): Int = api(site.serverUrl).use {
+        useCase(it, site).start(start.copy(repo = start.repo ?: originOf(site.cwd)), site.token)
+    }
 
-    override suspend fun attach(id: String, site: CloudSite): Int = useCase(site).attach(id, site.token)
+    override suspend fun attach(id: String, site: CloudSite): Int =
+        api(site.serverUrl).use { useCase(it, site).attach(id, site.token) }
 
-    private fun useCase(site: CloudSite) = CloudSessionUseCase(
-        ServerJson(ApiServerTransport(api(site.serverUrl))),
+    private fun useCase(client: OstromApi, site: CloudSite) = CloudSessionUseCase(
+        ServerJson(ApiServerTransport(client)),
         TerminalConnector { path, token ->
             try {
                 ChannelSocket(channels(site.serverUrl, path, token))

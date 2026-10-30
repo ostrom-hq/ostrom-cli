@@ -40,9 +40,15 @@ class CloudRunnerTest {
     }
 
     private val requests = mutableListOf<Pair<String, ServerRequest>>()
+    private var closed = 0
+
     private val api: (String) -> OstromApi = { url ->
         object : OstromApi {
             override suspend fun get(path: String) = send(ServerRequest("GET", path))
+
+            override fun close() {
+                closed++
+            }
 
             override suspend fun send(request: ServerRequest): ServerResponse {
                 requests += url to request
@@ -115,6 +121,7 @@ class CloudRunnerTest {
     @Test
     fun aSessionForThisFolderSendsItsOriginAsTheRepository() = runTest {
         assertEquals(0, runner().start(CloudStart(Agent.CLAUDE, null, null), site))
+        assertEquals(1, closed, "the client is closed with the command")
         assertEquals(listOf(listOf("git", "-C", "/work/acme", "remote", "get-url", "origin")), gitCalls)
         val created = requests.first()
         assertEquals("https://ostrom.example", created.first)
@@ -149,6 +156,7 @@ class CloudRunnerTest {
     fun aTerminalThatCannotOpenIsUnreachable() = runTest {
         unreachable = true
         assertEquals(69, runner().attach("cs1", site))
+        assertEquals(1, closed, "the client is closed with the command")
         assertTrue(errors.endsWith("ostrom: could not attach to session cs1 (connection reset)\n"), errors.toString())
     }
 
