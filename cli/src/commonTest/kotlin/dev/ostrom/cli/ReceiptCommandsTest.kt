@@ -15,6 +15,8 @@ import dev.ostrom.cli.platform.Environment
 import dev.ostrom.cli.platform.ExecutableFinder
 import dev.ostrom.cli.platform.FileStoreImpl
 import dev.ostrom.cli.platform.OperatingSystem
+import dev.ostrom.cli.platform.SecretBackend
+import dev.ostrom.cli.platform.SecretStore
 import dev.ostrom.cli.platform.StandardInput
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -28,6 +30,17 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /** `ostrom verify` and `ostrom receipts list|show|pull`, end to end on a fake file system and a fake server. */
+/** A secret store with nothing in it: the token of these tests is the one `credentials.json` holds. */
+private object NoSecrets : SecretStore {
+    override val backend = SecretBackend.KEYCHAIN
+
+    override fun read(name: String): String? = null
+
+    override fun write(name: String, secret: String) = Unit
+
+    override fun delete(name: String) = Unit
+}
+
 class ReceiptCommandsTest {
     private class FakeConsole : Console {
         val out = StringBuilder()
@@ -86,7 +99,7 @@ class ReceiptCommandsTest {
             mcpServer = { object : McpServer { override fun serve() = 0 } },
             credentials = { directory ->
                 val path = (directory.toPath() / "credentials.json").toString()
-                FileCredentialStore(LaunchFilesImpl(fileSystem) { _, _ -> }, path) { withServer[it] }
+                FileCredentialStore(LaunchFilesImpl(fileSystem) { _, _ -> }, path, { NoSecrets }) { withServer[it] }
             },
             workingDirectory = { "/work/acme" },
             executable = "/opt/ostrom",
