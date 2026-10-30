@@ -111,6 +111,15 @@ class GateHookTest {
     }
 
     @Test
+    fun aGatedCommandRunOutsideAnyRepositoryIsAskedWithoutARealRepository() {
+        answer("""{"id":"G2","status":"pending"}""")
+        hook().handle(bash("deploy now", cwd = "/elsewhere"))
+        val body = calls.bodyOf("/api/v1/gates")
+        assertFalse("realRepo" in body.toString(), "no repository resolved: none is claimed")
+        assertContains(body.toString(), """"class":"deploy","tool":"Bash"""")
+    }
+
+    @Test
     fun aGatedPushWaitsForAYesAndIsMarkedRefused() {
         answer("""{"id":"G1","status":"pending"}""")
         val reply = hook().handle(bash("git push origin main"))

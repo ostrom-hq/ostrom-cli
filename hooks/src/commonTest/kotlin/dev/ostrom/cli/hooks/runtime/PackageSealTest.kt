@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.hooks.runtime
 
+import okio.ByteString.Companion.encodeUtf8
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -8,8 +9,8 @@ import kotlin.test.assertNull
 class PackageSealTest {
     private val gates = """{"actions":[]}"""
     private val view = """{"version":"7"}"""
-    private val manifest = "${Sha256.hex(gates.encodeToByteArray())}  /s/plugin/ostrom/gates.json\n" +
-        "${Sha256.hex(view.encodeToByteArray())}  /s/package.json\n"
+    private val manifest = "${gates.encodeUtf8().sha256().hex()}  /s/plugin/ostrom/gates.json\n" +
+        "${view.encodeUtf8().sha256().hex()}  /s/package.json\n"
 
     private fun files() = FakeFiles(
         mutableMapOf(
@@ -19,7 +20,7 @@ class PackageSealTest {
         ),
     )
 
-    private fun seal(files: FakeFiles, digest: String? = Sha256.hex(manifest.encodeToByteArray())) =
+    private fun seal(files: FakeFiles, digest: String? = manifest.encodeUtf8().sha256().hex()) =
         PackageSeal(digest, "/s/package.sha256", files)
 
     private val prefix = "The session's package is not the one Ostrom signed and laid down: "
@@ -47,7 +48,7 @@ class PackageSealTest {
         val unreadable = files().apply { texts["/s/package.sha256"] = noSeparator }
         assertEquals(
             prefix + "its manifest is unreadable",
-            seal(unreadable, Sha256.hex(noSeparator.encodeToByteArray())).broken(),
+            seal(unreadable, noSeparator.encodeUtf8().sha256().hex()).broken(),
         )
         val incomplete = prefix + "its seal is incomplete or its manifest cannot be read"
         assertEquals(incomplete, PackageSeal(null, "/s/package.sha256", files()).broken())

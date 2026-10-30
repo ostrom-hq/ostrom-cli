@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.hooks.runtime
 
+import okio.ByteString.Companion.encodeUtf8
+
 /**
  * The seal of the session package the launcher laid down (security audit S2-33): every file of the package, its hook
  * view and its gate catalogue, by SHA-256, listed in a manifest (`<sha256>  <path>` per line) whose own SHA-256 the
@@ -17,7 +19,7 @@ class PackageSeal(private val digest: String?, private val manifest: String?, pr
         return when {
             digest == null && manifest == null -> null
             digest == null || text == null -> broke("its seal is incomplete or its manifest cannot be read")
-            Sha256.hex(text.encodeToByteArray()) != digest -> broke("its manifest was changed")
+            text.encodeUtf8().sha256().hex() != digest -> broke("its manifest was changed")
             else -> text.lines().filter { it.isNotEmpty() }.firstNotNullOfOrNull(::lineProblem)
         }
     }
@@ -29,7 +31,7 @@ class PackageSeal(private val digest: String?, private val manifest: String?, pr
         return when {
             separator < 0 -> broke("its manifest is unreadable")
             content == null -> broke("$path is missing")
-            Sha256.hex(content.encodeToByteArray()) != line.substring(0, separator) -> broke("$path was changed")
+            content.encodeUtf8().sha256().hex() != line.substring(0, separator) -> broke("$path was changed")
             else -> null
         }
     }
