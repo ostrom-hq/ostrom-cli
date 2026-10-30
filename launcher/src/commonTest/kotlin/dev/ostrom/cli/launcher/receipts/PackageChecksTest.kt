@@ -3,6 +3,7 @@ package dev.ostrom.cli.launcher.receipts
 
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -55,6 +56,20 @@ class PackageChecksTest {
             .with(listOf("receipt", "subject", "id"), "sess-0f3c2a91@other")
         val report = verify(renamed)
         assertHas(report, Mark.BAD, "package", "is version p202610280112-7a8ec07b, the receipt cites other")
+    }
+
+    @Test
+    fun anEnvelopeTheLauncherWouldRefuseIsNotValidHoweverWellSigned() {
+        val version = "p202610280112-7a8ec07b"
+        val foreign = verify(bundle.with(listOf("package", "format"), "ostrom.package/0"))
+        assertHas(foreign, Mark.BAD, "package", "$version: the envelope is not ostrom.package/1")
+        val unsigned = verify(bundle.with(listOf("package", "alg"), null))
+        assertHas(unsigned, Mark.BAD, "package", "$version: the envelope is not signed with ed25519")
+        val revoked = verify(bundle.with(listOf("package", "revoked"), JsonPrimitive(true)))
+        assertHas(revoked, Mark.BAD, "package", "$version: the package was revoked")
+        assertEquals(1, revoked.code, revoked.render())
+        val current = verify(bundle.with(listOf("package", "revoked"), JsonPrimitive(false)))
+        assertHas(current, Mark.OK, "package", "over its exact bytes")
     }
 
     @Test

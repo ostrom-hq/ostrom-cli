@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.launcher.receipts
 
+import dev.ostrom.cli.launcher.parseObject
 import kotlinx.serialization.json.JsonObject
 
 /**
@@ -39,11 +40,14 @@ class VerifyReceiptUseCaseImpl(private val kept: KeptCopies) : VerifyReceiptUseC
         return verification.report
     }
 
-    /** `Receipt <id> · <kind> of @<initiator> · <repository>` (CLI.md § 2.2); the subject when no package names it. */
+    /**
+     * `Receipt <id> · <kind> of @<initiator> · <repository>` (CLI.md § 2.2); the subject when no package names it. The
+     * repository is the one of the signed payload, never the envelope's unsigned header.
+     */
     private fun titleOf(input: ReceiptInput): String {
         val receipt = input.receipt
         val subject = receipt.field("subject")
-        val repository = input.pack.field("repo").str()
+        val repository = parseObject(input.pack.field("payload").str()).field("repo").str()
         val where = repository ?: "subject ${subject.field("id").strOr("?")}"
         val title = "Receipt ${receipt.field("id").strOr("?")} · ${subject.field("kind").strOr("?")} of " +
             "@${receipt.field("initiator").strOr("?")} · $where · ${receipt.field("createdAt").strOr("?")}"

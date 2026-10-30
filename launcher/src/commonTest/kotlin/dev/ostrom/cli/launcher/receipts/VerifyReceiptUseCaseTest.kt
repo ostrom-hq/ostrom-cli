@@ -8,6 +8,8 @@ import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /** The tests of the prototype's `verify.rs`, case for case, on its vectors (signed by the server's own code). */
 class VerifyReceiptUseCaseTest {
@@ -49,6 +51,15 @@ class VerifyReceiptUseCaseTest {
             |
         """.trimMargin()
         assertEquals(expected, report.render(), "the prototype's output, line for line, under CLI.md's title")
+    }
+
+    @Test
+    fun theTitleNamesTheRepositoryOfTheSignedPayloadNeverTheEnvelopeHeader() {
+        val title = verify(bundle.with(listOf("package", "repo"), "someone-else")).render().lines().first()
+        assertTrue(title.contains(" · controlresell-core · "), title)
+        assertFalse(title.contains("someone-else"), title)
+        val unreadable = verify(bundle.with(listOf("package", "payload"), "not json")).render().lines().first()
+        assertTrue(unreadable.contains(" · subject sess-0f3c2a91@p202610280112-7a8ec07b · "), unreadable)
     }
 
     @Test

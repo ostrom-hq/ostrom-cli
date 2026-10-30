@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.launcher.receipts
 
+import dev.ostrom.cli.launcher.hex
 import dev.ostrom.cli.launcher.sha256Hex
 import kotlinx.serialization.json.JsonObject
 import kotlin.io.encoding.Base64
@@ -36,6 +37,9 @@ sealed interface KeyReading {
 /** The keys a verification may trust (prototype `verify.rs`: `key_from_pem`, `pinned_keys`, `key_from_file`). */
 object TrustedKeys {
     private const val SPKI_ED25519_SIZE = 44
+
+    /** The SPKI DER header of an Ed25519 key (RFC 8410): the algorithm 1.3.101.112, then the 32 bytes of the key. */
+    private const val SPKI_ED25519_PREFIX = "302a300506032b6570032100"
     private const val KID_LENGTH = 16
 
     /** The key of an SPKI PEM [pem], its kid computed as the server computes it. */
@@ -49,7 +53,8 @@ object TrustedKeys {
         }
         return when {
             der == null -> KeyReading.Unreadable("not a PEM public key")
-            der.size != SPKI_ED25519_SIZE -> KeyReading.Unreadable("not an Ed25519 public key")
+            der.size != SPKI_ED25519_SIZE || !hex(der).startsWith(SPKI_ED25519_PREFIX) ->
+                KeyReading.Unreadable("not an Ed25519 public key")
             else -> KeyReading.Keys(listOf(TrustedKey(sha256Hex(der).take(KID_LENGTH), pem, from)))
         }
     }
@@ -91,6 +96,9 @@ object TrustedKeys {
     private fun keysOf(reading: KeyReading): List<TrustedKey> =
         if (reading is KeyReading.Keys) reading.keys else emptyList()
 
-    private fun all(readings: List<KeyReading>): KeyReading =
-        readings.firstOrNull { it is KeyReading.Unreadable } ?: KeyReading.Keys(readings.flatMap(::keysOf))
+    /** The keys of a list: those that read (a key of another kind does not void the others), else the first reason. */
+    private fun all(readings: List<KeyReading>): KeyReading {
+        val keys = readings.flatMap(::keysOf)
+        return if (keys.isEmpty()) readings.first() else KeyReading.Keys(keys)
+    }
 }

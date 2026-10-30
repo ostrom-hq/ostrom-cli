@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.launcher.receipts
 
+import dev.ostrom.cli.launcher.PACKAGE_ALGORITHM
+import dev.ostrom.cli.launcher.PACKAGE_FORMAT
 import dev.ostrom.cli.launcher.ed25519Verify
 import dev.ostrom.cli.launcher.parseObject
 import dev.ostrom.cli.launcher.sha256Hex
@@ -51,8 +53,20 @@ private fun Verification.checkSubject(version: String, digest: String) {
     }
 }
 
-/** The envelope has the cited digest over its exact bytes, carries the cited version, is signed by a trusted key. */
+/** Why the launcher would refuse [envelope] whatever its bytes (`PackageTrust`), or null. */
+private fun refusalOf(envelope: JsonObject): String? = when {
+    envelope.field("format").str() != PACKAGE_FORMAT -> "the envelope is not $PACKAGE_FORMAT"
+    envelope.field("alg").str() != PACKAGE_ALGORITHM -> "the envelope is not signed with $PACKAGE_ALGORITHM"
+    envelope.field("revoked") == JsonPrimitive(true) -> "the package was revoked"
+    else -> null
+}
+
+/**
+ * The envelope is one the launcher would accept (format, algorithm, not revoked), has the cited digest over its exact
+ * bytes, carries the cited version, and is signed by a trusted key.
+ */
 private fun Verification.checkEnvelope(envelope: JsonObject, version: String, digest: String) {
+    val refusal = refusalOf(envelope)
     val payload = envelope.field("payload").strOr("")
     val bytes = payload.encodeToByteArray()
     val hashed = sha256Hex(bytes)
@@ -62,6 +76,7 @@ private fun Verification.checkEnvelope(envelope: JsonObject, version: String, di
     val signature = decodeBase64(envelope.field("signature").strOr(""))
     val readable = signature != null && signature.size == ED25519_SIGNATURE_SIZE
     when {
+        refusal != null -> report.add(Mark.BAD, "package", "$version: $refusal")
         hashed != digest || envelope.field("digest").str() != digest -> report.add(
             Mark.BAD,
             "package",

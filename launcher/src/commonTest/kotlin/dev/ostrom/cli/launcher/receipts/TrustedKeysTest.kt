@@ -15,6 +15,8 @@ class TrustedKeysTest {
         assertEquals(KeyReading.Keys(listOf(testKey)), TrustedKeys.fromPem(ReceiptVectors.KEY_PEM, "test"))
         assertEquals(KeyReading.Unreadable("not a PEM public key"), TrustedKeys.fromPem("not base64!", "x"))
         assertEquals(KeyReading.Unreadable("not an Ed25519 public key"), TrustedKeys.fromPem("AAAA", "x"))
+        val notEd25519 = encodeBase64(ByteArray(44))
+        assertEquals(KeyReading.Unreadable("not an Ed25519 public key"), TrustedKeys.fromPem(notEd25519, "x"))
     }
 
     @Test
@@ -24,7 +26,9 @@ class TrustedKeysTest {
         assertEquals(KeyReading.Keys(listOf(compat)), TrustedKeys.fromFile("{\"publicKeyPem\":$single}", "k.pem"))
         val list = "{\"keys\":[{\"kid\":\"x\",\"publicKeyPem\":$single},{\"kid\":\"y\"}]}"
         assertEquals(KeyReading.Keys(listOf(compat)), TrustedKeys.fromFile(list, "k.pem"))
-        val broken = "{\"keys\":[{\"publicKeyPem\":$single},{\"publicKeyPem\":\"AAAA\"}]}"
+        val mixed = "{\"keys\":[{\"publicKeyPem\":$single},{\"publicKeyPem\":\"AAAA\"}]}"
+        assertEquals(KeyReading.Keys(listOf(compat)), TrustedKeys.fromFile(mixed, "k.pem"), "the other key is skipped")
+        val broken = "{\"keys\":[{\"publicKeyPem\":\"AAAA\"},{\"publicKeyPem\":\"not base64!\"}]}"
         assertEquals(KeyReading.Unreadable("not an Ed25519 public key"), TrustedKeys.fromFile(broken, "k.pem"))
         val none = KeyReading.Unreadable("no publicKeyPem in the JSON key file")
         assertEquals(none, TrustedKeys.fromFile("{\"kid\":\"x\"}", "k.pem"))

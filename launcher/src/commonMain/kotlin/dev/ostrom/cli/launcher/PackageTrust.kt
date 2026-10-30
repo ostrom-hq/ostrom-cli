@@ -5,6 +5,12 @@ import kotlinx.serialization.json.JsonObject
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
 
+/** The format of a package envelope; any other is refused, by the launcher and by `ostrom verify`. */
+internal const val PACKAGE_FORMAT = "ostrom.package/1"
+
+/** The only signature algorithm of a package envelope. */
+internal const val PACKAGE_ALGORITHM = "ed25519"
+
 /** What became of the session package of a repository. */
 sealed interface PackageOutcome {
     /** Verified: signature, digest and every file. */
@@ -148,8 +154,8 @@ class PackageTrust(
     }
 
     private companion object {
-        const val FORMAT = "ostrom.package/1"
-        const val ALGORITHM = "ed25519"
+        const val FORMAT = PACKAGE_FORMAT
+        const val ALGORITHM = PACKAGE_ALGORITHM
         const val NOT_FOUND = 404
         const val FETCH_MILLIS = 30_000L
     }

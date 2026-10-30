@@ -62,6 +62,18 @@ class ChainChecksTest {
     }
 
     @Test
+    fun aGateNodeIsBackedOnlyByThatGatesOwnReceiptForAnAnswerThisReceiptCites() {
+        val ref = gate.field("id").strOr("")
+        val notTheGate = "gate \"Push to main\": yes from Lyesbcb; the receipt found as $ref is not that gate's receipt"
+        val misfiled = verify(bundle.at("receipt"), kept = KeptInMemory(mapOf(ref to session)))
+        assertHas(misfiled, Mark.BAD, "node", notTheGate)
+        val task = verify(bundle.with(listOf("chain", 0, "subject", "kind"), "task"))
+        assertHas(task, Mark.BAD, "node", notTheGate)
+        val uncited = verify(bundle.with(listOf("receipt", "decisions", 0, "approvalId"), "appr_other"))
+        assertHas(uncited, Mark.BAD, "node", "its receipt $ref signs the answer appr_7d1b4f0…, which this receipt")
+    }
+
+    @Test
     fun aNodeThatIsNotAGateOrDoesNotCiteAReceiptIsSaidAsItIs() {
         val run = verify(bundle.with(listOf("receipt", "nodes", 1, "ref"), "run_42"))
         assertHas(run, Mark.OK, "node", "gate \"Push to main\": yes from Lyesbcb")

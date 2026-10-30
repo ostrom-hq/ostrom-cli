@@ -21,6 +21,7 @@ import dev.ostrom.cli.launcher.receipts.BUNDLE_FORMAT
 import dev.ostrom.cli.launcher.receipts.InputReading
 import dev.ostrom.cli.launcher.receipts.KeptCopiesImpl
 import dev.ostrom.cli.launcher.receipts.KeyReading
+import dev.ostrom.cli.launcher.receipts.RECEIPT_ID
 import dev.ostrom.cli.launcher.receipts.ReceiptInput
 import dev.ostrom.cli.launcher.receipts.TrustedKey
 import dev.ostrom.cli.launcher.receipts.TrustedKeys
@@ -28,7 +29,6 @@ import dev.ostrom.cli.launcher.receipts.VerifyReceiptUseCaseImpl
 import dev.ostrom.cli.launcher.receipts.locate
 import dev.ostrom.cli.launcher.receipts.parseDocument
 import dev.ostrom.cli.launcher.receipts.readReceiptInput
-import dev.ostrom.cli.launcher.receipts.receiptOf
 import dev.ostrom.cli.launcher.text
 import dev.ostrom.cli.platform.FileWriteException
 import kotlinx.coroutines.runBlocking
@@ -42,8 +42,11 @@ import kotlinx.serialization.json.JsonObject
 private const val RECEIPTS = "/api/v1/receipts"
 private const val SERVER_HELP = "Ostrom server URL (else OSTROM_URL, else the one of ostrom login)"
 
-/** What a receipt id may be: it names a file of `<config>/receipts/`, so never a path. */
-private val RECEIPT_ID = Regex("[A-Za-z0-9_-][A-Za-z0-9._-]*")
+/** The most pages of receipts `ostrom receipts list` reads, so that a server's endless cursor ends. */
+private const val MAX_PAGES = 20
+
+/** The width of the answer column of `ostrom receipts show` (`yes`, `no`). */
+private const val ANSWER_WIDTH = 5
 
 private fun refuse(code: ExitCode, message: String) = PrintMessage(message, code.code, printError = true)
 
@@ -51,15 +54,14 @@ private fun refuse(code: ExitCode, message: String) = PrintMessage(message, code
 private fun checkedId(id: String): String =
     if (RECEIPT_ID.matches(id)) id else throw refuse(ExitCode.USAGE, "ostrom: not a receipt id: $id")
 
-/** The receipts kept in `<config>/receipts/` (bundles or bare receipts), newest first; unreadable files skipped. */
+/**
+ * The receipts kept in `<config>/receipts/` (bundles or bare receipts), newest first: a file counts only when it holds
+ * the receipt it is named after, so an unreadable file, an empty one or another receipt's copy is not one.
+ */
 private fun CliDependencies.keptReceipts(directory: String): List<JsonObject> {
-    val folder = join(directory, "receipts")
-    val documents = files.list(folder).filter { it.endsWith(".json") }.mapNotNull {
-        parseDocument(files.read(join(folder, it)))
-    }
-    val receipts = documents.map(::receiptOf)
-        .filter { it.isNotEmpty() }
-    return receipts.sortedByDescending(::createdAt)
+    val kept = KeptCopiesImpl(files::read, directory)
+    val names = files.list(join(directory, "receipts")).filter { it.endsWith(".json") }
+    return names.mapNotNull { kept.receipt(it.removeSuffix(".json")) }.sortedByDescending(::createdAt)
 }
 
 /** When [receipt] was signed, or nothing: an undated receipt sorts last. */
@@ -91,15 +93,35 @@ private fun CliDependencies.listReceipts(server: String?, json: Boolean, local: 
     }
 }
 
-/** The receipts of the server, newest first; offline, exit 69 pointing to the ones this device keeps. */
+/**
+ * The receipts of the server, newest first, every page (`next` is the cursor of the following one) up to [MAX_PAGES];
+ * offline, exit 69 pointing to the ones this device keeps.
+ */
 private fun CliDependencies.remoteReceipts(server: String?, kept: Int): List<JsonObject> {
     val signed = signedIn(server)
-    val answer = runBlocking { signed.server.get(RECEIPTS, signed.token) }
-    if (answer is ServerAnswer.Failed && answer.status == null) {
-        throw refuse(ExitCode.UNREACHABLE, "Offline: $kept receipts kept on this device. ostrom receipts list --local")
-    }
-    return answer.orStop(signed.serverUrl, "No receipts on ${signed.serverUrl}.").list("items")
-        .filterIsInstance<JsonObject>()
+    val items = mutableListOf<JsonObject>()
+    var cursor: String? = null
+    var page = 0
+    do {
+        val path = if (cursor == null) RECEIPTS else "$RECEIPTS?before=${Routes.encode(cursor)}"
+        val answer = runBlocking { signed.server.get(path, signed.token) }
+        if (answer is ServerAnswer.Failed && answer.status == null) {
+            val local = "ostrom receipts list --local"
+            throw refuse(ExitCode.UNREACHABLE, "Offline: $kept receipts kept on this device. $local")
+        }
+        val body = answer.orStop(signed.serverUrl, "No receipts on ${signed.serverUrl}.")
+        items += body.list("items").filterIsInstance<JsonObject>()
+        cursor = body.text("next")?.takeIf { it.isNotEmpty() }
+        page++
+    } while (cursor != null && page < MAX_PAGES)
+    return items
+}
+
+/** The word of a decision: `yes` approved, `no` rejected, `?` anything else. */
+private fun answerOf(result: String): String = when (result) {
+    "approved" -> "yes"
+    "rejected" -> "no"
+    else -> "?"
 }
 
 /** A receipt as `ostrom receipts show` says it. */
@@ -110,7 +132,7 @@ private fun describe(receipt: JsonObject, kept: Boolean): String = buildString {
     if (by.isNotEmpty()) append("  agent ").append(by).append('\n')
     for (decision in receipt.list("decisions").filterIsInstance<JsonObject>()) {
         val said = listOf("result", "by", "at").map { decision.text(it) ?: "?" }
-        append("  yes   ${said[0]} by ${said[1]} at ${said[2]}\n")
+        append("  ${answerOf(said[0]).padEnd(ANSWER_WIDTH)} ${said[0]} by ${said[1]} at ${said[2]}\n")
     }
     for (node in receipt.list("nodes").filterIsInstance<JsonObject>()) {
         val (kind, label, outcome) = listOf("kind", "label", "outcome").map { node.text(it) ?: "?" }
@@ -147,9 +169,8 @@ internal class ReceiptsShowCommand(private val dependencies: CliDependencies) : 
 
     override fun run() {
         val id = checkedId(id)
-        val kept = parseDocument(dependencies.files.read(join(dependencies.directory(), "receipts", "$id.json")))
-        val receipt = if (kept == null) fetch(id) else receiptOf(kept)
-        dependencies.console.out(describe(receipt, kept != null))
+        val kept = KeptCopiesImpl(dependencies.files::read, dependencies.directory()).receipt(id)
+        dependencies.console.out(describe(kept ?: fetch(id), kept != null))
     }
 
     private fun fetch(id: String): JsonObject {
@@ -173,6 +194,10 @@ internal class ReceiptsPullCommand(private val dependencies: CliDependencies) : 
             .orStop(signed.serverUrl, "No receipt $id.")
         if (bundle.text("format") != BUNDLE_FORMAT) {
             throw refuse(ExitCode.FAILED, "Ostrom answered something that is not a receipt bundle.")
+        }
+        val receiptId = bundle.child("receipt")?.text("id")
+        if (receiptId != id) {
+            throw refuse(ExitCode.FAILED, "Ostrom answered the bundle of receipt ${receiptId ?: "?"}, not of $id.")
         }
         val path = join(dependencies.directory(), "receipts", "$id.json")
         val unwritten = try {

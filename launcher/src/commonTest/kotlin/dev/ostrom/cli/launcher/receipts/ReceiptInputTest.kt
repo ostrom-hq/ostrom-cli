@@ -40,29 +40,46 @@ class ReceiptInputTest {
 
     @Test
     fun theCopiesKeptOnThisMachineAreReadByIdAndByDigest() {
+        val receipt = bundle.at("receipt")
+        val id = receipt.field("id").strOr("")
+        val gateId = gate.field("id").strOr("")
+        val digest = receipt.field("package").field("digest").strOr("")
+        val other = "f".repeat(64)
         val files = mapOf(
-            "/c/receipts/r1.json" to ReceiptVectors.WORKFLOW_BUNDLE,
-            "/c/receipts/r2.json" to CanonicalJson.encode(gate),
+            "/c/receipts/$id.json" to ReceiptVectors.WORKFLOW_BUNDLE,
+            "/c/receipts/$gateId.json" to CanonicalJson.encode(gate),
             "/c/receipts/r3.json" to "not json",
-            "/c/packages/d1.json" to CanonicalJson.encode(bundle.at("package")),
-            "/c/packages/d2.json" to "[]",
-        )
+            "/c/receipts/r5.json" to CanonicalJson.encode(gate),
+            "/c/packages/$digest.json" to CanonicalJson.encode(bundle.at("package")),
+            "/c/packages/$other.json" to "[]",
+        ) + listOf("/c/receipts/../secret.json", "/c/secret.json").associateWith { """{"id":"../secret"}""" } +
+            listOf("/c/packages/../x.json", "/c/x.json").associateWith { CanonicalJson.encode(bundle.at("package")) }
         val kept = KeptCopiesImpl(files::get, "/c")
-        assertEquals<JsonElement?>(bundle.at("receipt"), kept.receipt("r1"))
-        assertEquals(gate, kept.receipt("r2"))
+        assertEquals<JsonElement?>(receipt, kept.receipt(id))
+        assertEquals(gate, kept.receipt(gateId))
         assertNull(kept.receipt("r3"))
         assertNull(kept.receipt("r4"))
-        assertEquals<JsonElement?>(bundle.at("package"), kept.envelope("d1"))
-        assertNull(kept.envelope("d2"))
-        assertNull(kept.envelope("d3"))
+        assertNull(kept.receipt("r5"), "the file holds another receipt than its name")
+        assertNull(kept.receipt("../secret"), "a receipt id is never a path")
+        assertEquals<JsonElement?>(bundle.at("package"), kept.envelope(digest))
+        assertNull(kept.envelope(other))
+        assertNull(kept.envelope("0".repeat(64)))
+        assertNull(kept.envelope("../x"), "a digest is never a path")
     }
 
     @Test
     fun aReceiptIsAFileFirstThenAKeptCopy() {
-        val files = mapOf("./r1.json" to "file", "/c/receipts/r1.json" to "kept", "/c/receipts/W-1.json" to "w")
+        val files = mapOf(
+            "./r1.json" to "file",
+            "/c/receipts/r1.json" to "kept",
+            "/c/receipts/W-1.json" to "w",
+            "/c/receipts/../secret.json" to "s",
+            "/c/secret.json" to "s",
+        )
         assertEquals(Located("./r1.json", "file"), locate(files::get, "./r1.json", "/c"))
         assertEquals(Located("/c/receipts/W-1.json", "w"), locate(files::get, "W-1", "/c"))
         assertNull(locate(files::get, "W-2", "/c"))
+        assertNull(locate(files::get, "../secret", "/c"), "only a receipt id is looked up among the kept copies")
     }
 
     @Test

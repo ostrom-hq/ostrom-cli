@@ -64,16 +64,24 @@ internal fun Verification.checkNodes() {
     }
 }
 
+/**
+ * A gate node against the receipt it cites: that receipt is the gate's (its id, its kind), signed by a trusted key,
+ * signs a yes or a no this receipt cites, and was given by the person the node names.
+ */
 private fun Verification.checkGateNode(label: String, outcome: String, ref: String) {
     val cited = input.chain.firstOrNull { it.field("id").str() == ref } ?: kept.receipt(ref)
     if (cited == null) {
         report.add(Mark.MISSING, "node", "$label: $outcome; its receipt $ref is not in the file")
         return
     }
-    val by = cited.field("decisions").items().firstOrNull().field("by").strOr("?")
+    val decision = cited.field("decisions").items().firstOrNull()
+    val by = decision.field("by").strOr("?")
+    val approval = decision.field("approvalId").strOr("")
     val check = checkSignature(cited, keys)
     val says = outcome.after("yes from ") ?: outcome.after("no from ")
     when {
+        cited.field("id").str() != ref || cited.kindOf() != "gate" ->
+            report.add(Mark.BAD, "node", "$label: $outcome; the receipt found as $ref is not that gate's receipt")
         check is SignatureCheck.UnknownKey -> report.add(
             Mark.MISSING,
             "node",
@@ -81,6 +89,11 @@ private fun Verification.checkGateNode(label: String, outcome: String, ref: Stri
         )
         check !is SignatureCheck.Valid ->
             report.add(Mark.BAD, "node", "$label: $outcome; its receipt $ref does not verify")
+        !cites(receipt, approval) -> report.add(
+            Mark.BAD,
+            "node",
+            "$label: its receipt $ref signs the answer ${short(approval)}…, which this receipt does not cite",
+        )
         says != null && says != by ->
             report.add(Mark.BAD, "node", "$label: the receipt says \"$outcome\", the gate's receipt says $by")
         else -> report.add(Mark.OK, "node", "$label: $outcome (gate receipt $ref, signed)")

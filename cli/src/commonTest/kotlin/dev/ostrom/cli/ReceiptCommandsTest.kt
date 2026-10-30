@@ -24,6 +24,7 @@ import okio.Path.Companion.toPath
 import okio.fakefilesystem.FakeFileSystem
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /** `ostrom verify` and `ostrom receipts list|show|pull`, end to end on a fake file system and a fake server. */
@@ -197,6 +198,30 @@ class ReceiptCommandsTest {
     }
 
     @Test
+    fun theListReadsEveryPageOfTheServer() {
+        signIn()
+        val routes = mapOf(
+            "GET /api/v1/receipts" to (200 to """{"items":[{"id":"R-2"}],"next":"c 1"}"""),
+            "GET /api/v1/receipts?before=c%201" to (200 to """{"items":[{"id":"R-1"}],"next":""}"""),
+        )
+        assertEquals(0, cli(routes).run(arrayOf("receipts", "list")))
+        assertEquals("  R-2\n  R-1\n", console.out.toString())
+        assertEquals(2, requests.size)
+    }
+
+    @Test
+    fun aServerWhoseCursorNeverEndsIsReadTwentyPagesAtMost() {
+        signIn()
+        val routes = mapOf(
+            "GET /api/v1/receipts" to (200 to """{"items":[],"next":"c"}"""),
+            "GET /api/v1/receipts?before=c" to (200 to """{"items":[{"id":"R"}],"next":"c"}"""),
+        )
+        assertEquals(0, cli(routes).run(arrayOf("receipts", "list")))
+        assertEquals(20, requests.size)
+        assertEquals(19, console.out.lines().count { it == "  R" })
+    }
+
+    @Test
     fun theHelpOfReceiptsListsItsCommands() {
         assertEquals(0, cli().run(arrayOf("receipts", "--help")))
         val help = console.out.toString().replace(Regex("""\s+"""), " ")
@@ -237,6 +262,8 @@ class ReceiptCommandsTest {
         keep("old", """{"id":"old","signature":"s","subject":{"kind":"task"}}""")
         keep("broken", "not json")
         keep("other", "[]")
+        keep("empty", "{}")
+        keep("copy", """{"id":"W-e2e","subject":{"kind":"workflow"}}""")
         write("$home/receipts/notes.txt", "{}")
         assertEquals(0, cli(routes = null).run(arrayOf("receipts", "list", "--local")))
         val lines = listOf(
@@ -274,10 +301,12 @@ class ReceiptCommandsTest {
     @Test
     fun showAsksTheServerForAReceiptNotKeptHere() {
         signIn()
-        val sparse = """{"decisions":[{}],"nodes":[{}]}"""
+        keep("R-1", """{"id":"R-other"}""")
+        val sparse = """{"decisions":[{},{"result":"rejected","by":"lena","at":"t"}],"nodes":[{}]}"""
         val server = cli(mapOf("GET /api/v1/receipts/R-1" to (200 to sparse)))
         assertEquals(0, server.run(arrayOf("receipts", "show", "R-1")))
-        val said = "\n  yes   ? by ? at ?\n  node  ? \"?\": ?\nKeep it: ostrom receipts pull ?\n"
+        val said = "\n  ?     ? by ? at ?\n  no    rejected by lena at t\n  node  ? \"?\": ?\n" +
+            "Keep it: ostrom receipts pull ?\n"
         assertEquals(said, console.out.toString())
         assertEquals(66, cli().run(arrayOf("receipts", "show", "R-9")))
         assertTrue(console.err.endsWith("No receipt R-9.\n"))
@@ -307,6 +336,13 @@ class ReceiptCommandsTest {
         val notBundle = mapOf("GET /api/v1/receipts/W-1/bundle" to (200 to """{"receipt":{"id":"W-1"}}"""))
         assertEquals(1, cli(notBundle).run(arrayOf("receipts", "pull", "W-1")))
         assertTrue(console.err.endsWith("Ostrom answered something that is not a receipt bundle.\n"))
+        val another = mapOf("GET /api/v1/receipts/W-1/bundle" to (200 to ReceiptBundleVector.BUNDLE))
+        assertEquals(1, cli(another).run(arrayOf("receipts", "pull", "W-1")))
+        assertTrue(console.err.endsWith("Ostrom answered the bundle of receipt W-e2e, not of W-1.\n"))
+        val empty = mapOf("GET /api/v1/receipts/W-1/bundle" to (200 to """{"format":"ostrom.receipt-bundle/1"}"""))
+        assertEquals(1, cli(empty).run(arrayOf("receipts", "pull", "W-1")))
+        assertTrue(console.err.endsWith("Ostrom answered the bundle of receipt ?, not of W-1.\n"))
+        assertFalse(fileSystem.exists("$home/receipts/W-1.json".toPath()), "nothing is kept")
         write("$home/receipts", "a file where the folder should be")
         val routes = mapOf("GET /api/v1/receipts/W-e2e/bundle" to (200 to ReceiptBundleVector.BUNDLE))
         assertEquals(73, cli(routes).run(arrayOf("receipts", "pull", "W-e2e")))
