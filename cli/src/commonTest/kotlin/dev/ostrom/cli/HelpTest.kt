@@ -2,6 +2,7 @@
 package dev.ostrom.cli
 
 import com.github.ajalt.clikt.core.CliktCommand
+import com.github.ajalt.clikt.core.CoreCliktCommand
 import com.github.ajalt.clikt.core.context
 import com.github.ajalt.clikt.testing.test
 import dev.ostrom.cli.commands.exitCodes
@@ -17,7 +18,10 @@ import kotlin.test.assertTrue
 /** The help of every command, its examples and docs page, and the way out of a usage error. */
 class HelpTest : CliKit() {
     /** Every command of the tree, by its path below `ostrom`. */
-    private fun paths(command: CliktCommand = cli().tree(), prefix: List<String> = emptyList()): List<List<String>> =
+    private fun paths(
+        command: CoreCliktCommand = cli().tree(),
+        prefix: List<String> = emptyList(),
+    ): List<List<String>> =
         listOf(prefix) + command.registeredSubcommands().flatMap { paths(it, prefix + it.commandName) }
 
     @Test
