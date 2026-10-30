@@ -484,6 +484,12 @@ class OstromCliTest {
     }
 
     @Test
+    fun theRealWaitOfLoginIsTheCoroutinesDelay() = runTest {
+        // a delay: virtual time in a test, so this returns at once
+        CliDependencies.create().sleep(1_000)
+    }
+
+    @Test
     fun telemetryIsOffByDefaultAndSaysWhatItWouldSend() {
         assertEquals(0, cli().run(arrayOf("telemetry")))
         assertOut("Usage statistics: off (this build has no statistics destination)")
