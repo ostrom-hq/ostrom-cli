@@ -24,6 +24,9 @@ interface FileStore {
 
     /** True when [path] exists. */
     fun exists(path: String): Boolean
+
+    /** The names of the entries of the folder [path], sorted; none when it does not exist or is not a folder. */
+    fun list(path: String): List<String>
 }
 
 /** A file of the CLI could not be written (exit code 73). */
@@ -56,6 +59,11 @@ class FileStoreImpl(private val fileSystem: FileSystem = FileSystem.SYSTEM) : Fi
     override fun delete(path: String) = fileSystem.delete(path.toPath(), mustExist = false)
 
     override fun exists(path: String): Boolean = fileSystem.exists(path.toPath())
+
+    override fun list(path: String): List<String> {
+        val entries = fileSystem.listOrNull(path.toPath()) ?: return emptyList()
+        return entries.map { it.name }.sorted()
+    }
 }
 
 /** Finds executables on the PATH, the way a shell would. */
