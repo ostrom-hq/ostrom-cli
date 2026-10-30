@@ -180,6 +180,10 @@ class OstromCliTest {
             "server" to "ostrom.example" to "server must be an http:// or https:// URL",
             "server" to "https://ostrom.example/a b" to "server must be",
             "server" to "ftp://ostrom.example" to "server must be",
+            "server" to "https://ostrom.example:99999" to "server must be",
+            "server" to "https://ostrom.example:0" to "server must be",
+            "server" to "http://-" to "server must be",
+            "server" to "https://user@ostrom.example" to "server must be",
             "default_agent" to "cursor" to "default_agent must be one of claude, codex, opencode, gemini",
             "color" to "rainbow" to "color must be auto, always or never.",
             "editor" to " " to "editor cannot be empty.",
@@ -194,6 +198,9 @@ class OstromCliTest {
         val accepted = listOf(
             "server" to "https://ostrom.example:8443/base/",
             "server" to "http://localhost:8080",
+            "server" to "http://[::1]:8080",
+            "server" to "http://ci_host",
+            "server" to "https://10.0.0.7:65535/ostrom",
             "color" to "always",
             "editor" to "code --wait",
         )

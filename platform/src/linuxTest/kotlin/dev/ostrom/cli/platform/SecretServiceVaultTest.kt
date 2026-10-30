@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.platform
 
+import okio.FileSystem
+import okio.Path.Companion.toPath
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -38,5 +40,13 @@ class SecretServiceVaultTest {
         val store = systemSecretStore(environment, FileStoreImpl())
         val service = SecretServiceVault.isAvailable()
         assertEquals(if (service) SecretBackend.SECRET_SERVICE else SecretBackend.ENCRYPTED_FILE, store.backend)
+        // Without a session bus (the linuxArm64 runner, a server over SSH), no Secret Service can run: the probe says
+        // so at once, through the shim's "unreachable" status, instead of waiting for a service.
+        if (environmentVariable("DBUS_SESSION_BUS_ADDRESS") == null) {
+            assertEquals(SecretBackend.ENCRYPTED_FILE, store.backend)
+            store.write("probe", "osd_test")
+            assertEquals("osd_test", store.read("probe"))
+            FileSystem.SYSTEM.deleteRecursively(home.toPath())
+        }
     }
 }

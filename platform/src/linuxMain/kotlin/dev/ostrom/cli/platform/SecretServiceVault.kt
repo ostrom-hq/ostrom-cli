@@ -14,9 +14,13 @@ internal actual fun systemVault(): Vault? = SecretServiceVault
 internal object SecretServiceVault : Vault {
     override val backend = SecretBackend.SECRET_SERVICE
 
-    /** libsecret is installed and a Secret Service answers a lookup (none runs without a session bus). */
+    /**
+     * libsecret is installed and a Secret Service runs on the session bus. A service that runs but refuses (a locked
+     * collection, no answer within the shim's deadline) is still the store: its secrets are there, and switching to
+     * the encrypted file would hide them (or keep a new one where the next command does not look).
+     */
     override fun isAvailable(): Boolean =
-        ostrom_secret_load() == 1 && read(SECRET_SERVICE_NAME, PROBE).status != VAULT_ERROR_STATUS
+        ostrom_secret_load() == 1 && read(SECRET_SERVICE_NAME, PROBE).status != VAULT_UNREACHABLE
 
     override fun read(service: String, account: String) =
         vaultRead { buffer, capacity, length, code ->
@@ -30,9 +34,6 @@ internal object SecretServiceVault : Vault {
     override fun delete(service: String, account: String) =
         vaultCall { code -> ostrom_secret_delete(service, account, code) }
 
-    /** An account never written: looking it up only proves the service answers. */
+    /** An account never written: looking it up only proves the service runs. */
     private const val PROBE = "availability-probe"
-
-    /** The shims' status for a failure. */
-    private const val VAULT_ERROR_STATUS = 3
 }

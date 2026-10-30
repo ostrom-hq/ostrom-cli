@@ -10,8 +10,11 @@ import dev.ostrom.cli.platform.vault.ostrom_keychain_write
 internal actual fun systemVault(): Vault? = KeychainVault
 
 /**
- * The login keychain, generic passwords. An item is readable without a prompt by the binary that wrote it; another
- * program (an agent calling `security`) gets the system's prompt, which the developer can refuse.
+ * The login keychain, generic passwords. An item is readable without a prompt by the program that created it while
+ * its code identity stays the same (releases signed with the same Developer ID); another program (an agent calling
+ * `security`), or a build signed differently, gets the system's prompt, which the developer can refuse. Where no
+ * prompt can be shown (SSH, a session without a desktop), the call fails with -25308 (errSecInteractionNotAllowed),
+ * and the store says how to allow it ([SecretBackend.whenRefused]).
  */
 internal object KeychainVault : Vault {
     override val backend = SecretBackend.KEYCHAIN

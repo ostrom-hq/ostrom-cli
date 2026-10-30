@@ -13,9 +13,18 @@ import kotlin.io.encoding.Base64
  *
  * @property displayName How doctor and login name it.
  * @property warning What to tell the developer when this store is used, or null when there is nothing to say.
+ * @property whenRefused What to do when the store refuses a secret.
  */
-enum class SecretBackend(val displayName: String, val warning: String? = null) {
-    KEYCHAIN("macOS Keychain"),
+enum class SecretBackend(
+    val displayName: String,
+    val warning: String? = null,
+    val whenRefused: String = "unlock it and try again",
+) {
+    // macOS asks again when the program changes (an update signed differently): only where a dialog can be shown.
+    KEYCHAIN(
+        "macOS Keychain",
+        whenRefused = "run ostrom doctor in a Terminal of your session and choose Always Allow when macOS asks",
+    ),
     SECRET_SERVICE("Secret Service (libsecret)"),
     CREDENTIAL_MANAGER("Windows Credential Manager"),
     ENCRYPTED_FILE(
@@ -26,7 +35,7 @@ enum class SecretBackend(val displayName: String, val warning: String? = null) {
 }
 
 /** The secret store could not keep or give back a secret; [message] says what to do. */
-class SecretStoreException(override val message: String) : Exception(message)
+class SecretStoreException(override val message: String, cause: Throwable? = null) : Exception(message, cause)
 
 /**
  * The secrets of this device, the device token of each server first (security audit S2-32). They live in the
@@ -71,11 +80,21 @@ interface SecretStore {
 fun systemSecretStore(environment: Environment, files: FileStore): SecretStore =
     secretStoreOf(systemVault(), environment, files)
 
-/** [systemSecretStore] with the system store given, for tests. */
-internal fun secretStoreOf(vault: Vault?, environment: Environment, files: FileStore): SecretStore {
+/**
+ * [systemSecretStore] with the system store given, for tests.
+ *
+ * @param user The numeric user id the encrypted file's key is bound to (not `USER`, which a hook, a cron job or a
+ * container may not have).
+ */
+internal fun secretStoreOf(
+    vault: Vault?,
+    environment: Environment,
+    files: FileStore,
+    user: String = currentUserId(),
+): SecretStore {
     if (vault != null && vault.isAvailable()) return VaultSecretStore(vault)
     val directory = environment.configDirectory ?: throw SecretStoreException(NO_SECRET_STORE)
-    val material = machineKeyMaterial(files, environment) ?: throw SecretStoreException(NO_SECRET_STORE)
+    val material = machineKeyMaterial(files, user) ?: throw SecretStoreException(NO_SECRET_STORE)
     return EncryptedFileSecretStore(files, (directory.toPath() / SECRETS_FILE).toString(), material)
 }
 
@@ -93,10 +112,13 @@ private const val SECRETS_FILE = "secrets.enc"
 /** What a system store answered: one of the `VAULT_` statuses, the system's error code, the secret read. */
 internal class VaultAnswer(val status: Int, val code: Int = 0, val secret: ByteArray = ByteArray(0))
 
-/** Statuses of [VaultAnswer], the same in the three C shims. */
+/** Statuses of [VaultAnswer], the same in the three C shims (3 is a refusal, its code says which). */
 internal const val VAULT_OK = 0
 internal const val VAULT_NOT_FOUND = 1
 internal const val VAULT_TOO_LARGE = 2
+
+/** No store to ask: libsecret is not installed, or no Secret Service runs on the session bus (Linux only). */
+internal const val VAULT_UNREACHABLE = 4
 
 /** The system store, as its C shim exposes it: one secret per service and account. */
 internal interface Vault {
@@ -118,6 +140,9 @@ internal interface Vault {
 
 /** The system store of this platform, or null where there is none (the JVM test target). */
 internal expect fun systemVault(): Vault?
+
+/** The numeric id of the user running the CLI (`getuid`), stable whatever the environment says. */
+internal expect fun currentUserId(): String
 
 /** [SecretStore] over the system store [vault]: one entry per secret, under [SECRET_SERVICE_NAME]. */
 internal class VaultSecretStore(private val vault: Vault) : SecretStore {
@@ -146,11 +171,12 @@ internal class VaultSecretStore(private val vault: Vault) : SecretStore {
     }
 
     private fun failure(action: String, name: String, answer: VaultAnswer) = SecretStoreException(
-        if (answer.status == VAULT_TOO_LARGE) {
-            "The secret $name in ${vault.backend.displayName} is too large to read."
-        } else {
-            "${vault.backend.displayName} could not $action the secret $name (error ${answer.code}): " +
-                "unlock it and try again."
+        when (answer.status) {
+            VAULT_TOO_LARGE -> "The secret $name in ${vault.backend.displayName} is too large to read."
+            VAULT_UNREACHABLE -> "${vault.backend.displayName} stopped answering: start it again (log in to the " +
+                "desktop session, or unlock GNOME Keyring or KWallet), then try again."
+            else -> "${vault.backend.displayName} could not $action the secret $name (error ${answer.code}): " +
+                "${vault.backend.whenRefused}."
         },
     )
 }
@@ -158,9 +184,10 @@ internal class VaultSecretStore(private val vault: Vault) : SecretStore {
 /**
  * [SecretStore] in an encrypted file, for a Linux without a Secret Service. Each secret is sealed with AES-256-GCM
  * (its name as associated data, so entries cannot be swapped). The key is derived from the machine identifier and the
- * user: a copy of the file (a backup, a synced dotfiles folder) does not open on another machine. The file is 0600;
- * the encryption is no defence against a program running as the same user on the same machine, which is why the
- * system store is preferred whenever there is one.
+ * user id: a copy of the file (a backup, a synced dotfiles folder) does not open on another machine. Neither input is
+ * secret, so the key is a plain hash rather than a password KDF: the file is 0600, and the encryption is no defence
+ * against a program running as the same user on the same machine, which is why the system store is preferred whenever
+ * there is one. A new machine identifier (a cloned VM) makes the old entries unreadable: `ostrom login` again.
  *
  * Format: a first line `ostrom-secrets 1`, then one `<name> <base64 of IV, ciphertext and tag>` line per secret.
  *
@@ -185,11 +212,11 @@ internal class EncryptedFileSecretStore(
     override fun write(name: String, secret: String) {
         requireName(name)
         val sealed = cipher.encryptBlocking(secret.encodeToByteArray(), name.encodeToByteArray())
-        save(entries() + (name to Base64.encode(sealed)))
+        save(writableEntries() + (name to Base64.encode(sealed)))
     }
 
     override fun delete(name: String) {
-        val entries = entries()
+        val entries = writableEntries()
         if (name in entries) save(entries - name)
     }
 
@@ -198,17 +225,32 @@ internal class EncryptedFileSecretStore(
         cipher.decryptBlocking(Base64.decode(sealed), name.encodeToByteArray()).decodeToString()
     }
 
+    /** The sealed entries, or none when the file is absent or in a format this version does not know. */
     private fun entries(): Map<String, String> {
-        val lines = files.read(path).orEmpty().lines()
-        if (lines.first() != HEADER) return emptyMap()
-        return lines.drop(1)
-            .filter { ' ' in it }
-            .associate { it.substringBefore(' ') to it.substringAfter(' ') }
+        val text = files.read(path).orEmpty()
+        return if (text.lines().first() == HEADER) parse(text) else emptyMap()
     }
+
+    /** The sealed entries, to be written back: a file in another format is never replaced (a newer CLI's). */
+    private fun writableEntries(): Map<String, String> {
+        val text = files.read(path)
+        if (text != null && text.lines().first() != HEADER) {
+            throw SecretStoreException("$path was written by another version of ostrom: update ostrom to change it.")
+        }
+        return parse(text.orEmpty())
+    }
+
+    private fun parse(text: String): Map<String, String> = text.lines().drop(1)
+        .filter { ' ' in it }
+        .associate { it.substringBefore(' ') to it.substringAfter(' ') }
 
     private fun save(entries: Map<String, String>) {
         val lines = entries.entries.joinToString("") { (name, sealed) -> "$name $sealed\n" }
-        files.write(path, "$HEADER\n$lines")
+        try {
+            files.write(path, "$HEADER\n$lines")
+        } catch (e: FileWriteException) {
+            throw SecretStoreException("Could not write ${e.path}: check that the folder is yours and writable.", e)
+        }
     }
 
     private fun requireName(name: String) {
@@ -241,13 +283,13 @@ private fun derivedKey(material: ByteArray): ByteArray =
 private const val KEY_LABEL = "ostrom secrets file v1\n"
 
 /**
- * What the encrypted file's key is derived from: the machine identifier (systemd's, else D-Bus's) and the user. Null
- * when the machine has no identifier.
+ * What the encrypted file's key is derived from: the machine identifier (systemd's, else D-Bus's) and the numeric
+ * [user] id. Null when the machine has no identifier.
  */
-internal fun machineKeyMaterial(files: FileStore, environment: Environment): ByteArray? {
+internal fun machineKeyMaterial(files: FileStore, user: String): ByteArray? {
     for (file in MACHINE_ID_FILES) {
         val identifier = files.read(file).orEmpty().trim()
-        if (identifier.isNotEmpty()) return "$identifier\n${environment["USER"].orEmpty()}".encodeToByteArray()
+        if (identifier.isNotEmpty()) return "$identifier\n$user".encodeToByteArray()
     }
     return null
 }

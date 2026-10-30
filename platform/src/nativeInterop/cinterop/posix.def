@@ -30,8 +30,10 @@ static void ostrom_relay_signal(int signal_number) {
  * Starts `file` (looked up on PATH) with `argv`, sharing stdin, stdout, stderr and the terminal, and waits for it.
  * While the child runs, this process ignores SIGINT and SIGQUIT (the child gets them from the terminal, with their
  * default action), like system(3), and relays SIGTERM and SIGHUP to the child (a closed terminal tab, a supervisor
- * stopping the CLI) then keeps waiting, so that the agent never outlives the CLI. One that arrives before the
- * child's pid is known (blocked on this thread, kept by the handler on another) is relayed as soon as it is. Returns 0 and sets *exit_code
+ * stopping the CLI) then keeps waiting, so that the agent never outlives the CLI: the CLI ends when the agent does,
+ * with its code (an agent that ignores SIGTERM keeps running, as it would without the CLI). One that arrives before
+ * the child's pid is known (blocked on this thread, kept by the handler on another) is relayed as soon as it is, or
+ * raised again here when the spawn failed. Returns 0 and sets *exit_code
  * (128 + signal when killed), 1 when the executable is not found, 2 on any other failure.
  */
 static inline int ostrom_spawn_wait(const char *file, char *const argv[], int *exit_code) {
@@ -70,8 +72,8 @@ static inline int ostrom_spawn_wait(const char *file, char *const argv[], int *e
     if (spawned == 0) {
         ostrom_child = pid;
         if (ostrom_pending_signal != 0) kill(pid, ostrom_pending_signal);
+        ostrom_pending_signal = 0;
     }
-    ostrom_pending_signal = 0;
     sigprocmask(SIG_SETMASK, &previous_mask, NULL);
     int result = 2;
     if (spawned == ENOENT) {
@@ -88,6 +90,10 @@ static inline int ostrom_spawn_wait(const char *file, char *const argv[], int *e
     sigaction(SIGQUIT, &old_quit, NULL);
     sigaction(SIGTERM, &old_term, NULL);
     sigaction(SIGHUP, &old_hup, NULL);
+    /* No child to pass it to (the spawn failed): the signal is this process's again, with its own action. */
+    int pending = ostrom_pending_signal;
+    ostrom_pending_signal = 0;
+    if (pending != 0) raise(pending);
     return result;
 }
 

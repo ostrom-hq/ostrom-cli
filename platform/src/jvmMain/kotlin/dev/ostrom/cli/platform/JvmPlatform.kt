@@ -85,7 +85,3 @@ internal actual fun restrictToOwner(path: String) {
         Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-------"))
     }
 }
-
-// coverage: test-only JVM target; each system store is tested on its own target (macosTest, linuxTest, mingwTest).
-@ExcludeFromCoverage
-internal actual fun systemVault(): Vault? = null

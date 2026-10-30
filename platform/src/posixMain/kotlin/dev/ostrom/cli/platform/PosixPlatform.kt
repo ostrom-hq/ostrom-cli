@@ -17,6 +17,7 @@ import kotlinx.cinterop.usePinned
 import kotlinx.cinterop.value
 import platform.posix.chmod
 import platform.posix.getenv
+import platform.posix.getuid
 import dev.ostrom.cli.platform.interop.ostrom_is_terminal
 import dev.ostrom.cli.platform.interop.ostrom_read_stdin
 import dev.ostrom.cli.platform.interop.ostrom_spawn_wait
@@ -42,6 +43,8 @@ internal actual fun readStdin(buffer: ByteArray, offset: Int, timeoutMillis: Int
     buffer.usePinned { ostrom_read_stdin(it.addressOf(0).reinterpret(), buffer.size, offset, timeoutMillis) }
 
 internal actual fun environmentVariable(name: String): String? = getenv(name)?.toKString()
+
+internal actual fun currentUserId(): String = getuid().toString()
 
 internal actual fun restrictToOwner(path: String) {
     chmod(path, OWNER_READ_WRITE.convert())

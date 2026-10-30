@@ -3,24 +3,21 @@ package dev.ostrom.cli.platform
 
 import kotlin.math.min
 
-/** The top-level string values of a TOML file, before its first table; other values are skipped. */
+/**
+ * The top-level string values of a TOML file, before its first table; other values (numbers, arrays, multi-line
+ * strings) are skipped, and a line inside a multi-line value is never read as a key.
+ */
 internal fun parseToml(text: String): Map<String, String> {
     val lines = text.lines()
+    val layout = tomlLayout(lines)
     val values = linkedMapOf<String, String>()
-    for (index in 0 until firstTable(lines)) {
+    for (index in 0 until layout.firstTable) {
         val line = lines[index]
-        val key = tomlKeyOf(line)
+        val key = if (layout.topLevel[index]) tomlKeyOf(line) else null
         val value = if (key != null) unquoteToml(line.substringAfter('=').trim()) else null
         if (key != null && value != null) values[key] = value
     }
     return values
-}
-
-/** The index of the first `[table]` line, or the line count when there is none. */
-internal fun firstTable(lines: List<String>): Int {
-    var index = 0
-    while (index < lines.size && !lines[index].trimStart().startsWith("[")) index++
-    return index
 }
 
 /** The bare key of a `key = value` line, or null for a comment, a blank line, a table or a quoted key. */
@@ -34,6 +31,8 @@ private fun isBareKeyCharacter(character: Char): Boolean =
 
 /** The value of a TOML string (basic or literal, with an optional trailing comment), or null when it is not one. */
 internal fun unquoteToml(text: String): String? = when {
+    // A multi-line string is not one the CLI writes: skipped, never misread as an empty one.
+    text.startsWith("\"\"\"") || text.startsWith("'''") -> null
     text.startsWith("'") -> text.indexOf('\'', startIndex = 1).takeIf { it > 0 }?.let { text.substring(1, it) }
     text.startsWith("\"") -> unquoteBasic(text)
     else -> null

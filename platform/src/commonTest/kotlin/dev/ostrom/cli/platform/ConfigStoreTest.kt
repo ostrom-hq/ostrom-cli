@@ -147,4 +147,35 @@ class ConfigStoreTest {
         assertEquals("\"a\\u0000b\\u007f\"", quoteToml("a\u0000b\u007F"))
         assertEquals("a\u0000b\u007F", unquoteToml(quoteToml("a\u0000b\u007F")))
     }
+
+    @Test
+    fun linesInsideMultiLineValuesAreNeverKeysNorTables() {
+        val original = "agents = [\n  [\"a\", \"b]\"], # [not a table]\n  ['c]'],\n]\n" +
+            "notes = \"\"\"\neditor = \"inside a string\"\n[fake]\nan escaped \\\"\"\" stays inside\n\"\"\"\n" +
+            "raw = \'\'\'\ncolor = \"inside a literal\"\n\'\'\'\n" +
+            "server = \"https://a.example\"\n[real]\ncolor = \"in a table\"\n"
+        file(original)
+        assertEquals(mapOf(ConfigKey.SERVER to "https://a.example"), store.list())
+        store.set(ConfigKey.COLOR, "never")
+        assertEquals(original.replace("[real]", "color = \"never\"\n[real]"), written())
+        store.set(ConfigKey.EDITOR, "vim")
+        store.unset(ConfigKey.EDITOR)
+        assertEquals(original.replace("[real]", "color = \"never\"\n[real]"), written())
+    }
+
+    @Test
+    fun onlyAnOpenBracketOrMultiLineStringHidesTheLinesAfterIt() {
+        // A one-line string cannot span lines: the next line is read; an open bracket hides what follows.
+        assertEquals(mapOf("server" to "https://a.example"), parseToml("a = \"open\nserver = \"https://a.example\""))
+        assertEquals(mapOf("color" to "x"), parseToml("color = \"x\"\nb = \'open\n] ]\nc = [\nserver = \"y\""))
+        assertEquals(emptyMap(), parseToml("editor = \"\"\"vim\"\"\"\nserver = \'\'\'x\'\'\'"))
+    }
+
+    @Test
+    fun aWindowsFileKeepsItsLineEndings() {
+        file("# notepad\r\nserver = \"https://a.example\"\r\n")
+        store.set(ConfigKey.COLOR, "never")
+        assertEquals("# notepad\r\nserver = \"https://a.example\"\r\ncolor = \"never\"\r\n", written())
+        assertEquals("https://a.example", store.get(ConfigKey.SERVER))
+    }
 }

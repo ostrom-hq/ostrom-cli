@@ -72,7 +72,8 @@ class SecretStoreTest {
         val vault = FakeVault().apply { failWith = VaultAnswer(3, code = -25308) }
         val store = secretStoreOf(vault, home, files)
         val read = assertFailsWith<SecretStoreException> { store.read("s") }
-        val expected = "macOS Keychain could not read the secret s (error -25308): unlock it and try again."
+        val expected = "macOS Keychain could not read the secret s (error -25308): run ostrom doctor in a Terminal " +
+            "of your session and choose Always Allow when macOS asks."
         assertEquals(expected, read.message)
         assertTrue(assertFailsWith<SecretStoreException> { store.write("s", "x") }.message!!.contains("could not keep"))
         assertTrue(assertFailsWith<SecretStoreException> { store.delete("s") }.message!!.contains("could not forget"))
@@ -81,6 +82,9 @@ class SecretStoreTest {
             "The secret s in macOS Keychain is too large to read.",
             assertFailsWith<SecretStoreException> { store.read("s") }.message,
         )
+        vault.failWith = VaultAnswer(VAULT_UNREACHABLE)
+        val stopped = assertFailsWith<SecretStoreException> { store.read("s") }.message!!
+        assertTrue(stopped.startsWith("macOS Keychain stopped answering"), stopped)
         vault.failWith = null
         assertFailsWith<SecretStoreException> { store.write("s", "x".repeat(MAX_SECRET_BYTES + 1)) }
         store.write("s", "x".repeat(MAX_SECRET_BYTES))
@@ -122,30 +126,36 @@ class SecretStoreTest {
         assertNull(swapped.read("broken"))
         assertNull(swapped.read("no-separator"))
         files.write(secretsFile, text)
+        assertNull(secretStoreOf(null, home, files, user = "1001").read("a"), "another user")
+        assertEquals("secret-a", secretStoreOf(null, FakeEnvironment(mapOf("HOME" to "/home/maya")), files).read("a"))
         machine("another-machine")
         assertNull(secretStoreOf(null, home, files).read("a"))
     }
 
     @Test
-    fun anUnknownFileFormatReadsAsNoSecretAndNamesAreChecked() {
+    fun anUnknownFileFormatReadsAsNoSecretIsNeverReplacedAndNamesAreChecked() {
         machine()
         files.write(secretsFile, "ostrom-secrets 2\nname value\n")
         val store = secretStoreOf(null, home, files)
         assertNull(store.read("name"))
+        assertFailsWith<SecretStoreException> { store.write("other", "x") }
+        assertFailsWith<SecretStoreException> { store.delete("name") }
+        assertEquals("ostrom-secrets 2\nname value\n", files.read(secretsFile))
+        files.write(secretsFile, "")
         assertFailsWith<SecretStoreException> { store.write("", "x") }
         assertFailsWith<SecretStoreException> { store.write("two words", "x") }
     }
 
     @Test
     fun theMachineIdentifierComesFromSystemdThenDbus() {
-        assertNull(machineKeyMaterial(files, home))
+        assertNull(machineKeyMaterial(files, "1000"))
         fileSystem.createDirectories("/var/lib/dbus".toPath())
         fileSystem.write("/var/lib/dbus/machine-id".toPath()) { writeUtf8("dbus-id") }
-        assertEquals("dbus-id\nmaya", machineKeyMaterial(files, home)!!.decodeToString())
+        assertEquals("dbus-id\n1000", machineKeyMaterial(files, "1000")!!.decodeToString())
         machine("  ")
-        assertEquals("dbus-id\nmaya", machineKeyMaterial(files, home)!!.decodeToString())
+        assertEquals("dbus-id\n1000", machineKeyMaterial(files, "1000")!!.decodeToString())
         machine("systemd-id")
-        assertEquals("systemd-id\n", machineKeyMaterial(files, FakeEnvironment(emptyMap()))!!.decodeToString())
+        assertEquals("systemd-id\n0", machineKeyMaterial(files, "0")!!.decodeToString())
     }
 
     @Test
@@ -160,6 +170,16 @@ class SecretStoreTest {
         machine()
         // The JVM test target has no system store: the file. Native targets prove theirs in the vault tests.
         assertIs<SecretStore>(systemSecretStore(home, files))
+    }
+
+    @Test
+    fun aFileThatCannotBeWrittenIsASecretStoreRefusal() {
+        machine()
+        // The CLI folder is a file: its secrets file cannot be created.
+        fileSystem.createDirectories("/home/maya/.config".toPath())
+        fileSystem.write("/home/maya/.config/ostrom".toPath()) { writeUtf8("not a folder") }
+        val refused = assertFailsWith<SecretStoreException> { secretStoreOf(null, home, files).write("a", "x") }
+        assertTrue(refused.message!!.startsWith("Could not write"), refused.message)
     }
 
     @Test

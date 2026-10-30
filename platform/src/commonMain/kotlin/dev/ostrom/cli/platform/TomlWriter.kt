@@ -3,18 +3,20 @@ package dev.ostrom.cli.platform
 
 /**
  * [text] with the top-level line of [key] replaced by [line], or removed when [line] is null. A new key goes after
- * the last top-level line, before the first table. Every other line is kept as it is.
+ * the last top-level line, before the first table. Every other line is kept as it is, and so are the file's line
+ * endings (`\r\n` when it has them, as Notepad writes it).
  */
 internal fun withTomlLine(text: String, key: String, line: String?): String {
-    val lines = if (text.isEmpty()) mutableListOf() else text.removeSuffix("\n").lines().toMutableList()
-    val end = firstTable(lines)
-    val existing = (0 until end).firstOrNull { tomlKeyOf(lines[it]) == key }
+    val newline = if ("\r\n" in text) "\r\n" else "\n"
+    val lines = if (text.isEmpty()) mutableListOf() else text.removeSuffix(newline).lines().toMutableList()
+    val layout = tomlLayout(lines)
+    val existing = (0 until layout.firstTable).firstOrNull { layout.topLevel[it] && tomlKeyOf(lines[it]) == key }
     when {
         existing != null && line != null -> lines[existing] = line
         existing != null -> lines.removeAt(existing)
-        line != null -> lines.add(insertionPoint(lines, end), line)
+        line != null -> lines.add(insertionPoint(lines, layout.firstTable), line)
     }
-    return if (lines.isEmpty()) "" else lines.joinToString("\n", postfix = "\n")
+    return if (lines.isEmpty()) "" else lines.joinToString(newline, postfix = newline)
 }
 
 /** Where a new top-level line goes: after the last non-blank line before [end], the first table. */
