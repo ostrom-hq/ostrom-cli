@@ -3,7 +3,8 @@
 Code (`--plugin-dir` → hooks/hooks.json) or Codex (`-c hooks.<Event>=[…]`) reads it, then plays the hooks a real
 session fires: session start, a harmless tool, a gated deployment (and, when the gate says so, `ostrom wait` as its own
 command, the way a model obeys the refusal; $E2E_OSTROM names the binary), the after-tool hook, session end. What it
-saw and what each hook answered go to $E2E_REPORT; it exits with $E2E_EXIT (3 by default), which `ostrom` must hand
+saw and what each hook answered go to $E2E_REPORT. With a package, it then rewrites the package's hook view and fires
+one more tool, which the hooks must hold (S2-33); it exits with $E2E_EXIT (3 by default), which `ostrom` must hand
 back.
 
 Installed by the run as `claude` and `codex` (the name it is started under picks the dialect).
@@ -62,6 +63,13 @@ def main():
                           "stderr": done.stderr})
     tool = {"tool_name": "Bash", "tool_input": {"command": "ls -la"}, "tool_response": {"stdout": ""}}
     fired.append(fire(hooks["PostToolUse"], {**base, "hook_event_name": "PostToolUse", **tool}))
+    package = os.environ.get("OSTROM_PACKAGE")
+    if package:
+        # S2-33: the agent rewrites a file of the package Ostrom laid down; the next hook holds every action
+        with open(package, "w") as handle:
+            handle.write("{}")
+        tool = {"tool_name": "Bash", "tool_input": {"command": "echo after-tampering"}}
+        fired.append(fire(hooks["PreToolUse"], {**base, "hook_event_name": "PreToolUse", **tool}))
     fired.append(fire(hooks["SessionEnd"], {**base, "hook_event_name": "SessionEnd", "reason": "exit"}))
     environment = {key: value for key, value in os.environ.items() if key.startswith(("OSTROM_", "ANTHROPIC_"))}
     report = {"agent": name, "arguments": arguments, "environment": environment, "cwd": cwd, "hooks": fired,

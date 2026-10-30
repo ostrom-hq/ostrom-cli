@@ -3,15 +3,27 @@ package dev.ostrom.cli.launcher
 
 /**
  * The environment `ostrom <agent>` gives the agent, read back by `ostrom hook gate|session` (hooks `HookContext`) and
- * `ostrom mcp`. Only the local relay's capability goes in it: the device token and the launch's agent token never do
- * (audit A12/A13).
+ * `ostrom mcp`. Only the agent's own capability on the local relay goes in it: the device token, the launch's agent
+ * token and the hooks' capability never do (audit A12/A13, S2-25).
  */
 object LaunchVariables {
     /** `http://127.0.0.1:<port>`: the local relay the hooks call. */
     const val RELAY_URL = "OSTROM_RELAY_URL"
 
-    /** The relay's capability, valid for this launch only. */
+    /** The agent's capability on the relay, for this launch only: its MCP servers and inference, no hook route. */
     const val RELAY_TOKEN = "OSTROM_RELAY_TOKEN"
+
+    /** The private file holding the hooks' capability on the relay, which never enters an environment (S2-25). */
+    const val RELAY_TOKEN_FILE = "OSTROM_RELAY_TOKEN_FILE"
+
+    /** The instance's signing keys (`GET /api/v1/instance/keys`), which the gate policy must be signed with (S2-20). */
+    const val INSTANCE_KEYS = "OSTROM_INSTANCE_KEYS"
+
+    /** The SHA-256 of the session package's manifest: the hooks check the package against it at every run (S2-33). */
+    const val PACKAGE_SEAL = "OSTROM_PACKAGE_SEAL"
+
+    /** The manifest of the package laid down, `<sha256>  <path>` per file (S2-33). */
+    const val PACKAGE_MANIFEST = "OSTROM_PACKAGE_MANIFEST"
 
     /** The repository the session is for (`owner/name`). */
     const val REPO = "OSTROM_REPO"

@@ -10,6 +10,7 @@ import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeSource
 
 /** The relay's capability in these tests (64 hexadecimal characters, like a real one). */
 const val TOKEN = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -47,17 +48,47 @@ class FakeOstrom(private val answer: suspend MockRequestHandleScope.(HttpRequest
     fun client() = HttpClient(engine) { expectSuccess = false }
 }
 
-/** Runs [block] against a relay forwarding to [ostrom]; [reports] receives what the user would be told. */
+/** The agent's own capability when a test draws it apart from the hooks' [TOKEN] (S2-25). */
+const val CLIENT_TOKEN = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+
+/**
+ * The relay's memory of the signed gate policy in a test.
+ *
+ * @property freshFor How long it answers from memory.
+ * @property clock The test's clock.
+ */
+class PolicyClock(val freshFor: Duration, val clock: TimeSource)
+
+/**
+ * Runs [block] against a relay forwarding to [ostrom]; [reports] receives what the user would be told. Without
+ * [clientToken] the agent's capability is the hooks' [TOKEN]; without [policy] the relay keeps its own defaults.
+ */
+@Suppress("LongParameterList") // the relay's settings a test may change, all defaulted
 fun relayTest(
     ostrom: FakeOstrom,
     config: RelayConfig = relayConfig(),
     hookTimeout: Duration = 5.seconds,
     reports: MutableList<String> = mutableListOf(),
+    clientToken: String? = null,
+    policy: PolicyClock? = null,
     block: suspend ApplicationTestBuilder.() -> Unit,
 ) = testApplication {
     application {
         val timeouts = RelayTimeouts(hook = hookTimeout, longPoll = 5.seconds)
-        relayModule(config, TOKEN, ostrom::client, FailureNotices { reports.add(it) }, timeouts)
+        val notices = FailureNotices { reports.add(it) }
+        when {
+            policy != null -> relayModule(
+                config,
+                TOKEN,
+                ostrom::client,
+                notices,
+                timeouts,
+                policyFreshFor = policy.freshFor,
+                clock = policy.clock,
+            )
+            clientToken != null -> relayModule(config, TOKEN, ostrom::client, notices, timeouts, clientToken)
+            else -> relayModule(config, TOKEN, ostrom::client, notices, timeouts)
+        }
     }
     block()
 }

@@ -3,6 +3,7 @@ package dev.ostrom.cli.hooks.runtime
 
 import dev.ostrom.cli.hooks.HookReply
 import dev.ostrom.cli.hooks.gate.FakeGit
+import dev.ostrom.cli.hooks.gate.GateCatalogue
 import dev.ostrom.cli.hooks.gate.ToolSubject
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -75,10 +76,12 @@ class GateHookTest {
         git: Map<String, String> = repository,
         catalogueText: String? = null,
     ): GateHook {
-        // Ostrom's catalogue comes through the relay; the hook's own calls are recorded apart
-        val served = FakeCalls().on("/api/v1/gates/catalog", ok(catalogueText ?: catalogue))
+        // the verified policy (CatalogueStoreTest checks the signature); an unreadable one holds every action
+        val parsed = GateCatalogue.parse(catalogueText ?: catalogue)
+        val store = CatalogueStore {
+            parsed?.let { CatalogueRead.Verified(it) } ?: CatalogueRead.Held("Ostrom's gate policy cannot be trusted")
+        }
         val ids = SessionIds(context.sessionFile, files)
-        val store = CatalogueStore(context, FakeFiles(), served)
         return GateHook(context, calls, ids, files, store, checks, FakeGit(git), { it.removeSuffix("/") }, "/w")
     }
 
@@ -105,6 +108,15 @@ class GateHookTest {
         assertEquals(HookReply(), hook().handle(buildJsonObject { put("hook_event_name", "PreToolUse") }), "no tool")
         assertTrue(calls.calls.isEmpty())
         assertFalse("/s/session.refused.json" in files.texts)
+    }
+
+    @Test
+    fun aGatedCommandRunOutsideAnyRepositoryIsAskedWithoutARealRepository() {
+        answer("""{"id":"G2","status":"pending"}""")
+        hook().handle(bash("deploy now", cwd = "/elsewhere"))
+        val body = calls.bodyOf("/api/v1/gates")
+        assertFalse("realRepo" in body.toString(), "no repository resolved: none is claimed")
+        assertContains(body.toString(), """"class":"deploy","tool":"Bash"""")
     }
 
     @Test
@@ -318,12 +330,25 @@ class GateHookTest {
     }
 
     @Test
-    fun theBuiltInCatalogueGatesTheBoundaryWhenOstromsCannotBeRead() {
-        val reply = hook(catalogueText = """{"actions":"unreadable"}""").handle(bash("kube''ctl apply -f prod.yaml"))
-        assertEquals(2, reply.exitCode)
-        assertContains(reply.stderr, "\"deployment\" needs a yes from the gate owner (Ostrom unreachable)")
-        assertContains(reply.stderr, "and Ostrom is unreachable (HTTP 404)")
-        assertEquals(HookReply(), hook(catalogueText = """{"actions":"unreadable"}""").handle(bash("ls -la")))
+    fun withoutAPolicyToTrustEveryActionTheGateSeesIsRefused() {
+        // S2-38: with the relay stopped, only four kinds of commands stayed gated; now nothing the gate sees runs
+        val held = hook(catalogueText = """{"actions":"unreadable"}""")
+        val events = listOf(
+            bash("ls -la"),
+            bash("kube''ctl apply -f prod.yaml"),
+            event("Write", """{"file_path":"/w/a.txt"}"""),
+            event("mcp__github__list_issues", "{}"),
+        )
+        for (tool in events) {
+            val reply = held.handle(tool)
+            assertEquals(2, reply.exitCode)
+            assertContains(
+                reply.stderr,
+                "Ostrom: denied. Ostrom's gate policy cannot be trusted, so every action of this session is held",
+            )
+        }
+        assertEquals(HookReply(), held.handle(event("Read", """{"file_path":"/w/a.txt"}""")), "not a gated tool")
+        assertTrue(calls.calls.isEmpty(), "nobody is asked for a yes")
     }
 
     @Test
