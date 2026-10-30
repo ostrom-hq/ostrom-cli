@@ -43,6 +43,13 @@ val generateBuildInfo by tasks.registering {
     }
 }
 
+// The API contract the routes of the CLI are checked against (ContractRoutesTest): ostrom-core's, from the checkout
+// next to this one that CI and local builds use (ostrom.core.local, settings.gradle.kts).
+val apiContract = rootDir.resolve("../ostrom-core/api/openapi.yaml").absolutePath
+tasks.withType<Test>().configureEach {
+    systemProperty("ostrom.contract", apiContract)
+}
+
 kotlin {
     targets.withType<KotlinNativeTarget>().configureEach {
         binaries.executable {
