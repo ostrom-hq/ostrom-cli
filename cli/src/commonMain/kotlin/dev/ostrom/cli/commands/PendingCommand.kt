@@ -63,9 +63,14 @@ open class GroupCommand(
     }
 }
 
-/** The error printed, through the CLI's console, by a command that is declared but not built yet (exit 70). */
-internal fun notImplemented(path: List<String>) =
-    PrintMessage("${path.joinToString(" ")}: not implemented yet.", ExitCode.NOT_IMPLEMENTED.code, printError = true)
+/**
+ * The error printed, through the CLI's console, by what is declared but not built yet: a command exits 70; an option
+ * of a built command (the [path] ends with it, `--cloud`) exits 64, a usage this version does not have.
+ */
+internal fun notImplemented(path: List<String>): PrintMessage {
+    val code = if (path.last().startsWith("-")) ExitCode.USAGE else ExitCode.NOT_IMPLEMENTED
+    return PrintMessage("${path.joinToString(" ")}: not implemented yet.", code.code, printError = true)
+}
 
 /** The end of the help of a command declared but not built yet. */
 private const val COMING_SOON = "(coming soon)"
