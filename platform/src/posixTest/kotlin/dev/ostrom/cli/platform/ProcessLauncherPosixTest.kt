@@ -27,6 +27,15 @@ class ProcessLauncherPosixTest {
     }
 
     @Test
+    fun variablesAreSetAndRemovedForTheChild() {
+        val script = "test \"\$OSTROM_TEST_SET\" = 'a b' && test -z \"\${OSTROM_TEST_GONE+x}\""
+        launcher.run(listOf("true"), mapOf("OSTROM_TEST_GONE" to "here"))
+        val environment = mapOf("OSTROM_TEST_SET" to "a b", "OSTROM_TEST_GONE" to null)
+        val result = launcher.run(listOf("sh", "-c", script), environment)
+        assertEquals(ProcessResult.Exited(0), result)
+    }
+
+    @Test
     fun aMissingExecutableIsNotFound() {
         assertIs<ProcessResult.NotFound>(launcher.run(listOf("ostrom-no-such-executable-4f2c")))
     }

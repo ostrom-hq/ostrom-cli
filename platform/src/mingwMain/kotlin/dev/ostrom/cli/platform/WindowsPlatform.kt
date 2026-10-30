@@ -13,6 +13,11 @@ import kotlinx.cinterop.usePinned
 import kotlinx.cinterop.value
 import kotlinx.cinterop.wcstr
 import platform.posix.getenv
+import platform.windows.GetModuleFileNameW
+import platform.windows.SetEnvironmentVariableW
+import platform.windows.WCHARVar
+import kotlinx.cinterop.allocArray
+import kotlinx.cinterop.toKStringFromUtf16
 import dev.ostrom.cli.platform.interop.ostrom_capture_w
 import dev.ostrom.cli.platform.interop.ostrom_is_terminal
 import dev.ostrom.cli.platform.interop.ostrom_read_stdin
@@ -21,7 +26,9 @@ import dev.ostrom.cli.platform.interop.ostrom_spawn_wait_w
 import dev.ostrom.cli.platform.interop.ostrom_tcp_exchange
 import dev.ostrom.cli.platform.interop.ostrom_write
 
-internal actual fun spawnAndWait(command: List<String>): ProcessResult = memScoped {
+internal actual fun spawnAndWait(command: List<String>, environment: Map<String, String?>): ProcessResult = memScoped {
+    // CreateProcessW with no environment block gives the child this process's block, which SetEnvironmentVariableW sets
+    environment.forEach { (name, value) -> SetEnvironmentVariableW(name, value) }
     val exitCode = alloc<IntVar>()
     when (ostrom_spawn_wait_w(windowsCommandLine(command).wcstr, exitCode.ptr)) {
         0 -> ProcessResult.Exited(exitCode.value)
@@ -44,6 +51,8 @@ internal actual fun readStdin(buffer: ByteArray, timeoutMillis: Int): Int =
 internal actual fun environmentVariable(name: String): String? = getenv(name)?.toKString()
 
 internal actual fun restrictToOwner(path: String) = Unit
+
+internal actual fun restrictToOwnerExecutable(path: String) = Unit
 
 internal actual fun captureOutput(
     command: List<String>,
@@ -84,3 +93,13 @@ internal actual fun tcpExchange(
     }
     return count to response
 }
+
+/** The running binary, as this platform says it. */
+actual fun currentExecutable(): String? = memScoped {
+    val buffer = allocArray<WCHARVar>(MODULE_PATH_CAPACITY)
+    val length = GetModuleFileNameW(null, buffer, MODULE_PATH_CAPACITY.toUInt()).toInt()
+    if (length in 1 until MODULE_PATH_CAPACITY) buffer.toKStringFromUtf16() else null
+}
+
+/** Long enough for any path Windows hands out without the `\\?\` prefix. */
+private const val MODULE_PATH_CAPACITY = 32_768

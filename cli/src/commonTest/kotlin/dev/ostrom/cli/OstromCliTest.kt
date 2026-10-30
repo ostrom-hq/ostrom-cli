@@ -1,6 +1,7 @@
 package dev.ostrom.cli
 
 import dev.ostrom.cli.api.OstromApi
+import dev.ostrom.cli.api.ServerRequest
 import dev.ostrom.cli.api.ServerResponse
 import dev.ostrom.cli.api.ServerUnreachableException
 import dev.ostrom.cli.hooks.HookRunner
@@ -48,6 +49,7 @@ class OstromCliTest {
     private fun serverAnswering(status: Int, millis: Long): (String) -> OstromApi = {
         object : OstromApi {
             override suspend fun get(path: String) = ServerResponse(status, "", millis)
+            override suspend fun send(request: ServerRequest) = get(request.path)
         }
     }
 
@@ -170,6 +172,7 @@ class OstromCliTest {
             object : OstromApi {
                 override suspend fun get(path: String): ServerResponse =
                     throw ServerUnreachableException(url + path, Exception("refused"))
+                override suspend fun send(request: ServerRequest) = get(request.path)
             }
         }
         val code = cli(environment = withServer, installed = emptySet(), api = down).run(arrayOf("doctor", "--json"))

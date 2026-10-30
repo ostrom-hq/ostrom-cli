@@ -4,20 +4,28 @@ import dev.ostrom.cli.platform.EnvironmentImpl
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
+import io.ktor.client.plugins.HttpTimeout
+import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.test.runTest
-import kotlinx.io.IOException
+import io.ktor.http.content.TextContent
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runTest
+import kotlinx.io.IOException
 
 class OstromApiTest {
-    private fun apiFailingWith(failure: () -> Nothing) =
-        OstromApiImpl("https://ostrom.example", "ostrom/0.1.0", HttpClient(MockEngine { failure() }))
+    private fun apiFailingWith(failure: () -> Nothing) = OstromApiImpl(
+        "https://ostrom.example",
+        "ostrom/0.1.0",
+        HttpClient(MockEngine { failure() }) { install(HttpTimeout) },
+    )
 
     @Test
     fun theResponseIsReturnedWhateverItsStatus() = runTest {
@@ -26,10 +34,43 @@ class OstromApiTest {
             assertEquals("ostrom/0.1.0", request.headers[HttpHeaders.UserAgent])
             respond("down", HttpStatusCode.ServiceUnavailable)
         }
-        val api = OstromApiImpl("https://ostrom.example/", "ostrom/0.1.0", HttpClient(engine) { expectSuccess = false })
+        val api = OstromApiImpl(
+            "https://ostrom.example/",
+            "ostrom/0.1.0",
+            HttpClient(engine) {
+                expectSuccess = false
+                install(HttpTimeout)
+            },
+        )
         val response = api.get("/api/health")
         assertEquals(503, response.status)
         assertEquals("down", response.body)
+    }
+
+    @Test
+    fun aCallCarriesItsMethodTokenAndJsonBody() = runTest {
+        val engine = MockEngine { request ->
+            assertEquals(HttpMethod.Post, request.method)
+            assertEquals("https://ostrom.example/api/v1/launches?x=1", request.url.toString())
+            assertEquals("Bearer t0k", request.headers[HttpHeaders.Authorization])
+            assertEquals(ContentType.Application.Json, request.body.contentType?.withoutParameters())
+            assertEquals("{\"agent\":\"codex\"}", (request.body as TextContent).text)
+            respond("{}", HttpStatusCode.Created)
+        }
+        val api = OstromApiImpl("https://ostrom.example", "ostrom/0.1.0", HttpClient(engine) { install(HttpTimeout) })
+        val request = ServerRequest("POST", "/api/v1/launches?x=1", "{\"agent\":\"codex\"}", "t0k", 2_000)
+        assertEquals(201, api.send(request).status)
+    }
+
+    @Test
+    fun anAnonymousCallHasNoTokenNorBody() = runTest {
+        val engine = MockEngine { request ->
+            assertNull(request.headers[HttpHeaders.Authorization])
+            assertEquals(0L, request.body.contentLength ?: 0L)
+            respond("{}")
+        }
+        val api = OstromApiImpl("https://ostrom.example", "ostrom/0.1.0", HttpClient(engine) { install(HttpTimeout) })
+        assertEquals(200, api.send(ServerRequest("GET", "/api/v1/receipts/keys")).status)
     }
 
     @Test

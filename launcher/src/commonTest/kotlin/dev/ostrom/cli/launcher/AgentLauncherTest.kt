@@ -13,7 +13,8 @@ class AgentLauncherTest {
 
     private class RecordingLauncher(private val result: ProcessResult) : ProcessLauncher {
         val commands = mutableListOf<List<String>>()
-        override fun run(command: List<String>): ProcessResult = result.also { commands += command }
+        override fun run(command: List<String>, environment: Map<String, String?>): ProcessResult =
+            result.also { commands += command }
     }
 
     @Test

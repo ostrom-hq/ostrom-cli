@@ -87,5 +87,16 @@ class ExecutableFinderImpl(
     }
 }
 
+/**
+ * Makes [path] usable by its owner only: 0700 for a folder or a script ([executable]), else 0600. A no-op on Windows,
+ * where the profile is private.
+ */
+fun restrictToOwner(path: String, executable: Boolean) {
+    if (executable) restrictToOwnerExecutable(path) else restrictToOwner(path)
+}
+
 /** Makes [path] readable and writable by its owner only (0600); a no-op on Windows, where the profile is private. */
 internal expect fun restrictToOwner(path: String)
+
+/** Makes [path] readable, writable and executable by its owner only (0700); a no-op on Windows. */
+internal expect fun restrictToOwnerExecutable(path: String)
