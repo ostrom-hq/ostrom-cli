@@ -26,18 +26,29 @@ private fun stop(code: ExitCode, message: String) = PrintMessage(message, code.c
 /** The body of a 2xx answer, or the exit code and message the spec gives a failure (CLI.md § 2.4). */
 internal fun ServerAnswer.orStop(serverUrl: String, notFound: String): JsonObject = when (this) {
     is ServerAnswer.Ok -> body
-    is ServerAnswer.Failed -> throw when (status) {
-        null -> stop(ExitCode.UNREACHABLE, "Ostrom is unreachable at $serverUrl. $CHECK_NETWORK")
+    is ServerAnswer.Failed -> throw failure(status ?: UNANSWERED, message, serverUrl, notFound)
+}
+
+private fun failure(status: Int, message: String, serverUrl: String, notFound: String): PrintMessage =
+    when (status) {
+        UNANSWERED -> stop(ExitCode.UNREACHABLE, "Ostrom is unreachable at $serverUrl. $CHECK_NETWORK")
         UNAUTHORIZED -> stop(ExitCode.SIGN_IN_REQUIRED, "ostrom: not signed in to $serverUrl: run `ostrom login`")
         FORBIDDEN -> stop(ExitCode.REFUSED, message)
         NOT_FOUND -> stop(ExitCode.NOT_FOUND, notFound)
+        // a request already decided or expired (409, 410) is the spec's 64; another refusal of Ostrom is not an outage
+        CONFLICT, GONE -> stop(ExitCode.USAGE, message)
+        in CLIENT_ERRORS -> stop(ExitCode.FAILED, "Ostrom refused: $message")
         else -> stop(ExitCode.UNREACHABLE, "Ostrom could not answer: $message")
     }
-}
 
+/** No HTTP status: the server was not reached. */
+private const val UNANSWERED = 0
 private const val UNAUTHORIZED = 401
 private const val FORBIDDEN = 403
 private const val NOT_FOUND = 404
+private const val CONFLICT = 409
+private const val GONE = 410
+private val CLIENT_ERRORS = 400..499
 private const val CHECK_NETWORK = "Check your network, or the --server URL."
 
 /** `ostrom inbox`: the requests that wait for this developer's yes. */
@@ -78,6 +89,9 @@ internal class InboxCommand(private val dependencies: CliDependencies) : CliktCo
             cursor = body.text("next")?.takeIf { it.isNotEmpty() }
             page++
         } while (cursor != null && page < MAX_PAGES)
+        if (cursor != null) {
+            dependencies.console.err("! More requests wait than ostrom lists: see the others on the console.\n")
+        }
         return items
     }
 
@@ -169,9 +183,11 @@ internal class DenyCommand(dependencies: CliDependencies) : AnswerCommand(depend
  * The console of [serverUrl], where requests are answered: `OSTROM_CONSOLE_URL` when set, else `app.<domain>` for an
  * `api.<domain>` server (api.ostrom.run → app.ostrom.run), else the server itself.
  */
-internal fun consoleOf(dependencies: CliDependencies, serverUrl: String): String =
+internal fun consoleOf(dependencies: CliDependencies, serverUrl: String): String {
+    val set = dependencies.environment["OSTROM_CONSOLE_URL"]?.trimEnd('/')
     // only a web page goes to the system's opener: a `file:` URL or a path would start whatever handles it
-    dependencies.environment["OSTROM_CONSOLE_URL"]?.trimEnd('/')?.takeIf { WEB.any(it::startsWith) }
-        ?: serverUrl.replaceFirst("://api.", "://app.")
+    return if (set != null && WEB.matches(set)) set else serverUrl.replaceFirst("://api.", "://app.")
+}
 
-private val WEB = listOf("https://", "http://")
+/** A web page, its scheme in any case. */
+private val WEB = Regex("https?://.+", RegexOption.IGNORE_CASE)
