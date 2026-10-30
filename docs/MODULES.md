@@ -92,9 +92,11 @@ Every pull request runs two required checks on Linux:
   Linux-built targets; `scripts/measure.py` measures `ostrom hook gate` and `ostrom version` start-up (fails above a
   15 ms median) and the binary sizes; `ci/build-linux.sh` leaves `dist/ostrom` for the end-to-end bench.
 
-On `main`, on tags, and on demand (`workflow_dispatch` with `full_validation`), three more jobs run: the
+On `main` and on demand (`workflow_dispatch` with `full_validation`), three more jobs run: the
 cross-compiled test binaries of every module on `ubuntu-24.04-arm` and on `windows-latest` (no Gradle there; the
 Windows start-up budget is 40 ms, process creation costs more), and macosArm64 tests and binary on `macos-15`.
+CI does not run on tags: it uploads binaries as artifacts and keeps a Gradle cache, which zizmor refuses in a
+workflow that publishes (cache poisoning). The release workflow, built without cache, publishes the binaries.
 
 `OSTROM_NETWORK_TESTS=1` turns on the real HTTPS test of `api-client` (each platform's TLS and certificate store).
 
