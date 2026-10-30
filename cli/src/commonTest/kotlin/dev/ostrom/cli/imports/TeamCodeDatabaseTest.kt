@@ -86,10 +86,10 @@ class TeamCodeDatabaseTest {
             "put the password in MYSQL_PWD, never in --db: a command line is public.",
             fails(mysql, "mysql://ro:pw@db/t"),
         )
-        assertEquals(
-            "--db must be mysql://user@host[:port]/database (got \"postgres://db/t\").",
-            fails(mysql, "postgres://db/t"),
-        )
+        val shape = "--db must be mysql://user@host[:port]/database, its password in MYSQL_PWD."
+        assertEquals(shape, fails(mysql, "postgres://db/t"))
+        // a password the pattern cannot read is never echoed
+        assertEquals(shape, fails(mysql, "mysql://ro:p@ss@db/teamcode"))
         assertEquals("\"x'; DROP\" is not a TeamCode team id.", fails(mysql, team = "x'; DROP"))
         assertEquals(emptyList(), mysql.commands)
         assertEquals(MysqlUrl("ro", "db", 3306, "t"), MysqlUrl.parse("mysql://ro@db/t"))

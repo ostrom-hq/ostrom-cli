@@ -36,7 +36,7 @@ fun columns(vararg tables: Pair<String, List<String>>): CaptureResult.Exited {
 
 private val VARIANT_COLUMNS =
     listOf("id", "target", "name", "binding", "config", "endpoint", "shared_secret", "transport", "command", "args")
-private val ACCOUNT_COLUMNS =
+val ACCOUNT_COLUMNS =
     listOf("id", "provider", "provider_account_id", "display_name", "credential_envelope", "email", "disabled")
 
 /** TeamCode's schema with every column the import reads. */

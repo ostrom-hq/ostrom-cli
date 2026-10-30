@@ -139,13 +139,18 @@ class OstromCliTest {
     }
 
     @Test
-    fun importTeamCodeShowsOstromsPlanWithTheTokenOfThisDevice() {
+    fun importTeamCodeShowsOstromsPlanWithAConsoleTokenNeverTheDevices() {
         val arguments = arrayOf("import", "teamcode", "--db", "mysql://ro@db/teamcode", "--key-file", "/keys/tc.key")
-        assertEquals(65, cli(environment = withServer).run(arguments), "not signed in")
-        assertTrue("set OSTROM_TOKEN to an admin's console token" in console.err.toString(), console.err.toString())
+        // Ostrom refuses the device token of ostrom login for import:write
         signIn("/home/maya/.config/ostrom")
+        for (none in listOf(withServer, withServer + ("OSTROM_TOKEN" to ""))) {
+            assertEquals(65, cli(environment = none).run(arguments), "no console token")
+        }
+        val refusal = "console token (scope import:write) in OSTROM_TOKEN"
+        assertTrue(refusal in console.err.toString(), console.err.toString())
+        val admin = withServer + ("OSTROM_TOKEN" to "ost_console")
         val mysql = FakeMysql(FULL_SCHEMA, TEAM_TABLES)
-        val noKey = cli(environment = withServer, api = serverOf(emptyMap()), capture = mysql)
+        val noKey = cli(environment = admin, api = serverOf(emptyMap()), capture = mysql)
         assertEquals(64, noKey.run(arguments))
         assertOut("--key-file holds no TeamCode key")
         fileSystem.createDirectories("/keys".toPath())
@@ -154,10 +159,10 @@ class OstromCliTest {
             "GET /api/v1/members" to (200 to """{"items":[]}"""),
             "POST /api/v1/import/teamcode?dryRun=true" to (200 to """{"items":[],"created":3}"""),
         )
-        val ready = cli(environment = withServer, api = serverOf(routes), capture = FakeMysql(FULL_SCHEMA, TEAM_TABLES))
+        val ready = cli(environment = admin, api = serverOf(routes), capture = FakeMysql(FULL_SCHEMA, TEAM_TABLES))
         assertEquals(0, ready.run(arguments))
         assertOut("3 created, 0 updated, 0 unchanged, 0 skipped.\nRun the same command with --yes to import.\n")
-        assertEquals(listOf("ost_1", "ost_1"), requests.map { it.second.token })
+        assertEquals(listOf("ost_console", "ost_console"), requests.map { it.second.token })
         assertEquals(0, cli().run(arrayOf("import")), "the group shows its help")
         assertOut("teamcode")
     }

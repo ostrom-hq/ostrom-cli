@@ -22,24 +22,49 @@ import kotlin.time.Instant
  */
 class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
     /**
+     * The body, and what it leaves out: a stdio server Ostrom cannot install, or an account without its provider or
+     * its tokens. One such row is said and skipped, never sent: the server would refuse the whole import for it.
+     *
      * @param memberMap TeamCode member id to Ostrom member id.
      * @throws TeamCodeReadException When a secret does not open with the key (another key file, or another team).
      */
-    fun request(tables: TeamCodeTables, memberMap: Map<String, String>): JsonObject {
+    fun request(tables: TeamCodeTables, memberMap: Map<String, String>): PlannedImport {
         val policies = tables.policies.associateBy { it["variant_id"] }
-        return objectOf(
+        val skipped = mutableListOf<String>()
+        val left = mutableSetOf<String?>()
+        val servers = tables.variants.mapNotNull { variant ->
+            server(variant, policies[variant["id"]]).also {
+                if (it == null) {
+                    skipped += unsupported(variant)
+                    left += variant["id"]
+                }
+            }
+        }
+        val accounts = tables.accounts.mapNotNull { row ->
+            account(row).also { if (it == null) skipped += "account ${row["display_name"].orEmpty()}: $INCOMPLETE" }
+        }
+        val body = objectOf(
             "members" to tables.members.map { mapOf("id" to it["id"], "username" to it["username"]) },
-            "mcpServers" to tables.variants.map { server(it, policies[it["id"]]) },
-            "assignments" to tables.assignments.map(::assignment),
-            "accounts" to tables.accounts.map(::account),
+            "mcpServers" to servers,
+            // the assignments of a server left out go with it
+            "assignments" to tables.assignments.filter { it["variant_id"] !in left }.map(::assignment),
+            "accounts" to accounts,
             "memberMap" to memberMap,
         )
+        return PlannedImport(body, skipped)
     }
 
-    private fun server(variant: Row, policy: Row?): Map<String, Any?> {
+    private fun unsupported(variant: Row) = "MCP server ${variant["target"]} (${variant["name"]}): its command " +
+        "(${commandOf(variant, configOf(variant)).ifEmpty { "none" }}) is not one Ostrom installs a package with " +
+        "(${LAUNCHERS.keys.joinToString()}), or it names no package."
+
+    private fun configOf(variant: Row) = parseObject(variant["config"]) ?: JsonObject(emptyMap())
+
+    private fun server(variant: Row, policy: Row?): Map<String, Any?>? {
         val id = variant["id"].orEmpty()
-        val config = parseObject(variant["config"]) ?: JsonObject(emptyMap())
+        val config = configOf(variant)
         val stdio = (variant["transport"] ?: config.text("transport")).equals("stdio", ignoreCase = true)
+        val launch = if (stdio) launchOf(variant, config) ?: return null else null
         val secret = variant["shared_secret"]?.let { open(it, "variant:$team:$id", "MCP server ${variant["target"]}") }
         return mapOf(
             "id" to id,
@@ -49,24 +74,34 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
             "url" to variant["endpoint"],
             "credentialHeader" to (config.text("CREDENTIAL_HEADER") ?: config.text("credentialHeader")),
             "sharedSecret" to secret.takeUnless { stdio },
-            "stdio" to if (stdio) stdio(variant, config, secret) else null,
+            "stdio" to launch?.let { stdio(it, secret) },
             "toolMode" to policy?.get("mode"),
             "tools" to strings(policy?.get("tools")),
         )
     }
 
-    /** A stdio variant: its package is the first argument; its secret is a JSON object of variables. */
-    private fun stdio(variant: Row, config: JsonObject, secret: String?): Map<String, Any?> {
-        val command = (variant["command"] ?: config.text("command")).orEmpty().substringAfterLast('/')
+    /** The command TeamCode runs, by its name alone: `/usr/bin/npx`, `C:\\…\\npx.cmd` and `npx` are `npx`. */
+    private fun commandOf(variant: Row, config: JsonObject): String =
+        (variant["command"] ?: config.text("command")).orEmpty().substringAfterLast('/').substringAfterLast('\\')
+            .lowercase().removeSuffix(".cmd").removeSuffix(".exe")
+
+    /** The registry and the arguments of a stdio variant (its package first), or null when Ostrom cannot install it. */
+    private fun launchOf(variant: Row, config: JsonObject): Pair<String, List<String>>? {
+        val launcher = LAUNCHERS[commandOf(variant, config)]
         val arguments = strings(variant["args"] ?: config["args"]?.toString())
+        return if (launcher == null || arguments.isEmpty()) null else launcher to arguments
+    }
+
+    /** A stdio variant: its package is the first argument; its secret is a JSON object of variables. */
+    private fun stdio(launch: Pair<String, List<String>>, secret: String?): Map<String, Any?> {
         // only plain values are variables; anything else in TeamCode's object is not one
         val variables = parseObject(secret).orEmpty()
             .mapNotNull { (name, value) -> (value as? JsonPrimitive)?.let { name to it.content } }
             .toMap()
         return mapOf(
-            "launcher" to LAUNCHERS[command],
-            "packageName" to arguments.firstOrNull(),
-            "args" to arguments.drop(1),
+            "launcher" to launch.first,
+            "packageName" to launch.second.first(),
+            "args" to launch.second.drop(1),
             "secretEnv" to variables,
         )
     }
@@ -82,19 +117,28 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
         )
     }
 
+    /** A shared account, or null when it lacks what Ostrom needs to sign in with it (said by [request]). */
     @OptIn(ExperimentalTime::class)
-    private fun account(row: Row): Map<String, Any?> {
+    private fun account(row: Row): Map<String, Any?>? {
         val label = row["display_name"].orEmpty()
         val credential = parseObject(open(row["credential_envelope"].orEmpty(), "$team:${row["id"]}", "account $label"))
             ?: throw TeamCodeReadException("account $label: its credential is not the JSON TeamCode writes.")
-        val expires = (credential["expiresAtMillis"] as? JsonPrimitive)?.longOrNull ?: 0L
+        val expires = (credential["expiresAtMillis"] as? JsonPrimitive)?.longOrNull
+        val fields = listOf(
+            row["provider"],
+            row["provider_account_id"],
+            credential.text("accessToken"),
+            credential.text("refreshToken"),
+        )
+        if (expires == null || fields.any { it.isNullOrEmpty() }) return null
+        val (provider, accountId, access, refresh) = fields
         return mapOf(
-            "provider" to row["provider"],
-            "providerAccountId" to row["provider_account_id"],
+            "provider" to provider,
+            "providerAccountId" to accountId,
             "label" to label,
             "email" to row["email"],
-            "accessToken" to credential.text("accessToken").orEmpty(),
-            "refreshToken" to credential.text("refreshToken").orEmpty(),
+            "accessToken" to access,
+            "refreshToken" to refresh,
             "expiresAt" to Instant.fromEpochMilliseconds(expires).toString(),
             "disabled" to (row["disabled"] == "1"),
         )
@@ -105,6 +149,8 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
 
     /** The registries and lists TeamCode stores. */
     companion object {
+        private const val INCOMPLETE = "no provider, account id, tokens or expiry in TeamCode: it could never sign in."
+
         /** The registry an MCP host installs a stdio server's package from, by the command TeamCode runs. */
         private val LAUNCHERS =
             mapOf("npx" to "npm", "npm" to "npm", "bunx" to "npm", "uvx" to "pypi", "pipx" to "pypi")
@@ -120,3 +166,11 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
         }
     }
 }
+
+/**
+ * The body of the import, and the rows it leaves out, each with why.
+ *
+ * @property body `TeamCodeImportRequest`.
+ * @property skipped One line per row left out.
+ */
+data class PlannedImport(val body: JsonObject, val skipped: List<String>)

@@ -2,6 +2,7 @@
 package dev.ostrom.cli.imports
 
 import dev.ostrom.cli.ExitCode
+import dev.ostrom.cli.launcher.Routes
 import dev.ostrom.cli.launcher.ServerAnswer
 import dev.ostrom.cli.launcher.ServerJson
 import dev.ostrom.cli.launcher.list
@@ -39,8 +40,9 @@ class ImportTeamCodeUseCase(
         val key = request.key?.let(TeamCodeKey::of)
             ?: throw Stop(ExitCode.USAGE, "--key-file holds no TeamCode key (32 bytes, base64).")
         val tables = database.read(request.db, request.team)
-        val map = memberMap(tables, ok(server.get(MEMBERS, token)))
-        val body = TeamCodePlan(key, request.team).request(tables, map)
+        val map = memberMap(tables, members())
+        val (body, skipped) = TeamCodePlan(key, request.team).request(tables, map)
+        skipped.forEach { say("! Left out: $it\n") }
         report("Plan (nothing imported yet):", ok(server.post("$IMPORT?dryRun=true", body, token, TIMEOUT_MILLIS)))
         if (request.apply) {
             report("Imported:", ok(server.post(IMPORT, body, token, TIMEOUT_MILLIS)))
@@ -56,16 +58,45 @@ class ImportTeamCodeUseCase(
         e.code.code
     }
 
-    /** TeamCode member id to Ostrom member id, by e-mail then login; the others are named and skipped. */
-    private fun memberMap(tables: TeamCodeTables, ostrom: JsonObject): Map<String, String> {
-        val members = ostrom.list("items").mapNotNull { it as? JsonObject }
-        val map = tables.members.mapNotNull { member ->
-            val email = member["email"]
-            val match = members.firstOrNull { email != null && it.text("email").equals(email, ignoreCase = true) }
-                ?: members.firstOrNull { it.text("login").equals(member["username"], ignoreCase = true) }
+    /** Every page of Ostrom's members (`next` is the cursor of the following one), up to [MAX_PAGES]. */
+    private suspend fun members(): List<JsonObject> {
+        val members = mutableListOf<JsonObject>()
+        var cursor: String? = null
+        var page = 0
+        do {
+            val before = cursor?.let { "?before=${Routes.encode(it)}" }.orEmpty()
+            val body = ok(server.get("$MEMBERS$before", token))
+            members += body.list("items").mapNotNull { it as? JsonObject }
+            cursor = body.text("next")?.takeIf { it.isNotEmpty() }
+            page++
+        } while (cursor != null && page < MAX_PAGES)
+        return members
+    }
+
+    /**
+     * TeamCode member id to Ostrom member id: by e-mail, or by TeamCode username against the GitHub login when TeamCode
+     * has no e-mail for them (an e-mail that matches nobody is another person, never a login that happens to match).
+     * Two TeamCode members on one Ostrom member are both left out: their secrets would go to one person. The others
+     * are named and skipped.
+     */
+    private fun memberMap(tables: TeamCodeTables, members: List<JsonObject>): Map<String, String> {
+        val found = tables.members.mapNotNull { member ->
+            val email = member["email"]?.takeIf { it.isNotEmpty() }
+            val match = if (email != null) {
+                members.firstOrNull { it.text("email").equals(email, ignoreCase = true) }
+            } else {
+                members.firstOrNull { it.text("login").equals(member["username"], ignoreCase = true) }
+            }
             match?.text("id")?.let { member["id"].orEmpty() to it }
-        }.toMap()
-        val unmatched = tables.members.filter { it["id"] !in map }.map { it["username"].orEmpty() }
+        }
+        val shared = found.groupBy({ it.second }, { it.first }).filterValues { it.size > 1 }.values.flatten().toSet()
+        val map = found.filter { it.first !in shared }.toMap()
+        if (shared.isNotEmpty()) {
+            val names = tables.members.filter { it["id"] in shared }.map { it["username"].orEmpty() }
+            say("! ${names.joinToString()} match the same Ostrom member: their assignments are skipped.\n")
+        }
+        val unmatched = tables.members.filter { it["id"] !in map && it["id"] !in shared }
+            .map { it["username"].orEmpty() }
         if (unmatched.isNotEmpty()) {
             say("! No Ostrom member for ${unmatched.joinToString()}: their assignments are skipped.\n")
         }
@@ -104,6 +135,7 @@ class ImportTeamCodeUseCase(
         private const val MEMBERS = "/api/v1/members"
         private const val IMPORT = "/api/v1/import/teamcode"
         private const val TIMEOUT_MILLIS = 120_000L
+        private const val MAX_PAGES = 20
         private const val UNAUTHORIZED = 401
         private const val FORBIDDEN = 403
         private val COUNTS = listOf("created", "updated", "unchanged", "skipped")

@@ -8,6 +8,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 
 class TeamCodePlanTest {
     private val key = assertNotNull(TeamCodeKey.of(Sealed.KEY))
@@ -17,7 +18,8 @@ class TeamCodePlanTest {
 
     @Test
     fun theRequestCarriesTheServersTheirSecretsTheAssignmentsAndTheAccounts() {
-        val request = TeamCodePlan(key, "default").request(tables, mapOf("m1" to "u-1"))
+        val (request, skipped) = TeamCodePlan(key, "default").request(tables, mapOf("m1" to "u-1"))
+        assertEquals(emptyList(), skipped)
         val expected = parseObject(
             """{"members":[{"id":"m1","username":"maya"},{"id":"m2","username":"tom"}],
             "mcpServers":[
@@ -39,42 +41,73 @@ class TeamCodePlanTest {
         assertEquals(expected, request)
     }
 
+    private fun plan(tables: TeamCodeTables) = TeamCodePlan(key, "default").request(tables, emptyMap())
+
     @Test
-    fun aStdioServerReadFromItsConfigAndAnAccountWithoutItsFields() {
-        val variant = mapOf(
+    fun aStdioServerOstromCannotInstallIsLeftOutWithItsAssignmentsAndSaid() {
+        val deno = mapOf(
             "id" to "v9", "target" to "files", "name" to "x", "binding" to "SHARED", "shared_secret" to null,
             "config" to """{"transport":"STDIO","command":"deno","args":["jsr:@x/files"],"credentialHeader":"X-K"}""",
         )
-        val account = mapOf("id" to "a2", "display_name" to "Max", "credential_envelope" to Sealed.BARE_ACCOUNT)
-        val one = TeamCodeTables(emptyList(), listOf(variant), emptyList(), emptyList(), listOf(account))
-        val request = TeamCodePlan(key, "default").request(one, emptyMap())
-        val server = request.items("mcpServers").single()
-        val stdio = parseObject("""{"launcher":null,"packageName":"jsr:@x/files","args":[],"secretEnv":{}}""")
-        assertEquals(stdio, server["stdio"])
-        assertEquals("\"X-K\"", server["credentialHeader"].toString())
-        val bare = parseObject(
-            """{"provider":null,"providerAccountId":null,"label":"Max","email":null,"accessToken":"",""" +
-                """"refreshToken":"","expiresAt":"1970-01-01T00:00:00Z","disabled":false}""",
+        val windows = mapOf(
+            "id" to "v8", "target" to "fetch", "name" to "y", "transport" to "stdio",
+            "config" to """{"command":"C:\\\\tools\\\\NPX.CMD","args":["@x/fetch","-q"]}""",
         )
-        assertEquals(bare, request.items("accounts").single())
-        val late = mapOf("id" to "a3", "display_name" to "Max", "credential_envelope" to Sealed.LATE_ACCOUNT)
-        val lateRequest = TeamCodePlan(key, "default").request(one.copy(accounts = listOf(late)), emptyMap())
-        assertEquals("\"1970-01-01T00:00:00Z\"", lateRequest.items("accounts").single()["expiresAt"].toString())
+        val assignments =
+            listOf(mapOf("member_id" to "m1", "variant_id" to "v9"), mapOf("member_id" to "m1", "variant_id" to "v8"))
+        val tables = TeamCodeTables(emptyList(), listOf(deno, windows), assignments, emptyList(), emptyList())
+        val (body, skipped) = plan(tables)
+        val server = body.items("mcpServers").single()
+        assertEquals("\"v8\"", server["id"].toString())
+        val stdio = parseObject("""{"launcher":"npm","packageName":"@x/fetch","args":["-q"],"secretEnv":{}}""")
+        assertEquals(stdio, server["stdio"], "a Windows path to npx.cmd is npx")
+        assertEquals(listOf("\"v8\""), body.items("assignments").map { it["serverId"].toString() })
+        assertEquals(
+            listOf(
+                "MCP server files (x): its command (deno) is not one Ostrom installs a package with (npx, npm, bunx, " +
+                    "uvx, pipx), or it names no package.",
+            ),
+            skipped,
+        )
+    }
+
+    @Test
+    fun anAccountWithoutItsProviderTokensOrExpiryIsLeftOutAndSaid() {
+        val full = mapOf(
+            "id" to "a1", "display_name" to "Max", "provider" to "anthropic", "provider_account_id" to "acc-1",
+            "credential_envelope" to Sealed.ACCOUNT,
+        )
+        val accounts = listOf(
+            full + ("provider" to null),
+            full + ("provider_account_id" to ""),
+            mapOf("id" to "a2", "display_name" to "Bare", "credential_envelope" to Sealed.BARE_ACCOUNT),
+            mapOf("id" to "a3", "display_name" to "Late", "credential_envelope" to Sealed.LATE_ACCOUNT),
+        )
+        val (body, skipped) = plan(TeamCodeTables(emptyList(), emptyList(), emptyList(), emptyList(), accounts))
+        assertEquals(emptyList(), body.items("accounts"))
+        val why = "no provider, account id, tokens or expiry in TeamCode: it could never sign in."
+        assertEquals(listOf("Max", "Max", "Bare", "Late").map { "account $it: $why" }, skipped)
     }
 
     @Test
     fun argumentsAndToolsThatAreNotAListOfStringsAreNone() {
-        val stdio = """{"launcher":null,"packageName":null,"args":[],"secretEnv":{}}"""
+        // no package to install: no arguments, arguments that are not a list, a list that is not of strings
         val variants = listOf(
-            mapOf("id" to "a", "config" to """{"transport":"stdio"}"""),
-            mapOf("id" to "b", "config" to "{}", "transport" to "stdio", "args" to "[unclosed"),
-            mapOf("id" to "c", "config" to "not json", "transport" to "stdio", "args" to "\"one\""),
+            mapOf("id" to "a", "config" to """{"transport":"stdio","command":"npx"}"""),
+            mapOf("id" to "b", "config" to "{}", "transport" to "stdio", "command" to "npx", "args" to "[unclosed"),
+            mapOf("id" to "c", "config" to "not json", "transport" to "stdio", "command" to "uvx", "args" to "[1]"),
+            mapOf("id" to "d", "config" to "{}"),
         )
-        val policies = listOf(mapOf("variant_id" to "a", "mode" to "allow", "tools" to """["x",1,{"y":2}]"""))
-        val tables = TeamCodeTables(emptyList(), variants, emptyList(), policies, emptyList())
-        val servers = TeamCodePlan(key, "default").request(tables, emptyMap()).items("mcpServers")
-        assertEquals(List(3) { parseObject(stdio) }, servers.map { it["stdio"] })
-        assertEquals("[\"x\"]", servers.first()["tools"].toString(), "only the strings")
+        val policies = listOf(mapOf("variant_id" to "d", "mode" to "allow", "tools" to """["x",1,{"y":2}]"""))
+        val (body, skipped) = plan(TeamCodeTables(emptyList(), variants, emptyList(), policies, emptyList()))
+        val servers = body.items("mcpServers")
+        assertEquals(listOf("\"d\""), servers.map { it["id"].toString() })
+        assertEquals("[\"x\"]", servers.single()["tools"].toString(), "only the strings")
+        assertEquals(3, skipped.size)
+        assertTrue(skipped.first().contains("its command (npx)"), skipped.first())
+        val none = mapOf("id" to "e", "target" to "t", "name" to "n", "config" to """{"transport":"stdio"}""")
+        val nothing = plan(TeamCodeTables(emptyList(), listOf(none), emptyList(), emptyList(), emptyList())).skipped
+        assertTrue(nothing.single().contains("its command (none)"), nothing.single())
     }
 
     @Test

@@ -64,12 +64,38 @@ class ImportTeamCodeUseCaseTest {
     }
 
     @Test
-    fun aMemberIsMatchedByLoginWhenTheEmailsDiffer() = runTest {
-        val byLogin = """{"items":[{"id":"u-2","login":"TOM"},{"id":"u-1","login":"maya"}]}"""
-        replies["GET /api/v1/members"] = ServerReply(200, byLogin)
+    fun aMemberWithoutAnEmailIsMatchedByLoginOnEveryPageOfOstromsMembers() = runTest {
+        // maya has an e-mail that matches nobody: another person, never the login `maya` that happens to exist
+        replies["GET /api/v1/members"] = ServerReply(200, """{"items":[{"id":"u-9","login":"maya"}],"next":"p/2"}""")
+        replies["GET /api/v1/members?before=p%2F2"] = ServerReply(200, """{"items":[{"id":"u-2","login":"TOM"}]}""")
         assertEquals(0, import())
-        assertEquals(parseObject("""{"m1":"u-1","m2":"u-2"}"""), parseObject(calls.last().body)?.child("memberMap"))
-        assertTrue("No Ostrom member" !in said.toString())
+        assertEquals(parseObject("""{"m2":"u-2"}"""), parseObject(calls.last().body)?.child("memberMap"))
+        assertTrue(said.startsWith("! No Ostrom member for maya: their assignments are skipped.\n"), said.toString())
+        // a server that always has a next page is read 20 pages deep, never forever
+        calls.clear()
+        replies["GET /api/v1/members?before=p%2F2"] = ServerReply(200, """{"items":[],"next":"p/2"}""")
+        assertEquals(0, import())
+        assertEquals(20, calls.count { it.path.startsWith("/api/v1/members") })
+    }
+
+    @Test
+    fun twoMembersOnOneOstromMemberAndARowLeftOutAreSaid() = runTest {
+        val tables = CaptureResult.Exited(
+            0,
+            batch("members", listOf("id", "username", "email"), listOf("m1", "maya", ""), listOf("m2", "tom", null)) +
+                batch("accounts", ACCOUNT_COLUMNS, listOf("a1", null, "acc-1", "Team Max", Sealed.ACCOUNT, null, "0")),
+        )
+        val same = """{"items":[{"id":"u-1","login":"maya"},{"id":"u-1","login":"tom"}]}"""
+        replies["GET /api/v1/members"] = ServerReply(200, same)
+        assertEquals(0, import(mysql = FakeMysql(FULL_SCHEMA, tables)))
+        assertEquals(parseObject("{}"), parseObject(calls.last().body)?.child("memberMap"), "no secret to one person")
+        val lines = said.lines()
+        assertEquals("! maya, tom match the same Ostrom member: their assignments are skipped.", lines[0])
+        assertEquals(
+            "! Left out: account Team Max: no provider, account id, tokens or expiry in TeamCode: it could never " +
+                "sign in.",
+            lines[1],
+        )
     }
 
     @Test

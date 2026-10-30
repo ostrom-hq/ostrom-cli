@@ -39,15 +39,17 @@ internal class ImportTeamCodeCommand(private val dependencies: CliDependencies) 
     override fun run() {
         val directory = dependencies.directory()
         val serverUrl = dependencies.serverOf(server, directory)
-        val credentials = dependencies.credentials(directory).load(serverUrl) ?: throw PrintMessage(
-            "ostrom: not signed in to $serverUrl: set OSTROM_TOKEN to an admin's console token (import:write)",
+        // Ostrom refuses the device token of `ostrom login` for import:write: only a console token imports
+        val token = dependencies.environment["OSTROM_TOKEN"]?.takeIf { it.isNotEmpty() } ?: throw PrintMessage(
+            "ostrom: the import needs an owner's or admin's console token (scope import:write) in OSTROM_TOKEN; " +
+                "the device token of ostrom login cannot import",
             ExitCode.SIGN_IN_REQUIRED.code,
             printError = true,
         )
         val import = ImportTeamCodeUseCase(
             TeamCodeDatabase(dependencies.capture),
             ServerJson(ApiServerTransport(dependencies.api(serverUrl))),
-            credentials.token,
+            token,
         ) { dependencies.console.out(it) }
         val request = ImportTeamCodeRequest(db, dependencies.files.read(keyFile), team, yes)
         throw ProgramResult(runBlocking { import(request) })

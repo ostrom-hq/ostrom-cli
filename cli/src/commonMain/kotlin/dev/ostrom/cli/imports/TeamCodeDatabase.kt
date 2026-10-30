@@ -119,8 +119,9 @@ data class MysqlUrl(val user: String, val host: String, val port: Int, val datab
     companion object {
         /** @throws TeamCodeReadException When [url] is not `mysql://user@host[:port]/database`, or holds a password. */
         fun parse(url: String): MysqlUrl {
+            // the URL is never echoed: a password written in it, which the pattern cannot read, would be printed
             val match = URL.matchEntire(url) ?: throw TeamCodeReadException(
-                "--db must be mysql://user@host[:port]/database (got \"${url.take(SHOWN)}\").",
+                "--db must be mysql://user@host[:port]/database, its password in MYSQL_PWD.",
             )
             val group = match.groupValues
             if (group[PASSWORD].isNotEmpty()) {
@@ -137,6 +138,5 @@ data class MysqlUrl(val user: String, val host: String, val port: Int, val datab
         private const val PORT = 4
         private const val DATABASE = 5
         private const val DEFAULT_PORT = "3306"
-        private const val SHOWN = 80
     }
 }
