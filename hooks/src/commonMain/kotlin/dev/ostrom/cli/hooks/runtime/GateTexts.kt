@@ -1,0 +1,80 @@
+// SPDX-License-Identifier: Apache-2.0
+package dev.ostrom.cli.hooks.runtime
+
+import dev.ostrom.cli.hooks.gate.Gate
+import dev.ostrom.cli.hooks.gate.RealRepository
+
+/** What the gate tells the agent, word for word the prototype's (`ostrom-gate.mjs`, `hook_gate`). */
+@Suppress("TooManyFunctions") // One text per outcome of a gate, kept together so that they read alike.
+object GateTexts {
+    private val Gate.name: String get() = label ?: "gate"
+
+    /** A guarded action run in another repository than the session's. */
+    fun foreign(context: HookContext, mine: RealRepository, real: RealRepository): String {
+        val launchTop = context.launchTop
+        val session = context.repository
+        val mineLabel = if (mine.origin.isNotEmpty() && mine.origin != session) {
+            "$session (${mine.origin}, $launchTop)"
+        } else {
+            "$session ($launchTop)"
+        }
+        return "Ostrom: denied. This session was opened for the repository $mineLabel, but this command runs in the " +
+            "repository ${real.label} (${real.top}). The session's checks and gates do not cover ${real.label}, so " +
+            "the action was not run. Work only in $launchTop; do not run it elsewhere."
+    }
+
+    /** A push whose landing is unknown while a gate on main is enforced (audit A9). */
+    fun unknownLanding(action: String, gate: Gate, reason: String): String =
+        "Ostrom: denied. Ostrom cannot tell which branches this push lands on ($reason), and " +
+            "\"$action\" needs a yes from ${gate.approversPhrase} (gate \"${gate.name}\"). The action was not run. " +
+            "Run `git push <remote> <branch>` as its own command."
+
+    /** A guarded push that sends git elsewhere (audit A6). */
+    fun redirected(action: String, gate: Gate, how: String): String =
+        "Ostrom: denied. \"$action\" needs a yes from ${gate.approversPhrase} (gate \"${gate.name}\"), and this " +
+            "command sends git elsewhere ($how). Run a plain `git push <remote> <branch>` as its own command."
+
+    /** An enforced push whose commits Ostrom cannot read. */
+    fun unreadable(action: String, gate: Gate, reason: String): String =
+        "Ostrom: denied. \"$action\" needs a yes from ${gate.approversPhrase} (gate \"${gate.name}\"), and $reason"
+
+    /** The session is closed and could not be reopened. */
+    fun closed(action: String, message: String): String =
+        "Ostrom: denied. \"$action\" needs a yes, and this session is closed on Ostrom's side and could not " +
+            "be reopened ($message). The action was not run. Tell the user; a new session (`ostrom <agent>`) asks " +
+            "again."
+
+    /** Ostrom is unreachable and the organisation fails open. */
+    fun letThrough(action: String, message: String): String =
+        "Ostrom unreachable ($message): \"$action\" let through (the organisation's fail mode is open)."
+
+    /** Ostrom is unreachable and the organisation fails closed. */
+    fun unreachable(action: String, gate: Gate, message: String): String =
+        "Ostrom: denied. \"$action\" needs a yes from ${gate.approversPhrase} (${gate.name}), and Ostrom is " +
+            "unreachable ($message). The action was not run. Do not work around this gate; tell the user."
+
+    /** Someone said yes. */
+    fun approved(answer: GateAnswer): String =
+        "Ostrom: ${answer.by} said yes to \"${answer.label}\" (gate \"${answer.gateLabel}\", receipt " +
+            "${answer.receiptId ?: "pending"})."
+
+    /** The gate is only proposed. */
+    fun shadow(answer: GateAnswer): String =
+        "Ostrom: \"${answer.label}\" falls under the proposed gate \"${answer.gateLabel}\" (${answer.who}). Not " +
+            "decided yet, so it is only logged."
+
+    /** Someone said no. */
+    fun rejected(answer: GateAnswer): String =
+        "Ostrom: ${answer.by} said no to \"${answer.label}\" (gate \"${answer.gateLabel}\", receipt " +
+            "${answer.receiptId ?: "-"}). The action was not run. Do not retry it or work around it; report the " +
+            "refusal to the user."
+
+    /**
+     * No answer yet. The instruction comes first: Grok shows the model only the first ~200 characters of a refusal
+     * (measured 28/10).
+     */
+    fun waiting(answer: GateAnswer): String =
+        "Ostrom: waiting for a yes. Run `ostrom wait ${answer.id}` as its own command, then the exact same command " +
+            "again once it says approved. Not run yet: \"${answer.label}\" needs a yes from ${answer.who} (gate " +
+            "\"${answer.gateLabel}\"); the request is in the Ostrom console. Do not work around it."
+}
