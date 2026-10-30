@@ -593,6 +593,23 @@ class OstromCliTest {
     }
 
     @Test
+    fun aServerIsReachedOverHttpsOrOnThisMachineOnly() {
+        // 09:45: the one-time code and the token never travel in clear
+        val home = mapOf("HOME" to "/home/maya")
+        for (url in listOf("http://ostrom.example", "http://localhost.evil.example", "ftp://ostrom.example")) {
+            assertEquals(64, cli(environment = home, api = serverOf(deviceFlow)).run(arrayOf("login", "--server", url)))
+            assertTrue(console.err.contains("ostrom: $url is not an HTTPS address"), console.err.toString())
+        }
+        val clear = home + ("OSTROM_URL" to "http://ostrom.example")
+        assertEquals(64, cli(environment = clear).run(arrayOf("logout")))
+        assertTrue(requests.isEmpty(), "nothing was sent")
+        for (url in listOf("http://localhost:8080/", "http://127.0.0.1:4000", "http://[::1]:9", "http://localhost")) {
+            assertEquals(0, cli(environment = home, api = serverOf(deviceFlow)).run(arrayOf("login", "--server", url)))
+            assertEquals(url.trimEnd('/'), requests.last().first)
+        }
+    }
+
+    @Test
     fun theSignInPageMustBeOnTheGitHubConfigured() {
         // S2-35: OSTROM_GITHUB_WEB_URL names the GitHub of a GitHub Enterprise; github.com's page is then refused
         val enterprise = withServer + ("OSTROM_GITHUB_WEB_URL" to "https://ghe.acme.example/")

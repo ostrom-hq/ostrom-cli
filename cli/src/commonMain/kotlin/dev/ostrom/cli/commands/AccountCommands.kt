@@ -23,10 +23,24 @@ import dev.ostrom.cli.platform.FileWriteException
 import kotlinx.coroutines.runBlocking
 import okio.IOException
 
-/** The server of an account command: `--server`, else `OSTROM_URL`, else the one of the last login, else Ostrom's. */
-private fun CliDependencies.serverOf(option: String?, directory: String): String =
-    (option ?: environment["OSTROM_URL"] ?: ConfigStoreImpl(files, configFile(directory)).get(ConfigKey.SERVER)
-        ?: DEFAULT_SERVER).trimEnd('/')
+/**
+ * The server of an account command: `--server`, else `OSTROM_URL`, else the one of the last login, else Ostrom's.
+ * Only over HTTPS, or `http://` to this machine (a server run for development): the one-time code and the token
+ * never travel in clear (exit 64 otherwise).
+ */
+private fun CliDependencies.serverOf(option: String?, directory: String): String {
+    val saved = { ConfigStoreImpl(files, configFile(directory)).get(ConfigKey.SERVER) }
+    val url = (option ?: environment["OSTROM_URL"] ?: saved() ?: DEFAULT_SERVER).trimEnd('/')
+    if (!url.startsWith("https://") && LOCAL_HTTP.matchEntire(url) == null) {
+        val message = "ostrom: $url is not an HTTPS address: the sign-in code and the token would travel in clear. " +
+            "Use https:// (http:// only for localhost, 127.0.0.1 or [::1])"
+        throw PrintMessage(message, ExitCode.USAGE.code, true)
+    }
+    return url
+}
+
+/** `http://` to this machine, with or without a port and a path. */
+private val LOCAL_HTTP = Regex("""http://(localhost|127\.0\.0\.1|\[::1])(:\d{1,5})?(/.*)?""")
 
 /**
  * Refuses an account command inside an agent's session: the agent would sign the developer out, or point the device
