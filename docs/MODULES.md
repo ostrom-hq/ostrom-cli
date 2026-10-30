@@ -54,8 +54,8 @@ which never enters the agent's environment (audit A12/A13).
   `/api/v1/inference/…`, 4 MiB, the response streamed, only the provider headers forwarded).
 - Ostrom unreachable or too slow: 502 with `{"error":{"type":"unreachable","message":"Ostrom is unreachable (…)"}}`,
   and one line for the user per outage through the starter's `report`; Ktor's own logger is silenced.
-- `hooks` never depends on `relay`: it speaks plain HTTP to the relay's loopback URL (`OSTROM_RELAY_URL`,
-  `OSTROM_RELAY_TOKEN`).
+- `hooks` never depends on `relay`: it speaks plain HTTP to the loopback URL and capability the launcher hands it
+  (how they reach the hook is the launch flow's choice, not this module's).
 
 ## Exit codes
 
