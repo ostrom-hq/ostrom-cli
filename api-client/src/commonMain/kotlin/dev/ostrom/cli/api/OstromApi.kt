@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.api
 
+import dev.ostrom.core.api.OstromJson
+import dev.ostrom.core.api.models.ApiError
+import dev.ostrom.core.api.models.ErrorDetail
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.timeout
@@ -37,6 +40,17 @@ data class ServerRequest(
 )
 
 /**
+ * The refusal this response carries, the contract's `ApiError` body (`{"error":{"type","message"}}`), or null when the
+ * body is not one (a proxy's HTML page, an empty 204).
+ */
+fun ServerResponse.apiError(): ErrorDetail? = try {
+    OstromJson.decodeFromString(ApiError.serializer(), body).error
+} catch (_: IllegalArgumentException) {
+    // A body that is not an ApiError is a SerializationException, which is an IllegalArgumentException.
+    null
+}
+
+/**
  * The server could not be reached (exit code 69).
  *
  * @property reason Why, in the words of the network layer.
@@ -45,8 +59,11 @@ class ServerUnreachableException(val url: String, cause: Throwable) : Exception(
     val reason: String = cause.message ?: cause.toString()
 }
 
-/** The Ostrom server, over HTTPS. Typed endpoints come with the contract of ostrom-core. */
-interface OstromApi {
+/**
+ * The Ostrom server, over HTTPS. Typed endpoints come with the contract of ostrom-core. Closing it releases the HTTP
+ * engine and its thread: use it with `use { }`, or close it once the command is done.
+ */
+interface OstromApi : AutoCloseable {
     /**
      * Fetches [path] of the server.
      *
@@ -66,6 +83,9 @@ interface OstromApi {
      * @throws ServerUnreachableException When no response came (DNS, TLS, connection, timeout).
      */
     suspend fun send(request: ServerRequest): ServerResponse
+
+    /** Releases the connection; a client without one has nothing to do. */
+    override fun close() = Unit
 }
 
 /**
@@ -106,6 +126,8 @@ class OstromApiImpl(
             throw ServerUnreachableException(url, e)
         }
     }
+
+    override fun close() = client.close()
 }
 
 private const val CONNECT_TIMEOUT_MILLIS = 5_000L

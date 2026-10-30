@@ -32,6 +32,7 @@ class DoctorCommand(private val dependencies: CliDependencies) : CliktCommand(na
             configDirectory = dependencies.environment.configDirectory,
             config = dependencies.config,
             api = dependencies.api,
+            secrets = dependencies.secrets,
         )
         val checks = runBlocking { doctor() }
         val problems = checks.count { it.status == CheckStatus.PROBLEM }
