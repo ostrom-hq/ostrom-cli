@@ -1,21 +1,19 @@
 name: Release checks
 
-# Everything the release pipeline relies on, tested on every pull request: the installers, the manifest generators,
-# the workflows' syntax and the runner image.
+# Everything the release pipeline relies on: the installers, the manifest generators, the workflows' syntax and the
+# runner image. On main and on demand, not on pull requests (org CI rules, JOURNAL 03:10: one `ci` job per PR).
 
 on:
-  pull_request:
   push:
     branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
-  packages: read
 
 concurrency:
   group: release-checks-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   installers:
@@ -23,7 +21,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install shellcheck and actionlint
         run: |
           sudo apt-get update && sudo apt-get install -y shellcheck jq
@@ -44,7 +42,7 @@ jobs:
     timeout-minutes: 10
     if: github.event_name != 'pull_request'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: brew install jq
       - run: sh scripts/release/tests/run.sh && sh install/tests/install.test.sh
 
@@ -53,7 +51,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Pester
         shell: pwsh
         run: |
@@ -69,14 +67,15 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: '21'
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with: { cache-provider: basic }
       - name: Cache the Kotlin/Native toolchain
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.konan
           key: konan-linux-${{ hashFiles('gradle/libs.versions.toml') }}

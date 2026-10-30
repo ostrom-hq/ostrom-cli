@@ -11,9 +11,9 @@ assert_eq "valid JSON" "1.2.3" "$(printf '%s' "$out" | jq -r .version)"
 assert_eq "date" "2026-10-30T10:00:00Z" "$(printf '%s' "$out" | jq -r .date)"
 assert_eq "four targets" "linux-arm64,linux-x64,macos-arm64,windows-x64" \
   "$(printf '%s' "$out" | jq -r '.assets | keys | join(",")')"
-assert_eq "url layout" "$base/download/v1.2.3/ostrom-1.2.3-linux-x64.tar.gz" \
+assert_eq "url layout" "$base/download/1.2.3/ostrom-1.2.3-linux-x64.tar.gz" \
   "$(printf '%s' "$out" | jq -r '.assets["linux-x64"].url')"
-assert_eq "windows is a zip" "$base/download/v1.2.3/ostrom-1.2.3-windows-x64.zip" \
+assert_eq "windows is a zip" "$base/download/1.2.3/ostrom-1.2.3-windows-x64.zip" \
   "$(printf '%s' "$out" | jq -r '.assets["windows-x64"].url')"
 assert_eq "sha256 from the file" "$(sha256_file "$tmp/dist/ostrom-1.2.3-macos-arm64.tar.gz")" \
   "$(printf '%s' "$out" | jq -r '.assets["macos-arm64"].sha256')"

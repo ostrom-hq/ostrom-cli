@@ -24,7 +24,7 @@ archive_of() {
 }
 
 # asset_url <base> <version> <file>
-asset_url() { printf '%s/download/v%s/%s\n' "$1" "$2" "$(basename "$3")"; }
+asset_url() { printf '%s/download/%s/%s\n' "$1" "$2" "$(basename "$3")"; }
 
 # shellcheck disable=SC2034  # used by the scripts that source this file
 TARGETS="linux-x64 linux-arm64 macos-arm64 windows-x64"

@@ -20,7 +20,7 @@ esac
 site="$tmp/site"
 mk_release() { # <version> <target>
   v="$1"; t="$2"
-  d="$site/download/v$v"; mkdir -p "$d" "$tmp/pkg-$v"
+  d="$site/download/$v"; mkdir -p "$d" "$tmp/pkg-$v"
   printf '#!/bin/sh\necho "ostrom %s"\n' "$v" > "$tmp/pkg-$v/ostrom"; chmod +x "$tmp/pkg-$v/ostrom"
   printf 'Apache\n' > "$tmp/pkg-$v/LICENSE"
   tar -czf "$d/ostrom-$v-$t.tar.gz" -C "$tmp/pkg-$v" ostrom LICENSE
@@ -33,13 +33,13 @@ mkdir -p "$site/latest/download"
 printf '{"version":"1.3.0","date":"2026-10-30T10:00:00Z","assets":{}}\n' > "$site/latest/download/latest.json"
 # a release whose checksum file lies
 mk_release 2.0.0 "$host"
-printf '%s  ostrom-2.0.0-%s.tar.gz\n' "0000000000000000000000000000000000000000000000000000000000000000" "$host" > "$site/download/v2.0.0/SHA256SUMS"
+printf '%s  ostrom-2.0.0-%s.tar.gz\n' "0000000000000000000000000000000000000000000000000000000000000000" "$host" > "$site/download/2.0.0/SHA256SUMS"
 # a release whose checksum file has no line for our archive
 mk_release 2.1.0 "$host"
-printf '%s  something-else.tar.gz\n' "0000000000000000000000000000000000000000000000000000000000000000" > "$site/download/v2.1.0/SHA256SUMS"
+printf '%s  something-else.tar.gz\n' "0000000000000000000000000000000000000000000000000000000000000000" > "$site/download/2.1.0/SHA256SUMS"
 # a release whose archive was swapped after the checksum was published
 mk_release 2.2.0 "$host"
-printf 'tampered\n' >> "$site/download/v2.2.0/ostrom-2.2.0-$host.tar.gz"
+printf 'tampered\n' >> "$site/download/2.2.0/ostrom-2.2.0-$host.tar.gz"
 
 ( cd "$site" && python3 -u -m http.server 0 --bind 127.0.0.1 > "$tmp/server.log" 2>&1 & echo $! > "$tmp/server.pid" )
 server_pid=$(cat "$tmp/server.pid")

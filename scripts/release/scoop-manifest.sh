@@ -25,7 +25,7 @@ cat <<JSON
   "autoupdate": {
     "architecture": {
       "64bit": {
-        "url": "https://github.com/ostrom-hq/ostrom-cli/releases/download/v\$version/ostrom-\$version-windows-x64.zip"
+        "url": "https://github.com/ostrom-hq/ostrom-cli/releases/download/\$version/ostrom-\$version-windows-x64.zip"
       }
     }
   }

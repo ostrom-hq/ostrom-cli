@@ -5,7 +5,7 @@ How the `ostrom` CLI is released, what is signed, and how to check it.
 ## Cutting a release
 
 1. Make sure `main` is green (`CI` and `Release checks`).
-2. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z` (from `main`).
+2. Tag and push: `git tag X.Y.Z && git push origin X.Y.Z` (bare semver, no `v`, CONVENTIONS section 12) (from `main`).
 3. The `Release` workflow builds the four targets (linuxX64, linuxArm64, mingwX64 on one Ubuntu job, macosArm64 on one
    macOS job, the only expensive one), packs, signs, builds the runner image, and creates the GitHub Release.
 
@@ -18,7 +18,7 @@ image push, no tap push. The packed and signed files are in the `release-dist` a
 **Draft or public.** While the repository is private the release is created as a **draft** (only the team sees it).
 At the go: make the repositories public, set the repository variable `RELEASE_DRAFT` to `false`
 (`gh variable set RELEASE_DRAFT --body false -R ostrom-hq/ostrom-cli`), and publish the existing draft
-(`gh release edit vX.Y.Z --draft=false`) or cut the next tag. With `RELEASE_DRAFT=false` the next release is public
+(`gh release edit X.Y.Z --draft=false`) or cut the next tag. With `RELEASE_DRAFT=false` the next release is public
 at once and the Homebrew tap and Scoop bucket are updated (`taps` job). The packages under `ghcr.io/ostrom-hq` are
 made public in the organisation's package settings.
 
@@ -75,7 +75,7 @@ newest non-draft, non-pre-release one):
   "version": "1.0.0",
   "date": "2026-10-30T10:00:00Z",
   "assets": {
-    "linux-x64":   { "url": "https://github.com/ostrom-hq/ostrom-cli/releases/download/v1.0.0/ostrom-1.0.0-linux-x64.tar.gz",   "sha256": "<hex>", "size": 1234567 },
+    "linux-x64":   { "url": "https://github.com/ostrom-hq/ostrom-cli/releases/download/1.0.0/ostrom-1.0.0-linux-x64.tar.gz",   "sha256": "<hex>", "size": 1234567 },
     "linux-arm64": { "url": "...", "sha256": "<hex>", "size": 0 },
     "macos-arm64": { "url": "...", "sha256": "<hex>", "size": 0 },
     "windows-x64": { "url": "https://.../ostrom-1.0.0-windows-x64.zip", "sha256": "<hex>", "size": 0 }

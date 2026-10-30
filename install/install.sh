@@ -69,7 +69,7 @@ case "$version" in
 esac
 
 archive="ostrom-$version-$target.tar.gz"
-rel="$BASE/download/v$version"
+rel="$BASE/download/$version"
 
 say "Installing Ostrom $version ($target)..."
 fetch "$rel/SHA256SUMS" "$work/SHA256SUMS" || fail "cannot download SHA256SUMS for $version ($rel)"

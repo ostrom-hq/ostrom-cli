@@ -42,7 +42,7 @@ function Install-Ostrom {
     if ($version -notmatch '^[0-9A-Za-z.+_-]+$') { throw "ostrom install: invalid version: $version" }
 
     $archive = "ostrom-$version-windows-x64.zip"
-    $rel = "$base/download/v$version"
+    $rel = "$base/download/$version"
     Write-Host "Installing Ostrom $version (windows-x64)..."
     Invoke-WebRequest -Uri "$rel/SHA256SUMS" -OutFile (Join-Path $work 'SHA256SUMS') -UseBasicParsing
     Invoke-WebRequest -Uri "$rel/$archive" -OutFile (Join-Path $work $archive) -UseBasicParsing

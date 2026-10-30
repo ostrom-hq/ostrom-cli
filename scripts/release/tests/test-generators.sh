@@ -12,7 +12,7 @@ brew=$(sh "$rel/brew-formula.sh" 1.2.3 "$base" "$tmp/dist")
 assert_contains "brew: class" "$brew" 'class Ostrom < Formula'
 assert_contains "brew: license" "$brew" 'license "Apache-2.0"'
 assert_contains "brew: version" "$brew" 'version "1.2.3"'
-assert_contains "brew: macOS arm url" "$brew" "url \"$base/download/v1.2.3/ostrom-1.2.3-macos-arm64.tar.gz\""
+assert_contains "brew: macOS arm url" "$brew" "url \"$base/download/1.2.3/ostrom-1.2.3-macos-arm64.tar.gz\""
 assert_contains "brew: macOS arm sha" "$brew" "sha256 \"$(sum macos-arm64.tar.gz)\""
 assert_contains "brew: linux x64 sha" "$brew" "sha256 \"$(sum linux-x64.tar.gz)\""
 assert_contains "brew: linux arm sha" "$brew" "sha256 \"$(sum linux-arm64.tar.gz)\""
@@ -23,7 +23,7 @@ assert_fails "brew: usage" sh "$rel/brew-formula.sh"
 # Scoop
 scoop=$(sh "$rel/scoop-manifest.sh" 1.2.3 "$base" "$tmp/dist")
 assert_eq "scoop: valid JSON, version" "1.2.3" "$(printf '%s' "$scoop" | jq -r .version)"
-assert_eq "scoop: url" "$base/download/v1.2.3/ostrom-1.2.3-windows-x64.zip" \
+assert_eq "scoop: url" "$base/download/1.2.3/ostrom-1.2.3-windows-x64.zip" \
   "$(printf '%s' "$scoop" | jq -r '.architecture["64bit"].url')"
 assert_eq "scoop: hash" "$(sum windows-x64.zip)" "$(printf '%s' "$scoop" | jq -r '.architecture["64bit"].hash')"
 assert_eq "scoop: bin" "ostrom.exe" "$(printf '%s' "$scoop" | jq -r .bin)"
@@ -43,7 +43,7 @@ i=$(cat "$tmp/winget/OstromHQ.Ostrom.installer.yaml")
 assert_contains "winget: installer type" "$i" 'ManifestType: installer'
 assert_contains "winget: portable in zip" "$i" 'NestedInstallerType: portable'
 assert_contains "winget: nested file" "$i" 'RelativeFilePath: ostrom.exe'
-assert_contains "winget: url" "$i" "InstallerUrl: $base/download/v1.2.3/ostrom-1.2.3-windows-x64.zip"
+assert_contains "winget: url" "$i" "InstallerUrl: $base/download/1.2.3/ostrom-1.2.3-windows-x64.zip"
 upper=$(sum windows-x64.zip | tr 'a-f' 'A-F')
 assert_contains "winget: uppercase sha" "$i" "InstallerSha256: $upper"
 l=$(cat "$tmp/winget/OstromHQ.Ostrom.locale.en-US.yaml")
