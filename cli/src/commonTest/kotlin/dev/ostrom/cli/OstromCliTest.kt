@@ -2,6 +2,9 @@
 package dev.ostrom.cli
 
 import com.github.ajalt.clikt.core.Abort
+import com.github.ajalt.clikt.core.PrintHelpMessage
+import com.github.ajalt.clikt.core.ProgramResult
+import com.github.ajalt.clikt.core.UsageError
 import dev.ostrom.cli.api.OstromApi
 import dev.ostrom.cli.api.ServerRequest
 import dev.ostrom.cli.api.ServerResponse
@@ -24,14 +27,15 @@ import dev.ostrom.cli.platform.ExecutableFinder
 import dev.ostrom.cli.platform.FileStoreImpl
 import dev.ostrom.cli.platform.OperatingSystem
 import dev.ostrom.cli.platform.StandardInput
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertTrue
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import okio.Path.Companion.toPath
 import okio.fakefilesystem.FakeFileSystem
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class OstromCliTest {
     private class FakeConsole : Console {
@@ -58,6 +62,7 @@ class OstromCliTest {
     private val console = FakeConsole()
     private val fileSystem = FakeFileSystem()
     private val hookCalls = mutableListOf<List<String>>()
+    private val statistics = mutableListOf<String>()
     private val withServer = mapOf("HOME" to "/home/maya", "OSTROM_URL" to "https://ostrom.example")
     private val launches = mutableListOf<Pair<LaunchRequest, LaunchSite>>()
 
@@ -78,6 +83,7 @@ class OstromCliTest {
         api: (String) -> OstromApi = { error("no server in this test") },
         executable: String? = "/opt/ostrom",
         gateWait: () -> GateWait = { error("no gate wait in this test") },
+        postHogKey: String = "",
     ) = OstromCli(
         CliDependencies(
             console = console,
@@ -100,6 +106,8 @@ class OstromCliTest {
             temporaryDirectory = "/tmp",
             agents = AgentRunner { request, site -> 7.also { launches += request to site } },
             gateWait = gateWait,
+            postHogKey = postHogKey,
+            sendStatistics = { _, body -> statistics += body },
         ),
     )
 
@@ -238,7 +246,8 @@ class OstromCliTest {
         assertEquals(0, cli.run(arrayOf("config", "unset", "default_agent")))
         assertEquals(1, cli.run(arrayOf("config", "get", "default_agent")))
         assertEquals(64, cli.run(arrayOf("config", "set", "colour", "never")))
-        assertTrue(console.err.contains("Unknown key \"colour\". Keys: server, default_agent, color, editor."))
+        val keys = "server, default_agent, color, editor, telemetry, telemetry_id"
+        assertTrue(console.err.contains("Unknown key \"colour\". Keys: $keys."), console.err.toString())
     }
 
     @Test
@@ -346,6 +355,9 @@ class OstromCliTest {
         val dependencies = CliDependencies.create()
         dependencies.api("https://ostrom.example")
         dependencies.mcpServer()
+        // Nothing listens on the discard port of the loopback: the sender is built on this first send and drops the
+        // refused connection.
+        runBlocking { dependencies.sendStatistics("http://127.0.0.1:9/batch/", "{}") }
         assertTrue(dependencies.configFile("/x").endsWith("config.toml"))
         assertTrue(dependencies.workingDirectory().isNotEmpty())
         assertEquals(null, dependencies.credentials("/nowhere-ostrom").load("https://ostrom.example")?.login)
@@ -369,6 +381,97 @@ class OstromCliTest {
         assertEquals(64, cli(gateWait = wait).run(arrayOf("wait", "g1", "--timeout", "0")), "at least a second")
         assertEquals(0, cli(gateWait = wait).run(arrayOf("wait", "--help")))
         assertOut("Seconds to wait (default 110)")
+    }
+
+    @Test
+    fun telemetryIsOffByDefaultAndSaysWhatItWouldSend() {
+        assertEquals(0, cli().run(arrayOf("telemetry")))
+        assertOut("Usage statistics: off (this build has no statistics destination)")
+        assertOut("Never arguments, paths, repositories, code or your")
+        assertEquals(0, cli(postHogKey = "phc").run(arrayOf("telemetry", "status")))
+        assertOut("Usage statistics: off (the default; ostrom telemetry enable turns it on)")
+        assertTrue(statistics.isEmpty())
+    }
+
+    @Test
+    fun telemetryEnableSendsOneEventPerCommandUntilDisabled() {
+        assertEquals(0, cli(postHogKey = "phc").run(arrayOf("telemetry", "enable")))
+        assertOut("✓ Usage statistics turned on, thank you. ostrom telemetry disable stops them.\n")
+        assertEquals(0, cli(postHogKey = "phc").run(arrayOf("version")))
+        assertEquals(0, cli(postHogKey = "phc").run(arrayOf("telemetry", "disable")))
+        assertOut("✓ Usage statistics turned off; the install id is deleted.\n")
+        assertEquals(0, cli(postHogKey = "phc").run(arrayOf("version")))
+
+        // Neither telemetry command is measured: turning statistics on sends nothing in the same breath.
+        assertEquals(1, statistics.size)
+        assertTrue(statistics.single().contains("\"cli_command_run\""), statistics.toString())
+        assertTrue(statistics.single().contains("\"command\":\"version\""), statistics.single())
+    }
+
+    @Test
+    fun theMeasuredCommandIsReadFromTheParsedLineNeverFromAnOptionValue() {
+        assertEquals(0, cli(postHogKey = "phc").run(arrayOf("telemetry", "enable")))
+        val lines = listOf(
+            arrayOf<String>() to "home",
+            arrayOf("--debug", "doctor", "--help") to "doctor",
+            arrayOf("--help") to "help",
+            arrayOf("https://secret.example") to "unknown",
+            arrayOf("--bogus") to "unknown",
+            arrayOf("config", "set", "colour", "x") to "config",
+        )
+        for ((args, _) in lines) cli(postHogKey = "phc").run(args)
+
+        val commands = statistics.map { Regex("\"command\":\"([a-z]+)\"").find(it)?.groupValues?.get(1) }
+        assertEquals(lines.map { it.second }, commands)
+        assertTrue(statistics.none { it.contains("secret") })
+    }
+
+    @Test
+    fun aFailureOutsideTheParserIsNotNamed() {
+        val cli = cli()
+        assertEquals("", cli.failedCommand(ProgramResult(1)))
+        assertEquals("", cli.failedCommand(UsageError("no context")))
+        assertEquals("help", cli.failedCommand(PrintHelpMessage(null)))
+    }
+
+    @Test
+    fun theTelemetryKeysAreChangedByOstromTelemetryOnly() {
+        assertEquals(64, cli().run(arrayOf("config", "set", "telemetry", "on")))
+        assertEquals(64, cli().run(arrayOf("config", "unset", "telemetry_id")))
+        val err = console.err.toString()
+        assertTrue(err.contains("telemetry is changed with ostrom telemetry enable | disable."), err)
+        assertTrue(err.contains("telemetry_id is changed with ostrom telemetry enable | disable."), err)
+    }
+
+    @Test
+    fun aBuildWithoutDestinationHasNothingToTurnOn() {
+        assertEquals(0, cli().run(arrayOf("telemetry", "enable")))
+        assertOut("This build of ostrom has no statistics destination: there is nothing to turn on.\n")
+        assertTrue(!fileSystem.exists("/home".toPath()), "nothing is written")
+    }
+
+    @Test
+    fun telemetryHelpListsItsSubcommands() {
+        assertEquals(0, cli().run(arrayOf("telemetry", "--help")))
+        assertOut("Say whether statistics are sent, and what they contain")
+        assertOut("Send anonymous usage statistics")
+        assertOut("Stop usage statistics and delete the install id")
+    }
+
+    @Test
+    fun telemetryEnableExplainsWhenTheEnvironmentKeepsItOff() {
+        val environment = mapOf("HOME" to "/home/maya", "DO_NOT_TRACK" to "1")
+        assertEquals(0, cli(environment = environment, postHogKey = "phc").run(arrayOf("telemetry", "enable")))
+        assertOut("Usage statistics are set to on, but nothing is sent: right now they are off (OSTROM_TELEMETRY=0")
+    }
+
+    @Test
+    fun telemetryWithoutAHomeOrAWritableFileIsExit73() {
+        assertEquals(73, cli(environment = emptyMap(), postHogKey = "phc").run(arrayOf("telemetry", "enable")))
+        fileSystem.createDirectories("/home/maya".toPath())
+        fileSystem.write("/home/maya/.config".toPath()) { writeUtf8("a file where the folder should be") }
+        assertEquals(73, cli().run(arrayOf("telemetry", "disable")))
+        assertTrue(console.err.contains("Could not write"), console.err.toString())
     }
 
     @Test
