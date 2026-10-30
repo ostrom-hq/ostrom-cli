@@ -56,12 +56,13 @@ class OstromApiTest {
             assertEquals(HttpMethod.Post, request.method)
             assertEquals("https://ostrom.example/api/v1/launches?x=1", request.url.toString())
             assertEquals("Bearer t0k", request.headers[HttpHeaders.Authorization])
+            assertEquals("org-1", request.headers[ORG_HEADER], "the organisation the call acts in")
             assertEquals(ContentType.Application.Json, request.body.contentType?.withoutParameters())
             assertEquals("{\"agent\":\"codex\"}", (request.body as TextContent).text)
             respond("{}", HttpStatusCode.Created)
         }
         val api = OstromApiImpl("https://ostrom.example", "ostrom/0.1.0", HttpClient(engine) { install(HttpTimeout) })
-        val request = ServerRequest("POST", "/api/v1/launches?x=1", "{\"agent\":\"codex\"}", "t0k", 2_000)
+        val request = ServerRequest("POST", "/api/v1/launches?x=1", "{\"agent\":\"codex\"}", "t0k", 2_000, "org-1")
         assertEquals(201, api.send(request).status)
     }
 
@@ -69,6 +70,7 @@ class OstromApiTest {
     fun anAnonymousCallHasNoTokenNorBody() = runTest {
         val engine = MockEngine { request ->
             assertNull(request.headers[HttpHeaders.Authorization])
+            assertNull(request.headers[ORG_HEADER], "no organisation named: the server resolves it")
             assertEquals(0L, request.body.contentLength ?: 0L)
             respond("{}")
         }

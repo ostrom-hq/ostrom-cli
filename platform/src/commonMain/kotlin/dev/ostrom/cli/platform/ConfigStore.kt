@@ -10,6 +10,7 @@ package dev.ostrom.cli.platform
  */
 enum class ConfigKey(val key: String, val description: String, val managedBy: String? = null) {
     SERVER("server", "URL of the Ostrom server (set by ostrom login)"),
+    ORG("org", "organisation the organisation's commands act in (set by ostrom init)"),
     DEFAULT_AGENT("default_agent", "agent started by ostrom when none is named"),
     COLOR("color", "auto, always or never"),
     EDITOR("editor", "editor opened by commands that edit text"),
