@@ -3,15 +3,32 @@ package dev.ostrom.cli.commands
 
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.Context
+import com.github.ajalt.clikt.core.context
+import com.github.ajalt.clikt.core.terminal
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.mordant.rendering.AnsiLevel
+import com.github.ajalt.mordant.terminal.Terminal
 import dev.ostrom.cli.BuildInfo
 import dev.ostrom.cli.CliDependencies
+import dev.ostrom.cli.help.NO_COLOR_OPTION
+import dev.ostrom.cli.help.OstromHelpFormatter
 import dev.ostrom.cli.launcher.Agent
 
 /** `ostrom` itself: with no subcommand, the home screen (never a raw help page, spec CLI.md § 2.2). */
 class RootCommand(private val dependencies: CliDependencies) : CliktCommand(name = "ostrom") {
     override val invokeWithoutSubcommand = true
+
+    /** The colours of help and errors ([dev.ostrom.cli.help.colourLevel]), set before the line is parsed. */
+    internal var colours: AnsiLevel? = AnsiLevel.NONE
+
+    init {
+        context {
+            helpFormatter = { OstromHelpFormatter(it) }
+            // No colour means no hyperlink either; otherwise the terminal says.
+            terminal = Terminal(ansiLevel = colours, hyperlinks = if (colours == AnsiLevel.NONE) false else null)
+        }
+    }
 
     override fun help(context: Context) =
         "Run coding agents under your team's harness: approvals, receipts and rules, wherever the agent runs."
@@ -23,7 +40,7 @@ class RootCommand(private val dependencies: CliDependencies) : CliktCommand(name
     val debug by option("--debug", help = "Print codes and HTTP statuses (never a secret)").flag()
 
     /** Plain output; the NO_COLOR variable does the same. */
-    val noColor by option("--no-color", help = "No colours (also NO_COLOR)").flag()
+    val noColor by option(NO_COLOR_OPTION, help = "No colours (also NO_COLOR, or ostrom config set color never)").flag()
 
     /** The top-level subcommand the parsed line invoked; null for `ostrom` alone, or when the line did not parse. */
     var invoked: String? = null

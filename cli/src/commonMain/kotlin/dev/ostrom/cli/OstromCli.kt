@@ -33,7 +33,9 @@ import dev.ostrom.cli.commands.VerifyCommand
 import dev.ostrom.cli.commands.VersionCommand
 import dev.ostrom.cli.commands.WaitCommand
 import dev.ostrom.cli.commands.pendingCommands
+import dev.ostrom.cli.help.colourLevel
 import dev.ostrom.cli.launcher.Agent
+import dev.ostrom.cli.platform.ConfigKey
 import dev.ostrom.cli.platform.SecretStoreException
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
@@ -65,6 +67,8 @@ class OstromCli(private val dependencies: CliDependencies) {
     }
 
     private fun execute(root: RootCommand, args: Array<String>, failed: (CliktError) -> Unit): Int {
+        val setting = dependencies.config?.get(ConfigKey.COLOR)
+        root.colours = colourLevel(args.asList(), dependencies.environment, setting, dependencies.console.isInteractive)
         return try {
             root.parse(args)
             ExitCode.OK.code

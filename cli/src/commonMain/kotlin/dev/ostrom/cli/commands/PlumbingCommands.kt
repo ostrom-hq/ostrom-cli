@@ -104,6 +104,7 @@ class HelpCommand(
         when (topic) {
             null -> dependencies.console.out(rootHelp() + "\n")
             "plumbing" -> dependencies.console.out(PLUMBING)
+            "exit-codes" -> dependencies.console.out(exitCodes())
             else -> {
                 dependencies.console.err("Unknown help topic \"$topic\". Topics: plumbing, exit-codes.\n")
                 throw ProgramResult(ExitCode.USAGE.code)
