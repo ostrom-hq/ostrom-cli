@@ -144,6 +144,20 @@ class PackageTrustTest {
     }
 
     @Test
+    fun aWrongKeyPublishedByTheServerIsNeverPinned() = runTest {
+        serve()
+        // the kid of the package, with a valid Ed25519 key that is not it: once pinned, only a hand edit would undo it
+        val another = "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA" + "A".repeat(43) + "=\n-----END PUBLIC KEY-----"
+        val wrong = mapOf("kid" to PackageVector.KID, "publicKeyPem" to another)
+        server[keysRoute] = 200 to objectOf("keys" to listOf(wrong)).toString()
+        val refused = assertIs<PackageOutcome.Refused>(fetch())
+        assertEquals("the server does not publish the key ${PackageVector.KID}", refused.reason)
+        assertEquals(null, files.texts[keys], "nothing pinned")
+        server[keysRoute] = 500 to "{}"
+        assertIs<PackageOutcome.Refused>(fetch(), "keys not served")
+    }
+
+    @Test
     fun anotherServersPinIsKept() = runTest {
         serve()
         files.texts[keys] = JsonObject(mapOf("https://other.example" to JsonPrimitive("x"))).toString()

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli
 
+import dev.ostrom.cli.api.Download
 import dev.ostrom.cli.api.OstromApi
 import dev.ostrom.cli.api.ServerRequest
 import dev.ostrom.cli.api.ServerResponse
@@ -21,11 +22,16 @@ import dev.ostrom.cli.platform.Console
 import dev.ostrom.cli.platform.Environment
 import dev.ostrom.cli.platform.ExecutableFinder
 import dev.ostrom.cli.platform.FileStoreImpl
+import dev.ostrom.cli.platform.LoopbackHttp
+import dev.ostrom.cli.platform.LoopbackRequest
+import dev.ostrom.cli.platform.LoopbackResponse
 import dev.ostrom.cli.platform.OperatingSystem
 import dev.ostrom.cli.platform.ProcessCapture
 import dev.ostrom.cli.platform.SecretBackend
 import dev.ostrom.cli.platform.SecretStore
 import dev.ostrom.cli.platform.StandardInput
+import dev.ostrom.cli.update.AgentSessionsImpl
+import dev.ostrom.cli.update.SelfUpdate
 import okio.Path.Companion.toPath
 import okio.fakefilesystem.FakeFileSystem
 import kotlin.test.assertTrue
@@ -69,6 +75,11 @@ open class CliKit {
     protected val opened = mutableListOf<String>()
     protected val bridged = mutableListOf<BridgeTarget>()
     protected var browser = true
+    protected val releaseUrls = mutableListOf<String>()
+    protected val noRelay = object : LoopbackHttp {
+        override fun exchange(port: Int, request: LoopbackRequest, timeoutMillis: Int): Result<LoopbackResponse> =
+            Result.failure(IllegalStateException("nothing listens"))
+    }
     protected val requests = mutableListOf<Pair<String, ServerRequest>>()
 
     /** A server that answers `METHOD path` from [routes] (404 otherwise), recording each request with its server. */
@@ -136,6 +147,13 @@ open class CliKit {
             readLine = { typed.removeFirstOrNull() },
             openUrl = { url -> browser.also { opened += url } },
             gateWait = gateWait,
+            selfUpdate = SelfUpdate(
+                downloads = { url, _ -> Download.Missing(404).also { releaseUrls += url } },
+                fileSystem = fileSystem,
+                unpack = { _, _ -> false },
+                say = { console.out("$it\n") },
+                sessions = AgentSessionsImpl(FakeEnvironment(environment), fileSystem, "/tmp", noRelay),
+            ),
             capture = capture,
             cloud = object : CloudRunner {
                 override suspend fun start(start: CloudStart, site: CloudSite) = 5.also { clouds += start to site }
