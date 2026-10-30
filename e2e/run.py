@@ -122,9 +122,38 @@ def scenario_claude(binary, work):
         check(any(r["path"].endswith("/workflow-receipt") for r in seen), "the workflow receipt is asked for")
         check(os.path.exists(os.path.join(home, "receipts", "W-e2e.json")), "the receipt is kept for ostrom verify")
         check(os.path.exists(os.path.join(home, "server-keys.json")), "the server's key is pinned")
+        offline(binary, work, home)
         check(not any(name.startswith("ostrom-run-") for name in os.listdir(work)), "the session's files are removed")
     finally:
         server_process.kill()
+
+
+def offline(binary, work, home):
+    """`ostrom verify` and `ostrom receipts list --local` on the kept receipt, with no server at all."""
+    environment = {"PATH": os.environ["PATH"], "HOME": work, "OSTROM_HOME": home}
+
+    def ostrom(*arguments):
+        return subprocess.run([os.path.abspath(binary), *arguments], env=environment, capture_output=True, text=True,
+                              timeout=30)
+
+    verified = ostrom("verify", "W-e2e")
+    check(verified.returncode == 0 and "VERIFIED offline" in verified.stdout,
+          f"ostrom verify W-e2e holds with the pinned key (exit {verified.returncode}: "
+          f"{verified.stdout[-400:]}{verified.stderr[-200:]})")
+    report = ostrom("verify", "W-e2e", "--json")
+    check(report.returncode == 0 and json.loads(report.stdout).get("result") == "verified", "--json says verified")
+    with open(os.path.join(home, "receipts", "W-e2e.json")) as handle:
+        bundle = json.load(handle)
+    bundle["receipt"]["nodes"][1]["outcome"] = "yes from mallory"
+    tampered = os.path.join(work, "tampered.json")
+    with open(tampered, "w") as handle:
+        json.dump(bundle, handle)
+    broken = ostrom("verify", tampered)
+    check(broken.returncode == 1 and "NOT VALID" in broken.stdout,
+          f"a tampered receipt is not valid (exit {broken.returncode})")
+    kept = ostrom("receipts", "list", "--local")
+    check(kept.returncode == 0 and kept.stdout.startswith("● W-e2e  workflow"),
+          f"the receipt is listed as kept here (exit {kept.returncode}: {kept.stdout[:200]}{kept.stderr[-200:]})")
 
 
 def scenario_codex(binary, work):
