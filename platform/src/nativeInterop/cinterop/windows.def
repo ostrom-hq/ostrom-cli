@@ -1,18 +1,27 @@
 package = dev.ostrom.cli.platform.interop
-linkerOpts = -lkernel32
+linkerOpts = -lkernel32 -ladvapi32 -lws2_32
 ---
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0A00
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <mstcpip.h>
 #include <windows.h>
+#include <wincred.h>
 #include <string.h>
 
 static BOOL WINAPI ostrom_ignore_console_event(DWORD event) { (void)event; return TRUE; }
 
 /*
- * Starts `command_line` (UTF-16, already quoted for CommandLineToArgvW) sharing the console and the standard handles,
+ * Starts `command_line` (UTF-16, already quoted for its program) sharing the console and the standard handles, with
+ * `application` as the program when it is not NULL (cmd.exe for a batch script),
  * and waits for it. While the child runs, Ctrl-C and Ctrl-Break are ignored here (a handler routine, which the child
  * does not inherit, unlike SetConsoleCtrlHandler(NULL, TRUE)). Returns 0 and sets *exit_code, 1 when the executable is
  * not found, 2 on any other failure.
  */
-static inline int ostrom_spawn_wait_w(const unsigned short *command_line, int *exit_code) {
+static inline int ostrom_spawn_wait_w(const unsigned short *application, const unsigned short *command_line,
+                                      int *exit_code) {
     size_t length = wcslen((const wchar_t *)command_line);
     wchar_t *buffer = (wchar_t *)HeapAlloc(GetProcessHeap(), 0, (length + 1) * sizeof(wchar_t));
     if (buffer == NULL) return 2;
@@ -23,7 +32,7 @@ static inline int ostrom_spawn_wait_w(const unsigned short *command_line, int *e
     startup.cb = sizeof startup;
     ZeroMemory(&process, sizeof process);
     SetConsoleCtrlHandler(ostrom_ignore_console_event, TRUE);
-    BOOL created = CreateProcessW(NULL, buffer, NULL, NULL, TRUE, 0, NULL, NULL, &startup, &process);
+    BOOL created = CreateProcessW((LPCWSTR)application, buffer, NULL, NULL, TRUE, 0, NULL, NULL, &startup, &process);
     DWORD error = created ? 0 : GetLastError();
     HeapFree(GetProcessHeap(), 0, buffer);
     int result = 2;
@@ -40,14 +49,14 @@ static inline int ostrom_spawn_wait_w(const unsigned short *command_line, int *e
     return result;
 }
 
-/* Same contract as the POSIX ostrom_read_stdin: count, -1 error, -2 deadline, -3 too large, -4 console. */
-static inline int ostrom_read_stdin(unsigned char *buffer, int capacity, int timeout_ms) {
+/* Same contract as the POSIX ostrom_read_stdin: count, -1 error, -2 deadline, -3 buffer full, -4 console. */
+static inline int ostrom_read_stdin(unsigned char *buffer, int capacity, int offset, int timeout_ms) {
     HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
     DWORD type = GetFileType(input);
     if (type == FILE_TYPE_CHAR) return -4;
     if (type != FILE_TYPE_PIPE && type != FILE_TYPE_DISK) return -1;
     ULONGLONG start = GetTickCount64();
-    int total = 0;
+    int total = offset;
     for (;;) {
         if (GetTickCount64() - start >= (ULONGLONG)timeout_ms) return -2;
         DWORD wanted = (DWORD)(capacity - total);
@@ -91,4 +100,251 @@ static inline int ostrom_write(int fd, const unsigned char *bytes, int length) {
 static inline int ostrom_is_terminal(int fd) {
     DWORD which = fd == 0 ? STD_INPUT_HANDLE : (fd == 2 ? STD_ERROR_HANDLE : STD_OUTPUT_HANDLE);
     return GetFileType(GetStdHandle(which)) == FILE_TYPE_CHAR;
+}
+
+/*
+ * Windows Credential Manager, generic credentials of the user (`target` is "<service>:<account>"). Statuses: 0 done,
+ * 1 not found, 2 larger than the buffer, 3 any other failure (GetLastError in *code).
+ */
+static inline int ostrom_credential_write(const unsigned short *target, const unsigned char *secret, int length,
+                                          int *code) {
+    CREDENTIALW credential;
+    ZeroMemory(&credential, sizeof credential);
+    credential.Type = CRED_TYPE_GENERIC;
+    credential.TargetName = (LPWSTR)target;
+    credential.CredentialBlobSize = (DWORD)length;
+    credential.CredentialBlob = (LPBYTE)secret;
+    credential.Persist = CRED_PERSIST_LOCAL_MACHINE;
+    credential.UserName = L"ostrom";
+    *code = 0;
+    if (CredWriteW(&credential, 0)) return 0;
+    *code = (int)GetLastError();
+    return 3;
+}
+
+static inline int ostrom_credential_read(const unsigned short *target, unsigned char *buffer, int capacity,
+                                         int *length, int *code) {
+    *length = 0;
+    *code = 0;
+    PCREDENTIALW credential = NULL;
+    if (!CredReadW((LPCWSTR)target, CRED_TYPE_GENERIC, 0, &credential)) {
+        DWORD error = GetLastError();
+        *code = (int)error;
+        return error == ERROR_NOT_FOUND ? 1 : 3;
+    }
+    int answer = 0;
+    if (credential->CredentialBlobSize > (DWORD)capacity) answer = 2;
+    else {
+        memcpy(buffer, credential->CredentialBlob, credential->CredentialBlobSize);
+        *length = (int)credential->CredentialBlobSize;
+    }
+    CredFree(credential);
+    return answer;
+}
+
+static inline int ostrom_credential_delete(const unsigned short *target, int *code) {
+    *code = 0;
+    if (CredDeleteW((LPCWSTR)target, CRED_TYPE_GENERIC, 0)) return 0;
+    DWORD error = GetLastError();
+    *code = (int)error;
+    return error == ERROR_NOT_FOUND ? 1 : 3;
+}
+
+/* A handle on NUL, inheritable, for a child's unused standard stream; INVALID_HANDLE_VALUE on failure. */
+static inline HANDLE ostrom_null_handle(DWORD access) {
+    SECURITY_ATTRIBUTES security = {sizeof(SECURITY_ATTRIBUTES), NULL, TRUE};
+    return CreateFileW(L"NUL", access, FILE_SHARE_READ | FILE_SHARE_WRITE, &security, OPEN_EXISTING, 0, NULL);
+}
+
+/* A writable copy of the UTF-16 `command_line` (CreateProcessW may write into it); NULL on failure. */
+static inline wchar_t *ostrom_copy_command(const unsigned short *command_line) {
+    size_t length = wcslen((const wchar_t *)command_line);
+    wchar_t *buffer = (wchar_t *)HeapAlloc(GetProcessHeap(), 0, (length + 1) * sizeof(wchar_t));
+    if (buffer != NULL) memcpy(buffer, command_line, (length + 1) * sizeof(wchar_t));
+    return buffer;
+}
+
+/* Same contract as the POSIX ostrom_capture: count, -1 not found, -2 deadline (the child is killed), -3 failure. */
+static inline int ostrom_capture_w(const unsigned short *command_line, unsigned char *out, int capacity,
+                                   int timeout_ms, int *exit_code) {
+    SECURITY_ATTRIBUTES security = {sizeof(SECURITY_ATTRIBUTES), NULL, TRUE};
+    HANDLE read_end, write_end;
+    if (!CreatePipe(&read_end, &write_end, &security, 0)) return -3;
+    SetHandleInformation(read_end, HANDLE_FLAG_INHERIT, 0);
+    HANDLE input = ostrom_null_handle(GENERIC_READ), error = ostrom_null_handle(GENERIC_WRITE);
+    wchar_t *buffer = ostrom_copy_command(command_line);
+    STARTUPINFOW startup;
+    PROCESS_INFORMATION process;
+    ZeroMemory(&startup, sizeof startup);
+    startup.cb = sizeof startup;
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdInput = input;
+    startup.hStdOutput = write_end;
+    startup.hStdError = error;
+    ZeroMemory(&process, sizeof process);
+    BOOL created = buffer != NULL &&
+        CreateProcessW(NULL, buffer, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &startup, &process);
+    DWORD failure = created ? 0 : GetLastError();
+    if (buffer != NULL) HeapFree(GetProcessHeap(), 0, buffer);
+    CloseHandle(write_end);
+    if (input != INVALID_HANDLE_VALUE) CloseHandle(input);
+    if (error != INVALID_HANDLE_VALUE) CloseHandle(error);
+    if (!created) {
+        CloseHandle(read_end);
+        return failure == ERROR_FILE_NOT_FOUND || failure == ERROR_PATH_NOT_FOUND ? -1 : -3;
+    }
+    ULONGLONG start = GetTickCount64();
+    int total = 0, timed_out = 0, exited = 0;
+    unsigned char drop[4096];
+    for (;;) {
+        if (GetTickCount64() - start >= (ULONGLONG)timeout_ms) { timed_out = 1; break; }
+        DWORD available = 0;
+        if (!PeekNamedPipe(read_end, NULL, 0, NULL, &available, NULL)) break;
+        if (available == 0) {
+            /* a child that exited is seen even if a grandchild keeps the pipe; what it wrote just before is still
+               in the pipe, so peek once more before stopping. Waiting on the process, not Sleep, wakes at its exit
+               instead of a whole timer tick later. */
+            if (exited) break;
+            if (WaitForSingleObject(process.hProcess, 1) == WAIT_OBJECT_0) exited = 1;
+            continue;
+        }
+        DWORD count = 0;
+        BOOL read = total < capacity
+            ? ReadFile(read_end, out + total, (DWORD)(capacity - total) < available ? (DWORD)(capacity - total) : available, &count, NULL)
+            : ReadFile(read_end, drop, available < sizeof drop ? available : (DWORD)sizeof drop, &count, NULL);
+        if (!read || count == 0) break;
+        if (total < capacity) total += (int)count;
+    }
+    CloseHandle(read_end);
+    if (!timed_out) {
+        /* the pipe is closed or broken: the child still has until the deadline to exit, never longer */
+        ULONGLONG spent = GetTickCount64() - start;
+        DWORD left = spent >= (ULONGLONG)timeout_ms ? 0 : (DWORD)((ULONGLONG)timeout_ms - spent);
+        if (WaitForSingleObject(process.hProcess, left) != WAIT_OBJECT_0) timed_out = 1;
+    }
+    if (timed_out) {
+        TerminateProcess(process.hProcess, 1);
+        WaitForSingleObject(process.hProcess, 5000);
+    }
+    DWORD code = 0;
+    GetExitCodeProcess(process.hProcess, &code);
+    CloseHandle(process.hProcess);
+    CloseHandle(process.hThread);
+    if (timed_out) return -2;
+    *exit_code = (int)code;
+    return total;
+}
+
+/* Same contract as the POSIX ostrom_spawn_detached: 0 started, -1 not. No console, no inherited handle. */
+static inline int ostrom_spawn_detached_w(const unsigned short *command_line) {
+    wchar_t *buffer = ostrom_copy_command(command_line);
+    if (buffer == NULL) return -1;
+    STARTUPINFOW startup;
+    PROCESS_INFORMATION process;
+    ZeroMemory(&startup, sizeof startup);
+    startup.cb = sizeof startup;
+    ZeroMemory(&process, sizeof process);
+    BOOL created = CreateProcessW(NULL, buffer, NULL, NULL, FALSE,
+                                  DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
+                                  NULL, NULL, &startup, &process);
+    HeapFree(GetProcessHeap(), 0, buffer);
+    if (!created) return -1;
+    CloseHandle(process.hProcess);
+    CloseHandle(process.hThread);
+    return 0;
+}
+
+/* Waits until `s` is ready for `events` or the deadline; 1 ready, 0 deadline, -1 error. */
+static inline int ostrom_wait_socket(SOCKET s, short events, ULONGLONG start, int timeout_ms) {
+    ULONGLONG elapsed = GetTickCount64() - start;
+    if (elapsed >= (ULONGLONG)timeout_ms) return 0;
+    WSAPOLLFD item = {s, events, 0};
+    int ready = WSAPoll(&item, 1, (INT)((ULONGLONG)timeout_ms - elapsed));
+    if (ready < 0) return -1;
+    if (ready == 0) return 0;
+    if (item.revents & (POLLERR | POLLNVAL)) return -1;
+    return 1;
+}
+
+/*
+ * SIO_TCP_INITIAL_RTO and its parameters (mstcpip.h, Windows 8 and later), written out: the MinGW headers of the
+ * Kotlin/Native toolchain do not have them, and without them a closed port answers only after two seconds.
+ */
+#define OSTROM_SIO_TCP_INITIAL_RTO _WSAIOW(IOC_VENDOR, 17)
+#define OSTROM_RTO_UNSPECIFIED_RTT ((USHORT)-1)
+#define OSTROM_RTO_NO_SYN_RETRANSMISSIONS ((UCHAR)-2)
+struct ostrom_initial_rto {
+    USHORT rtt;
+    UCHAR max_syn_retransmissions;
+};
+
+/* Same contract as the POSIX ostrom_tcp_exchange: count, -1 connection failed, -2 deadline, -3 too large. */
+static inline int ostrom_tcp_exchange(int port, const unsigned char *request, int length, unsigned char *response,
+                                      int capacity, int timeout_ms) {
+    static int started = 0;
+    if (!started) {
+        WSADATA data;
+        if (WSAStartup(MAKEWORD(2, 2), &data) != 0) return -1;
+        started = 1;
+    }
+    ULONGLONG start = GetTickCount64();
+    SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (s == INVALID_SOCKET) return -1;
+    u_long nonblocking = 1;
+    ioctlsocket(s, FIONBIO, &nonblocking);
+    struct sockaddr_in address;
+    memset(&address, 0, sizeof address);
+    address.sin_family = AF_INET;
+    address.sin_port = htons((unsigned short)port);
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    /* Windows retries a refused SYN for about two seconds, even on the loopback: a closed port must fail at once */
+    struct ostrom_initial_rto rto = {OSTROM_RTO_UNSPECIFIED_RTT, OSTROM_RTO_NO_SYN_RETRANSMISSIONS};
+    DWORD returned = 0;
+    WSAIoctl(s, OSTROM_SIO_TCP_INITIAL_RTO, &rto, sizeof rto, NULL, 0, &returned, NULL, NULL);
+    if (connect(s, (struct sockaddr *)&address, sizeof address) != 0) {
+        if (WSAGetLastError() != WSAEWOULDBLOCK) { closesocket(s); return -1; }
+        /* select, not WSAPoll: older WSAPoll never reports a connect that failed */
+        ULONGLONG spent = GetTickCount64() - start;
+        long left = spent >= (ULONGLONG)timeout_ms ? 0 : (long)((ULONGLONG)timeout_ms - spent);
+        fd_set writable, failed;
+        FD_ZERO(&writable);
+        FD_ZERO(&failed);
+        FD_SET(s, &writable);
+        FD_SET(s, &failed);
+        struct timeval delay = {left / 1000, (left % 1000) * 1000};
+        int ready = select(0, NULL, &writable, &failed, &delay);
+        int error = 0;
+        int size = sizeof error;
+        if (ready <= 0 || FD_ISSET(s, &failed) ||
+            getsockopt(s, SOL_SOCKET, SO_ERROR, (char *)&error, &size) != 0 || error != 0) {
+            closesocket(s);
+            return ready == 0 ? -2 : -1;
+        }
+    }
+    int sent = 0;
+    while (sent < length) {
+        int count = send(s, (const char *)request + sent, length - sent, 0);
+        if (count == SOCKET_ERROR && WSAGetLastError() == WSAEWOULDBLOCK) {
+            int ready = ostrom_wait_socket(s, POLLWRNORM, start, timeout_ms);
+            if (ready <= 0) { closesocket(s); return ready == 0 ? -2 : -1; }
+            continue;
+        }
+        if (count <= 0) { closesocket(s); return -1; }
+        sent += count;
+    }
+    int total = 0, result = -1;
+    for (;;) {
+        int count = recv(s, (char *)response + total, capacity - total, 0);
+        if (count > 0) {
+            total += count;
+            if (total >= capacity) { result = -3; break; }
+            continue;
+        }
+        if (count == 0) { result = total; break; }
+        if (WSAGetLastError() != WSAEWOULDBLOCK) { result = -1; break; }
+        int ready = ostrom_wait_socket(s, POLLRDNORM, start, timeout_ms);
+        if (ready <= 0) { result = ready == 0 ? -2 : -1; break; }
+    }
+    closesocket(s);
+    return result;
 }

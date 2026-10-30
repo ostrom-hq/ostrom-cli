@@ -16,19 +16,65 @@ extern char **environ;
 #define OSTROM_ENVIRON environ
 #endif
 
+/* The child being waited for, the target of the signals relayed by ostrom_relay_signal; 0 when there is none. */
+static pid_t ostrom_child = 0;
+/*
+ * The signals (one bit each, SIGHUP and SIGTERM) that came while there was no child to pass them to: before its pid
+ * was known (on another thread of the runtime), or after it ended. Lock-free atomics, safe in a signal handler.
+ */
+static int ostrom_pending_signals = 0;
+
+/* Passes the pending signals to `child`; the exchange hands each one to exactly one caller. */
+static void ostrom_relay_pending(pid_t child) {
+    int pending = __atomic_exchange_n(&ostrom_pending_signals, 0, __ATOMIC_SEQ_CST);
+    if (pending & (1 << SIGHUP)) kill(child, SIGHUP);
+    if (pending & (1 << SIGTERM)) kill(child, SIGTERM);
+}
+
+static void ostrom_relay_signal(int signal_number) {
+    pid_t child = __atomic_load_n(&ostrom_child, __ATOMIC_SEQ_CST);
+    if (child > 0) {
+        kill(child, signal_number);
+        return;
+    }
+    __atomic_fetch_or(&ostrom_pending_signals, 1 << signal_number, __ATOMIC_SEQ_CST);
+    /* The pid may have been published in between: then this handler relays what it just kept. */
+    child = __atomic_load_n(&ostrom_child, __ATOMIC_SEQ_CST);
+    if (child > 0) ostrom_relay_pending(child);
+}
+
 /*
  * Starts `file` (looked up on PATH) with `argv`, sharing stdin, stdout, stderr and the terminal, and waits for it.
  * While the child runs, this process ignores SIGINT and SIGQUIT (the child gets them from the terminal, with their
- * default action), like system(3). Returns 0 and sets *exit_code (128 + signal when killed), 1 when the executable is
- * not found, 2 on any other failure.
+ * default action), like system(3), and relays SIGTERM and SIGHUP to the child (a closed terminal tab, a supervisor
+ * stopping the CLI) then keeps waiting, so that the agent never outlives the CLI: the CLI ends when the agent does,
+ * with its code (an agent that ignores SIGTERM keeps running, as it would without the CLI). One that arrives before
+ * the child's pid is known (blocked on this thread, kept by the handler on another) is relayed as soon as it is; one
+ * with no child to take it (the spawn failed, or the child had already ended) is raised again here once the old
+ * handlers are back, so the CLI stops as it was asked to. Returns 0 and sets *exit_code
+ * (128 + signal when killed), 1 when the executable is not found, 2 on any other failure.
  */
 static inline int ostrom_spawn_wait(const char *file, char *const argv[], int *exit_code) {
-    struct sigaction ignore, old_int, old_quit;
+    struct sigaction ignore, relay, old_int, old_quit, old_term, old_hup;
     memset(&ignore, 0, sizeof ignore);
     ignore.sa_handler = SIG_IGN;
     sigemptyset(&ignore.sa_mask);
+    memset(&relay, 0, sizeof relay);
+    relay.sa_handler = ostrom_relay_signal;
+    sigemptyset(&relay.sa_mask);
+    sigset_t relayed, previous_mask;
+    sigemptyset(&relayed);
+    sigaddset(&relayed, SIGTERM);
+    sigaddset(&relayed, SIGHUP);
+    sigprocmask(SIG_BLOCK, &relayed, &previous_mask);
     sigaction(SIGINT, &ignore, &old_int);
     sigaction(SIGQUIT, &ignore, &old_quit);
+    /* A signal this process was started ignoring (nohup, a supervisor) stays ignored, by it and by the child. */
+    sigaction(SIGTERM, NULL, &old_term);
+    sigaction(SIGHUP, NULL, &old_hup);
+    int relay_term = old_term.sa_handler != SIG_IGN, relay_hup = old_hup.sa_handler != SIG_IGN;
+    if (relay_term) sigaction(SIGTERM, &relay, NULL);
+    if (relay_hup) sigaction(SIGHUP, &relay, NULL);
 
     posix_spawnattr_t attributes;
     posix_spawnattr_init(&attributes);
@@ -36,12 +82,20 @@ static inline int ostrom_spawn_wait(const char *file, char *const argv[], int *e
     sigemptyset(&defaults);
     sigaddset(&defaults, SIGINT);
     sigaddset(&defaults, SIGQUIT);
+    if (relay_term) sigaddset(&defaults, SIGTERM);
+    if (relay_hup) sigaddset(&defaults, SIGHUP);
     posix_spawnattr_setsigdefault(&attributes, &defaults);
-    posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETSIGDEF);
+    posix_spawnattr_setsigmask(&attributes, &previous_mask);
+    posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK);
 
     pid_t pid;
     int spawned = posix_spawnp(&pid, file, NULL, &attributes, argv, OSTROM_ENVIRON);
     posix_spawnattr_destroy(&attributes);
+    if (spawned == 0) {
+        __atomic_store_n(&ostrom_child, pid, __ATOMIC_SEQ_CST);
+        ostrom_relay_pending(pid);
+    }
+    sigprocmask(SIG_SETMASK, &previous_mask, NULL);
     int result = 2;
     if (spawned == ENOENT) {
         result = 1;
@@ -52,20 +106,28 @@ static inline int ostrom_spawn_wait(const char *file, char *const argv[], int *e
         if (waited == pid && WIFEXITED(status)) { *exit_code = WEXITSTATUS(status); result = 0; }
         else if (waited == pid && WIFSIGNALED(status)) { *exit_code = 128 + WTERMSIG(status); result = 0; }
     }
+    __atomic_store_n(&ostrom_child, 0, __ATOMIC_SEQ_CST);
     sigaction(SIGINT, &old_int, NULL);
     sigaction(SIGQUIT, &old_quit, NULL);
+    sigaction(SIGTERM, &old_term, NULL);
+    sigaction(SIGHUP, &old_hup, NULL);
+    /* Signals no child took are this process's again, with its own action. */
+    int pending = __atomic_exchange_n(&ostrom_pending_signals, 0, __ATOMIC_SEQ_CST);
+    if (pending & (1 << SIGHUP)) raise(SIGHUP);
+    if (pending & (1 << SIGTERM)) raise(SIGTERM);
     return result;
 }
 
 /*
- * Reads all of stdin into `buffer` within `timeout_ms`. Returns the byte count, -1 on a read error, -2 at the
- * deadline, -3 when the input does not fit in `capacity`, -4 when stdin is a terminal (nobody is piping an event).
+ * Reads the rest of stdin into `buffer`, from `offset` (the bytes an earlier call already read), within `timeout_ms`.
+ * Returns the byte count from the start of the buffer, -1 on a read error, -2 at the deadline, -3 when the buffer is
+ * full (more may follow: the caller grows it and calls again), -4 when stdin is a terminal (nobody pipes an event).
  */
-static inline int ostrom_read_stdin(unsigned char *buffer, int capacity, int timeout_ms) {
+static inline int ostrom_read_stdin(unsigned char *buffer, int capacity, int offset, int timeout_ms) {
     if (isatty(STDIN_FILENO)) return -4;
     struct timespec start, now;
     clock_gettime(CLOCK_MONOTONIC, &start);
-    int total = 0;
+    int total = offset;
     for (;;) {
         clock_gettime(CLOCK_MONOTONIC, &now);
         long elapsed = (now.tv_sec - start.tv_sec) * 1000L + (now.tv_nsec - start.tv_nsec) / 1000000L;
@@ -103,3 +165,192 @@ static inline int ostrom_write(int fd, const unsigned char *bytes, int length) {
 
 /* 1 when the file descriptor is a terminal. */
 static inline int ostrom_is_terminal(int fd) { return isatty(fd); }
+
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+
+/* Milliseconds since `start` on the monotonic clock. */
+static inline long ostrom_elapsed_ms(const struct timespec *start) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return (now.tv_sec - start->tv_sec) * 1000L + (now.tv_nsec - start->tv_nsec) / 1000000L;
+}
+
+/*
+ * Runs `file` (looked up on PATH) with `argv`, stdin and stderr on /dev/null, and captures its stdout into `out` (at
+ * most `capacity` bytes are kept, the rest is read and dropped). Waits at most `timeout_ms`, then kills it. Returns the
+ * byte count kept and sets *exit_code (128 + signal when killed by one); -1 when the executable is not found, -2 at
+ * the deadline, -3 on any other failure. The deadline holds whatever the child does: one that closes its stdout and
+ * keeps running is killed at it, and one that exits while a child of its own holds the pipe is not waited past.
+ */
+static inline int ostrom_capture(const char *file, char *const argv[], unsigned char *out, int capacity,
+                                 int timeout_ms, int *exit_code) {
+    int fds[2];
+    if (pipe(fds) != 0) return -3;
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
+    posix_spawn_file_actions_adddup2(&actions, fds[1], STDOUT_FILENO);
+    posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
+    posix_spawn_file_actions_addclose(&actions, fds[0]);
+    posix_spawn_file_actions_addclose(&actions, fds[1]);
+    pid_t pid;
+    int spawned = posix_spawnp(&pid, file, &actions, NULL, argv, OSTROM_ENVIRON);
+    posix_spawn_file_actions_destroy(&actions);
+    close(fds[1]);
+    if (spawned != 0) { close(fds[0]); return spawned == ENOENT ? -1 : -3; }
+    struct timespec start;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    int total = 0, timed_out = 0, status = 0, exited = 0;
+    pid_t waited = 0;
+    unsigned char drop[4096];
+    for (;;) {
+        long left = timeout_ms - ostrom_elapsed_ms(&start);
+        if (left <= 0) { timed_out = 1; break; }
+        struct pollfd output = {fds[0], POLLIN, 0};
+        /* short slices while nothing comes: a child that exited is seen even if a grandchild keeps the pipe */
+        int ready = poll(&output, 1, exited ? 0 : left > 50 ? 50 : (int)left);
+        if (ready < 0 && errno == EINTR) continue;
+        if (ready < 0) break;
+        if (ready == 0) {
+            /* once the child is gone, what it wrote just before is still in the pipe: drain it, then stop */
+            if (exited) break;
+            waited = waitpid(pid, &status, WNOHANG);
+            if (waited == pid) exited = 1;
+            continue;
+        }
+        ssize_t count = total < capacity ? read(fds[0], out + total, (size_t)(capacity - total))
+                                         : read(fds[0], drop, sizeof drop);
+        if (count < 0 && (errno == EINTR || errno == EAGAIN)) continue;
+        if (count <= 0) break;
+        if (total < capacity) total += (int)count;
+    }
+    close(fds[0]);
+    /* the pipe is closed or broken: the child still has until the deadline to exit */
+    while (!timed_out && waited != pid) {
+        waited = waitpid(pid, &status, WNOHANG);
+        if (waited < 0 && errno == EINTR) { waited = 0; continue; }
+        if (waited != 0) break;
+        if (ostrom_elapsed_ms(&start) >= timeout_ms) { timed_out = 1; break; }
+        struct timespec pause = {0, 1000000L};
+        nanosleep(&pause, NULL);
+    }
+    if (timed_out) {
+        kill(pid, SIGKILL);
+        do { waited = waitpid(pid, &status, 0); } while (waited < 0 && errno == EINTR);
+        return -2;
+    }
+    if (waited != pid) return -3;
+    *exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
+    return total;
+}
+
+/*
+ * Starts `file` with `argv` in its own session, its standard streams on /dev/null, and does not wait for it: it
+ * outlives this process (a hook that must answer at once starts the slow half of its work this way). Returns 0, or
+ * -1 when it could not be started.
+ */
+static inline int ostrom_spawn_detached(const char *file, char *const argv[]) {
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
+    posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null", O_WRONLY, 0);
+    posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
+    posix_spawnattr_t attributes;
+    posix_spawnattr_init(&attributes);
+#ifdef POSIX_SPAWN_SETSID
+    posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETSID);
+#else
+    posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP);
+    posix_spawnattr_setpgroup(&attributes, 0);
+#endif
+    pid_t pid;
+    int spawned = posix_spawnp(&pid, file, &actions, &attributes, argv, OSTROM_ENVIRON);
+    posix_spawn_file_actions_destroy(&actions);
+    posix_spawnattr_destroy(&attributes);
+    return spawned == 0 ? 0 : -1;
+}
+
+/* Waits until `fd` is ready for `events` or the deadline; 1 ready, 0 deadline, -1 error. */
+static inline int ostrom_wait_fd(int fd, short events, const struct timespec *start, int timeout_ms) {
+    for (;;) {
+        long left = timeout_ms - ostrom_elapsed_ms(start);
+        if (left <= 0) return 0;
+        struct pollfd item = {fd, events, 0};
+        int ready = poll(&item, 1, (int)left);
+        if (ready < 0 && errno == EINTR) continue;
+        if (ready < 0) return -1;
+        if (ready == 0) return 0;
+        if (item.revents & (POLLERR | POLLNVAL)) return -1;
+        return 1;
+    }
+}
+
+/*
+ * One exchange with a TCP server on 127.0.0.1:`port`: sends `request` whole, then reads until the server closes.
+ * Everything within `timeout_ms`. Returns the response byte count; -1 when the connection failed, -2 at the deadline,
+ * -3 when the response does not fit in `capacity`.
+ */
+static inline int ostrom_tcp_exchange(int port, const unsigned char *request, int length, unsigned char *response,
+                                      int capacity, int timeout_ms) {
+    struct timespec start;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) return -1;
+#ifdef SO_NOSIGPIPE
+    int one = 1;
+    setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one);
+#endif
+#ifdef MSG_NOSIGNAL
+    int send_flags = MSG_NOSIGNAL;
+#else
+    int send_flags = 0;
+#endif
+    fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
+    struct sockaddr_in address;
+    memset(&address, 0, sizeof address);
+    address.sin_family = AF_INET;
+    address.sin_port = htons((unsigned short)port);
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    int result = -1;
+    if (connect(fd, (struct sockaddr *)&address, sizeof address) != 0) {
+        if (errno != EINPROGRESS) { close(fd); return -1; }
+        int ready = ostrom_wait_fd(fd, POLLOUT, &start, timeout_ms);
+        int error = 0;
+        socklen_t size = sizeof error;
+        if (ready <= 0 || getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &size) != 0 || error != 0) {
+            close(fd);
+            return ready == 0 ? -2 : -1;
+        }
+    }
+    int sent = 0;
+    while (sent < length) {
+        ssize_t count = send(fd, request + sent, (size_t)(length - sent), send_flags);
+        if (count < 0 && (errno == EINTR)) continue;
+        if (count < 0 && errno == EAGAIN) {
+            int ready = ostrom_wait_fd(fd, POLLOUT, &start, timeout_ms);
+            if (ready <= 0) { close(fd); return ready == 0 ? -2 : -1; }
+            continue;
+        }
+        if (count <= 0) { close(fd); return -1; }
+        sent += (int)count;
+    }
+    int total = 0;
+    for (;;) {
+        ssize_t count = recv(fd, response + total, (size_t)(capacity - total), 0);
+        if (count > 0) {
+            total += (int)count;
+            if (total >= capacity) { result = -3; break; }
+            continue;
+        }
+        if (count == 0) { result = total; break; }
+        if (errno == EINTR) continue;
+        if (errno != EAGAIN) { result = -1; break; }
+        int ready = ostrom_wait_fd(fd, POLLIN, &start, timeout_ms);
+        if (ready <= 0) { result = ready == 0 ? -2 : -1; break; }
+    }
+    close(fd);
+    return result;
+}

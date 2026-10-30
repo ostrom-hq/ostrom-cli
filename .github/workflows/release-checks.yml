@@ -43,8 +43,12 @@ jobs:
     if: github.event_name != 'pull_request'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: brew install jq
-      - run: sh scripts/release/tests/run.sh && sh install/tests/install.test.sh
+      # macOS ships LibreSSL, without Ed25519 raw signing: the release signs on Linux with OpenSSL 3, test with it too.
+      - run: brew install jq openssl@3
+      - run: |
+          PATH="$(brew --prefix openssl@3)/bin:$PATH"
+          openssl version
+          sh scripts/release/tests/run.sh && sh install/tests/install.test.sh
 
   installer-windows:
     name: install.ps1 (Pester)
@@ -68,6 +72,22 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: ostrom-core version
+        id: core
+        run: echo "ref=$(tr -d '[:space:]' < gradle/ostrom-core.ref)" >> "$GITHUB_OUTPUT"
+      # GITHUB_TOKEN cannot read another repository's Maven packages: ostrom-core is built from its commit (05:50).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ostrom-hq/ostrom-core
+          ref: ${{ steps.core.outputs.ref }}
+          ssh-key: ${{ secrets.DEPLOY_KEY_CORE }}
+          path: ostrom-core
+          persist-credentials: false
+      - name: Build ostrom-core from that checkout
+        run: |
+          mv ostrom-core ../ostrom-core
+          mkdir -p ~/.gradle
+          echo "ostrom.core.local=true" >> ~/.gradle/gradle.properties
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin

@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: Apache-2.0
+package = dev.ostrom.cli.relay.interop.tlsexit
+---
+#include <stddef.h>
+#include <stdint.h>
+
+/* The OpenSSL that Ktor's Curl engine links statically into the Linux executable. */
+int OPENSSL_init_crypto(uint64_t opts, const void *settings);
+#define OSTROM_OPENSSL_INIT_NO_ATEXIT 0x00080000L
+
+/*
+ * Keeps OpenSSL's global state until the process is gone (the pattern of TeamCode's CLI, tls_exit.def, CONVENTIONS.md
+ * section 10.2). Ktor's Curl engine closes asynchronously: its worker thread still frees TLS contexts after
+ * HttpClient.close() returns, and OpenSSL's atexit() cleanup then destroys the locks under it, a segmentation fault
+ * once the command's output is printed. OPENSSL_INIT_NO_ATEXIT only takes effect on OpenSSL's first initialization,
+ * so this runs as an early ELF constructor (priority 101), before Ktor's curl_global_init(). The kernel reclaims the
+ * memory at exit.
+ */
+__attribute__((constructor(101), used)) static void ostrom_keep_tls_state_until_exit(void) {
+    OPENSSL_init_crypto(OSTROM_OPENSSL_INIT_NO_ATEXIT, NULL);
+}

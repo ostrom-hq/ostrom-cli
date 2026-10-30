@@ -24,7 +24,7 @@ interface FileStore {
     /** Deletes the file at [path]; nothing happens when it does not exist. */
     fun delete(path: String)
 
-    /** True when [path] exists. */
+    /** True when [path] exists; false when it does not, or cannot (a file in its path). */
     fun exists(path: String): Boolean
 }
 
@@ -60,7 +60,12 @@ class FileStoreImpl(private val fileSystem: FileSystem = FileSystem.SYSTEM) : Fi
 
     override fun delete(path: String) = fileSystem.delete(path.toPath(), mustExist = false)
 
-    override fun exists(path: String): Boolean = fileSystem.exists(path.toPath())
+    override fun exists(path: String): Boolean = try {
+        fileSystem.exists(path.toPath())
+    } catch (_: IOException) {
+        // A file in its path ("not a directory"): nothing can be there, and the next write says why.
+        false
+    }
 }
 
 /** Finds executables on the PATH, the way a shell would. */
@@ -104,8 +109,19 @@ class ExecutableFinderImpl(
     }
 }
 
+/**
+ * Makes [path] usable by its owner only: 0700 for a folder or a script ([executable]), else 0600. A no-op on Windows,
+ * where the profile is private.
+ */
+fun restrictToOwner(path: String, executable: Boolean) {
+    if (executable) restrictToOwnerExecutable(path) else restrictToOwner(path)
+}
+
 /** Makes [path] readable and writable by its owner only (0600); a no-op on Windows, where the profile is private. */
 internal expect fun restrictToOwner(path: String)
+
+/** Makes [path] readable, writable and executable by its owner only (0700); a no-op on Windows. */
+internal expect fun restrictToOwnerExecutable(path: String)
 
 /** Base of the random part of a temporary file name. */
 private const val RADIX = 36

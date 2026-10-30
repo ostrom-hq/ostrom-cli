@@ -43,6 +43,13 @@ private abstract class ConfigSubcommand(
     protected fun key(name: String): ConfigKey = ConfigKey.of(name)
         ?: fail(ExitCode.USAGE, "Unknown key \"$name\". Keys: ${ConfigKey.entries.joinToString(", ") { it.key }}.")
 
+    /** The key named [name] when `ostrom config` may change it, or exit 64 naming the command that does. */
+    protected fun editableKey(name: String): ConfigKey {
+        val key = key(name)
+        val command = key.managedBy ?: return key
+        fail(ExitCode.USAGE, "${key.key} is changed with $command.")
+    }
+
     /** Runs [write], turning a write failure into exit 73. */
     protected fun saving(write: () -> Unit) {
         try {
@@ -88,10 +95,11 @@ private class ConfigSet(dependencies: CliDependencies) : ConfigSubcommand("set",
     private val name by argument("key")
     private val value by argument("value")
 
-    override fun help(context: Context) = "Set a key"
+    override fun help(context: Context) = "Set a key (its value is checked first)"
 
     override fun run() {
-        val key = key(name)
+        val key = editableKey(name)
+        configValueProblem(key, value)?.let { fail(ExitCode.USAGE, it) }
         saving { store().set(key, value) }
         dependencies.console.out("✓ ${key.key} = $value\n")
     }
@@ -103,7 +111,7 @@ private class ConfigUnset(dependencies: CliDependencies) : ConfigSubcommand("uns
     override fun help(context: Context) = "Remove a key"
 
     override fun run() {
-        val key = key(name)
+        val key = editableKey(name)
         saving { store().unset(key) }
         dependencies.console.out("✓ ${key.key} unset\n")
     }

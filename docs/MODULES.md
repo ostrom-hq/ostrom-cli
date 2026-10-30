@@ -10,10 +10,11 @@ all Ostrom repositories are in `ostrom-core/docs/CONVENTIONS.md`; this page only
 | Module | Package | Holds | Depends on |
 | --- | --- | --- | --- |
 | `platform` | `dev.ostrom.cli.platform` | everything that touches the OS: processes sharing the terminal, stdin with a deadline, unbuffered stdout/stderr, environment, files, `config.toml`, PATH lookup | okio |
-| `hooks` | `dev.ostrom.cli.hooks` | `ostrom hook gate\|session\|gates-refresh`: event parsing (all agents' dialects), the gate, the reply | `platform` |
-| `api-client` | `dev.ostrom.cli.api` | the server over HTTPS (Ktor, platform engine) | ostrom-core (once published) |
+| `hooks` | `dev.ostrom.cli.hooks` | `ostrom hook gate\|session`: event parsing (all agents' dialects), the gate, the reply | `platform` |
+| `api-client` | `dev.ostrom.cli.api` | the server over HTTPS (Ktor, platform engine) | ostrom-core `api` |
 | `launcher` | `dev.ostrom.cli.launcher` | the agents (`Agent`) and starting one in this terminal | `platform` |
 | `mcp` | `dev.ostrom.cli.mcp` | the local MCP server on stdio (`ostrom mcp`) | `platform` |
+| `relay` | `dev.ostrom.cli.relay` | the launch's local relay on `127.0.0.1` (Ktor CIO): hooks, MCP and inference reach Ostrom through it | `platform` |
 | `cli` | `dev.ostrom.cli` | the command tree (Clikt), `main`, the wiring (`CliDependencies`), the executable | all of the above |
 
 Rules that keep the binary fast and the modules apart:
@@ -22,8 +23,8 @@ Rules that keep the binary fast and the modules apart:
   Linux, `windows.def` for Windows). Shared POSIX Kotlin lives in `src/posixMain`, added to `macosMain` and
   `linuxMain`; Windows code in `src/mingwMain`.
 - `hooks` stays light: no Clikt, no Ktor, no coroutines. `main` sends `ostrom hook …` straight to `HookRunner` before
-  building anything else (`cli/.../Main.kt`). A hook that needs the server reads a local cache and refreshes it in a
-  detached `ostrom hook gates-refresh`, as the prototype does; it never waits on the network.
+  building anything else (`cli/.../Main.kt`). A hook reaches Ostrom only through the launcher's local relay, which
+  answers the gate catalogue from its own memory; the hook trusts no cache on disk the agent could edit (S2-20).
 - Interfaces and their implementation: `XxxRepository` / `XxxRepositoryImpl`, `XxxUseCase` with
   `operator fun invoke`, KDoc on everything public, no `!!`, a `CancellationException` is always rethrown
   (`ostrom-core/docs/CONVENTIONS.md`).
@@ -34,6 +35,35 @@ Rules that keep the binary fast and the modules apart:
 - Wiring is plain constructors in `CliDependencies` (no container: the start-up of `ostrom hook` matters more than
   the convenience). Tests build `CliDependencies` with fakes.
 - Output goes through `Console` (unbuffered, UTF-8 on Windows consoles). Commands never call `println`.
+
+## The local relay
+
+While `ostrom <agent>` runs, the launcher starts a `LocalRelay`
+(`LocalRelayStarterImpl(report).start(RelayConfig(...))`) on `127.0.0.1` and a port chosen by the system, and closes
+it when the agent exits. The agent's hooks, its MCP client
+and, when the launch relays it, its inference reach Ostrom through it with one of two random capabilities (64
+hexadecimal characters from `secureRandomBytes` each); the relay adds the launch's agent token, which never enters the
+agent's environment (audit A12/A13). The hooks' capability (`LocalRelay.token`) is written to a private file
+(`OSTROM_RELAY_TOKEN_FILE`) and opens the hook routes; the agent's own (`LocalRelay.clientToken`, `OSTROM_RELAY_TOKEN`)
+opens its MCP servers, its inference and the read of a gate (`GET /api/v1/gates/{id}`, for `ostrom wait`), no other
+hook route: 403 otherwise (S2-25).
+
+- Every request needs a capability (`Authorization: Bearer`, `x-api-key` or `x-ostrom-local-token`, compared in
+  constant time): 401 otherwise. An `Origin` header or a `Host` that is not the loopback: 403.
+- Only an allow-list is forwarded, everything else is 404 (never an open proxy): the hook routes
+  (`POST /api/v1/sessions`, `/sessions/{id}/reopen|seen`, `/api/v1/gates`, `/api/v1/notifications`, `GET
+  /api/v1/gates/{id}` and `/gates/catalog`, as they are, 2 MiB, 15 s, 70 s for a gate wait; ending a session, its sign
+  of life, the use of a yes and check runs are the launcher's and Ostrom's, never forwarded for the agent, S2-25 and
+  S2-29), the catalogue of the verified package answered from memory when there is one, the organisation's gate
+  policy signed by the instance (`GET /api/v1/gates/catalog/signed`, kept 30 s in memory, a failure never kept; the
+  hooks check its signature against `OSTROM_INSTANCE_KEYS` and its expiry at every call, and hold every action without
+  one, S2-20 and S2-38), `POST /mcp/{server}` for the launch's servers (to `/api/v1/mcp/{server}`, streamed, 401/403 from
+  Ostrom become 502), and with inference `/v1/messages`, `/v1/chat/completions`, `/v1/models` (to
+  `/api/v1/inference/…`, 4 MiB, the response streamed, only the provider headers forwarded).
+- Ostrom unreachable or too slow: 502 with `{"error":{"type":"unreachable","message":"Ostrom is unreachable (…)"}}`,
+  and one line for the user per outage through the starter's `report`; Ktor's own logger is silenced.
+- `hooks` never depends on `relay`: it speaks plain HTTP to the loopback URL and capability the launcher hands it
+  (how they reach the hook is the launch flow's choice, not this module's).
 
 ## Exit codes
 
@@ -110,10 +140,37 @@ receiving Ctrl-C, stdin read through `PeekNamedPipe`, UTF-8 output on the consol
 `OSTROM_HOME` (the CLI folder, instead of `~/.config/ostrom`) and `OSTROM_HOOK_DIALECT` today; `OSTROM_TOKEN` and
 `OSTROM_CLAUDE_BIN` / `OSTROM_CODEX_BIN` arrive with `login` and the launcher.
 
+## Usage statistics (opt-in)
+
+`ostrom telemetry enable | disable | status` (`cli/.../telemetry/UsageStatistics.kt`). **Off unless the user turns it
+on**, and `OSTROM_TELEMETRY=0` (or `false`, `off`, `no`) or `DO_NOT_TRACK=1` keep it off whatever the setting. When on,
+each top-level command sends one `cli_command_run` event to PostHog EU after its output is written, waiting at most
+400 ms (the sender's client gives up by then; a lost event is not retried): the command name (only one of the known
+commands, read from the parsed command line, else `unknown`), `ok` / `usage` / `error`, a duration range, the OS, the
+architecture and the version, with a random install id (`telemetry_id` in `config.toml`, deleted by `disable`, never
+linked to the account). Never an argument, a path, a repository, code or a token; no IP address is kept and no
+location derived from it (`$ip` null, `$geoip_disable`). Plumbing commands (`hook`, `mcp`, `wait`, `check`) and
+`ostrom telemetry` itself are never measured. Statistics are on only with both `telemetry = "on"` and an install id;
+`ostrom config set | unset` refuses these two keys and names `ostrom telemetry`, which keeps them consistent.
+
+The destination is compiled into release builds only: CI passes the repository variable `OSTROM_POSTHOG_KEY` (a public,
+write-only project key) as `-PostromPosthogKey` on tags. Any other build has none: `ostrom telemetry enable` then says
+so and writes nothing, and nothing is ever sent.
+
+Every call to the server carries a W3C `traceparent` (`api-client/.../TraceContext.kt`): one random trace id for the
+whole command, a new parent id per call. The server continues the trace; this is not usage statistics and sends
+nothing anywhere else.
+
 ## ostrom-core
 
-`api-client` will depend on `dev.ostrom:ostrom-api` (the API models of ostrom-core), read from GitHub Packages
-(`maven.pkg.github.com/ostrom-hq/ostrom-core`, with `GITHUB_ACTOR` / `GITHUB_TOKEN`, or `gpr.user` / `gpr.key` in
-`~/.gradle/gradle.properties`). Set `ostromCoreVersion` in `gradle.properties` once a version is published. A clone of
-ostrom-core next to this one (`../ostrom-core`, or `../../ostrom-core` from a worktree) replaces the package through
-`includeBuild`, so a contract change can be tried here before it is released.
+`api-client` depends on `dev.ostrom:ostrom-api` (the API models of ostrom-core, `OstromJson`, `ApiError`). The version
+is `ostromCoreVersion` in `gradle.properties`, and `gradle/ostrom-core.ref` is the ostrom-core commit that published it:
+change both together.
+
+- Locally: from GitHub Packages (`maven.pkg.github.com/ostrom-hq/ostrom-core`, with `gpr.user` / `gpr.key` in
+  `~/.gradle/gradle.properties`, a token with `read:packages`), or from a clone at `../ostrom-core` with
+  `ostrom.core.local=true`, which `includeBuild`s it and substitutes `ostrom-api`, `ostrom-receipts` and
+  `ostrom-telemetry`.
+- In CI (`ci.yml`, `release.yml`): a repository's `GITHUB_TOKEN` cannot read another repository's Maven packages, so
+  ostrom-core is checked out at the commit of `gradle/ostrom-core.ref` with the read-only key `DEPLOY_KEY_CORE`, then
+  built through `ostrom.core.local` (JOURNAL 05:50).

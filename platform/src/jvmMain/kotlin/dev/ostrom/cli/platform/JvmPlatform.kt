@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+// One actual per expect of the module, as in posixMain and mingwMain: their number follows the platform API.
+@file:Suppress("TooManyFunctions")
+
 package dev.ostrom.cli.platform
 
 import java.io.IOException
@@ -11,8 +14,12 @@ import java.nio.file.attribute.PosixFilePermissions
 
 // coverage: test-only JVM target; the shipped native actual is tested in posixTest and mingwTest.
 @ExcludeFromCoverage
-internal actual fun spawnAndWait(command: List<String>): ProcessResult = try {
-    ProcessResult.Exited(ProcessBuilder(command).inheritIO().start().waitFor())
+internal actual fun spawnAndWait(command: List<String>, environment: Map<String, String?>): ProcessResult = try {
+    val builder = ProcessBuilder(command).inheritIO()
+    environment.forEach { (name, value) ->
+        if (value == null) builder.environment().remove(name) else builder.environment()[name] = value
+    }
+    ProcessResult.Exited(builder.start().waitFor())
 } catch (_: IOException) {
     ProcessResult.NotFound
 }
@@ -31,10 +38,10 @@ internal actual fun isTerminal(descriptor: Int): Boolean = System.console() != n
 
 // coverage: test-only JVM target; the shipped native actual is measured by the start-up test of the real binary.
 @ExcludeFromCoverage
-internal actual fun readStdin(buffer: ByteArray, timeoutMillis: Int): Int {
+internal actual fun readStdin(buffer: ByteArray, offset: Int, timeoutMillis: Int): Int {
     // System.in has no deadline: read on a daemon thread and give up at the deadline, as the native shim does.
     var result = READ_TIMEOUT
-    val reader = Thread { result = readAllOfStdin(buffer) }
+    val reader = Thread { result = readAllOfStdin(buffer, offset) }
     reader.isDaemon = true
     reader.start()
     reader.join(timeoutMillis.toLong())
@@ -43,8 +50,8 @@ internal actual fun readStdin(buffer: ByteArray, timeoutMillis: Int): Int {
 
 // coverage: test-only JVM target, see readStdin.
 @ExcludeFromCoverage
-private fun readAllOfStdin(buffer: ByteArray): Int {
-    var total = 0
+private fun readAllOfStdin(buffer: ByteArray, offset: Int): Int {
+    var total = offset
     while (total < buffer.size) {
         val count = System.`in`.read(buffer, total, buffer.size - total)
         if (count < 0) return total
@@ -76,6 +83,15 @@ internal actual fun currentArchitecture(): String = when (val arch = System.getP
     else -> arch
 }
 
+// coverage: test-only JVM target; the shipped native actual is tested by OwnerOnlyTest on macOS and Linux.
+@ExcludeFromCoverage
+internal actual fun restrictToOwnerExecutable(path: String) {
+    val file = Paths.get(path)
+    if (Files.getFileStore(file).supportsFileAttributeView("posix")) {
+        Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rwx------"))
+    }
+}
+
 // coverage: test-only JVM target; the shipped native actual is tested by FileStoreTest on macOS and Linux.
 @ExcludeFromCoverage
 internal actual fun restrictToOwner(path: String) {
@@ -85,3 +101,95 @@ internal actual fun restrictToOwner(path: String) {
         Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-------"))
     }
 }
+
+// coverage: test-only JVM target; the shipped native actual is tested in posixTest and mingwTest.
+@ExcludeFromCoverage
+internal actual fun captureOutput(
+    command: List<String>,
+    capacity: Int,
+    timeoutMillis: Int,
+): CaptureResult = try {
+    val process = quiet(ProcessBuilder(command)).start()
+    val output = java.io.ByteArrayOutputStream()
+    // read beside the wait, so the deadline holds while the child keeps its stdout open
+    val reader = Thread(Drain(process.inputStream, output, capacity)).apply {
+        isDaemon = true
+        start()
+    }
+    if (!process.waitFor(timeoutMillis.toLong(), java.util.concurrent.TimeUnit.MILLISECONDS)) {
+        process.destroyForcibly()
+        CaptureResult.TimedOut
+    } else {
+        reader.join(timeoutMillis.toLong())
+        val bytes = synchronized(output) { output.toByteArray() }
+        CaptureResult.Exited(process.exitValue(), bytes.decodeToString())
+    }
+} catch (_: IOException) {
+    // the JDK's wording of a missing program changes between versions: a child that cannot start is not found
+    CaptureResult.NotFound
+}
+
+/** Copies a child's output into [output], up to [capacity] bytes; a class, so no lambda escapes the exclusion. */
+// coverage: test-only JVM target, see captureOutput.
+@ExcludeFromCoverage
+private class Drain(
+    private val input: java.io.InputStream,
+    private val output: java.io.ByteArrayOutputStream,
+    private val capacity: Int,
+) : Runnable {
+    override fun run() = input.use {
+        val buffer = ByteArray(BUFFER_BYTES)
+        var count = it.read(buffer)
+        while (count >= 0) {
+            synchronized(output) { output.write(buffer, 0, minOf(count, capacity - output.size())) }
+            count = it.read(buffer)
+        }
+    }
+}
+
+/** stdin from the null device, stderr dropped: what the native shims do. */
+// coverage: test-only JVM target, see captureOutput.
+@ExcludeFromCoverage
+private fun quiet(builder: ProcessBuilder): ProcessBuilder {
+    val windows = System.getProperty("os.name").orEmpty().startsWith("Windows")
+    return builder
+        .redirectInput(ProcessBuilder.Redirect.from(java.io.File(if (windows) "NUL" else "/dev/null")))
+        .redirectError(ProcessBuilder.Redirect.DISCARD)
+}
+
+private const val BUFFER_BYTES = 8_192
+
+// coverage: test-only JVM target; the shipped native actual is tested in posixTest and mingwTest.
+@ExcludeFromCoverage
+internal actual fun spawnDetached(command: List<String>): Boolean = try {
+    quiet(ProcessBuilder(command)).redirectOutput(ProcessBuilder.Redirect.DISCARD).start()
+    true
+} catch (_: IOException) {
+    false
+}
+
+// coverage: test-only JVM target; the shipped native actual is tested in posixTest and by the end-to-end bench.
+@ExcludeFromCoverage
+internal actual fun tcpExchange(
+    port: Int,
+    request: ByteArray,
+    capacity: Int,
+    timeoutMillis: Int,
+): Pair<Int, ByteArray> = try {
+    java.net.Socket().use { socket ->
+        socket.connect(java.net.InetSocketAddress("127.0.0.1", port), timeoutMillis)
+        socket.soTimeout = timeoutMillis
+        socket.getOutputStream().write(request)
+        val bytes = socket.getInputStream().readBytes()
+        (if (bytes.size >= capacity) TCP_TOO_LARGE else bytes.size) to bytes
+    }
+} catch (_: java.net.SocketTimeoutException) {
+    TCP_TIMED_OUT to ByteArray(0)
+} catch (_: IOException) {
+    TCP_UNREACHABLE to ByteArray(0)
+}
+
+/** The running JVM's command. */
+// coverage: test-only JVM target; the shipped native actuals are tested by ExecutableTest on each target.
+@ExcludeFromCoverage
+actual fun currentExecutable(): String? = ProcessHandle.current().info().command().orElse(null)

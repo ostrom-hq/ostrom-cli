@@ -45,10 +45,11 @@ printf 'tampered\n' >> "$site/download/2.2.0/ostrom-2.2.0-$host.tar.gz"
 ( cd "$site" && python3 -u -m http.server 0 --bind 127.0.0.1 > "$tmp/server.log" 2>&1 & echo $! > "$tmp/server.pid" )
 server_pid=$(cat "$tmp/server.pid")
 i=0; port=""
-while [ $i -lt 50 ] && [ -z "$port" ]; do
+# A cold macOS runner can take several seconds to start Python: wait up to 30 s.
+while [ $i -lt 300 ] && [ -z "$port" ]; do
   port=$(sed -n 's/.*port \([0-9][0-9]*\).*/\1/p' "$tmp/server.log" | head -1); i=$((i + 1)); sleep 0.1
 done
-[ -n "$port" ] || { echo "http.server did not start" >&2; exit 1; }
+[ -n "$port" ] || { echo "http.server did not start" >&2; cat "$tmp/server.log" >&2; exit 1; }
 base="http://127.0.0.1:$port"
 
 HOME_N=0

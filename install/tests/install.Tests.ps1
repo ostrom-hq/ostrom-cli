@@ -5,7 +5,7 @@ BeforeAll {
   $script:site = Join-Path $root 'site'
 
   function New-Release([string]$Version) {
-    $dir = Join-Path $site "download\v$Version"
+    $dir = Join-Path $site "download\$Version"
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
     $pkg = Join-Path $root "pkg-$Version"
     New-Item -ItemType Directory -Force -Path $pkg | Out-Null
