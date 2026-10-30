@@ -3,8 +3,10 @@ package dev.ostrom.cli.launcher
 
 import dev.ostrom.cli.platform.SecretBackend
 import dev.ostrom.cli.platform.SecretStore
+import dev.ostrom.cli.platform.SecretStoreException
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -28,8 +30,10 @@ class CredentialsTest {
         }
     }
 
+    private val notices = mutableListOf<String>()
+
     private fun store(vararg variables: Pair<String, String>) =
-        FileCredentialStore(files, path, { secrets.also { opened++ } }) { mapOf(*variables)[it] }
+        FileCredentialStore(files, path, { secrets.also { opened++ } }, { notices += it }) { mapOf(*variables)[it] }
 
     @Test
     fun theTokenIsKeptInTheSecretStoreAndTheLoginInTheFile() {
@@ -49,17 +53,42 @@ class CredentialsTest {
     }
 
     @Test
-    fun forgettingATokenReadFromTheFileForgetsItInBothStores() {
+    fun aTokenInClearInTheFileMovesToTheSecretStoreOnce() {
+        // S2-32: an older ostrom or a provisioning script left it in credentials.json
         files.texts[path] = """{"https://a.example":{"token":"from-file","login":"alice"}}"""
         val store = store()
         assertEquals(Credentials("from-file", "alice"), store.saved("https://a.example"))
-        kept["https://a.example"] = "in-store"
-        assertEquals("in-store", store.saved("https://a.example")?.token, "the secret store first")
-        store.forget("https://a.example")
-        assertEquals(emptyMap(), kept)
-        assertNull(store.saved("https://a.example"))
+        assertEquals(mapOf("https://a.example" to "from-file"), kept)
+        assertTrue("from-file" !in files.texts.getValue(path) && "alice" in files.texts.getValue(path))
+        val moved = "ostrom: the device token of https://a.example moved from credentials.json to macOS Keychain"
+        assertEquals(listOf(moved), notices)
+        assertEquals(Credentials("from-file", "alice"), store.saved("https://a.example"))
+        assertEquals(1, notices.size, "once")
         kept["https://c.example"] = "t"
         assertEquals(Credentials("t", "unknown"), store.saved("https://c.example"), "a token without its file entry")
+    }
+
+    @Test
+    fun theStoresTokenWinsAndTheFilesIsRemovedAllTheSame() {
+        files.texts[path] = """{"https://a.example":{"token":"old","login":"alice"}}"""
+        kept["https://a.example"] = "new"
+        assertEquals(Credentials("new", "alice"), store().saved("https://a.example"))
+        assertTrue("old" !in files.texts.getValue(path))
+        store().forget("https://a.example")
+        assertEquals(emptyMap(), kept)
+        assertNull(store().saved("https://a.example"))
+    }
+
+    @Test
+    fun aStoreThatDoesNotAnswerLeavesTheFileAsItIs() {
+        val file = """{"https://a.example":{"token":"from-file","login":"alice"}}"""
+        files.texts[path] = file
+        val locked = FileCredentialStore(files, path, { throw SecretStoreException("locked") }, { notices += it }) {
+            null
+        }
+        assertFailsWith<SecretStoreException> { locked.saved("https://a.example") }
+        assertEquals(file, files.texts[path])
+        assertEquals(emptyList(), notices)
     }
 
     @Test
