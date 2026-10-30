@@ -37,6 +37,9 @@ import dev.ostrom.cli.telemetry.UsageStatistics
 import dev.ostrom.cli.update.AgentSessionsImpl
 import dev.ostrom.cli.update.SelfUpdate
 import dev.ostrom.cli.update.TarUnpacker
+import dev.ostrom.cli.update.UpdateNotice
+import dev.ostrom.cli.update.detachedRefresh
+import dev.ostrom.cli.update.updateNoticeOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.delay
@@ -59,6 +62,7 @@ import okio.Path.Companion.toPath
  * @property readLine Reads a line the developer typed, or null at the end of the input.
  * @property openUrl Opens a page in the developer's browser; false when it could not.
  * @property selfUpdate `ostrom update`.
+ * @property updateNotice The once-a-day update notice, kept in the CLI folder; null when there is none.
  * @property postHogKey The usage statistics destination of this build; blank means none.
  * @property sendStatistics Posts usage statistics (opt-in only).
  */
@@ -80,6 +84,7 @@ class CliDependencies(
     val readLine: () -> String?,
     val openUrl: (String) -> Boolean,
     val selfUpdate: SelfUpdate,
+    val updateNotice: UpdateNotice?,
     val postHogKey: String,
     val sendStatistics: suspend (url: String, body: String) -> Unit,
 ) {
@@ -144,6 +149,11 @@ class CliDependencies(
                     TarUnpacker(ProcessLauncherImpl()),
                     { console.out("$it\n") },
                     AgentSessionsImpl(environment, FileSystem.SYSTEM, temporary, LoopbackHttpImpl()),
+                ),
+                updateNotice = updateNoticeOf(
+                    environment.configDirectory,
+                    FileStoreImpl(),
+                    detachedRefresh(currentExecutable(), ProcessCaptureImpl()),
                 ),
                 postHogKey = BuildInfo.POSTHOG_KEY,
                 sendStatistics = { url, body -> statistics.send(url, body) },

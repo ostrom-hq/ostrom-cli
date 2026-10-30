@@ -14,6 +14,7 @@ import okio.fakefilesystem.FakeFileSystem
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** `ostrom update`: a signed manifest, a checked archive, a swap that keeps the previous binary. */
@@ -202,6 +203,17 @@ class SelfUpdateTest {
             "✗ ostrom cannot read the version v1 to check it against the release's floor. Nothing was changed.",
             floorRefusal("v1", "1.2.0", "1.0.0"),
         )
+    }
+
+    @Test
+    fun theLatestVersionIsTheSignedOneAndSaysNothing() = runTest {
+        assertEquals("9.9.9", updater().latest(request(version = "1.2.3")), "always the latest, whatever is asked")
+        serve(latest, "LATEST", signature = "SAME")
+        assertNull(updater().latest(request()), "a signature that does not match: unknown")
+        routes.remove(latest)
+        assertNull(updater().latest(request()), "no manifest: unknown")
+        assertTrue(said.isEmpty())
+        assertEquals("old", text(binary), "nothing installed")
     }
 
     @Test

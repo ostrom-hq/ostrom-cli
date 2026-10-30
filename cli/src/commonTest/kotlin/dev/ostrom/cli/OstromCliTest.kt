@@ -31,6 +31,7 @@ import dev.ostrom.cli.platform.OperatingSystem
 import dev.ostrom.cli.platform.StandardInput
 import dev.ostrom.cli.update.AgentSessionsImpl
 import dev.ostrom.cli.update.SelfUpdate
+import dev.ostrom.cli.update.UpdateNotice
 import dev.ostrom.cli.update.UpdateRequest
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
@@ -144,6 +145,9 @@ class OstromCliTest {
                 say = { console.out("$it\n") },
                 sessions = AgentSessionsImpl(FakeEnvironment(environment), fileSystem, "/tmp", noRelay),
             ),
+            updateNotice = UpdateNotice(FileStoreImpl(fileSystem), NOTICE, "1.0.0", { now }) {
+                true.also { refreshes++ }
+            },
             postHogKey = postHogKey,
             sendStatistics = { _, body -> statistics += body },
         ),
@@ -386,6 +390,40 @@ class OstromCliTest {
         assertEquals(1, failing.run(arrayOf("doctor")))
         assertOut("  ✗ ostrom.example answers 502: the server is in trouble, try again later.\n")
         assertOut("  ! No agent installed (claude, codex, opencode, gemini, grok, hermes, pi).")
+    }
+
+    private var now = 10 * UpdateNotice.DAY_MILLIS
+    private var refreshes = 0
+
+    @Test
+    fun aPersonAtATerminalIsToldOfANewReleaseOnceADayAfterACommand() {
+        fileSystem.createDirectories("/home/maya/.config/ostrom".toPath())
+        fileSystem.write(NOTICE.toPath()) { writeUtf8("""{"latest":"1.2.0","checkedAt":$now}""") }
+        val notice = "! ostrom 1.2.0 is available. Run ostrom update.\n"
+        assertEquals(0, cli().run(arrayOf("version")))
+        assertTrue(console.err.isEmpty(), "not in a pipe")
+        console.isInteractive = true
+        for (quiet in listOf("CI", "OSTROM_LAUNCH_ID", "OSTROM_NO_UPDATE_NOTICE")) {
+            assertEquals(0, cli(environment = mapOf("HOME" to "/home/maya", quiet to "1")).run(arrayOf("version")))
+        }
+        assertEquals(0, cli().run(arrayOf("hook", "gate")), "never after plumbing")
+        assertTrue(console.err.isEmpty(), console.err.toString())
+        assertEquals(64, cli().run(arrayOf("cluade")))
+        assertTrue(!console.err.contains(notice), "not after a line that names no command")
+        console.err.clear()
+        assertEquals(0, cli().run(arrayOf("version")))
+        assertEquals(notice, console.err.toString())
+        assertEquals(0, cli().run(arrayOf("version")))
+        assertEquals(notice, console.err.toString(), "once a day")
+        assertEquals(0, refreshes)
+    }
+
+    @Test
+    fun theDetachedRefreshRecordsTheLatestReleaseAndSaysNothing() {
+        assertEquals(0, cli().run(arrayOf("update", "--record-latest")))
+        assertTrue(console.out.isEmpty() && console.err.isEmpty())
+        assertTrue(fileSystem.read(NOTICE.toPath()) { readUtf8() }.contains("\"checkedAt\":$now"))
+        assertEquals(1, releaseUrls.size, "the manifest was asked for")
     }
 
     @Test
@@ -745,5 +783,9 @@ class OstromCliTest {
             }
             assertEquals(target, releaseTarget(environment))
         }
+    }
+
+    private companion object {
+        const val NOTICE = "/home/maya/.config/ostrom/update-check.json"
     }
 }

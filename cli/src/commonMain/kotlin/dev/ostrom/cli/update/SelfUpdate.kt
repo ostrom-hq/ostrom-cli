@@ -122,6 +122,16 @@ class SelfUpdate(
     }
 
     /**
+     * The version of the latest signed release, or null when it cannot be read or its signature does not match: what
+     * the update notice is told, never more (nothing is said, nothing is installed).
+     */
+    suspend fun latest(request: UpdateRequest): String? = try {
+        manifest(request.copy(version = null)).version
+    } catch (_: Stop) {
+        null
+    }
+
+    /**
      * `ostrom update --rollback`: back to the version kept by the last update, which is kept in turn. The version kept
      * is checked against the latest release's signed floor first, so the release must be reachable.
      */
