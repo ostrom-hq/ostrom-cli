@@ -129,12 +129,13 @@ internal class InferenceForwarder(
     private suspend fun relay(call: ApplicationCall, upstreamPath: String, body: ByteArray) {
         val method = call.request.httpMethod
         val headers = call.request.headers
-        val declared = headers[HttpHeaders.ContentType]
-        val type = if (declared == null) ContentType.Application.Json else ContentType.parse(declared)
+        val type = contentTypeOf(headers[HttpHeaders.ContentType])
+        // The query goes along: the model listing pages with it, and provider APIs select behaviour with it.
+        val query = call.request.queryString()
         upstream().use { client ->
             exchange.run(call, client, Duration.INFINITE, {
                 this.method = method
-                url(config.serverUrl + upstreamPath)
+                url(config.serverUrl + upstreamPath + if (query.isEmpty()) "" else "?$query")
                 identify(config)
                 copyHeaders(headers, INFERENCE_REQUEST_HEADERS)
                 if (method == HttpMethod.Post) setBody(ByteArrayContent(body, type))

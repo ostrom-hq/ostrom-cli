@@ -38,17 +38,20 @@ class CommandLocation(private val git: GitRunner, private val home: String) {
     private val tops = mutableMapOf<String, String>()
 
     /**
-     * Where a shell command really runs: a leading `cd <dir>`, then the `-C` directories of the first `git` in it
-     * (relative to the `cd`), else [cwd].
+     * Where a shell command really runs: every leading `cd` in turn (its options skipped, the home folder without a
+     * folder), then the `-C` directories of the first `git` in it (relative to the `cd`s), else [cwd].
      */
     fun directory(cwd: String, text: String): String {
         val segments = ShellWords.segments(text)
-        var directory = cwd
-        val first = segments.firstOrNull()
-        if (first != null && first.size >= 2 && first[0] == "cd") directory = ShellPaths.join(directory, first[1], home)
+        val directory = segments.takeWhile { it.first() == "cd" }
+            .fold(cwd) { base, words -> ShellPaths.join(base, cdTarget(words), home) }
         val invocation = segments.firstNotNullOfOrNull { GitInvocation.parse(it) }
         return invocation?.directories.orEmpty().fold(directory) { base, d -> ShellPaths.join(base, d, home) }
     }
+
+    /** The folder of `cd [-L|-P|-e|--] [dir]`: its first operand, `~` without one. */
+    private fun cdTarget(words: List<String>): String =
+        words.drop(1).dropWhile { it.startsWith('-') && it != "-" }.firstOrNull() ?: "~"
 
     /** The top of the git repository [directory] is in (empty outside one), asked of git once per folder. */
     fun top(directory: String): String =
