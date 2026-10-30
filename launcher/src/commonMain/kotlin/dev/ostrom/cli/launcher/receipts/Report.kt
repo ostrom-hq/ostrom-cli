@@ -97,14 +97,15 @@ class Report(val title: String) {
         return prettyJson.encodeToString(JsonObject.serializer(), JsonObject(report))
     }
 
-    private companion object {
-        const val VERIFIED = 0
-        const val INVALID = 1
-        const val INCOMPLETE = 2
-        const val WHAT_WIDTH = 9
+    /** The report's wording. */
+    companion object {
+        private const val VERIFIED = 0
+        private const val INVALID = 1
+        private const val INCOMPLETE = 2
+        private const val WHAT_WIDTH = 9
 
         @OptIn(ExperimentalSerializationApi::class)
-        val prettyJson = Json {
+        private val prettyJson = Json {
             prettyPrint = true
             prettyPrintIndent = "  "
         }
