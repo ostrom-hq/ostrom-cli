@@ -100,35 +100,48 @@ object HttpMessages {
      * @return The response, or null when the bytes are not an HTTP/1.x response.
      */
     fun decode(bytes: ByteArray): LoopbackResponse? {
-        val end = indexOf(bytes, "\r\n\r\n".encodeToByteArray())
-        if (end < 0) return null
-        val head = bytes.decodeToString(0, end).split(CRLF)
-        val statusLine = STATUS_LINE.find(head.first()) ?: return null
-        val status = statusLine.groupValues[1].toInt()
-        val headers = head.drop(1).mapNotNull { line ->
+        val end = indexOf(bytes, HEAD_END)
+        val head = if (end < 0) emptyList() else bytes.decodeToString(0, end).split(CRLF)
+        val statusLine = head.firstOrNull()?.let { STATUS_LINE.find(it) }
+        return statusLine?.let {
+            response(it.groupValues[1].toInt(), head.drop(1), bytes.copyOfRange(end + HEAD_END.size, bytes.size))
+        }
+    }
+
+    private fun response(status: Int, lines: List<String>, raw: ByteArray): LoopbackResponse? {
+        val headers = lines.mapNotNull { line ->
             val colon = line.indexOf(':')
             if (colon <= 0) null else line.substring(0, colon).trim().lowercase() to line.substring(colon + 1).trim()
         }.toMap()
-        val raw = bytes.copyOfRange(end + 4, bytes.size)
+        val length = headers["content-length"]?.toIntOrNull()
         val body = when {
-            headers["transfer-encoding"]?.lowercase() == "chunked" -> dechunk(raw) ?: return null
-            else -> headers["content-length"]?.toIntOrNull()?.let { raw.copyOf(minOf(it, raw.size)) } ?: raw
+            headers["transfer-encoding"]?.lowercase() == "chunked" -> dechunk(raw)
+            length == null -> raw
+            else -> raw.copyOf(minOf(length, raw.size))
         }
-        return LoopbackResponse(status, body.decodeToString())
+        return body?.let { LoopbackResponse(status, it.decodeToString()) }
     }
 
     private fun dechunk(raw: ByteArray): ByteArray? {
         var out = ByteArray(0)
-        var at = 0
-        while (true) {
-            val lineEnd = indexOf(raw, CRLF.encodeToByteArray(), at)
-            if (lineEnd < 0) return null
-            val size = raw.decodeToString(at, lineEnd).substringBefore(';').trim().toIntOrNull(HEX) ?: return null
-            if (size == 0) return out
-            val start = lineEnd + 2
-            if (start + size > raw.size) return null
-            out += raw.copyOfRange(start, start + size)
-            at = start + size + 2
+        var chunk = chunkAt(raw, 0)
+        while (chunk != null && chunk.first.isNotEmpty()) {
+            out += chunk.first
+            chunk = chunkAt(raw, chunk.second)
+        }
+        return if (chunk == null) null else out
+    }
+
+    /** The data of the chunk at [at] and where the next one starts, or null when the bytes are not a chunk. */
+    private fun chunkAt(raw: ByteArray, at: Int): Pair<ByteArray, Int>? {
+        val lineEnd = indexOf(raw, CRLF_BYTES, at)
+        val line = if (lineEnd < 0) null else raw.decodeToString(at, lineEnd)
+        val size = line?.let { it.substringBefore(';').trim().toIntOrNull(HEX) }
+        val start = lineEnd + CRLF_BYTES.size
+        return if (size == null || start + size > raw.size) {
+            null
+        } else {
+            raw.copyOfRange(start, start + size) to start + size + CRLF_BYTES.size
         }
     }
 
@@ -140,6 +153,8 @@ object HttpMessages {
     }
 
     private const val HEX = 16
+    private val CRLF_BYTES = CRLF.encodeToByteArray()
+    private val HEAD_END = "$CRLF$CRLF".encodeToByteArray()
 }
 
 /** The native socket's "unreachable". */

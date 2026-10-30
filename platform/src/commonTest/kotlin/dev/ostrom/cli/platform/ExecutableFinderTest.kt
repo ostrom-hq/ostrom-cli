@@ -65,6 +65,19 @@ class ExecutableFinderTest {
     }
 
     @Test
+    fun aLinkToAnExecutableIsFoundUnderItsOwnName() {
+        val fileSystem = FakeFileSystem().apply { allowSymlinks = true }
+        fileSystem.createDirectories("/opt/claude".toPath())
+        fileSystem.createDirectories("/bin".toPath())
+        fileSystem.write("/opt/claude/cli.js".toPath()) { writeUtf8("") }
+        fileSystem.createSymlink("/bin/claude".toPath(), "/opt/claude/cli.js".toPath())
+        fileSystem.createSymlink("/bin/broken".toPath(), "/opt/nothing".toPath())
+        val finder = ExecutableFinderImpl(linux("PATH" to "/bin"), fileSystem)
+        assertEquals("/bin/claude".toPath().toString(), finder.find("claude"))
+        assertNull(finder.find("broken"))
+    }
+
+    @Test
     fun theRealFinderFindsAShellOrCmd() {
         val environment = EnvironmentImpl()
         val shell = if (environment.operatingSystem == OperatingSystem.WINDOWS) "cmd" else "sh"

@@ -45,7 +45,10 @@ data class HookEvent(val name: String, val fields: JsonObject) {
          *
          * @return The event in the Claude Code shape.
          */
-        fun parse(bytes: ByteArray?): HookEvent = jsonObjectOf(bytes)?.let(::normalise) ?: EMPTY
+        fun parse(bytes: ByteArray?): HookEvent {
+            val raw = jsonObjectOf(bytes) ?: return EMPTY
+            return normalise(raw)
+        }
 
         private fun jsonObjectOf(bytes: ByteArray?): JsonObject? = try {
             bytes?.takeIf { it.isNotEmpty() }?.let { Json.parseToJsonElement(it.decodeToString()) as? JsonObject }

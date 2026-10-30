@@ -94,15 +94,18 @@ class McpDispatcher(private val version: String, tools: List<McpTool> = emptyLis
     )
 
     private companion object {
-        /** Newest first; the first is answered to a client asking for a version this server does not know. */
-        val SUPPORTED_VERSIONS = listOf("2025-06-18", "2025-03-26", "2024-11-05")
-        val NEWEST_VERSION = SUPPORTED_VERSIONS.first()
         const val PARSE_ERROR = -32700
         const val INVALID_REQUEST = -32600
         const val METHOD_NOT_FOUND = -32601
         const val INVALID_PARAMS = -32602
     }
 }
+
+/** Answered to a client asking for a protocol version this server does not know. */
+private const val NEWEST_VERSION = "2025-06-18"
+
+/** The MCP protocol versions this server speaks. */
+private val SUPPORTED_VERSIONS = setOf(NEWEST_VERSION, "2025-03-26", "2024-11-05")
 
 /** Runs the local MCP server on stdio until stdin closes. */
 interface McpServer {
