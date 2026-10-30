@@ -197,6 +197,15 @@ class ReceiptCommandsTest {
     }
 
     @Test
+    fun theHelpOfReceiptsListsItsCommands() {
+        assertEquals(0, cli().run(arrayOf("receipts", "--help")))
+        val help = console.out.toString().replace(Regex("""\s+"""), " ")
+        assertTrue(help.contains("List receipts, newest first (● kept on this device)"), help)
+        assertTrue(help.contains("show Show a receipt"), help)
+        assertTrue(help.contains("Download a receipt with its package and keys, to verify it offline"), help)
+    }
+
+    @Test
     fun receiptsAloneIsTheList() {
         signIn()
         assertEquals(0, cli(mapOf("GET /api/v1/receipts" to (200 to """{"items":[]}"""))).run(arrayOf("receipts")))

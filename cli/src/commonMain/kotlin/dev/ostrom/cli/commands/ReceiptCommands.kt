@@ -57,8 +57,13 @@ private fun CliDependencies.keptReceipts(directory: String): List<JsonObject> {
     val documents = files.list(folder).filter { it.endsWith(".json") }.mapNotNull {
         parseDocument(files.read(join(folder, it)))
     }
-    return documents.map(::receiptOf).filter { it.isNotEmpty() }.sortedByDescending { it.text("createdAt") ?: "" }
+    val receipts = documents.map(::receiptOf)
+        .filter { it.isNotEmpty() }
+    return receipts.sortedByDescending(::createdAt)
 }
+
+/** When [receipt] was signed, or nothing: an undated receipt sorts last. */
+private fun createdAt(receipt: JsonObject): String = receipt.text("createdAt") ?: ""
 
 /** `<id>  <kind>  <subject>  @<initiator>  <createdAt>`, marked `●` when this device keeps it. */
 private fun line(receipt: JsonObject, kept: Boolean): String {
