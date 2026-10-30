@@ -8,7 +8,8 @@ import dev.ostrom.cli.ExitCode
 
 /**
  * A command of the spec that is declared (name, help, options, arguments) but not built yet. It says so on stderr
- * and exits with [ExitCode.NOT_IMPLEMENTED], so a script or an agent can tell it from a real failure.
+ * and exits with [ExitCode.NOT_IMPLEMENTED], so a script or an agent can tell it from a real failure. Its help ends
+ * with « (coming soon) », so the reference generated from `--help` never presents it as shipped.
  *
  * @param summary The one-line help of the command.
  * @param hidden True for plumbing commands, hidden from `ostrom --help` and listed by `ostrom help plumbing`.
@@ -18,7 +19,7 @@ open class PendingCommand(
     private val summary: String,
     private val hidden: Boolean = false,
 ) : CliktCommand(name = name) {
-    override fun help(context: Context) = summary
+    override fun help(context: Context) = "$summary $COMING_SOON"
 
     override val hiddenFromHelp: Boolean
         get() = hidden
@@ -33,14 +34,16 @@ open class PendingCommand(
  *
  * @param defaultSubcommand The subcommand the spec runs when none is given, while it is not implemented; null to
  * print the group's help instead.
+ * @param comingSoon True while none of the group's subcommands is built: its help says « (coming soon) ».
  */
 open class GroupCommand(
     name: String,
     private val summary: String,
     private val defaultSubcommand: String? = null,
     private val hidden: Boolean = false,
+    private val comingSoon: Boolean = true,
 ) : CliktCommand(name = name) {
-    override fun help(context: Context) = summary
+    override fun help(context: Context) = if (comingSoon) "$summary $COMING_SOON" else summary
 
     override val hiddenFromHelp: Boolean
         get() = hidden
@@ -62,3 +65,6 @@ open class GroupCommand(
 /** The error printed, through the CLI's console, by a command that is declared but not built yet (exit 70). */
 private fun notImplemented(path: List<String>) =
     PrintMessage("${path.joinToString(" ")}: not implemented yet.", ExitCode.NOT_IMPLEMENTED.code, printError = true)
+
+/** The end of the help of a command declared but not built yet. */
+private const val COMING_SOON = "(coming soon)"

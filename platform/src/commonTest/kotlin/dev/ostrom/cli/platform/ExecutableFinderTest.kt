@@ -66,7 +66,7 @@ class ExecutableFinderTest {
 
     @Test
     fun aLinkToAnExecutableIsFoundUnderItsOwnName() {
-        val fileSystem = FakeFileSystem()
+        val fileSystem = FakeFileSystem().apply { allowSymlinks = true }
         fileSystem.createDirectories("/opt/claude".toPath())
         fileSystem.createDirectories("/bin".toPath())
         fileSystem.write("/opt/claude/cli.js".toPath()) { writeUtf8("") }
