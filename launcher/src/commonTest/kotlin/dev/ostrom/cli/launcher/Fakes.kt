@@ -67,6 +67,9 @@ class MemoryFiles : LaunchFiles {
 
     override fun deleteRecursively(path: String) {
         deleted += path
-        texts.keys.removeAll { it == path || it.startsWith(path + Path.DIRECTORY_SEPARATOR) }
+        val under = { entry: String -> entry == path || entry.startsWith(path + Path.DIRECTORY_SEPARATOR) }
+        texts.keys.removeAll(under)
+        directories.removeAll(under)
+        links.keys.removeAll(under)
     }
 }
