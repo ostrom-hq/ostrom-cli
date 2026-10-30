@@ -14,7 +14,8 @@ import dev.ostrom.cli.platform.ProcessResult
 class TarUnpacker(private val processes: ProcessLauncher, private val systemRoot: String? = null) : Unpacker {
     override fun unpack(archive: String, into: String): Boolean {
         val zip = archive.endsWith(".zip")
-        val tar = if (zip) "${systemRoot?.trimEnd('\\') ?: WINDOWS}\\System32\\tar.exe" else "tar"
+        val root = if (systemRoot == null) WINDOWS else systemRoot.trimEnd('\\')
+        val tar = if (zip) "$root\\System32\\tar.exe" else "tar"
         return processes.run(listOf(tar, if (zip) "-xf" else "-xzf", archive, "-C", into)) == ProcessResult.Exited(0)
     }
 
