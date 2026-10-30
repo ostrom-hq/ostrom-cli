@@ -11,6 +11,8 @@ package dev.ostrom.cli.launcher
  * @property launchId Sent upstream as `x-ostrom-launch`.
  * @property mcpServers The MCP servers relayed under `/mcp/{server}`.
  * @property inference True to relay the inference routes.
+ * @property gateCatalog The verified package's gate catalogue (`ostrom/gates.json`), which the relay answers from its
+ * own memory (security audit S2-20); null without a package.
  */
 data class RelaySettings(
     val serverUrl: String,
@@ -19,6 +21,7 @@ data class RelaySettings(
     val launchId: String,
     val mcpServers: Set<String>,
     val inference: Boolean,
+    val gateCatalog: String? = null,
 )
 
 /** A running local relay on `127.0.0.1`; [close] stops it. */
