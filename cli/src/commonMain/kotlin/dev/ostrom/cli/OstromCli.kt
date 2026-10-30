@@ -68,8 +68,10 @@ class OstromCli(private val dependencies: CliDependencies) {
     }
 
     private fun execute(root: RootCommand, args: Array<String>, failed: (CliktError) -> Unit): Int {
-        val setting = dependencies.config?.get(ConfigKey.COLOR)
-        root.colours = colourLevel(args.asList(), dependencies.environment, setting, dependencies.console.isInteractive)
+        root.colours = {
+            val setting = dependencies.config?.get(ConfigKey.COLOR)
+            colourLevel(args.asList(), dependencies.environment, setting, dependencies.console.isInteractive)
+        }
         return try {
             root.parse(args)
             ExitCode.OK.code

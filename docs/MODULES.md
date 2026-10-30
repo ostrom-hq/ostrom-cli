@@ -107,8 +107,9 @@ usage error instead: 64 (`USAGE`).
 - **Help**: `ostrom <command> --help` ends with examples and the page of the docs (`cli/.../help/CommandGuide.kt`,
   one entry per command: `HelpTest` fails for a command without one). A usage error ends with the
   `--help` to run.
-- **Colours**: only on a terminal. `--no-color`, `NO_COLOR` (any value) or `ostrom config set color never` turn them
-  off, `TERM=dumb` too; `color always` forces them (`cli/.../help/Colours.kt`).
+- **Colours**: only on a terminal. `--no-color`, `NO_COLOR` (set and not empty, as no-color.org says) or `ostrom config set color never` turn them
+  off, `TERM=dumb` too; `color always` forces them (`cli/.../help/Colours.kt`). Whether stdout is a terminal decides
+  for help; a usage error, on stderr, never has colours.
 - **`--json`**: one JSON document on stdout, then a newline, never a colour nor a line for humans; keys are only
   added, never renamed or removed, like the API contract. `ostrom doctor --json` is
   `{"checks":[{"status":"ok|warning|problem","message":"…"}],"problems":0,"warnings":0}`; `ostrom verify --json` is
