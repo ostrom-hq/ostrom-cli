@@ -49,6 +49,7 @@ import okio.Path.Companion.toPath
  * @property agents Runs `ostrom <agent>`.
  * @property sleep Waits the given milliseconds (the device flow of login; virtual in tests).
  * @property readLine Reads a line the developer typed, or null at the end of the input.
+ * @property openUrl Opens a page in the developer's browser; false when it could not.
  */
 @Suppress("LongParameterList") // The composition root: one parameter per dependency, each replaced in tests.
 class CliDependencies(
@@ -66,6 +67,7 @@ class CliDependencies(
     val agents: AgentRunner,
     val sleep: suspend (Long) -> Unit,
     val readLine: () -> String?,
+    val openUrl: (String) -> Boolean,
 ) {
     /** The device configuration, or null when no home folder is known. */
     val config: ConfigStore? by lazy {
@@ -111,6 +113,7 @@ class CliDependencies(
                 ),
                 sleep = { delay(it) },
                 readLine = ::readlnOrNull,
+                openUrl = BrowserOpener(ProcessLauncherImpl(), environment.operatingSystem)::open,
             )
         }
 

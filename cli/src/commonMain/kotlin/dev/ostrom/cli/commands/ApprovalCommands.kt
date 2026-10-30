@@ -9,10 +9,10 @@ import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import dev.ostrom.cli.CliDependencies
 import dev.ostrom.cli.ExitCode
+import dev.ostrom.cli.launcher.LaunchVariables
+import dev.ostrom.cli.launcher.Routes
 import dev.ostrom.cli.launcher.ServerAnswer
-import dev.ostrom.cli.launcher.child
 import dev.ostrom.cli.launcher.list
-import dev.ostrom.cli.launcher.objectOf
 import dev.ostrom.cli.launcher.text
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonArray
@@ -38,7 +38,6 @@ internal fun ServerAnswer.orStop(serverUrl: String, notFound: String): JsonObjec
 private const val UNAUTHORIZED = 401
 private const val FORBIDDEN = 403
 private const val NOT_FOUND = 404
-private const val CONFLICT = 409
 private const val CHECK_NETWORK = "Check your network, or the --server URL."
 
 /** `ostrom inbox`: the requests that wait for this developer's yes. */
@@ -81,41 +80,31 @@ internal class InboxCommand(private val dependencies: CliDependencies) : CliktCo
 }
 
 /**
- * `ostrom approve <id>` and `ostrom deny <id>`: shows what the yes or the no is for, asks (approve, unless `--yes`),
- * then answers with the digest of what was shown: the server refuses an answer to something that changed since.
+ * `ostrom approve <id>` and `ostrom deny <id>`: show the request, then open its page in the browser, where the yes or
+ * the no is given with a passkey. The CLI never answers a request (S2-31): the agent it launches can run `ostrom` with
+ * the device's token, and would then approve its own push. Inside an agent session it refuses outright.
  */
 internal abstract class AnswerCommand(
     private val dependencies: CliDependencies,
     name: String,
-    private val answer: String,
+    private val word: String,
 ) : CliktCommand(name = name) {
     val id by argument("id")
     val server by option("--server", help = "Ostrom server URL (else OSTROM_URL, else the one of ostrom login)")
 
-    /** What goes in the receipt with the answer, or null. */
-    abstract val comment: String?
-
-    /** True to answer without asking. */
-    abstract val skipQuestion: Boolean
-
-    /** What is said once the server signed the answer. */
-    abstract fun done(receipt: String): String
-
     override fun run() {
+        if (dependencies.environment[LaunchVariables.LAUNCH_ID] != null) {
+            throw stop(ExitCode.REFUSED, "ostrom $commandName: an agent session cannot answer. Use your own terminal.")
+        }
         val signed = dependencies.signedIn(server)
-        val approval = runBlocking { signed.server.get("$APPROVALS/$id", signed.token) }
+        val approval = runBlocking { signed.server.get("$APPROVALS/${Routes.encode(id)}", signed.token) }
             .orStop(signed.serverUrl, "No request $id.")
         val status = approval.text("status")
         if (status != "pending") throw stop(ExitCode.USAGE, already(approval, status))
         show(approval)
-        if (!skipQuestion) ask(approval)
-        val body = objectOf("answer" to answer, "shownDigest" to approval.text("shownDigest"), "comment" to comment)
-        val result = runBlocking { signed.server.post("$APPROVALS/$id/answer", body, signed.token) }
-        if (result is ServerAnswer.Failed && result.status == CONFLICT) {
-            throw stop(ExitCode.FAILED, "The request changed since it was shown. Run ostrom $commandName $id again.")
-        }
-        val receipt = result.orStop(signed.serverUrl, "No request $id.").child("receipt")?.text("id") ?: "?"
-        dependencies.console.out(done(receipt) + "\n")
+        val url = "${consoleOf(dependencies, signed.serverUrl)}/yes/${Routes.encode(id)}"
+        val said = if (dependencies.openUrl(url)) "Opened $url: say $word there" else "Open $url to say $word"
+        dependencies.console.out("$said, with your passkey.\n")
     }
 
     private fun already(approval: JsonObject, status: String?): String = when (status) {
@@ -137,40 +126,24 @@ internal abstract class AnswerCommand(
         }
     }
 
-    private fun ask(approval: JsonObject) {
-        if (!dependencies.console.isInteractive) {
-            throw stop(ExitCode.USAGE, "ostrom $commandName: no terminal to ask in; add --yes to answer.")
-        }
-        dependencies.console.out("Approve \"${approval.text("title")}\"? [y/N] ")
-        val reply = dependencies.readLine().orEmpty().trim().lowercase()
-        if (reply != "y" && reply != "yes") throw stop(ExitCode.INCOMPLETE, "Nothing was said.")
-    }
-
     private companion object {
         const val SHORT_SHA = 7
     }
 }
 
-/** `ostrom approve <id> [--note N] [--yes]`. */
-internal class ApproveCommand(dependencies: CliDependencies) : AnswerCommand(dependencies, "approve", "approve") {
-    override fun help(context: Context) = "Say yes to a request"
-
-    val note by option("--note", help = "A note kept in the receipt")
-    val yes by option("--yes", help = "Do not ask for confirmation").flag()
-    override val comment get() = note
-    override val skipQuestion get() = yes
-
-    override fun done(receipt: String) = "✓ Approved. Receipt $receipt signed."
+/** `ostrom approve <id>`: the request, then its page, where the yes is given. */
+internal class ApproveCommand(dependencies: CliDependencies) : AnswerCommand(dependencies, "approve", "yes") {
+    override fun help(context: Context) = "Show a request and open its page to say yes"
 }
 
-/** `ostrom deny <id> [--reason R]`: no question, a no is never a risk. */
-internal class DenyCommand(dependencies: CliDependencies) : AnswerCommand(dependencies, "deny", "reject") {
-    override fun help(context: Context) = "Say no to a request"
-
-    val reason by option("--reason", help = "Told to the agent")
-    override val comment get() = reason
-    override val skipQuestion = true
-
-    override fun done(receipt: String) =
-        "✓ Denied. Receipt $receipt signed." + if (reason == null) "" else " The agent was told: \"$reason\"."
+/** `ostrom deny <id>`: the request, then its page, where the no is given (with the reason told to the agent). */
+internal class DenyCommand(dependencies: CliDependencies) : AnswerCommand(dependencies, "deny", "no") {
+    override fun help(context: Context) = "Show a request and open its page to say no"
 }
+
+/**
+ * The console of [serverUrl], where requests are answered: `OSTROM_CONSOLE_URL` when set, else `app.<domain>` for an
+ * `api.<domain>` server (api.ostrom.run → app.ostrom.run), else the server itself.
+ */
+internal fun consoleOf(dependencies: CliDependencies, serverUrl: String): String =
+    dependencies.environment["OSTROM_CONSOLE_URL"]?.trimEnd('/') ?: serverUrl.replaceFirst("://api.", "://app.")
