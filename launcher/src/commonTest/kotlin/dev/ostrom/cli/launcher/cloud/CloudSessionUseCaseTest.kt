@@ -47,7 +47,8 @@ class CloudSessionUseCaseTest {
         val sent = mutableListOf<String>()
         val texts = mutableListOf<String>()
         var closed = false
-        override var closeCode: Int? = null
+        // a session's end closes with 1000; null is a connection lost without a close frame
+        override var closeCode: Int? = 1000
 
         override suspend fun receive(): TerminalOutput? = channel.receiveCatching().getOrNull()
 
@@ -188,7 +189,7 @@ class CloudSessionUseCaseTest {
         val shown = "\r\n[ostrom] the session's machine is reconnecting…\r\n" +
             "\r\n[ostrom] the session's machine is back.\r\n"
         assertEquals(shown, terminal.shown.toString(), "said once each way, and only for connected itself")
-        assertEquals("Session cs1 ended.", said.last(), "no close code: an end")
+        assertEquals("Session cs1 ended.", said.last())
     }
 
     @Test
@@ -217,7 +218,10 @@ class CloudSessionUseCaseTest {
     @Test
     fun theCloseCodeSaysWhyTheTerminalClosed() = runTest {
         on("GET /api/v1/cloud/sessions/cs1", 200 to """{"status":"running"}""")
+        val lost = "ostrom: The connection to session cs1 was lost; it keeps running. Attach again with " +
+            "`ostrom attach cs1`."
         val cases = mapOf(
+            null to (69 to lost),
             4401 to (65 to "ostrom: Ostrom refused the terminal: run `ostrom login`."),
             4403 to (77 to "ostrom: Session cs1 is not yours to attach to."),
             4404 to (66 to "ostrom: No session cs1."),

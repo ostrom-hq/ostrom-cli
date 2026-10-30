@@ -16,6 +16,9 @@ import dev.ostrom.cli.platform.CaptureResult
 import dev.ostrom.cli.platform.Console
 import dev.ostrom.cli.platform.ProcessCapture
 import dev.ostrom.cli.platform.RawTerminal
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.IO
+import kotlinx.coroutines.withContext
 import okio.IOException
 
 /**
@@ -50,7 +53,7 @@ class CloudRunnerImpl(
 ) : CloudRunner {
     // the client is closed with the command: its engine holds a thread and the connection pool
     override suspend fun start(start: CloudStart, site: CloudSite): Int = api(site.serverUrl).use {
-        useCase(it, site).start(start.copy(repo = start.repo ?: originOf(site.cwd)), site.token)
+        useCase(it, site).start(start.copy(repo = start.repo ?: gitHubOrigin(site.cwd)), site.token)
     }
 
     override suspend fun attach(id: String, site: CloudSite): Int =
@@ -69,16 +72,26 @@ class CloudRunnerImpl(
         { console.err("$it\n") },
     )
 
-    /** The `origin` remote of the repository at [cwd], or null outside one. */
-    private fun originOf(cwd: String): String? {
-        val result = capture.capture(listOf("git", "-C", cwd, "remote", "get-url", "origin"), GIT_MILLIS)
+    /**
+     * The `origin` remote of the repository at [cwd] when it is on GitHub, or null: outside a repository, and for an
+     * origin elsewhere (GitLab, an ssh host alias), said, since only a `--repo` named by the developer is refused.
+     */
+    private suspend fun gitHubOrigin(cwd: String): String? {
+        val command = listOf("git", "-C", cwd, "remote", "get-url", "origin")
+        // git may wait on a credential helper or a slow disk: never on the caller's thread
+        val result = withContext(Dispatchers.IO) { capture.capture(command, GIT_MILLIS) }
         val url = if (result is CaptureResult.Exited && result.code == 0) result.output.trim() else ""
-        return url.ifEmpty { null }
+        val onGitHub = url.isNotEmpty() && CloudSessionUseCase.gitHubUrl(url) != null
+        if (url.isNotEmpty() && !onGitHub) {
+            console.err("ostrom: origin is not on GitHub ($url): the session starts without a repository ($NAME_ONE)\n")
+        }
+        return if (onGitHub) url else null
     }
 
     /** How long git may take to name the remote. */
     companion object {
         private const val GIT_MILLIS = 5_000
+        private const val NAME_ONE = "--repo names one"
     }
 }
 

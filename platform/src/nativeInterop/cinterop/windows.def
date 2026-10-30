@@ -359,15 +359,18 @@ static inline int ostrom_tcp_exchange(int port, const unsigned char *request, in
 #define DISABLE_NEWLINE_AUTO_RETURN 0x0008
 #endif
 
-/* The console modes before ostrom_raw_enter, kept to give them back. */
+/* The console modes and code pages before ostrom_raw_enter, kept to give them back. */
 static DWORD ostrom_saved_input_mode, ostrom_saved_output_mode;
+static UINT ostrom_saved_input_cp, ostrom_saved_output_cp;
 static int ostrom_modes_saved = 0;
 
-/* The modes ostrom_raw_enter found, given back; nothing when it set none. */
+/* The modes and code pages ostrom_raw_enter found, given back; nothing when it set none. */
 static void ostrom_raw_give_back(void) {
     if (!ostrom_modes_saved) return;
     SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), ostrom_saved_input_mode);
     SetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), ostrom_saved_output_mode);
+    if (ostrom_saved_input_cp != 0) SetConsoleCP(ostrom_saved_input_cp);
+    if (ostrom_saved_output_cp != 0) SetConsoleOutputCP(ostrom_saved_output_cp);
     ostrom_modes_saved = 0;
 }
 
@@ -381,7 +384,11 @@ static BOOL WINAPI ostrom_raw_on_console_event(DWORD event) {
     return FALSE;
 }
 
-/* Raw console input as VT sequences, and VT output. 1 when set, 0 when stdin or stdout is no console. */
+/*
+ * Raw console input as VT sequences, and VT output, both in UTF-8 for the whole raw session: a typed « é » reaches the
+ * session as UTF-8, and a character split between two frames of the session is never written in two code pages. 1
+ * when set, 0 when stdin or stdout is no console.
+ */
 static inline int ostrom_raw_enter(void) {
     HANDLE input = GetStdHandle(STD_INPUT_HANDLE), output = GetStdHandle(STD_OUTPUT_HANDLE);
     DWORD input_mode, output_mode;
@@ -392,6 +399,10 @@ static inline int ostrom_raw_enter(void) {
     SetConsoleMode(output, output_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN);
     ostrom_saved_input_mode = input_mode;
     ostrom_saved_output_mode = output_mode;
+    ostrom_saved_input_cp = GetConsoleCP();
+    ostrom_saved_output_cp = GetConsoleOutputCP();
+    SetConsoleCP(CP_UTF8);
+    SetConsoleOutputCP(CP_UTF8);
     ostrom_modes_saved = 1;
     SetConsoleCtrlHandler(ostrom_raw_on_console_event, TRUE);
     return 1;
@@ -420,15 +431,23 @@ static inline int ostrom_terminal_read(unsigned char *buffer, int capacity, int 
         DWORD waited = WaitForSingleObject(input, (DWORD)timeout_ms);
         if (waited == WAIT_TIMEOUT) return 0;
         if (waited != WAIT_OBJECT_0) return -1;
-        /* focus, mouse and resize events also wake the wait, and so does a key that types nothing (Shift, Ctrl, Alt,
-           CapsLock alone, a key release): ReadFile would then block until a character, so drop them */
+        /* focus, mouse and resize events also wake the wait, and so do a key release and a modifier pressed alone
+           (Shift, Ctrl, Alt, the Windows keys, CapsLock, NumLock, ScrollLock): ReadFile would then block until a
+           character, so drop them. Any other key goes on: an arrow, Home or F5 types no character, but the console
+           turns it into its VT sequence in ReadFile (ENABLE_VIRTUAL_TERMINAL_INPUT). */
         INPUT_RECORD records[64];
         DWORD pending = 0;
         if (!PeekConsoleInputW(input, records, 64, &pending)) return -1;
+        if (pending == 0) return 0;
         int key = 0;
         for (DWORD i = 0; i < pending; i++) {
             KEY_EVENT_RECORD *event = &records[i].Event.KeyEvent;
-            if (records[i].EventType == KEY_EVENT && event->bKeyDown && event->uChar.UnicodeChar != 0) key = 1;
+            if (records[i].EventType != KEY_EVENT || !event->bKeyDown) continue;
+            WORD vk = event->wVirtualKeyCode;
+            int modifier = vk == VK_SHIFT || vk == VK_CONTROL || vk == VK_MENU || vk == VK_CAPITAL
+                || vk == VK_NUMLOCK || vk == VK_SCROLL || vk == VK_LWIN || vk == VK_RWIN
+                || (vk >= VK_LSHIFT && vk <= VK_RMENU);
+            if (event->uChar.UnicodeChar != 0 || !modifier) key = 1;
         }
         if (!key) {
             ReadConsoleInputW(input, records, pending, &pending);

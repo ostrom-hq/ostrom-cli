@@ -80,7 +80,11 @@ alternative: a second private file for `ostrom wait`, which a command of the age
 
 `cli/.../ExitCode.kt`, from the spec (`CLI.md` § 2.3). A command declared but not built exits with 70
 (`NOT_IMPLEMENTED`) and says so on stderr; it disappears once every command is built. An option of a built command
-that this version does not have yet (`ostrom claude --cloud`) is a usage error instead: 64 (`USAGE`).
+that this version does not have yet is a usage error instead: 64 (`USAGE`); none is in that state since `--cloud` was
+built. `ostrom <agent> --cloud` and `ostrom attach` end with the session: 0 when it ends or the developer detaches,
+64 for agent arguments (before any sign-in is read) or a `--repo` not on GitHub, 65 to sign in again, 66 for no such
+session, 69 when Ostrom or the connection is lost (the session keeps running: `ostrom attach <id>`), 77 for a session
+of someone else.
 
 ## Add a command
 

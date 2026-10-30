@@ -398,13 +398,20 @@ static inline int ostrom_raw_enter_fd(int fd) {
     raw.c_cflag |= CS8;
     raw.c_cc[VMIN] = 1;
     raw.c_cc[VTIME] = 0;
+    /* saved before any handler is set: a signal right away finds the mode to give back */
+    ostrom_raw_fd = fd;
+    ostrom_mode_saved = 1;
     struct sigaction give_back;
     give_back.sa_handler = ostrom_raw_on_signal;
     sigemptyset(&give_back.sa_mask);
     give_back.sa_flags = 0;
-    for (int i = 0; i < 3; i++) sigaction(ostrom_raw_signals[i], &give_back, &ostrom_raw_previous[i]);
-    ostrom_raw_fd = fd;
-    ostrom_mode_saved = 1;
+    for (int i = 0; i < 3; i++) {
+        sigaction(ostrom_raw_signals[i], NULL, &ostrom_raw_previous[i]);
+        /* a signal ignored before (nohup's SIGHUP) stays ignored: raising it again would not end the process, which
+           would go on with the keyboard given back while it relays raw */
+        int ignored = !(ostrom_raw_previous[i].sa_flags & SA_SIGINFO) && ostrom_raw_previous[i].sa_handler == SIG_IGN;
+        if (!ignored) sigaction(ostrom_raw_signals[i], &give_back, NULL);
+    }
     if (tcsetattr(fd, TCSANOW, &raw) != 0) {
         ostrom_raw_give_back();
         return 0;

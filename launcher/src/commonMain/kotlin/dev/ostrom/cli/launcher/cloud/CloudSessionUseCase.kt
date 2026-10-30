@@ -205,7 +205,11 @@ class CloudSessionUseCase(
     private fun ended(id: String, code: Int?, detached: Boolean): Int {
         val outcome = when {
             detached -> "Detached: session $id keeps running. Attach again with `ostrom attach $id`." to OK
-            code == null || code == NORMAL -> "Session $id ended." to OK
+            code == NORMAL -> "Session $id ended." to OK
+            // no close frame: the network went (Wi-Fi, a reset, no pong), not the session
+            code == null ->
+                "The connection to session $id was lost; it keeps running. Attach again with `ostrom attach $id`." to
+                    UNREACHABLE
             code == HTTP_BASE + UNAUTHORIZED -> "Ostrom refused the terminal: run `ostrom login`." to SIGN_IN
             code == HTTP_BASE + FORBIDDEN -> "Session $id is not yours to attach to." to REFUSED
             code == HTTP_BASE + NOT_FOUND -> "No session $id." to MISSING

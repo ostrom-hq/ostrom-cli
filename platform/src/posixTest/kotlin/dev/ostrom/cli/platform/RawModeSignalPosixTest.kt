@@ -16,6 +16,7 @@ import platform.posix.O_NOCTTY
 import platform.posix.O_RDWR
 import platform.posix.SIGHUP
 import platform.posix.SIGINT
+import platform.posix.SIG_IGN
 import platform.posix.SIGTERM
 import platform.posix.close
 import platform.posix.grantpt
@@ -75,6 +76,27 @@ class RawModeSignalPosixTest {
                 signal(signalNumber, before)
             }
         } finally {
+            close(terminal)
+            close(master)
+        }
+    }
+
+    @Test
+    fun aSignalIgnoredBeforeStaysIgnoredAndTheKeyboardStaysRaw() {
+        // nohup's SIGHUP: raising it again would not end the process, which would relay with the terminal cooked
+        val master = posix_openpt(O_RDWR or O_NOCTTY)
+        check(master >= 0 && grantpt(master) == 0 && unlockpt(master) == 0) { "no pseudo-terminal" }
+        val terminal = open(checkNotNull(ptsname(master)).toKString(), O_RDWR or O_NOCTTY)
+        check(terminal >= 0) { "cannot open the pseudo-terminal" }
+        val before = signal(SIGHUP, SIG_IGN)
+        try {
+            assertEquals(1, ostrom_raw_enter_fd(terminal))
+            raise(SIGHUP)
+            assertEquals(0L, modeOf(terminal) and cooked, "still raw: the signal was ignored, as before")
+            ostrom_raw_restore()
+            assertEquals(cooked, modeOf(terminal) and cooked, "given back by the restore")
+        } finally {
+            signal(SIGHUP, before)
             close(terminal)
             close(master)
         }

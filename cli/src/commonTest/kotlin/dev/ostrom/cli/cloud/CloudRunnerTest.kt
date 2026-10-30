@@ -145,6 +145,20 @@ class CloudRunnerTest {
     }
 
     @Test
+    fun anOriginElsewhereThanGitHubStartsWithoutARepositoryAndSaysSo() = runTest {
+        // an ssh host alias, GitLab: not a usage error, since the developer named no repository
+        for (url in listOf("git@github.com-work:acme/api.git", "https://gitlab.com/acme/api.git")) {
+            origin = CaptureResult.Exited(0, "$url\n")
+            requests.clear()
+            assertEquals(0, runner().start(CloudStart(Agent.CODEX, null, null), site), url)
+            assertEquals("""{"agent":"codex"}""", requests.first().second.body, url)
+            val said = "ostrom: origin is not on GitHub ($url): the session starts without a repository " +
+                "(--repo names one)\n"
+            assertTrue(errors.contains(said), errors.toString())
+        }
+    }
+
+    @Test
     fun aRepositoryNamedIsSentWithoutAskingGit() = runTest {
         runner().start(CloudStart(Agent.GEMINI, "pro", "acme/web"), site)
         assertTrue(gitCalls.isEmpty())

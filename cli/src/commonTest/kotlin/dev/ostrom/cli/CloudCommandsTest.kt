@@ -11,6 +11,13 @@ import kotlin.test.assertTrue
 /** `ostrom <agent> --cloud` and `ostrom attach`. */
 class CloudCommandsTest : CliKit() {
     @Test
+    fun agentArgumentsWithCloudAreAUsageErrorBeforeTheSignIn() {
+        assertEquals(64, cli(environment = withServer).run(arrayOf("claude", "--cloud", "-p", "hello")), "not 65")
+        val said = console.err.toString()
+        assertTrue(said.startsWith("ostrom: agent arguments do not go to a cloud session"), said)
+    }
+
+    @Test
     fun cloudStartsTheAgentInOstromsCloudWithTheCredentialsOfThisDevice() {
         signIn("/home/maya/.config/ostrom")
         val arguments = arrayOf("codex", "--cloud", "--repo", "acme/api", "--model", "gpt-5")

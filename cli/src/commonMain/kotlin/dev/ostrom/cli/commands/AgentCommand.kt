@@ -40,6 +40,14 @@ internal class AgentCommand(private val agent: Agent, private val dependencies: 
 
     override fun run() {
         if (cloud && dryRun) throw UsageError("--dry-run checks a launch on this machine: it does not go with --cloud")
+        // a usage error before the server or the sign-in is looked at: 64, never 65 for a developer signed out
+        if (cloud && agentArguments.isNotEmpty()) {
+            throw stop(
+                ExitCode.USAGE,
+                "agent arguments do not go to a cloud session (${agentArguments.joinToString(" ")}): " +
+                    "start it with `ostrom ${agent.command} --cloud`, then type in it",
+            )
+        }
         val environment = dependencies.environment
         val directory = environment.configDirectory ?: throw stop(ExitCode.CANNOT_WRITE, NO_HOME)
         val saved = ConfigStoreImpl(dependencies.files, dependencies.configFile(directory)).get(ConfigKey.SERVER)
@@ -67,16 +75,8 @@ internal class AgentCommand(private val agent: Agent, private val dependencies: 
     private fun cwd() = dependencies.workingDirectory()
 
     /** `--cloud`: the session runs in Ostrom's cloud and this terminal is attached to it. */
-    private suspend fun inTheCloud(site: CloudSite): Int {
-        if (agentArguments.isNotEmpty()) {
-            throw stop(
-                ExitCode.USAGE,
-                "agent arguments do not go to a cloud session (${agentArguments.joinToString(" ")}): " +
-                    "start it with `ostrom ${agent.command} --cloud`, then type in it",
-            )
-        }
-        return dependencies.cloud.start(CloudStart(agent, model, repo), site)
-    }
+    private suspend fun inTheCloud(site: CloudSite): Int =
+        dependencies.cloud.start(CloudStart(agent, model, repo), site)
 
     private fun stop(code: ExitCode, message: String) = PrintMessage("ostrom: $message", code.code, printError = true)
 

@@ -53,7 +53,10 @@ class TerminalChannels(
     private val client: HttpClient = webSocketClient(),
 ) {
     companion object {
-        /** Opens a terminal on the server of the call, `(serverUrl, path, token)`, with [userAgent]. */
+        /**
+         * Opens a terminal on the server of the call, `(serverUrl, path, token)`, with [userAgent]. Each open has a
+         * client of its own, released with the process: one terminal is opened per `ostrom attach`, which ends with it.
+         */
         fun opener(userAgent: String): suspend (String, String, String) -> TerminalChannel =
             { url, path, token -> TerminalChannels(url, userAgent).open(path, token) }
     }
