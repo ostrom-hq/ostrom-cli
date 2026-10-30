@@ -14,6 +14,13 @@ internal sealed interface RelayTarget {
     /** `GET /api/v1/gates/catalog`, answered with the package's verified [catalog] without leaving the machine. */
     data class Catalog(val catalog: String) : RelayTarget
 
+    /**
+     * `GET /api/v1/gates/catalog/signed`: the organisation's gate policy signed by the instance, forwarded to Ostrom
+     * and kept in memory for a few seconds; the hook checks its signature and expiry at every call (security audit
+     * S2-20).
+     */
+    data object SignedCatalog : RelayTarget
+
     /** An inference route, forwarded to [upstreamPath]. */
     data class Inference(val upstreamPath: String) : RelayTarget
 
@@ -29,6 +36,7 @@ private const val ID = "[A-Za-z0-9_-]{1,128}"
 private const val API_PREFIX = "/api/v1/"
 private const val MCP_PREFIX = "/mcp/"
 private const val GATE_CATALOG = "/api/v1/gates/catalog"
+private const val SIGNED_GATE_CATALOG = "/api/v1/gates/catalog/signed"
 
 /**
  * The hook routes the relay forwards (CLI-AGENTS, `api/openapi.yaml` of ostrom-core), by method. Ending a session,
@@ -57,6 +65,7 @@ internal fun resolveTarget(method: HttpMethod, path: String, config: RelayConfig
 
 private fun hookTarget(method: HttpMethod, path: String, catalog: String?): RelayTarget = when {
     method == HttpMethod.Post && HOOK_POST.matches(path) -> RelayTarget.Hook(longPoll = false)
+    method == HttpMethod.Get && path == SIGNED_GATE_CATALOG -> RelayTarget.SignedCatalog
     method == HttpMethod.Get && path == GATE_CATALOG ->
         if (catalog == null) RelayTarget.Hook(longPoll = false) else RelayTarget.Catalog(catalog)
     method == HttpMethod.Get && HOOK_GET.matches(path) -> RelayTarget.Hook(longPoll = true)
@@ -72,4 +81,18 @@ private fun mcpTarget(method: HttpMethod, server: String, allowed: Set<String>):
 private fun inferenceTarget(method: HttpMethod, path: String): RelayTarget {
     val upstreamPath = INFERENCE_ROUTES[method to path]
     return if (upstreamPath == null) RelayTarget.NotFound else RelayTarget.Inference(upstreamPath)
+}
+
+/**
+ * Whether a request that carries the hooks' capability ([hooks]) or the agent's own ([client]) may reach [target]. The
+ * hook routes take the hooks' capability, which never enters the agent's environment; the MCP and inference routes
+ * take the agent's (security audit S2-25). The agent's opens one hook route, reading where a gate stands
+ * (`GET /api/v1/gates/{id}`, which `ostrom wait` calls from the agent's shell): it neither asks, consumes nor closes
+ * anything. Off the allow-list, either gets its 404.
+ */
+internal fun opens(target: RelayTarget, hooks: Boolean, client: Boolean): Boolean = when (target) {
+    is RelayTarget.Hook -> hooks || client && target.longPoll
+    is RelayTarget.Catalog, RelayTarget.SignedCatalog -> hooks
+    RelayTarget.NotFound -> true
+    is RelayTarget.Mcp, is RelayTarget.Inference, RelayTarget.McpMethodNotAllowed -> client
 }

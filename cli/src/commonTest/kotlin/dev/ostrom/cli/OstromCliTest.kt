@@ -6,9 +6,17 @@ import com.github.ajalt.clikt.core.PrintHelpMessage
 import com.github.ajalt.clikt.core.ProgramResult
 import com.github.ajalt.clikt.core.UsageError
 import dev.ostrom.cli.api.OstromApi
+import dev.ostrom.cli.api.ServerRequest
 import dev.ostrom.cli.api.ServerResponse
 import dev.ostrom.cli.api.ServerUnreachableException
 import dev.ostrom.cli.hooks.HookRunner
+import dev.ostrom.cli.launch.AgentRunner
+import dev.ostrom.cli.launcher.Agent
+import dev.ostrom.cli.launcher.Credentials
+import dev.ostrom.cli.launcher.FileCredentialStore
+import dev.ostrom.cli.launcher.LaunchFilesImpl
+import dev.ostrom.cli.launcher.LaunchRequest
+import dev.ostrom.cli.launcher.LaunchSite
 import dev.ostrom.cli.mcp.McpServer
 import dev.ostrom.cli.platform.Console
 import dev.ostrom.cli.platform.Environment
@@ -54,11 +62,13 @@ class OstromCliTest {
     private val hookCalls = mutableListOf<List<String>>()
     private val statistics = mutableListOf<String>()
     private val withServer = mapOf("HOME" to "/home/maya", "OSTROM_URL" to "https://ostrom.example")
+    private val launches = mutableListOf<Pair<LaunchRequest, LaunchSite>>()
 
     /** A server that answers every request with [status] after [millis]. */
     private fun serverAnswering(status: Int, millis: Long): (String) -> OstromApi = {
         object : OstromApi {
             override suspend fun get(path: String) = ServerResponse(status, "", millis)
+            override suspend fun send(request: ServerRequest) = get(request.path)
         }
     }
 
@@ -75,10 +85,12 @@ class OstromCliTest {
     /** Asserts that stdout contains [text], showing all of it otherwise. */
     private fun assertOut(text: String) = assertTrue(console.out.contains(text), console.out.toString())
 
+    @Suppress("LongParameterList") // one default per dependency a test replaces
     private fun cli(
         environment: Map<String, String> = mapOf("HOME" to "/home/maya"),
         installed: Set<String> = setOf("git", "claude"),
         api: (String) -> OstromApi = { error("no server in this test") },
+        executable: String? = "/opt/ostrom",
         secrets: () -> SecretStore = storeIn(SecretBackend.KEYCHAIN),
         postHogKey: String = "",
     ) = OstromCli(
@@ -94,11 +106,73 @@ class OstromCliTest {
                 override fun run(arguments: List<String>): Int = 0.also { hookCalls += arguments }
             },
             mcpServer = { object : McpServer { override fun serve() = 0 } },
+            credentials = { directory ->
+                val path = (directory.toPath() / "credentials.json").toString()
+                FileCredentialStore(LaunchFilesImpl(fileSystem) { _, _ -> }, path) { environment[it] }
+            },
+            workingDirectory = { "/work/acme" },
+            executable = executable,
+            temporaryDirectory = "/tmp",
+            agents = AgentRunner { request, site -> 7.also { launches += request to site } },
             secrets = secrets,
             postHogKey = postHogKey,
             sendStatistics = { _, body -> statistics += body },
         ),
     )
+
+    private fun signIn(directory: String, server: String = "https://ostrom.example") {
+        fileSystem.createDirectories(directory.toPath())
+        fileSystem.write(directory.toPath() / "credentials.json") {
+            writeUtf8("""{"$server":{"token":"ost_1","login":"maya"}}""")
+        }
+    }
+
+    @Test
+    fun anAgentRunsWithTheServerAndTheCredentialsOfThisDevice() {
+        signIn("/home/maya/.config/ostrom")
+        val environment = withServer + ("OSTROM_URL" to "https://ostrom.example/")
+        val arguments = arrayOf("claude", "--model", "opus", "--resume", "-p", "hi")
+        assertEquals(7, cli(environment = environment).run(arguments), "the agent's exit code")
+        val (request, site) = launches.single()
+        assertEquals(LaunchRequest(Agent.CLAUDE, listOf("--resume", "-p", "hi"), null, "opus"), request)
+        assertEquals("https://ostrom.example", site.serverUrl)
+        assertEquals(Credentials("ost_1", "maya"), site.credentials)
+        assertEquals("/work/acme", site.cwd)
+        assertEquals("/opt/ostrom", site.executable)
+        assertEquals("/home/maya/.config/ostrom", site.configDirectory)
+        assertEquals("/tmp", site.temporaryDirectory)
+        assertEquals("/home/maya", site.home)
+        assertEquals(':', site.pathSeparator)
+        assertEquals("/home/maya", site.variable("HOME"))
+    }
+
+    @Test
+    fun theServerIsTheOptionsTheEnvironmentsOrTheOneOfLogin() {
+        signIn("/home/maya/.config/ostrom", "https://cfg.example")
+        val home = mapOf("HOME" to "/home/maya")
+        assertEquals(65, cli(environment = home).run(arrayOf("codex")))
+        assertTrue(console.err.endsWith("ostrom: no Ostrom server: run `ostrom login`, or set OSTROM_URL\n"))
+        assertEquals(0, cli(environment = home).run(arrayOf("config", "set", "server", "https://cfg.example")))
+        assertEquals(7, cli(environment = home).run(arrayOf("codex", "exec", "fix")))
+        assertEquals("https://cfg.example", launches.last().second.serverUrl)
+        assertEquals(listOf("exec", "fix"), launches.last().first.arguments)
+        assertEquals(65, cli(environment = withServer).run(arrayOf("codex")))
+        assertTrue(console.err.endsWith("ostrom: not signed in to https://ostrom.example: run `ostrom login`\n"))
+        val other = arrayOf("pi", "--server", "https://cfg.example", "--repo", "acme/api")
+        assertEquals(7, cli(environment = withServer, executable = null).run(other))
+        assertEquals("acme/api", launches.last().first.repo)
+        assertEquals("ostrom", launches.last().second.executable, "no path from the system: found on the PATH")
+    }
+
+    @Test
+    fun withoutAFolderForItsFilesOstromCannotLaunch() {
+        assertEquals(73, cli(environment = emptyMap()).run(arrayOf("claude")))
+        assertTrue(console.err.endsWith("ostrom: no folder for ostrom's files: set OSTROM_HOME\n"))
+        signIn("/srv/ostrom")
+        val bench = mapOf("OSTROM_HOME" to "/srv/ostrom", "OSTROM_URL" to "https://ostrom.example")
+        assertEquals(7, cli(environment = bench).run(arrayOf("gemini")))
+        assertEquals("", launches.last().second.home, "no home folder known")
+    }
 
     @Test
     fun versionPrintsTheVersionAndThePlatform() {
@@ -154,7 +228,9 @@ class OstromCliTest {
         assertEquals("ostrom status: not implemented yet.\n", console.err.toString())
         assertEquals(70, cli().run(arrayOf("harness", "add", "git-safety", "--set", "a=b", "--yes")))
         assertEquals(70, cli().run(arrayOf("receipts")))
-        assertEquals(70, cli().run(arrayOf("claude", "--resume", "-p", "hello")))
+        assertEquals(70, cli().run(arrayOf("claude", "--cloud", "-p", "hello")))
+        assertEquals(70, cli().run(arrayOf("codex", "--dry-run")))
+        assertTrue(console.err.endsWith("ostrom codex --dry-run: not implemented yet.\n"), console.err.toString())
         assertEquals(64, cli().run(arrayOf("approve")))
     }
 
@@ -240,6 +316,7 @@ class OstromCliTest {
             object : OstromApi {
                 override suspend fun get(path: String): ServerResponse =
                     throw ServerUnreachableException(url + path, Exception("refused"))
+                override suspend fun send(request: ServerRequest) = get(request.path)
             }
         }
         val code = cli(environment = withServer, installed = emptySet(), api = down).run(arrayOf("doctor", "--json"))
@@ -327,6 +404,8 @@ class OstromCliTest {
         // refused connection.
         runBlocking { dependencies.sendStatistics("http://127.0.0.1:9/batch/", "{}") }
         assertTrue(dependencies.configFile("/x").endsWith("config.toml"))
+        assertTrue(dependencies.workingDirectory().isNotEmpty())
+        assertEquals(null, dependencies.credentials("/nowhere-ostrom").load("https://ostrom.example")?.login)
     }
 
     @Test
@@ -464,6 +543,11 @@ class OstromCliTest {
                 override fun run(arguments: List<String>) = 0
             },
             mcpServer = { object : McpServer { override fun serve() = 0 } },
+            credentials = { error("no credentials in this test") },
+            workingDirectory = { "/work/acme" },
+            executable = null,
+            temporaryDirectory = "/tmp",
+            agents = AgentRunner { _, _ -> 0 },
             postHogKey = "",
             sendStatistics = { _, _ -> },
         )

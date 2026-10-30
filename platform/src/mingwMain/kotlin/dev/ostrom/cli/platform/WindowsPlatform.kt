@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+// One actual per expect of the module, as in posixMain and jvmMain: their number follows the platform API.
 @file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+@file:Suppress("TooManyFunctions")
 
 package dev.ostrom.cli.platform
 
@@ -14,6 +16,11 @@ import kotlinx.cinterop.usePinned
 import kotlinx.cinterop.value
 import kotlinx.cinterop.wcstr
 import platform.posix.getenv
+import platform.windows.GetModuleFileNameW
+import platform.windows.SetEnvironmentVariableW
+import platform.windows.WCHARVar
+import kotlinx.cinterop.allocArray
+import kotlinx.cinterop.toKStringFromUtf16
 import dev.ostrom.cli.platform.interop.ostrom_capture_w
 import dev.ostrom.cli.platform.interop.ostrom_is_terminal
 import dev.ostrom.cli.platform.interop.ostrom_read_stdin
@@ -22,7 +29,9 @@ import dev.ostrom.cli.platform.interop.ostrom_spawn_wait_w
 import dev.ostrom.cli.platform.interop.ostrom_tcp_exchange
 import dev.ostrom.cli.platform.interop.ostrom_write
 
-internal actual fun spawnAndWait(command: List<String>): ProcessResult = memScoped {
+internal actual fun spawnAndWait(command: List<String>, environment: Map<String, String?>): ProcessResult = memScoped {
+    // CreateProcessW with no environment block gives the child this process's block, which SetEnvironmentVariableW sets
+    environment.forEach { (name, value) -> SetEnvironmentVariableW(name, value) }
     val launch = windowsLaunch(command, environmentVariable("SystemRoot"))
         ?: return ProcessResult.Failed(
             "a .cmd or .bat script cannot receive a line break or a NUL, nor run from a path that holds a quote, a " +
@@ -50,6 +59,8 @@ internal actual fun readStdin(buffer: ByteArray, offset: Int, timeoutMillis: Int
 internal actual fun environmentVariable(name: String): String? = getenv(name)?.toKString()
 
 internal actual fun restrictToOwner(path: String) = Unit
+
+internal actual fun restrictToOwnerExecutable(path: String) = Unit
 
 /**
  * [command] with its program resolved on the PATH alone. CreateProcessW given a bare name looks in the application's
@@ -107,3 +118,13 @@ internal actual fun tcpExchange(
     }
     return count to response
 }
+
+/** The running binary, as this platform says it. */
+actual fun currentExecutable(): String? = memScoped {
+    val buffer = allocArray<WCHARVar>(MODULE_PATH_CAPACITY)
+    val length = GetModuleFileNameW(null, buffer, MODULE_PATH_CAPACITY.toUInt()).toInt()
+    if (length in 1 until MODULE_PATH_CAPACITY) buffer.toKStringFromUtf16() else null
+}
+
+/** Long enough for any path Windows hands out without the `\\?\` prefix. */
+private const val MODULE_PATH_CAPACITY = 32_768

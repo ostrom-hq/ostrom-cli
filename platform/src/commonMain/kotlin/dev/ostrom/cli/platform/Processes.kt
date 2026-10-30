@@ -23,22 +23,26 @@ interface ProcessLauncher {
      * environment. While it runs, Ctrl-C reaches the child only: this process waits for its exit code.
      *
      * @param command The executable (looked up on the PATH) followed by its arguments; never empty.
+     * @param environment Variables set (a value) or removed (null) for the child, on top of this process's own.
      *
      * @return How the child ended.
      */
-    fun run(command: List<String>): ProcessResult
+    fun run(command: List<String>, environment: Map<String, String?> = emptyMap()): ProcessResult
 }
 
 /** [ProcessLauncher] backed by `posix_spawnp` on macOS and Linux, `CreateProcessW` on Windows. */
 class ProcessLauncherImpl : ProcessLauncher {
-    override fun run(command: List<String>): ProcessResult {
+    override fun run(command: List<String>, environment: Map<String, String?>): ProcessResult {
         require(command.isNotEmpty()) { "A command needs at least its executable." }
-        return spawnAndWait(command)
+        return spawnAndWait(command, environment)
     }
 }
 
-/** Platform half of [ProcessLauncherImpl]. */
-internal expect fun spawnAndWait(command: List<String>): ProcessResult
+/**
+ * Platform half of [ProcessLauncherImpl]. On macOS, Linux and Windows the variables are set in this process before the
+ * child starts (it inherits them): `ostrom <agent>` starts one child and ends with it.
+ */
+internal expect fun spawnAndWait(command: List<String>, environment: Map<String, String?>): ProcessResult
 
 /**
  * Quotes [arguments] into one Windows command line that `CommandLineToArgvW` (and the MSVC runtime) splits back into
@@ -79,6 +83,12 @@ private fun quoteWindowsArgument(argument: String): String =
         repeat(backslashes * 2) { append('\\') }
         append('"')
     }
+
+/**
+ * The full path of the running `ostrom` binary, for the hooks and MCP servers an agent starts (`"<path>" hook gate`),
+ * or null when the platform does not say.
+ */
+expect fun currentExecutable(): String?
 
 /**
  * How Windows starts [command]: `CreateProcessW`'s application and command line. A `.cmd` or `.bat` script (npm's

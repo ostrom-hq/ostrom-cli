@@ -125,6 +125,8 @@ jobs:
           python3 scripts/measure.py --label linuxX64
           --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
           --sizes cli/build/bin/*/releaseExecutable/ostrom.*
+      - name: End to end, the real binary with fake Claude Code and Codex against the contract's server
+        run: python3 e2e/run.py --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
       - name: The bench's build contract
         run: ./ci/build-linux.sh && ldd dist/ostrom
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

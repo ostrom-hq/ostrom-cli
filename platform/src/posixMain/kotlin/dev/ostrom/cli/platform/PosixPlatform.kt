@@ -7,7 +7,6 @@ import kotlinx.cinterop.IntVar
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.alloc
 import kotlinx.cinterop.allocArrayOf
-import kotlinx.cinterop.convert
 import kotlinx.cinterop.cstr
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.ptr
@@ -15,9 +14,10 @@ import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.toKString
 import kotlinx.cinterop.usePinned
 import kotlinx.cinterop.value
-import platform.posix.chmod
 import platform.posix.getenv
 import platform.posix.getuid
+import platform.posix.setenv
+import platform.posix.unsetenv
 import dev.ostrom.cli.platform.interop.ostrom_capture
 import dev.ostrom.cli.platform.interop.ostrom_is_terminal
 import dev.ostrom.cli.platform.interop.ostrom_read_stdin
@@ -26,7 +26,8 @@ import dev.ostrom.cli.platform.interop.ostrom_spawn_wait
 import dev.ostrom.cli.platform.interop.ostrom_tcp_exchange
 import dev.ostrom.cli.platform.interop.ostrom_write
 
-internal actual fun spawnAndWait(command: List<String>): ProcessResult = memScoped {
+internal actual fun spawnAndWait(command: List<String>, environment: Map<String, String?>): ProcessResult = memScoped {
+    environment.forEach { (name, value) -> if (value == null) unsetenv(name) else setenv(name, value, 1) }
     val argv = allocArrayOf(command.map { it.cstr.ptr } + listOf(null))
     val exitCode = alloc<IntVar>()
     when (ostrom_spawn_wait(command.first(), argv, exitCode.ptr)) {
@@ -48,13 +49,6 @@ internal actual fun readStdin(buffer: ByteArray, offset: Int, timeoutMillis: Int
 internal actual fun environmentVariable(name: String): String? = getenv(name)?.toKString()
 
 internal actual fun currentUserId(): String = getuid().toString()
-
-internal actual fun restrictToOwner(path: String) {
-    chmod(path, OWNER_READ_WRITE.convert())
-}
-
-/** Mode 0600: read and write for the owner only. */
-private const val OWNER_READ_WRITE = 0x180
 
 internal actual fun captureOutput(
     command: List<String>,

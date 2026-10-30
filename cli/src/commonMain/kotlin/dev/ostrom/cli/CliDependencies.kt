@@ -8,6 +8,12 @@ import dev.ostrom.cli.api.TraceContext
 import dev.ostrom.cli.hooks.HookRunner
 import dev.ostrom.cli.hooks.HookRunnerImpl
 import dev.ostrom.cli.hooks.runtime.SessionHooks
+import dev.ostrom.cli.launch.AgentRunner
+import dev.ostrom.cli.launch.AgentRunnerImpl
+import dev.ostrom.cli.launcher.CredentialStore
+import dev.ostrom.cli.launcher.FileCredentialStore
+import dev.ostrom.cli.launcher.LaunchFilesImpl
+import dev.ostrom.cli.launcher.join
 import dev.ostrom.cli.mcp.McpDispatcher
 import dev.ostrom.cli.mcp.McpServer
 import dev.ostrom.cli.mcp.McpServerImpl
@@ -23,9 +29,14 @@ import dev.ostrom.cli.platform.FileStore
 import dev.ostrom.cli.platform.FileStoreImpl
 import dev.ostrom.cli.platform.LoopbackHttpImpl
 import dev.ostrom.cli.platform.ProcessCaptureImpl
+import dev.ostrom.cli.platform.ProcessLauncherImpl
 import dev.ostrom.cli.platform.SecretStore
+import dev.ostrom.cli.platform.currentExecutable
 import dev.ostrom.cli.platform.systemSecretStore
+import dev.ostrom.cli.relay.LocalRelayStarterImpl
 import dev.ostrom.cli.telemetry.UsageStatistics
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.IO
 import okio.FileSystem
 import okio.Path.Companion.toPath
 
@@ -36,6 +47,11 @@ import okio.Path.Companion.toPath
  * @property api Builds the client of the server at the given URL.
  * @property hookRunner Runs `ostrom hook <kind>`.
  * @property mcpServer Builds the local MCP server.
+ * @property credentials The developer's credentials, kept in the CLI folder given.
+ * @property workingDirectory The folder `ostrom` runs in, its links resolved.
+ * @property executable This binary, or null when the system does not say.
+ * @property temporaryDirectory Where a launch makes its private folder.
+ * @property agents Runs `ostrom <agent>`.
  * @property secrets Opens the secret store of this device (system store, or encrypted file). Each call chooses and
  * probes the store again (up to a second on Linux): a command calls it once and keeps the store; the hook's fast
  * path never calls it.
@@ -51,6 +67,11 @@ class CliDependencies(
     val api: (String) -> OstromApi,
     val hookRunner: HookRunner,
     val mcpServer: () -> McpServer,
+    val credentials: (String) -> CredentialStore,
+    val workingDirectory: () -> String,
+    val executable: String?,
+    val temporaryDirectory: String,
+    val agents: AgentRunner,
     val postHogKey: String,
     val sendStatistics: suspend (url: String, body: String) -> Unit,
     val secrets: () -> SecretStore = { systemSecretStore(environment, files) },
@@ -78,18 +99,40 @@ class CliDependencies(
             val trace = TraceContext()
             // Built on first send only: with statistics off (the default) no HTTP client is made.
             val statistics by lazy { StatisticsSender() }
+            val finder = ExecutableFinderImpl(environment)
+            val api = { url: String -> OstromApiImpl(url, USER_AGENT, trace = trace) }
+            val launchFiles = LaunchFilesImpl()
             return CliDependencies(
                 console = console,
                 environment = environment,
                 files = FileStoreImpl(),
-                finder = ExecutableFinderImpl(environment),
-                api = { url -> OstromApiImpl(url, "ostrom/${BuildInfo.VERSION}", trace = trace) },
+                finder = finder,
+                api = api,
                 hookRunner = hookRunner(console, environment),
                 mcpServer = { McpServerImpl(McpDispatcher(BuildInfo.VERSION), console) },
+                credentials = { directory ->
+                    FileCredentialStore(launchFiles, join(directory, "credentials.json")) { environment[it] }
+                },
+                workingDirectory = { FileSystem.SYSTEM.canonicalize(".".toPath()).toString() },
+                executable = currentExecutable(),
+                temporaryDirectory = FileSystem.SYSTEM_TEMPORARY_DIRECTORY.toString(),
+                agents = AgentRunnerImpl(
+                    console = console,
+                    finder = finder,
+                    api = api,
+                    files = launchFiles,
+                    processes = ProcessLauncherImpl(),
+                    capture = ProcessCaptureImpl(),
+                    relays = LocalRelayStarterImpl({ console.err("ostrom: $it\n") }),
+                    blocking = Dispatchers.IO,
+                    userAgent = USER_AGENT,
+                ),
                 postHogKey = BuildInfo.POSTHOG_KEY,
                 sendStatistics = { url, body -> statistics.send(url, body) },
             )
         }
+
+        private val USER_AGENT = "ostrom/${BuildInfo.VERSION}"
 
         /** The hook runner alone, for the fast path of `main` (nothing else is built). */
         fun hookRunner(console: Console, environment: Environment): HookRunner {

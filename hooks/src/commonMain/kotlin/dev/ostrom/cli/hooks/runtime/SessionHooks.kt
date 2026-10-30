@@ -25,12 +25,19 @@ object SessionHooks {
     ): HookProcessor {
         val files = FileSystemHookFiles(fileSystem, clock)
         val context = HookContext.read { environment[it] }
+        // the relay's capability for the hooks is read from its file, never from the agent's environment (S2-25)
+        val token = context.relayTokenFile?.let(files::read)?.trim()
         val ports = HookPorts(
-            calls = RelayCalls(environment["OSTROM_RELAY_URL"], environment["OSTROM_RELAY_TOKEN"], http),
+            calls = BudgetedCalls.of(
+                RelayCalls(environment["OSTROM_RELAY_URL"], token, http),
+                environment["OSTROM_HOOK_BUDGET_MS"],
+                clock,
+            ),
             files = files,
             git = CapturedGit(capture, context.git),
             canonical = files::canonical,
             workingDirectory = files.canonical(".".toPath().toString()),
+            now = clock,
         )
         return SessionHookProcessor(context, ports)
     }

@@ -14,8 +14,12 @@ import java.nio.file.attribute.PosixFilePermissions
 
 // coverage: test-only JVM target; the shipped native actual is tested in posixTest and mingwTest.
 @ExcludeFromCoverage
-internal actual fun spawnAndWait(command: List<String>): ProcessResult = try {
-    ProcessResult.Exited(ProcessBuilder(command).inheritIO().start().waitFor())
+internal actual fun spawnAndWait(command: List<String>, environment: Map<String, String?>): ProcessResult = try {
+    val builder = ProcessBuilder(command).inheritIO()
+    environment.forEach { (name, value) ->
+        if (value == null) builder.environment().remove(name) else builder.environment()[name] = value
+    }
+    ProcessResult.Exited(builder.start().waitFor())
 } catch (_: IOException) {
     ProcessResult.NotFound
 }
@@ -77,6 +81,15 @@ internal actual fun currentArchitecture(): String = when (val arch = System.getP
     "aarch64" -> "arm64"
     "amd64", "x86_64" -> "x64"
     else -> arch
+}
+
+// coverage: test-only JVM target; the shipped native actual is tested by OwnerOnlyTest on macOS and Linux.
+@ExcludeFromCoverage
+internal actual fun restrictToOwnerExecutable(path: String) {
+    val file = Paths.get(path)
+    if (Files.getFileStore(file).supportsFileAttributeView("posix")) {
+        Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rwx------"))
+    }
 }
 
 // coverage: test-only JVM target; the shipped native actual is tested by FileStoreTest on macOS and Linux.
@@ -175,3 +188,8 @@ internal actual fun tcpExchange(
 } catch (_: IOException) {
     TCP_UNREACHABLE to ByteArray(0)
 }
+
+/** The running JVM's command. */
+// coverage: test-only JVM target; the shipped native actuals are tested by ExecutableTest on each target.
+@ExcludeFromCoverage
+actual fun currentExecutable(): String? = ProcessHandle.current().info().command().orElse(null)
