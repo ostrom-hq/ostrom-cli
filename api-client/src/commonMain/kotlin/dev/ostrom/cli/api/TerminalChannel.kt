@@ -59,19 +59,22 @@ class TerminalChannels(
      */
     suspend fun open(path: String, token: String): TerminalChannel {
         val url = baseUrl.trimEnd('/').replaceFirst(Regex("^http"), "ws") + path
+        var failure: Exception = IllegalStateException("not opened")
         val session = try {
             client.webSocketSession(url) {
                 header(HttpHeaders.UserAgent, userAgent)
                 header(HttpHeaders.Authorization, "Bearer $token")
             }
+        } catch (e: CancellationException) {
+            // a cancellation is an IllegalStateException too: it goes on as it is, before the catch below
+            throw e
         } catch (e: IOException) {
-            throw ServerUnreachableException(url, e)
+            null.also { failure = e }
         } catch (e: IllegalStateException) {
-            // a refused upgrade, and the Curl and WinHttp engines' failed connections, are IllegalStateException; so is
-            // a cancellation, which goes on as it is
-            throw if (e is CancellationException) e else ServerUnreachableException(url, e)
+            // a refused upgrade, and the Curl and WinHttp engines' failed connections, are IllegalStateException
+            null.also { failure = e }
         }
-        return KtorTerminalChannel(session)
+        return KtorTerminalChannel(session ?: throw ServerUnreachableException(url, failure))
     }
 }
 

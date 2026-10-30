@@ -8,12 +8,16 @@ import dev.ostrom.cli.launcher.ServerReply
 import dev.ostrom.cli.launcher.ServerTransport
 import dev.ostrom.cli.platform.RawTerminal
 import dev.ostrom.cli.platform.TerminalSize
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import okio.IOException
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /** `ostrom <agent> --cloud` and `ostrom attach` against a scripted server, socket and terminal. */
@@ -59,6 +63,11 @@ class CloudSessionUseCaseTest {
             closed = true
             channel.close()
         }
+
+        /** The session ends on its own, now. */
+        fun end() {
+            channel.close()
+        }
     }
 
     private class Terminal(private val keys: ArrayDeque<String>, private val sizes: ArrayDeque<TerminalSize?>) :
@@ -66,6 +75,7 @@ class CloudSessionUseCaseTest {
         var raw = true
         var idle = false
         var restored = 0
+        var atTheEnd: () -> Unit = {}
         val shown = StringBuilder()
 
         override fun enterRaw() = raw
@@ -77,7 +87,7 @@ class CloudSessionUseCaseTest {
         override fun size(): TerminalSize? = if (sizes.size > 1) sizes.removeFirst() else sizes.firstOrNull()
 
         override fun read(buffer: ByteArray, timeoutMillis: Int): Int {
-            val next = keys.removeFirstOrNull() ?: return if (idle) 0 else -1
+            val next = keys.removeFirstOrNull() ?: return if (idle) 0 else -1.also { atTheEnd() }
             val bytes = next.encodeToByteArray()
             bytes.copyInto(buffer)
             return bytes.size
@@ -232,6 +242,9 @@ class CloudSessionUseCaseTest {
         assertEquals("ostrom: session t is terminated", said.last())
         assertEquals(1, useCase().attach("p", "device"))
         assertEquals("ostrom: session p is paused: resume it from Ostrom's console, then attach again", said.last())
+        on("GET /api/v1/cloud/sessions/q", 200 to """{"status":"pausing"}""")
+        assertEquals(1, useCase().attach("q", "device"))
+        assertEquals("ostrom: session q is paused: resume it from Ostrom's console, then attach again", said.last())
         assertEquals(emptyList(), opened)
     }
 
@@ -267,7 +280,9 @@ class CloudSessionUseCaseTest {
     @Test
     fun anAgentWithoutACloudImageOrAnAnswerWithoutIdStops() = runTest {
         assertEquals(64, useCase().start(CloudStart(Agent.PI, null, null), "device"))
-        assertEquals("ostrom: Pi does not run in Ostrom's cloud yet (claude, codex, opencode, gemini do)", said.last())
+        val cloud = CloudSessionUseCase.CLOUD_AGENTS.joinToString()
+        assertEquals("ostrom: Pi does not run in Ostrom's cloud yet ($cloud do)", said.last())
+        assertEquals(listOf("claude", "codex", "opencode", "gemini"), CloudSessionUseCase.CLOUD_AGENTS)
         assertTrue(calls.isEmpty())
         on("POST /api/v1/cloud/sessions", 201 to "{}")
         assertEquals(69, useCase().start(CloudStart(Agent.CODEX, null, null), "device"))
@@ -304,5 +319,45 @@ class CloudSessionUseCaseTest {
             "https://github.com/owner/name"
         assertEquals(refusal, said.last())
         assertTrue(calls.isEmpty())
+    }
+
+    @Test
+    fun theEndOfTheKeyboardLeavesTheSessionToEndOnItsOwn() = runTest {
+        on("GET /api/v1/cloud/sessions/cs1", 200 to """{"status":"running"}""")
+        socket = Socket(emptyList(), endsOnItsOwn = false)
+        // "" is a read that timed out; the same size again sends no resize
+        terminal = Terminal(ArrayDeque(listOf("x", "")), ArrayDeque(listOf(null, TerminalSize(80, 24))))
+        terminal.atTheEnd = { socket.end() }
+        assertEquals(0, useCase().attach("cs1", "device"))
+        assertEquals(listOf("x"), socket.sent)
+        assertEquals(emptyList(), socket.texts)
+        assertFalse(socket.closed, "not detached: the session closed the socket")
+        assertEquals("Session cs1 ended.", said.last())
+    }
+
+    @Test
+    fun aCancelledAttachGivesTheTerminalBack() = runTest {
+        on("GET /api/v1/cloud/sessions/cs1", 200 to """{"status":"running"}""")
+        for (raw in listOf(true, false)) {
+            socket = Socket(emptyList(), endsOnItsOwn = false)
+            terminal = Terminal(ArrayDeque(), ArrayDeque(listOf(null)))
+            terminal.raw = raw
+            val attach = launch { useCase().attach("cs1", "device") }
+            advanceUntilIdle()
+            attach.cancelAndJoin()
+            assertEquals(if (raw) 1 else 0, terminal.restored, "raw $raw")
+        }
+    }
+
+    @Test
+    fun theRealClockAndKeyboardThreadAreTheDefaults() = runTest {
+        on(
+            "GET /api/v1/cloud/sessions/cs1",
+            200 to """{"status":"creating"}""",
+            200 to """{"status":"running"}""",
+        )
+        val plain = CloudSessionUseCase(ServerJson(transport), { _, _ -> socket }, terminal, { said += it })
+        assertEquals(0, plain.attach("cs1", "device"))
+        assertEquals("Session cs1 ended.", said.last())
     }
 }

@@ -363,6 +363,24 @@ static inline int ostrom_tcp_exchange(int port, const unsigned char *request, in
 static DWORD ostrom_saved_input_mode, ostrom_saved_output_mode;
 static int ostrom_modes_saved = 0;
 
+/* The modes ostrom_raw_enter found, given back; nothing when it set none. */
+static void ostrom_raw_give_back(void) {
+    if (!ostrom_modes_saved) return;
+    SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), ostrom_saved_input_mode);
+    SetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), ostrom_saved_output_mode);
+    ostrom_modes_saved = 0;
+}
+
+/*
+ * The console's own signals (Ctrl-Break, the window closed, a log-off or shut-down) while the input is raw: the modes
+ * are given back first, then FALSE lets the next handler, and in the end the default one, end the process as before.
+ */
+static BOOL WINAPI ostrom_raw_on_console_event(DWORD event) {
+    (void)event;
+    ostrom_raw_give_back();
+    return FALSE;
+}
+
 /* Raw console input as VT sequences, and VT output. 1 when set, 0 when stdin or stdout is no console. */
 static inline int ostrom_raw_enter(void) {
     HANDLE input = GetStdHandle(STD_INPUT_HANDLE), output = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -375,15 +393,15 @@ static inline int ostrom_raw_enter(void) {
     ostrom_saved_input_mode = input_mode;
     ostrom_saved_output_mode = output_mode;
     ostrom_modes_saved = 1;
+    SetConsoleCtrlHandler(ostrom_raw_on_console_event, TRUE);
     return 1;
 }
 
-/* The modes ostrom_raw_enter found; nothing when it set none. */
+/* The modes ostrom_raw_enter found, and the console's signals as they were; nothing when it set none. */
 static inline void ostrom_raw_restore(void) {
     if (!ostrom_modes_saved) return;
-    SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), ostrom_saved_input_mode);
-    SetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), ostrom_saved_output_mode);
-    ostrom_modes_saved = 0;
+    ostrom_raw_give_back();
+    SetConsoleCtrlHandler(ostrom_raw_on_console_event, FALSE);
 }
 
 /* columns << 16 | rows of stdout's console window, or -1. */

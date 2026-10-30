@@ -359,13 +359,36 @@ static inline int ostrom_tcp_exchange(int port, const unsigned char *request, in
     return result;
 }
 
-/* The terminal mode before ostrom_raw_enter, kept to give it back. */
+/* The terminal mode before ostrom_raw_enter_fd, kept to give it back, and the terminal it was taken from. */
 static struct termios ostrom_saved_mode;
-static int ostrom_mode_saved = 0;
+static volatile sig_atomic_t ostrom_mode_saved = 0;
+static int ostrom_raw_fd = -1;
 
-/* Raw mode on stdin (no echo, no line editing, no signal keys). 1 when set, 0 when stdin is no terminal. */
-static inline int ostrom_raw_enter(void) {
-    if (!isatty(STDIN_FILENO) || tcgetattr(STDIN_FILENO, &ostrom_saved_mode) != 0) return 0;
+/* The signals that end this process with the keyboard still raw, and what they did before raw mode. */
+static const int ostrom_raw_signals[3] = {SIGINT, SIGTERM, SIGHUP};
+static struct sigaction ostrom_raw_previous[3];
+
+/* The mode ostrom_raw_enter_fd found, given back; then each signal does again what it did before. */
+static void ostrom_raw_give_back(void) {
+    if (!ostrom_mode_saved) return;
+    tcsetattr(ostrom_raw_fd, TCSANOW, &ostrom_saved_mode);
+    ostrom_mode_saved = 0;
+    for (int i = 0; i < 3; i++) sigaction(ostrom_raw_signals[i], &ostrom_raw_previous[i], NULL);
+}
+
+/*
+ * A signal that would end this process (a kill, the terminal window closed) while the keyboard is raw: the shell would
+ * get a terminal with no echo and no line editing. The mode is given back first, then the signal is raised again with
+ * the handler it had before, so it ends the process as it would have. tcsetattr and sigaction are async-signal-safe.
+ */
+static void ostrom_raw_on_signal(int signal_number) {
+    ostrom_raw_give_back();
+    raise(signal_number);
+}
+
+/* Raw mode on the terminal `fd` (no echo, no line editing, no signal keys). 1 when set, 0 when `fd` is no terminal. */
+static inline int ostrom_raw_enter_fd(int fd) {
+    if (ostrom_mode_saved || !isatty(fd) || tcgetattr(fd, &ostrom_saved_mode) != 0) return 0;
     struct termios raw = ostrom_saved_mode;
     /* what cfmakeraw does, written out: cfmakeraw is not POSIX and some C modes hide it */
     raw.c_iflag &= ~(tcflag_t)(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL | IXON);
@@ -375,15 +398,28 @@ static inline int ostrom_raw_enter(void) {
     raw.c_cflag |= CS8;
     raw.c_cc[VMIN] = 1;
     raw.c_cc[VTIME] = 0;
-    if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) != 0) return 0;
+    struct sigaction give_back;
+    give_back.sa_handler = ostrom_raw_on_signal;
+    sigemptyset(&give_back.sa_mask);
+    give_back.sa_flags = 0;
+    for (int i = 0; i < 3; i++) sigaction(ostrom_raw_signals[i], &give_back, &ostrom_raw_previous[i]);
+    ostrom_raw_fd = fd;
     ostrom_mode_saved = 1;
+    if (tcsetattr(fd, TCSANOW, &raw) != 0) {
+        ostrom_raw_give_back();
+        return 0;
+    }
     return 1;
 }
 
-/* The mode ostrom_raw_enter found; nothing when it set none. */
+/* Raw mode on stdin. */
+static inline int ostrom_raw_enter(void) {
+    return ostrom_raw_enter_fd(STDIN_FILENO);
+}
+
+/* The mode ostrom_raw_enter_fd found, and the signals' handlers; nothing when it set none. */
 static inline void ostrom_raw_restore(void) {
-    if (ostrom_mode_saved) tcsetattr(STDIN_FILENO, TCSANOW, &ostrom_saved_mode);
-    ostrom_mode_saved = 0;
+    ostrom_raw_give_back();
 }
 
 /* columns << 16 | rows of stdout's terminal, or -1. */

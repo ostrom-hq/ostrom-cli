@@ -44,7 +44,8 @@ internal actual fun spawnAndWait(command: List<String>, environment: Map<String,
 }
 
 internal actual fun writeBytes(descriptor: Int, bytes: ByteArray) {
-    bytes.usePinned { ostrom_write(descriptor, it.addressOf(0).reinterpret(), bytes.size) }
+    // an empty array has no element 0 to pin: nothing to write (Console.out(""), a terminal frame with no bytes)
+    if (bytes.isNotEmpty()) bytes.usePinned { ostrom_write(descriptor, it.addressOf(0).reinterpret(), bytes.size) }
 }
 
 internal actual fun isTerminal(descriptor: Int): Boolean = ostrom_is_terminal(descriptor) == 1
