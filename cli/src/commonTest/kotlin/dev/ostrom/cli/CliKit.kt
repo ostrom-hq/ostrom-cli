@@ -67,6 +67,9 @@ open class CliKit {
     protected val releaseUrls = mutableListOf<String>()
     protected var now = 10 * UpdateNotice.DAY_MILLIS
     protected var refreshes = 0
+
+    /** What the update notice tells to do. */
+    protected var noticeAdvice: () -> String? = { "Run ostrom update." }
     protected val noRelay = object : LoopbackHttp {
         override fun exchange(port: Int, request: LoopbackRequest, timeoutMillis: Int): Result<LoopbackResponse> =
             Result.failure(IllegalStateException("nothing listens"))
@@ -138,7 +141,7 @@ open class CliKit {
                 say = { console.out("$it\n") },
                 sessions = AgentSessionsImpl(FakeEnvironment(environment), fileSystem, "/tmp", noRelay),
             ),
-            updateNotice = UpdateNotice(FileStoreImpl(fileSystem), NOTICE, "1.0.0", { now }) {
+            updateNotice = UpdateNotice(FileStoreImpl(fileSystem), NOTICE, "1.0.0", { now }, { noticeAdvice() }) {
                 true.also { refreshes++ }
             },
             postHogKey = postHogKey,

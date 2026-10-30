@@ -39,6 +39,7 @@ import dev.ostrom.cli.update.SelfUpdate
 import dev.ostrom.cli.update.TarUnpacker
 import dev.ostrom.cli.update.UpdateNotice
 import dev.ostrom.cli.update.detachedRefresh
+import dev.ostrom.cli.update.noticeAdvice
 import dev.ostrom.cli.update.updateNoticeOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
@@ -115,10 +116,13 @@ class CliDependencies(
             val api = { url: String -> OstromApiImpl(url, USER_AGENT, trace = trace) }
             val launchFiles = LaunchFilesImpl()
             val temporary = FileSystem.SYSTEM_TEMPORARY_DIRECTORY.toString()
+            val files = FileStoreImpl()
+            val self = currentExecutable()
+            val sessions = AgentSessionsImpl(environment, FileSystem.SYSTEM, temporary, LoopbackHttpImpl())
             return CliDependencies(
                 console = console,
                 environment = environment,
-                files = FileStoreImpl(),
+                files = files,
                 finder = finder,
                 api = api,
                 hookRunner = hookRunner(console, environment),
@@ -127,7 +131,7 @@ class CliDependencies(
                     FileCredentialStore(launchFiles, join(directory, "credentials.json")) { environment[it] }
                 },
                 workingDirectory = { FileSystem.SYSTEM.canonicalize(".".toPath()).toString() },
-                executable = currentExecutable(),
+                executable = self,
                 temporaryDirectory = temporary,
                 agents = AgentRunnerImpl(
                     console = console,
@@ -148,12 +152,13 @@ class CliDependencies(
                     FileSystem.SYSTEM,
                     TarUnpacker(ProcessLauncherImpl(), environment["SystemRoot"]),
                     { console.out("$it\n") },
-                    AgentSessionsImpl(environment, FileSystem.SYSTEM, temporary, LoopbackHttpImpl()),
+                    sessions,
                 ),
                 updateNotice = updateNoticeOf(
                     environment.configDirectory,
-                    FileStoreImpl(),
-                    detachedRefresh(currentExecutable(), ProcessCaptureImpl()),
+                    files,
+                    noticeAdvice(self, sessions),
+                    detachedRefresh(self, ProcessCaptureImpl()),
                 ),
                 postHogKey = BuildInfo.POSTHOG_KEY,
                 sendStatistics = { url, body -> statistics.send(url, body) },

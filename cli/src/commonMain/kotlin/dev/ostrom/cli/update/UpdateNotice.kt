@@ -13,6 +13,7 @@ import dev.ostrom.cli.platform.ProcessCapture
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.longOrNull
+import okio.Path.Companion.toPath
 
 /**
  * The update notice (CLI.md § 2.2, `ostrom update`): `! ostrom 0.4.1 is available. Run ostrom update.` on stderr after
@@ -21,6 +22,7 @@ import kotlinx.serialization.json.longOrNull
  *
  * @param current The version of this binary.
  * @param now The time, in milliseconds since the epoch.
+ * @param advice What the notice tells to do ([noticeAdvice]); null while the notice must wait (it is said later).
  * @param refresh Starts the detached refresh; false when it could not start.
  */
 class UpdateNotice(
@@ -28,6 +30,7 @@ class UpdateNotice(
     private val path: String,
     private val current: String,
     private val now: () -> Long,
+    private val advice: () -> String?,
     private val refresh: () -> Boolean,
 ) {
     /** After a command: says the notice when it is due, and starts a refresh when the last one is a day old. */
@@ -35,9 +38,12 @@ class UpdateNotice(
         val state = parseObject(files.read(path)) ?: JsonObject(emptyMap())
         val latest = state.text(LATEST)
         val time = now()
-        val show = latest != null && newer(latest, current) && due(state.millis(NOTIFIED), time)
+        val newer = latest != null && newer(latest, current) && due(state.millis(NOTIFIED), time)
+        // asked only when there is something to say: it may look for a running session
+        val todo = if (newer) advice() else null
+        val show = todo != null
         val check = due(state.millis(CHECKED), time)
-        if (show) say("! ostrom $latest is available. Run ostrom update.\n")
+        if (show) say("! ostrom $latest is available. $todo\n")
         if (!show && !check) return
         val next = JsonObject(
             state + listOfNotNull(
@@ -49,10 +55,15 @@ class UpdateNotice(
         if (write(next) && check) refresh()
     }
 
-    /** `ostrom update --record-latest`: keeps [latest] (null: unknown, the last one known is kept). */
+    /**
+     * `ostrom update --record-latest`: keeps [latest] (null: unknown, the last one known is kept). A lookup that failed
+     * (offline, a captive portal) is tried again an hour later, not the next day.
+     */
     fun record(latest: String?) {
         val state = parseObject(files.read(path)) ?: JsonObject(emptyMap())
-        write(JsonObject(state + objectOf(LATEST to latest, CHECKED to now())))
+        val time = now()
+        val checked = if (latest == null) time - DAY_MILLIS + RETRY_MILLIS else time
+        write(JsonObject(state + objectOf(LATEST to latest, CHECKED to checked)))
     }
 
     private fun write(state: JsonObject): Boolean = try {
@@ -80,6 +91,9 @@ class UpdateNotice(
 
         /** A day. */
         const val DAY_MILLIS = 86_400_000L
+
+        /** How soon a lookup that failed is tried again. */
+        const val RETRY_MILLIS = 3_600_000L
     }
 }
 
@@ -87,10 +101,30 @@ class UpdateNotice(
 const val UPDATE_NOTICE_FILE = "update-check.json"
 
 /** The update notice kept in the CLI folder [directory], on the real clock; none without a folder. */
-internal fun updateNoticeOf(directory: String?, files: FileStore, refresh: () -> Boolean): UpdateNotice? =
-    directory?.let {
-        UpdateNotice(files, join(it, UPDATE_NOTICE_FILE), BuildInfo.VERSION, SessionHooks::epochMillis, refresh)
+internal fun updateNoticeOf(
+    directory: String?,
+    files: FileStore,
+    advice: () -> String?,
+    refresh: () -> Boolean,
+): UpdateNotice? = directory?.let {
+    UpdateNotice(files, join(it, UPDATE_NOTICE_FILE), BuildInfo.VERSION, SessionHooks::epochMillis, advice, refresh)
+}
+
+/**
+ * What the notice tells to do: the package manager's command for an install it manages (`ostrom update` refuses
+ * there); nothing while an agent's session runs (`ostrom update` refuses then too: the notice waits for the sessions to
+ * end); else `ostrom update`.
+ *
+ * @param executable This binary, or null when the platform does not say.
+ */
+internal fun noticeAdvice(executable: String?, sessions: AgentSessions): () -> String? = {
+    val manager = executable?.let { managerOf(it.toPath()) }
+    when {
+        manager != null -> "$manager."
+        sessions.running() != null -> null
+        else -> "Run ostrom update."
     }
+}
 
 /** The refresh of the notice: this binary, [self], started detached as `ostrom update --record-latest`. */
 internal fun detachedRefresh(self: String?, capture: ProcessCapture): () -> Boolean =

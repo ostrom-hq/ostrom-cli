@@ -25,8 +25,10 @@ class UpdateNoticeTest {
     private var started = true
     private val said = mutableListOf<String>()
 
+    private var advice: String? = "Run ostrom update."
+
     private fun notice(current: String = "1.0.0", at: String = path) =
-        UpdateNotice(FileStoreImpl(fileSystem), at, current, { time }) { started.also { refreshes++ } }
+        UpdateNotice(FileStoreImpl(fileSystem), at, current, { time }, { advice }) { started.also { refreshes++ } }
 
     private fun state() = parseObject(fileSystem.read(path.toPath()) { readUtf8() })!!
 
@@ -71,15 +73,47 @@ class UpdateNoticeTest {
     }
 
     @Test
-    fun anUnknownLatestKeepsTheOneKnownAndAClockThatWentBackIsDue() {
+    fun anUnknownLatestKeepsTheOneKnownAndIsLookedUpAgainAnHourLater() {
         notice().record("1.2.0")
-        time -= 1
         notice().record(null)
         assertEquals("1.2.0", (state()["latest"] as JsonPrimitive).content)
-        assertEquals(time, millis(UpdateNotice.CHECKED))
+        assertEquals(time - UpdateNotice.DAY_MILLIS + UpdateNotice.RETRY_MILLIS, millis(UpdateNotice.CHECKED))
+        time += UpdateNotice.RETRY_MILLIS - 1
+        notice().after { said += it }
+        assertEquals(0, refreshes, "not before the hour")
+        time += 1
+        notice().after { said += it }
+        assertEquals(1, refreshes, "an hour after a lookup that failed")
+    }
+
+    @Test
+    fun aClockThatWentBackIsDue() {
+        notice().record("1.0.0")
         time -= 1
         notice().after { said += it }
         assertEquals(1, refreshes, "an earlier time than the last check is due")
+    }
+
+    @Test
+    fun theNoticeWaitsWhileItsAdviceDoes() {
+        notice().record("1.2.0")
+        advice = null
+        notice().after { said += it }
+        assertTrue(said.isEmpty(), "a session runs: nothing said, and nothing stamped")
+        advice = "Homebrew: run brew upgrade ostrom."
+        notice().after { said += it }
+        assertEquals(listOf("! ostrom 1.2.0 is available. Homebrew: run brew upgrade ostrom.\n"), said)
+    }
+
+    @Test
+    fun theAdviceNamesThePackageManagerElseWaitsForTheSessionsElseIsOstromUpdate() {
+        val idle = AgentSessions { null }
+        val busy = AgentSessions { "a local relay" }
+        val brew = "/opt/homebrew/Cellar/ostrom/1.0/bin/ostrom"
+        assertEquals("Homebrew: run brew upgrade ostrom.", noticeAdvice(brew, busy)())
+        assertEquals(null, noticeAdvice("/usr/local/bin/ostrom", busy)())
+        assertEquals("Run ostrom update.", noticeAdvice("/usr/local/bin/ostrom", idle)())
+        assertEquals("Run ostrom update.", noticeAdvice(null, idle)())
     }
 
     @Test
@@ -110,8 +144,9 @@ class UpdateNoticeTest {
 
     @Test
     fun theNoticeLivesInTheCliFolderAndItsRefreshIsThisBinaryDetached() {
-        assertNull(updateNoticeOf(null, FileStoreImpl(fileSystem)) { true })
-        val notice = assertNotNull(updateNoticeOf("/home/maya/.config/ostrom", FileStoreImpl(fileSystem)) { true })
+        assertNull(updateNoticeOf(null, FileStoreImpl(fileSystem), { null }) { true })
+        val folder = "/home/maya/.config/ostrom"
+        val notice = assertNotNull(updateNoticeOf(folder, FileStoreImpl(fileSystem), { null }) { true })
         notice.record("0.0.1")
         assertTrue(fileSystem.exists(path.toPath()))
         assertEquals(UPDATE_NOTICE_FILE, path.substringAfterLast('/'))

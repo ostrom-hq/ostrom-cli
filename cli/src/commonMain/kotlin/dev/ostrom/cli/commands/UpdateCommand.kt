@@ -27,6 +27,9 @@ internal class UpdateCommand(private val dependencies: CliDependencies) : CliktC
     val recordLatest by option("--record-latest", hidden = true).flag()
 
     override fun run() {
+        if (recordLatest && (rollback || check || version != null)) {
+            throw UsageError("--record-latest is the update notice's own refresh: it takes no other option")
+        }
         if (rollback && (check || version != null)) {
             throw UsageError("--rollback goes back to the version kept: it takes neither --check nor --version")
         }
