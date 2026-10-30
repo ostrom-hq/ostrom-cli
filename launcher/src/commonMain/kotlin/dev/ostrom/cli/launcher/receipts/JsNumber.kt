@@ -16,8 +16,8 @@ import dev.ostrom.cli.platform.ExcludeFromCoverage
  * the annotations differ.
  */
 // coverage: core's code as it is, with three defensive branches no double reaches (`size == 0` of a non-zero
-// mantissa, all-zero digits in `normalize`, `upperOk` false after the `continue`); JsNumberTest takes every other
-// branch with 63 of core's Node.js vectors. To be measured where it lives once core runs Kover (QUESTIONS.md).
+// mantissa, all-zero digits in `normalize`, `upperOk` false after the `continue`); CanonicalJsonTest takes every
+// other branch with 63 of core's Node.js vectors. To be measured where it lives once core runs Kover (QUESTIONS.md).
 @ExcludeFromCoverage
 @Suppress(
     "MagicNumber",
@@ -59,7 +59,9 @@ internal object JsNumber {
         return sign + body
     }
 
+    // coverage: excluded with its object (a nested class is a class of its own for Kover).
     /** A positive decimal `0.digits × 10^pos`, digits without leading or trailing zeros. */
+    @ExcludeFromCoverage
     private data class Decimal(val digits: String, val pos: Int) : Comparable<Decimal> {
         override fun compareTo(other: Decimal): Int {
             if (pos != other.pos) return pos.compareTo(other.pos)
@@ -151,7 +153,9 @@ internal object JsNumber {
         }
     }
 
+    // coverage: excluded with its object; holds the unreachable `size == 0`.
     /** A non-negative integer in base 10^9 limbs, little-endian; only what [decimalOf] needs. */
+    @ExcludeFromCoverage
     private class BigDecimalDigits(value: Long) {
         // 5^1075 and 2^1024 fit in 85 limbs of 9 digits; the array grows if ever needed
         private var limbs = LongArray(8)

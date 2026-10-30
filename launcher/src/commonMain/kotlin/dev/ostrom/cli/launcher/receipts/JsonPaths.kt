@@ -27,10 +27,10 @@ internal fun JsonElement?.str(): String? {
 internal fun JsonElement?.strOr(default: String): String = str() ?: default
 
 /** The elements of this value when it is an array, else none. */
-internal fun JsonElement?.items(): List<JsonElement> = this as? JsonArray ?: emptyList()
+internal fun JsonElement?.items(): List<JsonElement> = if (this is JsonArray) this else emptyList()
 
 /** This value as JSON text (`"approved"`, `null`), as the prototype prints a `Value` in a message. */
-internal fun JsonElement?.shown(): String = this?.toString() ?: "null"
+internal fun JsonElement?.shown(): String = if (this == null) "null" else toString()
 
 /** The first 12 characters of a digest, as the report shows it. */
 internal fun short(digest: String): String = digest.take(SHORT_DIGEST)

@@ -43,7 +43,10 @@ fun checkSignature(receipt: JsonObject, keys: List<TrustedKey>): SignatureCheck 
     val bytes = CanonicalJson.bytes(JsonObject(receipt - "signature"))
     val digest = sha256Hex(bytes)
     val parts = signature.split(';').drop(1)
-    fun part(name: String): String = parts.firstOrNull { it.startsWith("$name=") }?.substringAfter('=') ?: ""
+    fun part(name: String): String {
+        val found = parts.firstOrNull { it.startsWith("$name=") }
+        return if (found == null) "" else found.substringAfter('=')
+    }
     val signed = part("sha256")
     val key = keys.firstOrNull { it.kid == part("kid") }
     return when {

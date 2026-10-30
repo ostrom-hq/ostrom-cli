@@ -88,7 +88,8 @@ object TrustedKeys {
         }
     }
 
-    private fun keysOf(reading: KeyReading): List<TrustedKey> = (reading as? KeyReading.Keys)?.keys ?: emptyList()
+    private fun keysOf(reading: KeyReading): List<TrustedKey> =
+        if (reading is KeyReading.Keys) reading.keys else emptyList()
 
     private fun all(readings: List<KeyReading>): KeyReading =
         readings.firstOrNull { it is KeyReading.Unreadable } ?: KeyReading.Keys(readings.flatMap(::keysOf))
