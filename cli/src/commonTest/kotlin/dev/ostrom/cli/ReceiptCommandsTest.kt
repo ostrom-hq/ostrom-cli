@@ -6,6 +6,7 @@ import dev.ostrom.cli.api.ServerRequest
 import dev.ostrom.cli.api.ServerResponse
 import dev.ostrom.cli.api.ServerUnreachableException
 import dev.ostrom.cli.hooks.HookRunner
+import dev.ostrom.cli.imports.FakeMysql
 import dev.ostrom.cli.launch.AgentRunner
 import dev.ostrom.cli.launcher.FileCredentialStore
 import dev.ostrom.cli.launcher.LaunchFilesImpl
@@ -113,7 +114,9 @@ class ReceiptCommandsTest {
             executable = "/opt/ostrom",
             temporaryDirectory = "/tmp",
             agents = AgentRunner { _, _ -> 0 },
+            gateWait = { error("no gate wait in this test") },
             sleep = {},
+            capture = FakeMysql(),
             readLine = { null },
             openUrl = { false },
             postHogKey = "",
