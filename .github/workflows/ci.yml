@@ -64,18 +64,24 @@ jobs:
           }
           KTS
       - run: python3 scripts/check-conventions.py --self-test && python3 scripts/check-conventions.py
-      - name: detekt, JVM tests and coverage (100 % lines and branches); linuxX64 tests; other targets linked
+      # Coverage first, in its own step, so that its report is printed even when the native links that follow are cut
+      # short (a runner lost while linking used to cancel the job before the report, ostrom-cli#25).
+      - name: detekt, JVM tests and coverage (100 % lines and branches)
+        env:
+          OSTROM_NETWORK_TESTS: '1'
+        run: ./gradlew --continue detekt jvmTest koverXmlReport koverVerify
+      - name: Lines and branches not covered
+        if: failure()
+        run: python3 scripts/uncovered.py
+      - name: linuxX64 tests; other targets linked
+        if: ${{ !cancelled() }}
         env:
           OSTROM_NETWORK_TESTS: '1'
         run: >-
           ./gradlew --continue
-          detekt jvmTest koverXmlReport koverVerify
           linuxX64Test
           linkDebugTestLinuxArm64 linkDebugTestMingwX64
           :cli:linkReleaseExecutableLinuxX64 :cli:linkReleaseExecutableLinuxArm64 :cli:linkReleaseExecutableMingwX64
-      - name: Lines and branches not covered
-        if: failure()
-        run: python3 scripts/uncovered.py
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
