@@ -67,9 +67,9 @@ class LaunchWiringTest {
                 }
             }
         }
-        val settings = RelaySettings("https://o.example", "agt", "ua", "L1", setOf("gh"), true)
+        val settings = RelaySettings("https://o.example", "agt", "ua", "L1", setOf("gh"), true, "{}")
         val relay = RelayStarter(starter).start(settings)
-        assertEquals(RelayConfig("https://o.example", "agt", "ua", "L1", setOf("gh"), true), config)
+        assertEquals(RelayConfig("https://o.example", "agt", "ua", "L1", setOf("gh"), true, "{}"), config)
         assertEquals("http://127.0.0.1:4100", relay.url)
         assertEquals("capability", relay.token)
         relay.close()
