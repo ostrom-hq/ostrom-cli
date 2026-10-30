@@ -115,7 +115,8 @@ on**, and `OSTROM_TELEMETRY=0` (or `false`, `off`, `no`) or `DO_NOT_TRACK=1` kee
 each top-level command sends one `cli_command_run` event to PostHog EU after its output is written, waiting at most
 400 ms: the command name (only one of the known commands, else `unknown`), `ok` / `usage` / `error`, a duration range,
 the OS, the architecture and the version, with a random install id (`telemetry_id` in `config.toml`, deleted by
-`disable`, never linked to the account). Never an argument, a path, a repository, code or a token. Plumbing commands
+`disable`, never linked to the account). Never an argument, a path, a repository, code or a token; no IP address is
+kept and no location derived from it (`$ip` null, `$geoip_disable`). Plumbing commands
 (`hook`, `mcp`, `wait`, `check`) are never measured. The destination is compiled in by CI (`-PostromPosthogKey`, a
 public write-only key); a local build has none and sends nothing even when turned on.
 

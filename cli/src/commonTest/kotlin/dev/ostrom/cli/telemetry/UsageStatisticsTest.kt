@@ -7,6 +7,7 @@ import dev.ostrom.cli.platform.FileStoreImpl
 import dev.ostrom.cli.platform.OperatingSystem
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonArray
@@ -114,6 +115,8 @@ class UsageStatisticsTest {
         assertEquals("0.2.0", properties.text("version"))
         assertEquals("ostrom-cli", properties.text("\$lib"))
         assertEquals(false, properties.getValue("\$process_person_profile").jsonPrimitive.boolean)
+        assertEquals(JsonNull, properties.getValue("\$ip"))
+        assertEquals(true, properties.getValue("\$geoip_disable").jsonPrimitive.boolean)
     }
 
     @Test

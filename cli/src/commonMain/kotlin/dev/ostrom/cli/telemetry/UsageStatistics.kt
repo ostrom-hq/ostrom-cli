@@ -3,6 +3,7 @@ package dev.ostrom.cli.telemetry
 import dev.ostrom.cli.platform.ConfigKey
 import dev.ostrom.cli.platform.ConfigStore
 import dev.ostrom.cli.platform.Environment
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -113,6 +114,9 @@ class UsageStatistics(
         put("\$lib", "ostrom-cli")
         put("\$lib_version", version)
         put("\$process_person_profile", JsonPrimitive(false))
+        // Anonymous means no network either: no address kept, no city or country derived from it.
+        put("\$ip", JsonNull)
+        put("\$geoip_disable", JsonPrimitive(true))
     }
 
     /** The values and endpoint. */
