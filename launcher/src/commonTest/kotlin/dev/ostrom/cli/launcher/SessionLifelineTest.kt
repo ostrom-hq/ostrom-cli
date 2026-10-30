@@ -89,6 +89,18 @@ class SessionLifelineTest {
     }
 
     @Test
+    fun aSignOfLifeThatCannotBeWrittenDownNeverStopsTheNextOnes() = runTest {
+        files.texts[sessionFile] = "d1"
+        server["POST /api/v1/sessions/d1/alive"] = 409 to """{"error":{"type":"session_closed","message":"closed"}}"""
+        server["POST /api/v1/sessions/d1/reopen"] = 200 to """{"id":"d1~2"}"""
+        files.failWrites = true
+        val job = launch { lifeline.keepAlive(20_000) }
+        advanceTimeBy(45_000)
+        job.cancel()
+        assertEquals(2, server.sent("POST /api/v1/sessions/d1/reopen").size, "the keep-alive went on")
+    }
+
+    @Test
     fun theEndSaysWhatTheReceiptIs() = runTest {
         lifeline.end(0, null, "codex", null, receipts)
         assertEquals(listOf("no session was recorded (the session hook did not run)."), said)
