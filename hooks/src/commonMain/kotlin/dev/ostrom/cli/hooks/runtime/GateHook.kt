@@ -144,7 +144,7 @@ class GateHook(
                 val targets = pushes.destinations(location.directory(cwd, subject.text), subject.text)
                 subject.copy(text = subject.text + GateRequests.targetsNote(targets)) to null
             } catch (e: UnreadablePushException) {
-                subject to e.message.orEmpty()
+                subject to e.reason
             }
         }
 

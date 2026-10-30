@@ -27,8 +27,12 @@ data class Push(val remote: String, val remoteRepository: String, val refs: List
     val destinations: List<String> get() = refs.map { it.destination }.distinct()
 }
 
-/** Why Ostrom cannot tie a push to commits, with what to do instead (the agent reads it). */
-class UnreadablePushException(message: String) : IllegalArgumentException(message)
+/**
+ * Why Ostrom cannot tie a push to commits, with what to do instead (the agent reads it).
+ *
+ * @property reason The same text as the message, never null.
+ */
+class UnreadablePushException(val reason: String) : IllegalArgumentException(reason)
 
 /**
  * Reads `git push` commands with [git], in the folder each runs in.
@@ -48,35 +52,28 @@ class PushReader(private val git: GitRunner, private val home: String) {
     fun read(directory: String, text: String): Push? {
         val segments = if (mentions(text)) ShellWords.segments(text) else emptyList()
         val invocations = segments.map { invocationsOf.pushIn(directory, it) }
-        val pushes = segments.indices.filter { invocations[it] != null }
-        if (pushes.isEmpty() && MENTION.containsMatchIn(text)) throw UnreadablePushException(NOT_PLAIN)
-        val other = pushes.lastOrNull()?.let { last ->
-            (0 until last).firstOrNull { invocations[it] == null && segments[it].first() != "cd" }?.let(segments::get)
+        val pushes = invocations.filterNotNull()
+        val problem = if (pushes.isEmpty() && MENTION.containsMatchIn(text)) {
+            NOT_PLAIN
+        } else {
+            notAlone(segments, invocations)
         }
-        if (other != null) {
-            throw UnreadablePushException(
-                "run the push as its own command, after `${other.joinToString(" ").take(SHOWN)}` has run: Ostrom " +
-                    "checks and asks a yes for the commits a push sends, and they must exist before the command " +
-                    "starts. Run `git push …` alone.",
-            )
+        if (problem != null) throw UnreadablePushException(problem)
+        val ones = pushes.map { onePush(it.directoryIn(directory, home), it.arguments, lenient = false) }
+        val remote = ones.firstOrNull()?.remote ?: return null
+        if (ones.any { it.remote != remote }) throw UnreadablePushException(TWO_REMOTES)
+        return Push(remote, repositoryOf(directory, remote), ones.flatMap { it.refs }, ones.any { it.force })
+    }
+
+    /** What to say when a command other than `cd` runs before the last push in the same command line, else null. */
+    private fun notAlone(segments: List<List<String>>, invocations: List<GitInvocation?>): String? {
+        val last = invocations.indexOfLast { it != null }
+        val other = (0 until last).firstOrNull { invocations[it] == null && segments[it].first() != "cd" }
+        return other?.let {
+            "run the push as its own command, after `${segments[it].joinToString(" ").take(SHOWN)}` has run: Ostrom " +
+                "checks and asks a yes for the commits a push sends, and they must exist before the command starts. " +
+                "Run `git push …` alone."
         }
-        if (pushes.isEmpty()) return null
-        var remote = ""
-        val refs = mutableListOf<PushRef>()
-        var force = false
-        for (index in pushes) {
-            val invocation = checkNotNull(invocations[index])
-            val one = onePush(invocation.directoryIn(directory, home), invocation.arguments, lenient = false)
-            if (remote.isNotEmpty() && remote != one.remote) {
-                throw UnreadablePushException(
-                    "this command pushes to two remotes: push to one at a time, each as its own command.",
-                )
-            }
-            remote = one.remote
-            refs += one.refs
-            force = force || one.force
-        }
-        return Push(remote, repositoryOf(directory, remote), refs, force)
     }
 
     /**
@@ -208,6 +205,8 @@ class PushReader(private val git: GitRunner, private val home: String) {
         private val MENTION = Regex("\\bgit\\b[^\\n;&|]*\\bpush\\b")
 
         private val NOT_PUSHING = PushInvocations.GIT_COMMANDS - "push"
+        private const val TWO_REMOTES =
+            "this command pushes to two remotes: push to one at a time, each as its own command."
         private const val SHOWN = 80 // characters of the command quoted in a refusal
         private const val NOT_PLAIN =
             "Ostrom cannot read which commits this push sends (the push is not a plain `git push` command). Run " +

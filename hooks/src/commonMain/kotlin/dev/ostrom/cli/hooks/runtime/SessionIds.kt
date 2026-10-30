@@ -41,7 +41,8 @@ class SessionIds(private val sessionFile: String?, private val files: HookFiles)
      * quiets the after-tool hook: nothing is let through on its word.
      */
     fun markRefused(text: String, refused: Boolean) {
-        val file = sessionFile?.let { "$it.refused.json" } ?: return
+        val session = sessionFile ?: return
+        val file = "$session.refused.json"
         val marks = read(file)
         val key = Sha256.hex(text)
         val updated = when {
@@ -65,7 +66,7 @@ class SessionIds(private val sessionFile: String?, private val files: HookFiles)
         } catch (_: IllegalArgumentException) {
             null
         }
-        return parsed?.entries?.mapNotNull { (key, value) -> (value as? JsonPrimitive)?.let { key to it.content } }
-            ?.toMap().orEmpty()
+        return parsed.orEmpty().mapNotNull { (key, value) -> (value as? JsonPrimitive)?.let { key to it.content } }
+            .toMap()
     }
 }

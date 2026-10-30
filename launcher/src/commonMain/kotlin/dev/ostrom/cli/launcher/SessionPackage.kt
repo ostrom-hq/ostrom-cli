@@ -32,14 +32,16 @@ class SessionPackage(val body: JsonObject, val digest: String) {
      * The time the checks of one action may take, for the hook timeout the agent is given: every enforced check that
      * guards the action runs in the one hook, one after the other, so their limits add up. Checks in shadow never run.
      */
-    val enforcedCheckSeconds: Long get() = body.list("scripts").filterIsInstance<JsonObject>()
-        .filter { it.text("mode") == "enforce" }
+    val enforcedCheckSeconds: Long get() = enforcedScripts()
         .sumOf { (it["timeoutSec"] as? JsonPrimitive)?.longOrNull ?: 0L }
+
+    private fun enforcedScripts(): List<JsonObject> =
+        body.list("scripts").filterIsInstance<JsonObject>().filter { it.text("mode") == "enforce" }
 
     /** One line for the developer: what was laid down. */
     fun summary(): String {
         fun count(key: String) = body.list(key).size
-        val enforced = body.list("scripts").count { (it as? JsonObject)?.text("mode") == "enforce" }
+        val enforced = enforcedScripts().size
         return "package $version (${count("workflows")} workflow(s), ${count("nodes")} node(s): " +
             "${count("hooks")} hook(s), ${count("scripts")} script(s) of which $enforced enforced, " +
             "${count("notifications")} notification(s), ${count("files")} file(s)), signature valid, " +

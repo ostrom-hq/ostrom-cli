@@ -55,9 +55,10 @@ class RelayCalls(
         }
     }
 
-    private companion object {
-        val PORT = Regex("http://127\\.0\\.0\\.1:(\\d{1,5})")
-        val SUCCESS = 200..299
+    /** The relay's address and answers. */
+    companion object {
+        private val PORT = Regex("http://127\\.0\\.0\\.1:(\\d{1,5})")
+        private val SUCCESS = 200..299
     }
 }
 
