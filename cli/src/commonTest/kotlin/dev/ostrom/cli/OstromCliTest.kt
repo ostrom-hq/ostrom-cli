@@ -1,5 +1,6 @@
 package dev.ostrom.cli
 
+import com.github.ajalt.clikt.core.Abort
 import dev.ostrom.cli.api.OstromApi
 import dev.ostrom.cli.api.ServerResponse
 import dev.ostrom.cli.api.ServerUnreachableException
@@ -99,6 +100,12 @@ class OstromCliTest {
         for (command in commands) {
             assertTrue(Regex("""\n\s+$command\s""").containsMatchIn(help), "$command missing from:\n$help")
         }
+        // Help may wrap: compare with every run of spaces and line breaks made one space.
+        val flat = help.replace(Regex("""\s+"""), " ")
+        assertTrue(flat.contains(" status Everything about you, this repository and this device (coming soon) "), flat)
+        val harness = " harness The harness of your team: rules, hooks, skills, approvals (coming soon) "
+        assertTrue(flat.contains(harness), flat)
+        assertTrue(flat.contains(" config Settings of this device doctor "), flat)
         for (hidden in listOf("wait", "hook", "mcp", "check")) {
             assertTrue(!Regex("""\n\s+$hidden\s""").containsMatchIn(help), "$hidden should be hidden:\n$help")
         }
@@ -255,5 +262,23 @@ class OstromCliTest {
         dependencies.api("https://ostrom.example")
         dependencies.mcpServer()
         assertTrue(dependencies.configFile("/x").endsWith("config.toml"))
+    }
+
+    @Test
+    fun configListAndTheHelpOfEverySubcommand() {
+        assertEquals(0, cli().run(arrayOf("config", "list")))
+        assertOut("color          (not set)\n")
+        for (subcommand in listOf("list", "get", "set", "unset")) {
+            console.out.clear()
+            assertEquals(0, cli().run(arrayOf("config", subcommand, "--help")))
+            assertOut("Usage: ostrom config $subcommand")
+        }
+    }
+
+    @Test
+    fun anErrorWithoutMessagePrintsNothing() {
+        val cli = cli()
+        cli.report(cli.tree(), Abort())
+        assertEquals("", console.out.toString() + console.err.toString())
     }
 }

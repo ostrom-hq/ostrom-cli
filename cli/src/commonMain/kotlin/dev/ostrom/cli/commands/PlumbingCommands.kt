@@ -65,14 +65,13 @@ class HelpCommand(
             }
         }
     }
-
-    private companion object {
-        val PLUMBING = """
-            |Used by agents and their hooks (hidden from ostrom --help):
-            |  ostrom wait <id> [--timeout S]           wait for a yes; exit 0 yes, 2 no, 75 still waiting
-            |  ostrom hook gate|session|gates-refresh   answer an agent hook (stdin: the hook event)
-            |  ostrom mcp [workflow]                    the local MCP server, on stdio
-            |  ostrom check <node>                      run a workflow check
-            |""".trimMargin()
-    }
 }
+
+/** The commands agents and their hooks call, hidden from `ostrom --help`. */
+private val PLUMBING = """
+    |Used by agents and their hooks (hidden from ostrom --help):
+    |  ostrom wait <id> [--timeout S]           wait for a yes; exit 0 yes, 2 no, 75 still waiting
+    |  ostrom hook gate|session|gates-refresh   answer an agent hook (stdin: the hook event)
+    |  ostrom mcp [workflow]                    the local MCP server, on stdio
+    |  ostrom check <node>                      run a workflow check
+    |""".trimMargin()

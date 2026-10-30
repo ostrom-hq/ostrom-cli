@@ -38,9 +38,9 @@ class OstromCli(private val dependencies: CliDependencies) {
         }
     }
 
-    /** Writes the help or the error message of [error], to stdout or stderr as Clikt decides. */
-    private fun report(root: RootCommand, error: CliktError) {
-        val text = root.getFormattedHelp(error).orEmpty().trimEnd() + "\n"
+    /** Writes the help or the error message of [error], to stdout or stderr as Clikt decides; nothing without one. */
+    internal fun report(root: RootCommand, error: CliktError) {
+        val text = (root.getFormattedHelp(error) ?: return).trimEnd() + "\n"
         if (error.printError) dependencies.console.err(text) else dependencies.console.out(text)
     }
 
@@ -50,7 +50,8 @@ class OstromCli(private val dependencies: CliDependencies) {
         val agents = Agent.entries.map { AgentCommand(it) }
         val implemented = listOf(ConfigCommand(dependencies), DoctorCommand(dependencies), VersionCommand(dependencies))
         val plumbing = listOf(HookCommand(dependencies), McpCommand(dependencies))
-        val help = HelpCommand(dependencies) { root.getFormattedHelp().orEmpty() }
+        // The root always has a help screen: no null to handle.
+        val help = HelpCommand(dependencies) { "${root.getFormattedHelp()}" }
         return root.subcommands(agents + pendingCommands(implemented) + plumbing + help)
     }
 }
