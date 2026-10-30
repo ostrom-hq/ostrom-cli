@@ -142,11 +142,12 @@ class SecretStoreTest {
     }
 
     @Test
-    fun anUnknownFileFormatReadsAsNoSecretIsNeverReplacedAndNamesAreChecked() {
+    fun anUnknownFileFormatIsARefusalNeverReplacedAndNamesAreChecked() {
         machine()
         files.write(secretsFile, "ostrom-secrets 2\nname value\n")
         val store = secretStoreOf(null, home, files)
-        assertNull(store.read("name"))
+        val newer = assertFailsWith<SecretStoreException> { store.read("name") }.message
+        assertTrue(newer.endsWith("was written by another version of ostrom: update ostrom to change it."), newer)
         assertFailsWith<SecretStoreException> { store.write("other", "x") }
         assertFailsWith<SecretStoreException> { store.delete("name") }
         assertEquals("ostrom-secrets 2\nname value\n", files.read(secretsFile))
@@ -195,11 +196,11 @@ class SecretStoreTest {
     }
 
     @Test
-    fun aFileThatCannotBeReadIsNeverReplaced() {
+    fun aFileThatCannotBeReadIsARefusalNeverReplaced() {
         machine()
         fileSystem.createDirectories(secretsFile.toPath())
         val store = secretStoreOf(null, home, files)
-        assertNull(store.read("a"))
+        assertFailsWith<SecretStoreException> { store.read("a") }
         val refused = assertFailsWith<SecretStoreException> { store.write("a", "x") }
         assertTrue(refused.message.endsWith("cannot be read: check that it is yours, then try again."))
     }

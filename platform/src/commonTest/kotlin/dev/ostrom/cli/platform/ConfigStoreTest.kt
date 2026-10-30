@@ -205,4 +205,18 @@ class ConfigStoreTest {
         assertNull(tomlKeyOf("café = 1"), "a letter past z is not bare")
         assertNull(tomlKeyOf("# color = never"))
     }
+
+    @Test
+    fun theCommentsRightAboveTheFirstTableStayWithIt() {
+        file("server = \"x\"\n\n# proxy settings\n[proxy]\nurl = \"y\"\n")
+        store.set(ConfigKey.COLOR, "never")
+        assertEquals("server = \"x\"\ncolor = \"never\"\n\n# proxy settings\n[proxy]\nurl = \"y\"\n", written())
+        file("# proxy settings\n[proxy]\n")
+        store.set(ConfigKey.COLOR, "never")
+        assertEquals("color = \"never\"\n# proxy settings\n[proxy]\n", written())
+        // The last line of a multi-line string is no comment, even when it starts with #.
+        file("notes = \"\"\"\n# kept in the string\"\"\"\n[proxy]\n")
+        store.set(ConfigKey.COLOR, "never")
+        assertEquals("notes = \"\"\"\n# kept in the string\"\"\"\ncolor = \"never\"\n[proxy]\n", written())
+    }
 }

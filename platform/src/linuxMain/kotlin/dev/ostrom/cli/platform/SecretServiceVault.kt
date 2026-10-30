@@ -42,15 +42,18 @@ internal object SecretServiceVault : Vault {
         vaultCall { code -> ostrom_secret_delete(service, account, deadline(), code) }
 
     /**
-     * How long a call may wait for the service: in a terminal, long enough to answer an unlock prompt; elsewhere (a
-     * hook, a background job), short, as nobody is there to answer it and the agent waits.
+     * How long a call may wait for the service: with a person at a terminal (its input or its error output, so that
+     * `ostrom login 2>log` still counts), long enough to answer an unlock prompt; elsewhere (a hook, whose input is
+     * the agent's pipe; a background job), short, as nobody is there to answer it and the agent waits.
      */
-    private fun deadline() = if (isTerminal(STDERR)) INTERACTIVE_MILLIS else BACKGROUND_MILLIS
+    private fun deadline() =
+        if (isTerminal(STDIN) || isTerminal(STDERR)) INTERACTIVE_MILLIS else BACKGROUND_MILLIS
 
     /** An account never written: looking it up only proves the service runs. */
     private const val PROBE = "availability-probe"
     private const val PROBE_MILLIS = 1_000
     private const val BACKGROUND_MILLIS = 3_000
     private const val INTERACTIVE_MILLIS = 120_000
+    private const val STDIN = 0
     private const val STDERR = 2
 }

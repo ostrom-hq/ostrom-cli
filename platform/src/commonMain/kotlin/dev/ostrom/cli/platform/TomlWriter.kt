@@ -17,7 +17,7 @@ internal fun withTomlLine(text: String, key: String, line: String?): String {
             lines.removeAt(existing)
             file.endings.removeAt(existing)
         }
-        line != null -> insert(file, insertionPoint(lines, layout.firstTable), line)
+        line != null -> insert(file, insertionPoint(lines, layout), line)
     }
     return tomlText(file)
 }
@@ -30,9 +30,15 @@ private fun insert(file: TomlLines, index: Int, line: String) {
     file.endings.add(index, newline)
 }
 
-/** Where a new top-level line goes: after the last non-blank line before [end], the first table. */
-private fun insertionPoint(lines: List<String>, end: Int): Int {
-    var at = end
+/**
+ * Where a new top-level line goes: after the last non-blank line before the first table, and before the comments
+ * right above that table, which belong to it.
+ */
+private fun insertionPoint(lines: List<String>, layout: TomlLayout): Int {
+    var at = layout.firstTable
+    if (at < lines.size) {
+        while (at > 0 && layout.topLevel[at - 1] && lines[at - 1].trimStart().startsWith("#")) at--
+    }
     while (at > 0 && lines[at - 1].isBlank()) at--
     return at
 }

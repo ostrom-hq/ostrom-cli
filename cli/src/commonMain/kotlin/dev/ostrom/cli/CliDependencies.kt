@@ -34,8 +34,9 @@ import okio.Path.Companion.toPath
  * @property api Builds the client of the server at the given URL.
  * @property hookRunner Runs `ostrom hook <kind>`.
  * @property mcpServer Builds the local MCP server.
- * @property secrets Opens the secret store of this device (system store, or encrypted file); built on first use,
- * never on the hook's fast path.
+ * @property secrets Opens the secret store of this device (system store, or encrypted file). Each call chooses and
+ * probes the store again (up to a second on Linux): a command calls it once and keeps the store; the hook's fast
+ * path never calls it.
  * @property postHogKey The usage statistics destination of this build; blank means none.
  * @property sendStatistics Posts usage statistics (opt-in only).
  */

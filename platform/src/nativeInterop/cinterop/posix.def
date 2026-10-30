@@ -69,8 +69,12 @@ static inline int ostrom_spawn_wait(const char *file, char *const argv[], int *e
     sigprocmask(SIG_BLOCK, &relayed, &previous_mask);
     sigaction(SIGINT, &ignore, &old_int);
     sigaction(SIGQUIT, &ignore, &old_quit);
-    sigaction(SIGTERM, &relay, &old_term);
-    sigaction(SIGHUP, &relay, &old_hup);
+    /* A signal this process was started ignoring (nohup, a supervisor) stays ignored, by it and by the child. */
+    sigaction(SIGTERM, NULL, &old_term);
+    sigaction(SIGHUP, NULL, &old_hup);
+    int relay_term = old_term.sa_handler != SIG_IGN, relay_hup = old_hup.sa_handler != SIG_IGN;
+    if (relay_term) sigaction(SIGTERM, &relay, NULL);
+    if (relay_hup) sigaction(SIGHUP, &relay, NULL);
 
     posix_spawnattr_t attributes;
     posix_spawnattr_init(&attributes);
@@ -78,8 +82,8 @@ static inline int ostrom_spawn_wait(const char *file, char *const argv[], int *e
     sigemptyset(&defaults);
     sigaddset(&defaults, SIGINT);
     sigaddset(&defaults, SIGQUIT);
-    sigaddset(&defaults, SIGTERM);
-    sigaddset(&defaults, SIGHUP);
+    if (relay_term) sigaddset(&defaults, SIGTERM);
+    if (relay_hup) sigaddset(&defaults, SIGHUP);
     posix_spawnattr_setsigdefault(&attributes, &defaults);
     posix_spawnattr_setsigmask(&attributes, &previous_mask);
     posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK);

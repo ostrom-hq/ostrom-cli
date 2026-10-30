@@ -24,7 +24,10 @@ import dev.ostrom.cli.platform.interop.ostrom_write
 
 internal actual fun spawnAndWait(command: List<String>): ProcessResult = memScoped {
     val launch = windowsLaunch(command, environmentVariable("SystemRoot"))
-        ?: return ProcessResult.Failed("a script cannot receive a line break, nor run from a path with a quote")
+        ?: return ProcessResult.Failed(
+            "a .cmd or .bat script cannot receive a line break or a NUL, nor run from a path that holds a quote, a " +
+                "line break or ends with a backslash",
+        )
     val exitCode = alloc<IntVar>()
     when (ostrom_spawn_wait_w(launch.application?.wcstr, launch.commandLine.wcstr, exitCode.ptr)) {
         0 -> ProcessResult.Exited(exitCode.value)

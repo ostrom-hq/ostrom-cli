@@ -111,11 +111,12 @@ internal fun isBatchScript(executable: String): Boolean {
  * that is not plainly safe is quoted, its quotes doubled, and every `%` made unable to expand a variable
  * (`%%cd:~,` before it, an empty substring of `%cd%`). Port of `make_bat_command_line` of Rust's standard library.
  *
- * @return The command line, or null when the script's path holds a quote or ends with a backslash, or an argument
- * holds a line break or a NUL, which `cmd.exe` cannot receive intact.
+ * @return The command line, or null when the script's path holds a quote or ends with a backslash, or the path or an
+ * argument holds a line break or a NUL, which `cmd.exe` cannot receive intact.
  */
 internal fun windowsBatchCommandLine(script: String, arguments: List<String>): String? {
-    val refused = '"' in script || script.endsWith('\\') || arguments.joinToString("").any { it in BATCH_REFUSED }
+    val refused = '"' in script || script.endsWith('\\') ||
+        (arguments + script).joinToString("").any { it in BATCH_REFUSED }
     return if (refused) null else buildString {
         append("cmd.exe /e:ON /v:OFF /d /c \"\"").append(script).append('"')
         for (argument in arguments) {
@@ -126,7 +127,7 @@ internal fun windowsBatchCommandLine(script: String, arguments: List<String>): S
     }
 }
 
-/** Characters no argument of a batch script can hold: they end the command line early. */
+/** Characters neither a batch script's path nor its arguments can hold: they end the command line early. */
 private const val BATCH_REFUSED = "\r\n\u0000"
 
 /** ASCII characters other than letters and digits that need no quotes in a batch argument. */

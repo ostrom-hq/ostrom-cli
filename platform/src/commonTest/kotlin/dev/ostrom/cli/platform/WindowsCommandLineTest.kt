@@ -50,6 +50,7 @@ class WindowsCommandLineTest {
         assertNull(windowsBatchCommandLine("C:\\x\\", emptyList()))
         assertNull(windowsBatchCommandLine("C:\\x.cmd", listOf("two\nlines")))
         assertNull(windowsBatchCommandLine("C:\\x.cmd", listOf("ok", "nul\u0000")))
+        assertNull(windowsBatchCommandLine("C:\\new\nline.cmd", emptyList()))
         val noArguments = windowsBatchCommandLine("C:\\x.cmd", emptyList())
         assertEquals("cmd.exe /e:ON /v:OFF /d /c \"\"C:\\x.cmd\"\"", noArguments)
     }

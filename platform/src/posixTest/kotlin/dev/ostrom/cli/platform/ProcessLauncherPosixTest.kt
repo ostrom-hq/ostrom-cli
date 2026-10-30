@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.platform
 
+import kotlinx.cinterop.ExperimentalForeignApi
+import platform.posix.SIGHUP
+import platform.posix.SIG_IGN
+import platform.posix.signal
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -45,5 +49,18 @@ class ProcessLauncherPosixTest {
         assertEquals(ProcessResult.Exited(128 + 15), terminated)
         val hungUp = launcher.run(listOf("sh", "-c", "kill -HUP \$PPID; exec sleep 5"))
         assertEquals(ProcessResult.Exited(128 + 1), hungUp)
+    }
+
+    @OptIn(ExperimentalForeignApi::class)
+    @Test
+    fun aHangUpTheCliWasStartedIgnoringStaysIgnoredByItAndTheChild() {
+        // nohup ostrom …: the hang-up is neither relayed nor reset in the child, which outlives the terminal.
+        val previous = signal(SIGHUP, SIG_IGN)
+        try {
+            val result = launcher.run(listOf("sh", "-c", "kill -HUP \$PPID; kill -HUP \$\$; exit 7"))
+            assertEquals(ProcessResult.Exited(7), result)
+        } finally {
+            signal(SIGHUP, previous)
+        }
     }
 }

@@ -222,18 +222,18 @@ internal class EncryptedFileSecretStore(
     override val backend: SecretBackend = SecretBackend.ENCRYPTED_FILE
 
     override fun read(name: String): String? {
-        val sealed = entries()[name] ?: return null
+        val sealed = storedEntries()[name] ?: return null
         return open(name, sealed)
     }
 
     override fun write(name: String, secret: String) {
         requireName(name)
         val sealed = cipher.encryptBlocking(secret.encodeToByteArray(), name.encodeToByteArray())
-        save(writableEntries() + (name to Base64.encode(sealed)))
+        save(storedEntries() + (name to Base64.encode(sealed)))
     }
 
     override fun delete(name: String) {
-        val entries = writableEntries()
+        val entries = storedEntries()
         if (name in entries) save(entries - name)
     }
 
@@ -242,17 +242,12 @@ internal class EncryptedFileSecretStore(
         cipher.decryptBlocking(Base64.decode(sealed), name.encodeToByteArray()).decodeToString()
     }
 
-    /** The sealed entries, or none when the file is absent or in a format this version does not know. */
-    private fun entries(): Map<String, String> {
-        val text = files.read(path).orEmpty()
-        return if (text.lines().first() == HEADER) parse(text) else emptyMap()
-    }
-
     /**
-     * The sealed entries, to be written back. A file that exists but cannot be read, or one in another format (a newer
-     * CLI's), is never replaced: the other servers' secrets in it would be lost. An empty file holds none.
+     * The sealed entries; none when the file is absent or empty. A file that exists but cannot be read, or one in
+     * another format (a newer CLI's), is a refusal, for reading as for writing: read as empty, it would say "not signed
+     * in" while a token is there, and written over, the other servers' secrets in it would be lost.
      */
-    private fun writableEntries(): Map<String, String> {
+    private fun storedEntries(): Map<String, String> {
         val text = files.read(path)
         val problem = when {
             text == null && files.exists(path) -> "$path cannot be read: check that it is yours, then try again."
