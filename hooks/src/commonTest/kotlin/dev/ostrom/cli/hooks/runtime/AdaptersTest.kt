@@ -70,6 +70,7 @@ class AdaptersTest {
         assertEquals(ok(), call(200, "[1]"))
         assertEquals(CallResult.Failed("session closed: s1"), call(409, """{"error":"session closed: s1"}"""))
         assertEquals(CallResult.Failed("HTTP 502"), call(502, "bad gateway"))
+        assertEquals(CallResult.Failed("HTTP 101"), call(101, ""), "below 200 is no answer either")
         assertEquals(CallResult.Failed("HTTP 403"), call(403, """{"error":3}"""))
         val contract = call(409, """{"error":{"type":"session_closed","message":"session s1 is closed"}}""")
         assertEquals(CallResult.Failed("session s1 is closed", "session_closed"), contract)
@@ -122,6 +123,7 @@ class AdaptersTest {
         val files = FileSystemHookFiles(fileSystem) { 0 }
         files.write("/s/file", "x")
         assertFalse(files.write("/s/file/child", "y"), "a file is in the way")
+        assertFalse(files.write("/", "z"), "the root has no folder to make and is no file")
         assertNull(files.read("/s"), "a folder is not a file")
     }
 

@@ -84,7 +84,7 @@ interface AgentAdapter {
 }
 
 /** The agent cannot be prepared: an embedded plugin changed shape, for example. */
-class AdapterException(message: String) : Exception(message)
+class AdapterException(val reason: String) : Exception(reason)
 
 /**
  * A config home for the session: every entry of the developer's [real] home linked into [session], except [own] (the

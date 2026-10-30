@@ -7,6 +7,8 @@ package dev.ostrom.cli.hooks.runtime
  */
 @Suppress("MagicNumber") // the constants and rotations of the standard, FIPS 180-4 section 4.2.2 and 6.2.2
 object Sha256 {
+    private const val BLOCK_BYTES = 64
+
     private val K = intArrayOf(
         0x428a2f98, 0x71374491, 0xb5c0fbcfu.toInt(), 0xe9b5dba5u.toInt(),
         0x3956c25b, 0x59f111f1, 0x923f82a4u.toInt(), 0xab1c5ed5u.toInt(),
@@ -41,7 +43,8 @@ object Sha256 {
         )
         val padded = pad(bytes)
         val w = IntArray(64)
-        for (block in padded.indices step 64) {
+        var block = 0
+        while (block < padded.size) {
             for (t in 0 until 16) w[t] = word(padded, block + t * 4)
             for (t in 16 until 64) {
                 val s0 = w[t - 15].rotateRight(7) xor w[t - 15].rotateRight(18) xor (w[t - 15] ushr 3)
@@ -49,6 +52,7 @@ object Sha256 {
                 w[t] = w[t - 16] + s0 + w[t - 7] + s1
             }
             compress(h, w)
+            block += BLOCK_BYTES
         }
         val out = ByteArray(32)
         for (i in 0 until 8) for (j in 0 until 4) out[i * 4 + j] = (h[i] ushr (24 - 8 * j)).toByte()

@@ -76,14 +76,15 @@ class ClaudeAdapter : AgentAdapter {
         )
     }
 
-    private companion object {
+    /** What Claude Code is given. */
+    companion object {
         /** The tools Ostrom's PreToolUse hook sees: shell, file writes and MCP tools. */
-        const val MATCHER = "Bash|Write|Edit|MultiEdit|mcp__.*"
-        const val DESCRIPTION = "Your team's harness, laid down by Ostrom for this session only"
-        const val AFTER_SECONDS = 10L
-        const val START_SECONDS = 20L
-        const val END_SECONDS = 30L
-        val PROVIDER_OVERRIDES = listOf(
+        private const val MATCHER = "Bash|Write|Edit|MultiEdit|mcp__.*"
+        private const val DESCRIPTION = "Your team's harness, laid down by Ostrom for this session only"
+        private const val AFTER_SECONDS = 10L
+        private const val START_SECONDS = 20L
+        private const val END_SECONDS = 30L
+        private val PROVIDER_OVERRIDES = listOf(
             "ANTHROPIC_API_KEY",
             "CLAUDE_CODE_OAUTH_TOKEN",
             "CLAUDE_CODE_USE_BEDROCK",
