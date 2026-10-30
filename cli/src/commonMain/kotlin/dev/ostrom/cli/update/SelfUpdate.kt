@@ -90,8 +90,7 @@ private class Asset(val version: String, val url: String, val sha256: String, va
  * @param unpack Unpacks an archive into a folder; false when it could not.
  * @param say Writes a line for the developer (stdout).
  * @param sessions Says whether this runs inside an agent's session.
- * @param releaseKeyPem The key the manifest must be signed with.
- * @param builtFloor The floor of the release this binary was built for, or null for none.
+ * @param trust The release key and the floor this binary was built with.
  */
 class SelfUpdate(
     private val downloads: Downloads,
@@ -99,8 +98,7 @@ class SelfUpdate(
     private val unpack: Unpacker,
     private val say: (String) -> Unit,
     private val sessions: AgentSessions,
-    private val releaseKeyPem: String = RELEASE_KEY_PEM,
-    private val builtFloor: String? = null,
+    private val trust: ReleaseTrust = ReleaseTrust(),
 ) {
     /** Runs [request]; the exit code. */
     suspend fun update(request: UpdateRequest): Int = try {
@@ -138,7 +136,7 @@ class SelfUpdate(
         }
         val recorded = fileSystem.textOf(keptVersionOf(binary))
             ?: stop(ExitCode.REFUSED, "✗ The version of the ostrom kept is not recorded. $UNCHANGED $REINSTALL")
-        floorRefusal(recorded.trim(), request.current, manifest(request.copy(version = null)).floor, builtFloor)
+        floorRefusal(recorded.trim(), request.current, manifest(request.copy(version = null)).floor, trust.floor)
             ?.let { stop(ExitCode.REFUSED, it) }
         swapBack(binary, request.current)
     } catch (stopped: Stop) {
@@ -186,7 +184,7 @@ class SelfUpdate(
         val url = "${request.releases.trimEnd('/')}/$folder/latest.json"
         val manifest = fetch(url, MAX_MANIFEST_BYTES, request)
         val signature = fetch("$url.sig", MAX_SIGNATURE_BYTES, request)
-        if (!ed25519Verify(releaseKeyPem, manifest, decoded(signature.decodeToString().trim()))) {
+        if (!ed25519Verify(trust.keyPem, manifest, decoded(signature.decodeToString().trim()))) {
             stop(ExitCode.SIGNATURE_REFUSED, "✗ The release signature does not match. Nothing was changed.")
         }
         val body = parseObject(manifest.decodeToString()) ?: unreadable()
@@ -216,7 +214,7 @@ class SelfUpdate(
     /** Installs [asset] when the latest release's floor allows it (S2-39). */
     private suspend fun install(request: UpdateRequest, asset: Asset): Int {
         val floor = if (request.version == null) asset.floor else manifest(request.copy(version = null)).floor
-        floorRefusal(asset.version, request.current, floor, builtFloor)?.let { stop(ExitCode.REFUSED, it) }
+        floorRefusal(asset.version, request.current, floor, trust.floor)?.let { stop(ExitCode.REFUSED, it) }
         val executable = request.executable
             ?: stop(ExitCode.CANNOT_WRITE, "ostrom cannot find its own binary. Reinstall it with the installer.")
         val binary = executable.toPath()
@@ -300,6 +298,14 @@ class SelfUpdate(
 
 /** Where the version of the binary kept for `--rollback` is recorded. */
 internal fun keptVersionOf(binary: Path): Path = "$binary.previous.version".toPath()
+
+/**
+ * What a release is checked against.
+ *
+ * @param keyPem The key the manifest must be signed with.
+ * @param floor The floor of the release this binary was built for (`release-floor.txt`), or null for none.
+ */
+data class ReleaseTrust(val keyPem: String = RELEASE_KEY_PEM, val floor: String? = null)
 
 /**
  * Why [target] may not be installed over [current] given the latest release's signed [floor] and the floor this binary

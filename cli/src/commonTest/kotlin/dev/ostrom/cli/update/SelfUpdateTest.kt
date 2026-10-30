@@ -53,7 +53,7 @@ class SelfUpdateTest {
         unpack = { _, into -> unpacked(into) },
         say = { said += it },
         sessions = { session },
-        releaseKeyPem = ReleaseVectors.KEY_PEM,
+        trust = ReleaseTrust(ReleaseVectors.KEY_PEM),
     )
 
     private fun request(current: String = "1.0.0", version: String? = null, checkOnly: Boolean = false) =
@@ -226,8 +226,7 @@ class SelfUpdateTest {
             unpack = { _, into -> unpacked(into) },
             say = { said += it },
             sessions = { null },
-            releaseKeyPem = ReleaseVectors.KEY_PEM,
-            builtFloor = "9.0.0",
+            trust = ReleaseTrust(ReleaseVectors.KEY_PEM, floor = "9.0.0"),
         )
         assertEquals(77, guarded.rollback(request(current = "9.9.9")))
         assertEquals(

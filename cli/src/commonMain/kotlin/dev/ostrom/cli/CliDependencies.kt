@@ -42,6 +42,7 @@ import dev.ostrom.cli.platform.systemSecretStore
 import dev.ostrom.cli.relay.LocalRelayStarterImpl
 import dev.ostrom.cli.telemetry.UsageStatistics
 import dev.ostrom.cli.update.AgentSessionsImpl
+import dev.ostrom.cli.update.ReleaseTrust
 import dev.ostrom.cli.update.SelfUpdate
 import dev.ostrom.cli.update.TarUnpacker
 import kotlinx.coroutines.Dispatchers
@@ -187,7 +188,7 @@ class CliDependencies(
             TarUnpacker(ProcessLauncherImpl(), environment["SystemRoot"]),
             { console.out("$it\n") },
             AgentSessionsImpl(environment, FileSystem.SYSTEM, temporary, LoopbackHttpImpl()),
-            builtFloor = BuildInfo.FLOOR,
+            ReleaseTrust(floor = BuildInfo.FLOOR),
         )
 
         /** The hook runner alone, for the fast path of `main` (nothing else is built). */
