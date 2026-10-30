@@ -31,6 +31,9 @@ kotlin {
     jvmToolchain(21)
     jvm {
         testRuns.named("test") { executionTask.configure { useJUnitPlatform() } }
+        // Interface default methods without the DefaultImpls compatibility stubs, which no caller uses and which
+        // Kover would count as uncovered.
+        compilerOptions { freeCompilerArgs.add("-jvm-default=no-compatibility") }
     }
     if ("macosArm64" in nativeTargets) macosArm64()
     if ("linuxX64" in nativeTargets) linuxX64()
