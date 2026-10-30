@@ -195,4 +195,14 @@ class ConfigStoreTest {
         store.set(ConfigKey.COLOR, "never")
         assertEquals("retries = 3\r\ncolor = \"never\"\n", written())
     }
+
+    @Test
+    fun aBareKeyHoldsLettersOfBothCasesDigitsUnderscoresAndDashesOnly() {
+        assertEquals("Max_retries-2", tomlKeyOf("Max_retries-2 = 3"))
+        assertNull(tomlKeyOf("server.url = \"x\""), "a dotted key is not a bare one")
+        assertNull(tomlKeyOf("\"color\" = \"never\""), "a quoted key")
+        assertNull(tomlKeyOf(" = 1"))
+        assertNull(tomlKeyOf("café = 1"), "a letter past z is not bare")
+        assertNull(tomlKeyOf("# color = never"))
+    }
 }
