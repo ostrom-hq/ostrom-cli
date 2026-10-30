@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.platform
 
 import okio.FileSystem
@@ -24,7 +25,7 @@ class FileStoreTest {
         assertNull(store.read(path))
         store.write(path, "server = \"https://ostrom.run\"\n")
         assertEquals("server = \"https://ostrom.run\"\n", store.read(path))
-        assertFalse(store.exists("$path.tmp"))
+        assertEquals(listOf("config.toml"), FileSystem.SYSTEM.list(folder / "nested").map { it.name })
         store.write(path, "color = \"never\"\n")
         assertEquals("color = \"never\"\n", store.read(path))
         store.delete(path)

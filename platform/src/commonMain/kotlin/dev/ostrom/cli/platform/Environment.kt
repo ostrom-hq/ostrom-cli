@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.platform
 
 /** The operating system families the CLI ships for. */

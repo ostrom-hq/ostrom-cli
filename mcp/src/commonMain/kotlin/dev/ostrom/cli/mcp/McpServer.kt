@@ -1,6 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.mcp
 
 import kotlinx.serialization.SerializationException
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -79,8 +81,26 @@ class McpDispatcher(private val version: String, tools: List<McpTool> = emptyLis
     private fun callTool(id: JsonElement, params: JsonObject): JsonObject {
         val name = (params["name"] as? JsonPrimitive)?.content
         val tool = name?.let { tools[it] } ?: return error(id, INVALID_PARAMS, "Unknown tool: $name")
-        return result(id, tool.call(params["arguments"] as? JsonObject ?: JsonObject(emptyMap())))
+        val arguments = params["arguments"] as? JsonObject ?: JsonObject(emptyMap())
+        val outcome = try {
+            tool.call(arguments)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+            // A failing tool is the agent's to read (MCP tool error), never the end of the server and its other calls.
+            toolError("${tool.name} failed: ${e.message ?: e::class.simpleName}")
+        }
+        return result(id, outcome)
     }
+
+    private fun toolError(text: String) = JsonObject(
+        mapOf(
+            "content" to JsonArray(
+                listOf(JsonObject(mapOf("type" to JsonPrimitive("text"), "text" to JsonPrimitive(text)))),
+            ),
+            "isError" to JsonPrimitive(true),
+        ),
+    )
 
     private fun result(id: JsonElement, result: JsonObject) =
         JsonObject(mapOf("jsonrpc" to JsonPrimitive("2.0"), "id" to id, "result" to result))

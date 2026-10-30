@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.platform
 
 import okio.Path.Companion.toPath
@@ -38,6 +39,25 @@ class ExecutableFinderTest {
         fileSystem.write("/tools/claude.cmd".toPath()) { writeUtf8("") }
         val finder = ExecutableFinderImpl(windows("PATH" to "/tools", "PATHEXT" to ".EXE;;.CMD"), fileSystem)
         assertEquals("/tools/claude.cmd".toPath().toString(), finder.find("claude"))
+    }
+
+    @Test
+    fun theExtensionlessNpmShimIsSkippedOnWindows() {
+        val fileSystem = FakeFileSystem()
+        fileSystem.createDirectories("/npm".toPath())
+        fileSystem.write("/npm/claude".toPath()) { writeUtf8("#!/bin/sh") }
+        fileSystem.write("/npm/claude.cmd".toPath()) { writeUtf8("") }
+        val finder = ExecutableFinderImpl(windows("PATH" to "/npm", "PATHEXT" to ".EXE;.CMD"), fileSystem)
+        assertEquals("/npm/claude.cmd".toPath().toString(), finder.find("claude"))
+    }
+
+    @Test
+    fun aNameWithItsExtensionIsFoundAsItIsOnWindows() {
+        val fileSystem = FakeFileSystem()
+        fileSystem.createDirectories("/tools".toPath())
+        fileSystem.write("/tools/git.exe".toPath()) { writeUtf8("") }
+        val finder = ExecutableFinderImpl(windows("PATH" to "/tools"), fileSystem)
+        assertEquals("/tools/git.exe".toPath().toString(), finder.find("git.exe"))
     }
 
     @Test

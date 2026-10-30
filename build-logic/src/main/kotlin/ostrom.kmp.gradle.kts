@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Convention for every Kotlin module of Ostrom (docs/CONVENTIONS.md sections 7, 8, 9 and 10).
 // A module applies `id("ostrom.kmp")` and declares its own dependencies; nothing else goes in its build file.
 //
@@ -31,6 +32,9 @@ kotlin {
     jvmToolchain(21)
     jvm {
         testRuns.named("test") { executionTask.configure { useJUnitPlatform() } }
+        // Interface default methods without the DefaultImpls compatibility stubs, which no caller uses and which
+        // Kover would count as uncovered.
+        compilerOptions { freeCompilerArgs.add("-jvm-default=no-compatibility") }
     }
     if ("macosArm64" in nativeTargets) macosArm64()
     if ("linuxX64" in nativeTargets) linuxX64()
