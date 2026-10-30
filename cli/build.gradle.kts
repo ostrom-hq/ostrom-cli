@@ -12,11 +12,8 @@ plugins {
 // (ostrom.core.local, settings.gradle.kts). ContractRoutesTest checks the routes; its version goes in BuildInfo.
 val apiContractFile = rootDir.resolve("../ostrom-core/api/openapi.yaml")
 
-// `info.version` of the contract, compared by `ostrom doctor` with the server's; blank without the checkout.
-val contractVersion = apiContractFile.takeIf { it.isFile }?.readLines().orEmpty()
-    .dropWhile { it != "info:" }.drop(1).takeWhile { it.startsWith(" ") }
-    .firstNotNullOfOrNull { Regex("""^ {2}version: *['"]?([^'"\s]+)['"]? *$""").find(it)?.groupValues?.get(1) }
-    .orEmpty()
+/** `  version: 0.1.0` in the `info:` block, quoted or not, with or without a comment after it. */
+val contractVersionLine = Regex("""^ {2}version: *['"]?([0-9A-Za-z.+-]+)['"]? *(#.*)?$""")
 
 // The version printed by `ostrom version`, written into a generated source at build time.
 val generatedBuildInfo = layout.buildDirectory.dir("generated/build-info")
@@ -27,9 +24,14 @@ val generateBuildInfo by tasks.registering {
     val postHogKey = providers.gradleProperty("ostromPosthogKey").orElse("").get()
     // Written into a Kotlin string literal: only the characters a PostHog key has, so nothing can break or inject.
     require(Regex("[A-Za-z0-9_-]*").matches(postHogKey)) { "ostromPosthogKey has characters a PostHog key never has" }
-    // Written into a Kotlin string literal: only the characters of a version.
-    require(Regex("[0-9A-Za-z.+-]*").matches(contractVersion)) { "the contract's version is not one: $contractVersion" }
-    val contract = contractVersion
+    // `info.version` of the contract, compared by `ostrom doctor` with the server's: blank without the checkout, and a
+    // contract whose version cannot be read fails the build rather than ship a doctor that compares nothing.
+    val contract = apiContractFile.takeIf { it.isFile }?.let { file ->
+        val info = file.readLines().dropWhile { it.trimEnd() != "info:" }.drop(1).takeWhile { it.startsWith(" ") }
+        val versions = info.mapNotNull { contractVersionLine.find(it)?.groupValues?.get(1) }
+        // Written into a Kotlin string literal: only the characters of a version.
+        requireNotNull(versions.singleOrNull()) { "no info.version that reads as a version in $file" }
+    }.orEmpty()
     val output = generatedBuildInfo
     inputs.property("version", version)
     inputs.property("contractVersion", contract)

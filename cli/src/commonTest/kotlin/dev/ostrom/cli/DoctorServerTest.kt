@@ -22,21 +22,26 @@ class DoctorServerTest : CliKit() {
 
     private fun health(version: String, status: String = "ok") = """{"status":"$status","version":"$version"}"""
 
+    /** A version of the contract this build speaks, or any when the build has none. */
+    private val spoken = BuildInfo.CONTRACT_VERSION.ifBlank { "0.1.0" }
+
     private fun doctor(api: (String) -> OstromApi, installed: Set<String> = setOf("git", "claude")) =
         cli(environment = withServer, installed = installed, api = api).run(arrayOf("doctor"))
 
     @Test
     fun anOstromServerOfTheContractsVersionIsReachable() {
-        assertEquals(0, doctor(answering(200, health("${BuildInfo.CONTRACT_VERSION}-dev"), 84)))
-        assertOut("  ✓ ostrom.example reachable (84 ms) · Ostrom ${BuildInfo.CONTRACT_VERSION}-dev\n")
+        assertEquals(0, doctor(answering(200, health("$spoken-dev"), 84)))
+        assertOut("  ✓ ostrom.example reachable (84 ms) · Ostrom $spoken-dev\n")
         assertEquals(listOf("/api/v1/health"), asked)
     }
 
     @Test
     fun aClientErrorARedirectOrAnInformationalAnswerIsNotReachable() {
-        for (status in listOf(404, 401, 301, 101)) {
+        val error = """{"error":{"type":"not_found","message":"no"}}"""
+        val answers = listOf(404 to error, 401 to error, 301 to "", 302 to "<html>moved</html>", 101 to "")
+        for ((status, body) in answers) {
             console.out.clear()
-            assertEquals(1, doctor(answering(status, """{"error":{"type":"not_found","message":"no"}}""")), "$status")
+            assertEquals(1, doctor(answering(status, body)), "$status")
             assertOut("  ✗ ostrom.example answers $status on /api/v1/health: not an Ostrom server of this version")
         }
     }
@@ -44,7 +49,8 @@ class DoctorServerTest : CliKit() {
     @Test
     fun anAnswerThatIsNotOstromsHealthIsNotReachable() {
         val bodies = listOf("", "<html>captive portal</html>", """{"status":"ok"}""", """{"version":"0.1.0"}""",
-            """{"status":1,"version":"0.1.0"}""")
+            """{"status":1,"version":"0.1.0"}""", """{"status":"weird","version":"0.1.0"}""", health(""),
+            health("\\u001b]0;pwned\\u0007"), health("0.1.0\\n  ✓ all good"))
         for (body in bodies) {
             console.out.clear()
             assertEquals(1, doctor(answering(200, body)), body)
@@ -59,14 +65,24 @@ class DoctorServerTest : CliKit() {
     }
 
     @Test
+    fun aServerInTroubleSaysWhichOfItsChecksFailed() {
+        val body = """{"status":"degraded","version":"0.1.0","checks":""" +
+            """{"database":"down","cache":"ok","queue":{"x":1},"bad name!":"down","lag":"slow now"}}"""
+        assertEquals(1, doctor(answering(503, body)))
+        assertOut("  ✗ ostrom.example answers 503: the server is in trouble (database: down, queue: ?, lag: ?), try")
+    }
+
+    @Test
     fun anotherVersionOfTheApiIsAWarning() {
+        if (BuildInfo.CONTRACT_VERSION.isBlank()) return // a build without ostrom-core's checkout compares nothing
         assertEquals(0, doctor(answering(200, health("9.4.2"))))
         assertOut("  ! ostrom.example reachable (1 ms) · Ostrom 9.4.2, but this ostrom speaks the API ")
+        assertOut(": this ostrom is behind: ostrom update.\n")
     }
 
     @Test
     fun oneProblemAndOneWarningAreCountedInTheSingular() {
-        assertEquals(1, doctor(answering(204, health(BuildInfo.CONTRACT_VERSION)), installed = setOf("claude")))
+        assertEquals(1, doctor(answering(200, health(spoken)), installed = setOf("claude")))
         val expected = "  ✗ git not found: install git, agents need it.\n" +
             "  ✓ Agents found: claude\n1 problem, 1 warning.\n"
         assertTrue(console.out.endsWith(expected), console.out.toString())
