@@ -143,13 +143,17 @@ internal class InitCommand(private val dependencies: CliDependencies) : CliktCom
     /** The rules the analysis proposed, accepted here by an owner or admin who says yes. */
     private fun rules(access: OrgAccess) {
         val page = access.readIfServed("$RULES?status=proposed")
-        val proposed = page?.list("items")?.filterIsInstance<JsonObject>()
-        summary["proposedRules"] = proposed?.size
-        when {
-            proposed == null -> say("  Rules       not on this server yet")
-            proposed.isEmpty() -> say("  Rules       none proposed yet: the analysis of ${access.org.name} " +
-                "proposes them (${access.console}/rules)")
-            else -> proposedRules(access, proposed, !page?.text("next").isNullOrEmpty())
+        if (page == null) {
+            say("  Rules       not on this server yet")
+            return
+        }
+        val proposed = page.list("items").filterIsInstance<JsonObject>()
+        summary["proposedRules"] = proposed.size
+        if (proposed.isEmpty()) {
+            say("  Rules       none proposed yet: the analysis of ${access.org.name} proposes them " +
+                "(${access.console}/rules)")
+        } else {
+            proposedRules(access, proposed, !page.text("next").isNullOrEmpty())
         }
     }
 
