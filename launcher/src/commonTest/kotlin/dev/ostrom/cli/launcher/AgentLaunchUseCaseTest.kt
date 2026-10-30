@@ -175,6 +175,52 @@ class AgentLaunchUseCaseTest {
     }
 
     @Test
+    fun aDryRunChecksThePolicyAndShowsTheHarnessButStartsNothing() = runTest {
+        serveALaunch()
+        server["GET ${Routes.POLICY}?agent=claude-code&dev=alice&model=opus"] = 200 to """{"allowed":true}"""
+        server["GET ${Routes.PACKAGE}?repo=acme-api"] = 200 to PackageVector.ENVELOPE
+        server["GET ${Routes.KEYS}"] = 200 to objectOf(
+            "keys" to listOf(mapOf("kid" to PackageVector.KID, "publicKeyPem" to PackageVector.PUBLIC_KEY_PEM)),
+        ).toString()
+        server["GET ${Routes.MCP_SERVERS}"] = 200 to """{"items":[{"name":"linear"}]}"""
+        val before = files.texts.toMap()
+        assertEquals(0, start(model = "opus", dryRun = true))
+        assertTrue(said.any { it.startsWith("ostrom: package ") }, said.toString())
+        assertTrue(said[said.size - 2].startsWith("ostrom: MCP servers: linear"), said.toString())
+        val passed = "ostrom: dry run for acme-api, model opus: the policy, the package and the instance's keys " +
+            "check out; no launch was asked of Ostrom and Claude Code was not started"
+        assertEquals(passed, said.last())
+        assertTrue(commands.isEmpty(), "the agent never starts")
+        assertTrue(server.sent("POST ${Routes.LAUNCHES}").isEmpty(), "no launch is created")
+        assertTrue(files.directories.isEmpty(), "no folder is made")
+        assertEquals(before, files.texts.toMap(), "no file is written: neither the envelope nor a key pinned")
+        assertEquals(1, server.sent("GET ${Routes.INSTANCE_KEYS}").size, "the instance's keys are read")
+        said.clear()
+        server["GET ${Routes.MCP_SERVERS}"] = 200 to """{"items":[]}"""
+        assertEquals(0, start(repo = "acme/web", dryRun = true))
+        assertEquals("ostrom: MCP servers: none", said[said.size - 2])
+        assertTrue(said.last().startsWith("ostrom: dry run for acme/web: the policy"), said.last())
+    }
+
+    @Test
+    fun aDryRunStopsWhereALaunchWouldStop() = runTest {
+        serveALaunch()
+        server["GET ${Routes.POLICY}?agent=claude-code&dev=alice"] = 200 to """{"allowed":false,"reason":"x"}"""
+        assertEquals(77, start(dryRun = true), "a refusal is the same as for a launch")
+        serveALaunch()
+        server["GET ${Routes.PACKAGE}?repo=acme-api"] = 500 to """{"error":{"type":"e","message":"down"}}"""
+        assertEquals(78, start(dryRun = true), "a package that cannot be verified")
+        server["GET ${Routes.PACKAGE}?repo=acme-api"] = 404 to "{}"
+        server.unreachable = setOf("GET ${Routes.INSTANCE_KEYS}")
+        assertEquals(69, start(dryRun = true), "the instance's keys cannot be read")
+        // the checks before the policy too: two models, an agent that is not installed
+        assertEquals(64, start(model = "a", arguments = listOf("--model=b"), dryRun = true))
+        installed.remove("claude")
+        assertEquals(127, start(dryRun = true))
+        assertTrue(commands.isEmpty())
+    }
+
+    @Test
     fun anAgentWithoutAdapterOrNotInstalledIsNeverStarted() = runTest {
         assertEquals(70, start(Agent.GROK))
         installed.clear()
@@ -418,12 +464,14 @@ class AgentLaunchUseCaseTest {
         assertEquals("opencode", ostromName(Agent.OPENCODE))
     }
 
+    @Suppress("LongParameterList") // one default per fact of a launch a test changes
     private suspend fun TestScope.start(
         agent: Agent = Agent.CLAUDE,
         arguments: List<String> = emptyList(),
         repo: String? = null,
         model: String? = null,
         executable: String = join("/opt/bin", "ostrom"),
+        dryRun: Boolean = false,
     ): Int {
         val dependencies = LaunchDependencies(
             server = ServerJson(server),
@@ -450,7 +498,8 @@ class AgentLaunchUseCaseTest {
             pathSeparator = ':',
             variable = { variables[it] },
         )
-        return AgentLaunchUseCase(dependencies, adapters).launch(LaunchRequest(agent, arguments, repo, model), site)
+        val request = LaunchRequest(agent, arguments, repo, model, dryRun)
+        return AgentLaunchUseCase(dependencies, adapters).launch(request, site)
     }
 
     /** The routes of a launch that goes well, without a package. */
