@@ -52,6 +52,8 @@ class ColoursTest : CliKit() {
         assertTrue(help().contains(ESCAPE))
         assertFalse(help("--no-color").contains(ESCAPE))
         assertFalse(help(environment = mapOf("HOME" to "/home/maya", "NO_COLOR" to "1")).contains(ESCAPE))
+        assertEquals(64, cli().run(arrayOf("doctor", "--bad")))
+        assertFalse(console.err.contains(ESCAPE), console.err.toString())
         console.isInteractive = true
         assertEquals(0, cli().run(arrayOf("config", "set", "color", "auto")))
         assertTrue(help().contains("Usage: ostrom"))

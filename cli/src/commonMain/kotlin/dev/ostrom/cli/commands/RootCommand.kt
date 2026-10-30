@@ -19,14 +19,18 @@ import dev.ostrom.cli.launcher.Agent
 class RootCommand(private val dependencies: CliDependencies) : CliktCommand(name = "ostrom") {
     override val invokeWithoutSubcommand = true
 
-    /** The colours of help and errors ([dev.ostrom.cli.help.colourLevel]), set before the line is parsed. */
-    internal var colours: AnsiLevel? = AnsiLevel.NONE
+    /**
+     * The colours of help ([dev.ostrom.cli.help.colourLevel]), set before the line is parsed and decided only when the
+     * parser builds the root's context, inside the parse and its error handling.
+     */
+    internal var colours: () -> AnsiLevel? = { AnsiLevel.NONE }
 
     init {
         context {
             helpFormatter = { OstromHelpFormatter(it) }
             // No colour means no hyperlink either; otherwise the terminal says.
-            terminal = Terminal(ansiLevel = colours, hyperlinks = if (colours == AnsiLevel.NONE) false else null)
+            val level = colours()
+            terminal = Terminal(ansiLevel = level, hyperlinks = if (level == AnsiLevel.NONE) false else null)
         }
     }
 
@@ -39,7 +43,11 @@ class RootCommand(private val dependencies: CliDependencies) : CliktCommand(name
     /** Codes and HTTP statuses on stderr, never a secret. Read by commands that call the server. */
     val debug by option("--debug", help = "Print codes and HTTP statuses (never a secret)").flag()
 
-    /** Plain output; the NO_COLOR variable does the same. */
+    /**
+     * Plain output; the NO_COLOR variable does the same. Declared so that the parser accepts it and `--help` lists it;
+     * the decision reads the raw line before parsing ([dev.ostrom.cli.help.colourLevel]), since help and errors may be
+     * printed before any option is read.
+     */
     val noColor by option(NO_COLOR_OPTION, help = "No colours (also NO_COLOR, or ostrom config set color never)").flag()
 
     /** The top-level subcommand the parsed line invoked; null for `ostrom` alone, or when the line did not parse. */

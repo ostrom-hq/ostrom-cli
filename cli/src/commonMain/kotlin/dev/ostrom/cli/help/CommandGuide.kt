@@ -163,11 +163,17 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
         "harness",
         "ostrom policy rules edit rul_7d1a --strength required" to "change a rule",
     ),
-    "import" to guide("migrate-from-teamcode", "ostrom import teamcode --db teamcode.db" to "bring your TeamCode in"),
+    "import" to guide(
+        "migrate-from-teamcode",
+        "ostrom import teamcode --db mysql://teamcode@db.acme.dev/teamcode --key-file teamcode.key" to
+            "bring your TeamCode in",
+    ),
     "import teamcode" to guide(
         "migrate-from-teamcode",
-        "ostrom import teamcode --db teamcode.db" to "bring your TeamCode in",
-        "ostrom import teamcode --db teamcode.db --yes" to "without the confirmation",
+        "ostrom import teamcode --db mysql://teamcode@db.acme.dev/teamcode --key-file teamcode.key" to
+            "bring your TeamCode in (password: MYSQL_PWD)",
+        "ostrom import teamcode --db mysql://teamcode@db.acme.dev/teamcode --key-file teamcode.key --yes" to
+            "without the confirmation",
     ),
     "check" to guide("workflows", "ostrom check tests" to "run a workflow check (agents call it)"),
     "wait" to guide("approvals", "ostrom wait apr_3f9c --timeout 600" to "wait for a yes (agents call it)"),

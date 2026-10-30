@@ -22,7 +22,9 @@ class CompletionTest : CliKit() {
     @Test
     fun bashZshAndFishGetClikts() {
         val scripts = listOf("bash", "zsh", "fish").associateWith { script(it) }
-        scripts.forEach { (shell, script) -> assertTrue(script.contains("ostrom") && script.contains("receipts"), shell) }
+        scripts.forEach { (shell, script) ->
+            assertTrue(script.contains("ostrom") && script.contains("receipts"), shell)
+        }
         assertTrue(scripts.getValue("bash").contains("complete "), scripts.getValue("bash"))
         assertTrue(scripts.getValue("fish").contains("complete -c ostrom"), scripts.getValue("fish"))
         assertEquals(3, scripts.values.toSet().size)
@@ -37,7 +39,8 @@ class CompletionTest : CliKit() {
         assertTrue(root.contains("'receipts'") && root.contains("'completion'") && root.contains("'--no-color'"), root)
         assertFalse(root.contains("'wait'") || root.contains("'hook'"), root)
         assertTrue(script.contains("\n        'receipts' = @('list', 'show', 'pull', "), script)
-        assertTrue(script.contains("\n        'receipts list' = @('--help', '--json', '--local', '--server', '-h')"), script)
+        val list = "\n        'receipts list' = @('--help', '--json', '--local', '--server', '-h')"
+        assertTrue(script.contains(list), script)
         assertTrue(script.endsWith("}\n"), script)
     }
 

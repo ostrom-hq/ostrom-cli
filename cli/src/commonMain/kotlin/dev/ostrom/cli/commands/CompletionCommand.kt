@@ -14,7 +14,7 @@ import dev.ostrom.cli.CliDependencies
  * command tree. Bash, zsh and fish are Clikt's; PowerShell, which Clikt does not write, is [powerShellCompletion].
  */
 class CompletionCommand(private val dependencies: CliDependencies) : CliktCommand(name = "completion") {
-    private val shell by argument("shell", help = "bash, zsh, fish or powershell").choice(*SHELLS)
+    private val shell by argument("shell", help = "bash, zsh, fish or powershell").choice(SHELLS.associateWith { it })
 
     override fun help(context: Context) = "Print the tab completion script of your shell"
 
@@ -30,7 +30,7 @@ class CompletionCommand(private val dependencies: CliDependencies) : CliktComman
 
     private companion object {
         const val POWERSHELL = "powershell"
-        val SHELLS = arrayOf("bash", "zsh", "fish", POWERSHELL)
+        val SHELLS = listOf("bash", "zsh", "fish", POWERSHELL)
     }
 }
 
