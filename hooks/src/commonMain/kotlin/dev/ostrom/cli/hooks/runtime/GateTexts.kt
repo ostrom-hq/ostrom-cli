@@ -5,6 +5,7 @@ import dev.ostrom.cli.hooks.gate.Gate
 import dev.ostrom.cli.hooks.gate.RealRepository
 
 /** What the gate tells the agent, word for word the prototype's (`ostrom-gate.mjs`, `hook_gate`). */
+@Suppress("TooManyFunctions") // One text per outcome of a gate, kept together so that they read alike.
 object GateTexts {
     private val Gate.name: String get() = label ?: "gate"
 

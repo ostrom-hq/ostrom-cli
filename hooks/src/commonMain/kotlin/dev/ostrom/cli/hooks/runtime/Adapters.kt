@@ -6,6 +6,7 @@ import dev.ostrom.cli.platform.CaptureResult
 import dev.ostrom.cli.platform.LoopbackException
 import dev.ostrom.cli.platform.LoopbackHttp
 import dev.ostrom.cli.platform.LoopbackRequest
+import dev.ostrom.cli.platform.LoopbackResponse
 import dev.ostrom.cli.platform.ProcessCapture
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -25,23 +26,33 @@ class RelayCalls(
     private val http: LoopbackHttp,
 ) : OstromCalls {
     override fun call(path: String, body: JsonElement?, timeoutMillis: Int): CallResult {
-        val port = relayUrl?.let { PORT.matchEntire(it.trimEnd('/')) }?.groupValues?.get(1)?.toIntOrNull()
-            ?: return CallResult.Failed("no Ostrom relay in this session (run the agent with `ostrom <agent>`)")
+        val port = relayUrl?.let { PORT.matchEntire(it.trimEnd('/')) }?.let { it.groupValues[1].toIntOrNull() }
         val headers = token?.let { mapOf("Authorization" to "Bearer $it") }.orEmpty()
         val request = LoopbackRequest(if (body == null) "GET" else "POST", path, headers, body?.toString())
-        val response = http.exchange(port, request, timeoutMillis).getOrElse {
-            return CallResult.Failed((it as LoopbackException).failure.message)
+        return if (port == null) {
+            CallResult.Failed("no Ostrom relay in this session (run the agent with `ostrom <agent>`)")
+        } else {
+            http.exchange(port, request, timeoutMillis).fold(
+                onSuccess = ::resultOf,
+                onFailure = { CallResult.Failed((it as LoopbackException).failure.message) },
+            )
         }
+    }
+
+    private fun resultOf(response: LoopbackResponse): CallResult {
         val json = try {
             Json.parseToJsonElement(response.body) as? JsonObject
         } catch (_: IllegalArgumentException) {
             null
         }
-        if (response.status in SUCCESS) return CallResult.Ok(json ?: JsonObject(emptyMap()))
         // the contract's refusal is {"error":{"type","message"}}; the prototype's was {"error":"…"}
         val detail = json?.get("error") as? JsonObject
         val message = detail?.string("message") ?: json?.string("error") ?: "HTTP ${response.status}"
-        return CallResult.Failed(message, detail?.string("type"))
+        return if (response.status in SUCCESS) {
+            CallResult.Ok(json ?: JsonObject(emptyMap()))
+        } else {
+            CallResult.Failed(message, detail?.string("type"))
+        }
     }
 
     private companion object {

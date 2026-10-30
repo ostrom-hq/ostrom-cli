@@ -64,11 +64,13 @@ class SessionIds(private val sessionFile: String?, private val files: HookFiles)
 
     /** The gate request whose yes the action [text] ran under, forgotten once read; null when it ran without one. */
     fun takeYes(text: String): String? {
-        val file = sessionFile?.let { "$it.yes.json" } ?: return null
-        val yeses = read(file)
+        val file = sessionFile?.let { "$it.yes.json" }
+        val yeses = file?.let { read(it) }.orEmpty()
         val key = Sha256.hex(text)
-        val gateId = yeses[key] ?: return null
-        files.write(file, JsonObject((yeses - key).mapValues { JsonPrimitive(it.value) }).toString())
+        val gateId = yeses[key]
+        if (file != null && gateId != null) {
+            files.write(file, JsonObject((yeses - key).mapValues { JsonPrimitive(it.value) }).toString())
+        }
         return gateId
     }
 
