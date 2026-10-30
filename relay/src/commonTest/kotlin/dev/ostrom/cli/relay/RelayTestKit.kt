@@ -19,13 +19,18 @@ const val LAUNCH = "launch-1"
 const val USER_AGENT = "ostrom/0.1.0-test"
 
 /** A relay configuration; the trailing slash of the server is dropped by the relay. */
-fun relayConfig(inference: Boolean = false, mcpServers: Set<String> = setOf("github")) = RelayConfig(
+fun relayConfig(
+    inference: Boolean = false,
+    mcpServers: Set<String> = setOf("github"),
+    gateCatalog: String? = null,
+) = RelayConfig(
     serverUrl = "$SERVER/",
     agentToken = AGENT_TOKEN,
     userAgent = USER_AGENT,
     launchId = LAUNCH,
     mcpServers = mcpServers,
     inference = inference,
+    gateCatalog = gateCatalog,
 )
 
 /** Ostrom as the relay sees it: a mock engine that records every request it gets and answers with [answer]. */
