@@ -16,6 +16,9 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class GateHookTest {
+    private val logArgs = "log --no-color --no-ext-diff --no-textconv --format=%h %s (%an)"
+    private val diffArgs = "diff --no-color --no-ext-diff --no-textconv --stat --patch"
+
     private val catalogue = """
         {"failMode":"closed","actions":[
           {"class":"lint","tools":["Bash"],"patterns":["\\blint\\b"]},
@@ -37,11 +40,11 @@ class GateHookTest {
         "/w|config branch.main.remote" to "origin",
         "/w|config branch.main.merge" to "refs/heads/main",
         "/w|rev-parse --verify --quiet refs/remotes/origin/main" to "B",
-        "/w|log --no-color --format=%h %s (%an) refs/remotes/origin/main..M" to "m1 fix (lena)",
-        "/w|diff --no-color --stat --patch refs/remotes/origin/main..M" to "+fix",
+        "/w|$logArgs refs/remotes/origin/main..M" to "m1 fix (lena)",
+        "/w|$diffArgs refs/remotes/origin/main..M" to "+fix",
         "/w|rev-parse --abbrev-ref @{u}" to "origin/main",
-        "/w|log --no-color --format=%h %s (%an) @{u}..HEAD" to "m1 fix (lena)",
-        "/w|diff --no-color --stat --patch @{u}..HEAD" to "+fix",
+        "/w|$logArgs @{u}..HEAD" to "m1 fix (lena)",
+        "/w|$diffArgs @{u}..HEAD" to "+fix",
         "/o|rev-parse --show-toplevel" to "/o",
         "/o|remote get-url origin" to "https://github.com/acme/other",
     )
@@ -63,7 +66,7 @@ class GateHookTest {
         }
     }
 
-    private val files = FakeFiles(mutableMapOf("/s/gates.json" to catalogue))
+    private val files = FakeFiles()
     private var calls = FakeCalls()
 
     private fun hook(
@@ -72,10 +75,11 @@ class GateHookTest {
         git: Map<String, String> = repository,
         catalogueText: String? = null,
     ): GateHook {
-        if (catalogueText != null) files.texts["/s/gates.json"] = catalogueText
+        // Ostrom's catalogue comes through the relay; the hook's own calls are recorded apart
+        val served = FakeCalls().on("/api/v1/gates/catalog", ok(catalogueText ?: catalogue))
         val ids = SessionIds(context.sessionFile, files)
-        val store = CatalogueStore(context, files, calls) { true }
-        return GateHook(context, calls, ids, store, checks, FakeGit(git), { it.removeSuffix("/") }, "/w")
+        val store = CatalogueStore(context, FakeFiles(), served)
+        return GateHook(context, calls, ids, files, store, checks, FakeGit(git), { it.removeSuffix("/") }, "/w")
     }
 
     private fun event(tool: String, input: String, after: Boolean = false, cwd: String? = null) = buildJsonObject {
@@ -98,6 +102,7 @@ class GateHookTest {
         assertEquals(HookReply(), hook().handle(event("Read", """{"file_path":"/w/a"}""")))
         assertEquals(HookReply(), hook().handle(bash("npm run lint")))
         assertEquals(HookReply(), hook().handle(bash("git status")))
+        assertEquals(HookReply(), hook().handle(buildJsonObject { put("hook_event_name", "PreToolUse") }), "no tool")
         assertTrue(calls.calls.isEmpty())
         assertFalse("/s/session.refused.json" in files.texts)
     }
@@ -148,7 +153,7 @@ class GateHookTest {
         assertTrue(no.stderr.startsWith("Ostrom: omar said no to \"Push to main\" (gate \"Release\", receipt R2)."))
         answer("""{"id":"G1","status":"rejected"}""")
         assertContains(hook().handle(bash("git push origin main")).stderr, "receipt -")
-        answer("""{"status":"pending","gate":{"approvers":["ana","bo",3]}}""")
+        answer("""{"status":"pending","gate":{"approvers":["ana","bo",3,{}]}}""")
         assertContains(hook().handle(bash("git push origin main")).stderr, "`ostrom wait ?`")
         assertContains(hook().handle(bash("git push origin main")).stderr, "needs a yes from ana or bo (gate \"Main\")")
         answer("""{"status":"shadow"}""")
@@ -156,10 +161,11 @@ class GateHookTest {
         assertContains(shadow, "falls under the proposed gate \\\"Prod\\\" (the gate owner)")
         answer("""{"status":"shadow","gate":{"approvers":[]}}""")
         assertContains(hook().handle(bash("./deploy.sh")).stdout, "(the gate owner)")
-        for (status in listOf("ungated", "consumed")) {
-            answer("""{"status":"$status"}""")
-            assertEquals(HookReply(), hook().handle(bash("./deploy.sh")))
-        }
+        answer("""{"status":"ungated"}""")
+        assertEquals(HookReply(), hook().handle(bash("./deploy.sh")))
+        // S2-29: a used yes no longer lets the action through
+        answer("""{"id":"G9","status":"consumed"}""")
+        assertContains(hook().handle(bash("./deploy.sh")).stderr, "Ostrom: waiting for a yes. Run `ostrom wait G9`")
     }
 
     @Test
@@ -262,20 +268,94 @@ class GateHookTest {
     }
 
     @Test
-    fun anActionThatRanUsesUpItsYes() {
-        answer("""{"gate":{"id":"G1","status":"approved","decidedBy":"omar"}}""")
-        assertEquals(0, hook().handle(bash("git push origin main")).exitCode)
-        calls = FakeCalls().on("/api/v1/gates/G1/consume", ok())
+    fun theAfterToolHookUsesUpNoYes() {
+        // S2-25, S2-29: Ostrom uses the yes up when it sees the push land; the hook reports the action only
         val checks = Checks()
         assertEquals(HookReply(), hook(checks = checks).handle(bash("git push origin main", after = true)))
         assertEquals(listOf("git push origin main\n# ostrom: git push to: main"), checks.after)
-        assertEquals(listOf("/api/v1/gates/G1/consume"), calls.paths())
-        assertEquals("{}", calls.calls.single().body.toString())
-        assertEquals(2_000, calls.calls.single().timeoutMillis)
-        assertEquals(HookReply(), hook().handle(bash("git push origin main", after = true)))
-        assertEquals(1, calls.calls.size, "one yes, one action")
-        assertEquals(HookReply(), hook().handle(bash("npm run lint", after = true)))
-        assertEquals(1, calls.calls.size, "an ungated action has no yes to use up")
+        assertTrue(calls.calls.isEmpty())
+    }
+
+    @Test
+    fun quotesAndBackslashesDoNotHideAGatedCommand() {
+        // S2-26: the patterns read the words as the shell reads them
+        answer("""{"id":"G1","status":"pending"}""")
+        for (command in listOf("git pu''sh origin main", "g\\it push origin main", "git push origin 'main'")) {
+            assertEquals(2, hook().handle(bash(command)).exitCode, command)
+        }
+        assertEquals(3, calls.calls.size)
+    }
+
+    @Test
+    fun theBuiltInCatalogueGatesTheBoundaryWhenOstromsCannotBeRead() {
+        val reply = hook(catalogueText = """{"actions":"unreadable"}""").handle(bash("kube''ctl apply -f prod.yaml"))
+        assertEquals(2, reply.exitCode)
+        assertContains(reply.stderr, "\"deployment\" needs a yes from the gate owner (Ostrom unreachable)")
+        assertContains(reply.stderr, "and Ostrom is unreachable (HTTP 404)")
+        assertEquals(HookReply(), hook(catalogueText = """{"actions":"unreadable"}""").handle(bash("ls -la")))
+    }
+
+    @Test
+    fun aProgramNamedByAVariableIsRefusedWhileAGateIsEnforced() {
+        val reply = hook().handle(bash("G=git; \$G push origin main"))
+        assertEquals(2, reply.exitCode)
+        assertContains(reply.stderr, "\"Push to main\" needs a yes from omar (gate \"Main\"), and Ostrom cannot read")
+        assertContains(reply.stderr, "which program `\$G` runs")
+        assertEquals(HookReply(), hook().handle(bash("echo \$HOME")), "a variable in an argument is read as text")
+        val soft = catalogue.replace("\"enforce\":true,\"label\":\"Main\"", "\"label\":\"Main\"")
+        assertEquals(HookReply(), hook(catalogueText = soft).handle(bash("\$G status")), "no gate on Bash enforced")
+        assertTrue(calls.calls.isEmpty())
+    }
+
+    @Test
+    fun aPushWithAVariableOrAShellAliasCannotBeReadAndIsRefused() {
+        val variable = hook().handle(bash("git push origin \$B"))
+        assertContains(variable.stderr, "`\$B` is a shell variable or substitution")
+        val git = repository + ("/w|config --get alias.yolo" to "!git push origin main")
+        assertContains(hook(git = git).handle(bash("git yolo")).stderr, "runs the shell alias `!git push origin main`")
+        assertTrue(calls.calls.isEmpty())
+    }
+
+    @Test
+    fun aGitAliasThatPushesIsReadAsThePushItStandsFor() {
+        answer("""{"id":"G1","status":"pending"}""")
+        val git = repository + ("/w|config --get alias.ship" to "push origin") + ("/w|config --get alias.lg" to "log")
+        assertEquals(2, hook(git = git).handle(bash("git ship main")).exitCode)
+        val push = calls.bodyOf("/api/v1/gates")["push"].toString()
+        assertEquals("""{"remote":"acme/app","refs":[{"ref":"main","sha":"M"}],"force":false}""", push)
+        assertEquals(HookReply(), hook(git = git).handle(bash("git lg")), "an alias that does not push")
+        val inline = hook(git = git).handle(bash("git -c alias.x=push x origin main"))
+        assertContains(inline.stderr, "this command sends git elsewhere (-c alias.x)")
+    }
+
+    @Test
+    fun aChangeToWherePushesGoIsRefusedWhileAGateOnMainIsEnforced() {
+        val writes = listOf("git config alias.ship push", "git remote set-url origin x", "git config set url.x.y z")
+        for (command in writes) {
+            val reply = hook().handle(bash(command))
+            assertEquals(2, reply.exitCode, command)
+            assertContains(reply.stderr, "needs a yes from omar (gate \"Main\"), and this command changes git")
+        }
+        assertContains(hook().handle(bash("git remote add up x")).stderr, "changes git remote add, which decides")
+        assertEquals(HookReply(), hook().handle(bash("git config --get remote.origin.url")))
+        assertEquals(HookReply(), hook().handle(bash("git config user.name lena")))
+        val soft = catalogue.replace("\"enforce\":true,\"label\":\"Main\"", "\"label\":\"Main\"")
+        assertEquals(HookReply(), hook(catalogueText = soft).handle(bash("git config alias.ship push")))
+    }
+
+    @Test
+    fun aScriptIsReadWithTheCommandThatRunsIt() {
+        val script = "#!/bin/sh\nnpm test\ngit push origin main\n"
+        files.texts["/w/ship.sh"] = script
+        files.texts["/w/./ship.sh"] = script // `./ship.sh`, joined as the shell reads it
+        for (command in listOf("sh ship.sh", "./ship.sh", "bash -e ship.sh")) {
+            val reply = hook().handle(bash(command))
+            assertEquals(2, reply.exitCode, command)
+            assertContains(reply.stderr, "run the push as its own command")
+        }
+        assertTrue(calls.calls.isEmpty())
+        assertEquals(HookReply(), hook().handle(bash("sh missing.sh")))
+        assertEquals(HookReply(), hook().handle(bash("bash -c 'echo hi'")))
     }
 
     @Test

@@ -2,11 +2,13 @@
 package dev.ostrom.cli.hooks.runtime
 
 import dev.ostrom.cli.hooks.HookReply
+import dev.ostrom.cli.hooks.gate.CommandChecks
 import dev.ostrom.cli.hooks.gate.CommandLocation
 import dev.ostrom.cli.hooks.gate.GateCatalogue
 import dev.ostrom.cli.hooks.gate.GitRunner
 import dev.ostrom.cli.hooks.gate.PatternCache
 import dev.ostrom.cli.hooks.gate.PushReader
+import dev.ostrom.cli.hooks.gate.ScriptTexts
 import dev.ostrom.cli.hooks.gate.ToolKind
 import dev.ostrom.cli.hooks.gate.ToolSubject
 import dev.ostrom.cli.hooks.gate.UnreadablePushException
@@ -18,13 +20,16 @@ import kotlinx.serialization.json.JsonObject
  * The gate never holds the agent: it answers at once (allow, or "waiting for a yes") and the server keeps the
  * decision; the same command passes once the owner said yes. A guarded action run in another repository than the
  * session's is refused; a push is read for the commits it sends, the ref it lands on, the remote it goes to and its
- * force, and a push that redirects git is refused before anyone is asked.
+ * force, and a push that redirects git is refused before anyone is asked. A command the gate cannot read while a gate
+ * is enforced (a program named by a variable, a change to git's remotes or aliases) is refused, and the scripts a
+ * command runs are read with it (security audit S2-26, S2-27).
  */
 @Suppress("LongParameterList") // the hook's collaborators, each a port tested on its own
 class GateHook(
     private val context: HookContext,
     private val calls: OstromCalls,
     private val ids: SessionIds,
+    private val files: HookFiles,
     private val catalogues: CatalogueStore,
     private val checks: WorkflowChecks,
     private val git: GitRunner,
@@ -56,8 +61,9 @@ class GateHook(
         }
     }
 
-    private fun beforeTool(event: JsonObject, raw: ToolSubject, cwd: String): HookReply {
+    private fun beforeTool(event: JsonObject, written: ToolSubject, cwd: String): HookReply {
         val catalogue = catalogues.current()
+        val raw = if (written.kind == ToolKind.BASH) withScripts(written, cwd) else written
         val (subject, landing) = withPushTargets(raw, cwd)
         val action = catalogue.match(subject, patterns)
         val gate = action?.gate
@@ -66,12 +72,14 @@ class GateHook(
         } else {
             null
         }
+        val unread = if (raw.kind == ToolKind.BASH) unreadable(catalogue, raw.text) else null
         return when {
+            unread != null -> unread
             foreign != null ->
                 replies.deny(GateTexts.foreign(context, location.repositoryAt(context.launchTop), foreign))
             else -> checks.beforeTool(event, subject, cwd) ?: when {
                 action != null && gate != null ->
-                    requests.ask(GateAsk(event, raw.text, subject, cwd, action, gate, catalogue.failMode))
+                    requests.ask(GateAsk(event, written.text, subject, cwd, action, gate, catalogue.failMode))
                 landing != null -> landingReply(catalogue, subject, landing)
                 else -> replies.allow()
             }
@@ -81,20 +89,39 @@ class GateHook(
     /** A push whose landing Ostrom cannot read may land on main: refused while a gate on main is enforced (A9). */
     private fun landingReply(catalogue: GateCatalogue, subject: ToolSubject, landing: String): HookReply {
         val main = subject.copy(text = subject.text + GateRequests.targetsNote(listOf("main")))
-        val worst = catalogue.match(main, patterns)
-        val gate = worst?.gate?.takeIf { it.enforce }
-        return if (worst != null && gate != null) {
-            replies.deny(GateTexts.unknownLanding(worst.name, gate, landing))
-        } else {
+        val guard = catalogue.enforcedFor(main, patterns)
+        return if (guard == null) {
             replies.allow()
+        } else {
+            replies.deny(GateTexts.unknownLanding(guard.first.name, guard.second, landing))
         }
     }
 
+    /** A program named by a variable, or a change to where pushes go, while a gate holds them (S2-26, S2-27). */
+    private fun unreadable(catalogue: GateCatalogue, text: String): HookReply? {
+        val program = CommandChecks.dynamicProgram(text)
+        val guard = if (program == null) null else catalogue.enforcedOn(ToolKind.BASH.wire)
+        val setting = CommandChecks.pushSetting(text)
+        val push = ToolSubject(ToolKind.BASH, ToolKind.BASH.wire, "git push" + GateRequests.targetsNote(listOf("main")))
+        val pushGuard = if (setting == null) null else catalogue.enforcedFor(push, patterns)
+        return when {
+            program != null && guard != null ->
+                replies.deny(GateTexts.dynamicCommand(guard.first.name, guard.second, program))
+            setting != null && pushGuard != null ->
+                replies.deny(GateTexts.gitSetting(pushGuard.first.name, pushGuard.second, setting))
+            else -> null
+        }
+    }
+
+    /** The command with the scripts it runs appended, so that the patterns and the push reader read them too. */
+    private fun withScripts(subject: ToolSubject, cwd: String): ToolSubject {
+        val scripts = ScriptTexts.of(subject.text, location.directory(cwd, subject.text), context.home, files::read)
+        return if (scripts.isEmpty()) subject else subject.copy(text = subject.text + scripts)
+    }
+
+    // the action ran: Ostrom, not the hook, uses its yes up when it sees the push land (S2-29)
     private fun afterTool(event: JsonObject, raw: ToolSubject, cwd: String): HookReply {
         checks.afterTool(event, withPushTargets(raw, cwd).first)
-        // the action ran: the yes it ran under is used up (one yes, one action)
-        val gateId = ids.takeYes(raw.text)
-        if (gateId != null) calls.call(Routes.consume(gateId), JsonObject(emptyMap()), CONSUME_MILLIS)
         return replies.allow()
     }
 
@@ -111,7 +138,7 @@ class GateHook(
                 val targets = pushes.destinations(location.directory(cwd, subject.text), subject.text)
                 subject.copy(text = subject.text + GateRequests.targetsNote(targets)) to null
             } catch (e: UnreadablePushException) {
-                subject to e.message.orEmpty()
+                subject to e.reason
             }
         }
 
@@ -124,7 +151,6 @@ class GateHook(
 
     private companion object {
         const val DENIED = 2
-        const val CONSUME_MILLIS = 2_000
         const val SEEN_MILLIS = 2_000
     }
 }

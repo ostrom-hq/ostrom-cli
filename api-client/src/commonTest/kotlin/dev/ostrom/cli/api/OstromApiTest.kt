@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.api
 
 import dev.ostrom.cli.platform.EnvironmentImpl
@@ -113,6 +114,7 @@ class OstromApiTest {
     @Test
     fun anUnreachableServerSaysWhyInTheNetworksWords() {
         assertEquals("connection refused", ServerUnreachableException("u", IOException("connection refused")).reason)
-        assertTrue(ServerUnreachableException("u", IOException()).reason.endsWith("IOException"), "no message: its type")
+        val bare = ServerUnreachableException("u", IOException())
+        assertTrue(bare.reason.endsWith("IOException"), "no message: its type")
     }
 }

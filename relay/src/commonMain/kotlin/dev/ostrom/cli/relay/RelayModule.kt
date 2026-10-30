@@ -2,6 +2,7 @@
 package dev.ostrom.cli.relay
 
 import io.ktor.client.HttpClient
+import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
@@ -79,6 +80,7 @@ private class Relay(
     private suspend fun dispatch(call: ApplicationCall, target: RelayTarget) {
         when (target) {
             is RelayTarget.Hook -> hooks.forward(call, target.longPoll)
+            is RelayTarget.Catalog -> call.respondText(target.catalog, ContentType.Application.Json)
             is RelayTarget.Mcp -> mcp.forward(call, target.server)
             is RelayTarget.Inference -> inference.forward(call, target.upstreamPath)
             RelayTarget.McpMethodNotAllowed -> {

@@ -36,6 +36,7 @@ class RelayStarter(private val starter: LocalRelayStarter) : SessionRelayStarter
                 launchId = settings.launchId,
                 mcpServers = settings.mcpServers,
                 inference = settings.inference,
+                gateCatalog = settings.gateCatalog,
             ),
         )
         return object : SessionRelay {

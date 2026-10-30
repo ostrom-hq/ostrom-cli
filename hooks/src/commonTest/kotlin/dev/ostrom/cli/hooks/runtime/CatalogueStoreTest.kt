@@ -3,109 +3,64 @@ package dev.ostrom.cli.hooks.runtime
 
 import dev.ostrom.cli.hooks.gate.GateCatalogue
 import kotlin.test.Test
-import kotlin.test.assertContains
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
-import kotlin.test.assertTrue
 
 class CatalogueStoreTest {
-    private val copy = """{"failMode":"closed","actions":[{"class":"old"}]}"""
-    private val served = ok("""{"actions":[{"class":"new"}]}""")
-    private var started = 0
+    private val served = ok("""{"gates":[],"actions":[{"class":"new","tools":["Bash"],"patterns":["x"]}]}""")
 
-    private fun store(files: FakeFiles, calls: FakeCalls, context: HookContext = contextOf(), starts: Boolean = true) =
-        CatalogueStore(context, files, calls) { started++; starts }
+    private fun store(files: FakeFiles, calls: FakeCalls, context: HookContext = contextOf()) =
+        CatalogueStore(context, files, calls)
 
     @Test
-    fun aFreshCopyIsServedWithoutACall() {
-        val files = FakeFiles(mutableMapOf("/s/gates.json" to copy), mutableMapOf("/s/gates.json" to 1_000))
-        val calls = FakeCalls()
-        assertEquals("old", store(files, calls).current().actions.single().actionClass)
-        assertTrue(calls.calls.isEmpty())
-        assertEquals(0, started)
-    }
-
-    @Test
-    fun pastASixthOfTheTtlOneRefreshStartsInTheBackground() {
-        val files = FakeFiles(mutableMapOf("/s/gates.json" to copy), mutableMapOf("/s/gates.json" to 6_000))
-        val calls = FakeCalls()
-        val store = store(files, calls)
-        assertEquals("old", store.current().actions.single().actionClass)
-        assertEquals(1, started)
-        assertEquals("refreshing", files.texts["/s/gates.json.refreshing"])
-        files.ages["/s/gates.json.refreshing"] = 9_000
-        store.current()
-        assertEquals(1, started, "one refresh at a time")
-        files.ages["/s/gates.json.refreshing"] = 10_000
-        store.current()
-        assertEquals(2, started, "a stale marker is taken over")
-    }
-
-    @Test
-    fun aRefreshThatCannotStartOrMarkLeavesNoMarker() {
-        val files = FakeFiles(mutableMapOf("/s/gates.json" to copy), mutableMapOf("/s/gates.json" to 6_000))
-        store(files, FakeCalls(), starts = false).current()
-        assertFalse("/s/gates.json.refreshing" in files.texts)
-        assertEquals(1, started)
-        files.readOnly = true
-        store(files, FakeCalls()).current()
-        assertEquals(1, started, "no marker, no refresh")
-    }
-
-    @Test
-    fun pastTheTtlTheCatalogueIsRefreshedInLineAndKept() {
-        val files = FakeFiles(mutableMapOf("/s/gates.json" to copy), mutableMapOf("/s/gates.json" to 30_000))
+    fun ostromsCatalogueIsAskedThroughTheRelayAtEveryCall() {
         val calls = FakeCalls().on("/api/v1/gates/catalog", served)
-        assertEquals("new", store(files, calls).current().actions.single().actionClass)
-        assertEquals("/api/v1/gates/catalog?repo=acme%2Fapp", calls.calls.single().path)
-        assertEquals(800, calls.calls.single().timeoutMillis)
-        val kept = files.texts.getValue("/s/gates.json")
-        assertContains(kept, "\"failMode\":\"closed\"", message = "the rest of the copy is kept")
-        assertContains(kept, "new")
-    }
-
-    @Test
-    fun whenOstromCannotServeItTheCopyElseNothingIsMatched() {
-        val stale = FakeFiles(mutableMapOf("/s/gates.json" to copy), mutableMapOf("/s/gates.json" to 60_000))
-        assertEquals("old", store(stale, FakeCalls()).current().actions.single().actionClass)
-        val bad = FakeCalls().on("/api/v1/gates/catalog", ok("""{"actions":3}"""))
-        assertEquals("old", store(stale, bad).refresh(1).first.actions.single().actionClass)
-        assertEquals(GateCatalogue(), store(FakeFiles(), FakeCalls()).current())
-        val noActions = FakeCalls().on("/api/v1/gates/catalog", ok())
-        assertEquals(GateCatalogue() to false, store(FakeFiles(), noActions).refresh(1))
-    }
-
-    @Test
-    fun aDamagedCopyIsReplacedWhole() {
-        val files = FakeFiles(mutableMapOf("/s/gates.json" to "{"))
-        val calls = FakeCalls().on("/api/v1/gates/catalog", served)
-        assertEquals("new", store(files, calls).current().actions.single().actionClass)
-        assertEquals("""{"actions":[{"class":"new"}]}""", files.texts["/s/gates.json"])
-    }
-
-    @Test
-    fun outsideASessionTheCatalogueIsAskedEveryTime() {
-        val context = contextOf("OSTROM_GATES" to "")
-        val calls = FakeCalls().on("/api/v1/gates/catalog", served)
-        val store = store(FakeFiles(), calls, context)
+        val store = store(FakeFiles(), calls)
         assertEquals("new", store.current().actions.single().actionClass)
-        store.refreshNow()
-        assertEquals(1, calls.calls.size, "no file to refresh")
+        store.current()
+        assertEquals(List(2) { "/api/v1/gates/catalog?repo=acme%2Fapp" }, calls.paths())
+        assertEquals(null, calls.calls.first().body, "a GET")
     }
 
     @Test
-    fun theBackgroundRefreshClearsItsMarkerOnlyOnSuccess() {
-        val files = FakeFiles(mutableMapOf("/s/gates.json.refreshing" to "refreshing"))
-        store(files, FakeCalls()).refreshNow()
-        assertTrue("/s/gates.json.refreshing" in files.texts)
+    fun aCopyOnDiskNeverRemovesWhatOstromGates() {
+        // S2-20: an emptied copy dated in the future used to be served forever
+        val emptied = FakeFiles(mutableMapOf("/s/gates.json" to """{"actions":[]}"""))
         val calls = FakeCalls().on("/api/v1/gates/catalog", served)
-        store(files, calls).refreshNow()
-        assertFalse("/s/gates.json.refreshing" in files.texts)
-        assertEquals(5_000, calls.calls.single().timeoutMillis)
+        assertEquals(listOf("new"), store(emptied, calls).current().actions.map { it.actionClass })
     }
 
     @Test
-    fun queryValuesArePercentEncoded() {
-        assertEquals("a-z_0.9~%2F%20%C3%A9%3F", Urls.encode("a-z_0.9~/ é?"))
+    fun thePackagesCatalogueAddsActionsAndClosesTheFailModeNeverOpensIt() {
+        val open = ok("""{"failMode":"open","actions":[{"class":"new"}]}""")
+        val added = FakeFiles(mutableMapOf("/s/gates.json" to """{"failMode":"closed","actions":[{"class":"pkg"}]}"""))
+        val joined = store(added, FakeCalls().on("/api/v1/gates/catalog", open)).current()
+        assertEquals(listOf("new", "pkg"), joined.actions.map { it.actionClass })
+        assertEquals("closed", joined.failMode)
+        val opening = FakeFiles(mutableMapOf("/s/gates.json" to """{"failMode":"open","actions":[]}"""))
+        val served = store(opening, FakeCalls().on("/api/v1/gates/catalog", ok("""{"actions":[]}"""))).current()
+        assertEquals(null, served.failMode, "the copy cannot open what Ostrom left closed")
+    }
+
+    @Test
+    fun withoutOstromsCatalogueTheBuiltInOneFailsClosed() {
+        val unreachable = store(FakeFiles(), FakeCalls()).current()
+        assertEquals(GateCatalogue.CLOSED, unreachable)
+        assertEquals("closed", unreachable.failMode)
+        val broken = FakeCalls().on("/api/v1/gates/catalog", ok("""{"actions":"none"}"""))
+        assertEquals(GateCatalogue.CLOSED, store(FakeFiles(), broken).current())
+        val unparsable = FakeFiles(mutableMapOf("/s/gates.json" to "not json"))
+        assertEquals(GateCatalogue.CLOSED, store(unparsable, FakeCalls()).current(), "a broken copy adds nothing")
+        val withCopy = FakeFiles(mutableMapOf("/s/gates.json" to """{"actions":[{"class":"pkg"}]}"""))
+        val joined = store(withCopy, FakeCalls()).current()
+        assertEquals(GateCatalogue.CLOSED.actions.size + 1, joined.actions.size)
+        assertEquals("closed", joined.failMode)
+    }
+
+    @Test
+    fun outsideASessionThereIsNoCopyToRead() {
+        val noCopy = contextOf("OSTROM_GATES" to "")
+        val files = FakeFiles(mutableMapOf("/s/gates.json" to """{"actions":[{"class":"pkg"}]}"""))
+        val calls = FakeCalls().on("/api/v1/gates/catalog", served)
+        assertEquals(listOf("new"), store(files, calls, noCopy).current().actions.map { it.actionClass })
     }
 }

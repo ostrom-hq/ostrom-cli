@@ -18,6 +18,9 @@ class ToolSubjectTest {
         assertEquals(ToolSubject(ToolKind.BASH, "Bash", ""), of("run_shell_command", """{"command":{"x":1}}"""))
         assertEquals(ToolSubject(ToolKind.BASH, "Bash", ""), of("terminal", """{"command":3}"""))
         assertEquals(ToolSubject(ToolKind.BASH, "Bash", ""), of("BASH", null))
+        // S2-26: Claude Code's PowerShell and Monitor tools run shell commands too
+        assertEquals(ToolSubject(ToolKind.BASH, "Bash", "git push"), of("PowerShell", """{"command":"git push"}"""))
+        assertEquals(ToolSubject(ToolKind.BASH, "Bash", "tail -f x"), of("Monitor", """{"command":"tail -f x"}"""))
     }
 
     @Test
@@ -25,6 +28,7 @@ class ToolSubjectTest {
         assertEquals(ToolSubject(ToolKind.WRITE, "Write", "/w/a.kt"), of("Edit", """{"file_path":"/w/a.kt"}"""))
         assertEquals(ToolSubject(ToolKind.WRITE, "Write", "/w/b.kt"), of("write_file", """{"path":"/w/b.kt"}"""))
         assertEquals(ToolSubject(ToolKind.WRITE, "Write", """{"patch":"x"}"""), of("apply_patch", """{"patch":"x"}"""))
+        assertEquals(ToolSubject(ToolKind.WRITE, "Write", "[1]"), of("Write", "[1]"), "an input that is not an object")
         assertEquals(2_000, of("patch", """{"patch":"${"y".repeat(3_000)}"}""").text.length)
     }
 
