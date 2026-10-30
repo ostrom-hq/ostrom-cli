@@ -39,7 +39,7 @@ class OstromCliTest {
             err.append(text)
         }
 
-        override val isInteractive = false
+        override var isInteractive = false
         override fun readStandardInput(maxBytes: Int, timeoutMillis: Int): StandardInput = error("not used")
     }
 
@@ -55,6 +55,7 @@ class OstromCliTest {
     private val withServer = mapOf("HOME" to "/home/maya", "OSTROM_URL" to "https://ostrom.example")
     private val launches = mutableListOf<Pair<LaunchRequest, LaunchSite>>()
     private val waits = mutableListOf<Long>()
+    private val typed = ArrayDeque<String>()
     private val requests = mutableListOf<Pair<String, ServerRequest>>()
 
     /** A server that answers `METHOD path` from [routes] (404 otherwise), recording each request with its server. */
@@ -112,6 +113,7 @@ class OstromCliTest {
             temporaryDirectory = "/tmp",
             agents = AgentRunner { request, site -> 7.also { launches += request to site } },
             sleep = { waits += it },
+            readLine = { typed.removeFirstOrNull() },
         ),
     )
 
@@ -437,5 +439,129 @@ class OstromCliTest {
         assertEquals(0, cli(environment = withServer, api = serverOf(emptyMap())).run(arrayOf("logout")))
         assertTrue(console.err.contains("! The server could not be told"), console.err.toString())
         assertOut("✓ Signed out @maya.")
+    }
+
+    private val pending = """{"id":"g1","title":"Push to main","repo":"acme/api","status":"pending",""" +
+        """"shownDigest":"sha256:abc","askedBy":["maya-k"],"commits":["a","b"],""" +
+        """"commitDetails":[{"sha":"a3f9c21deadbeef","title":"fix: v-prefixed versions"}],""" +
+        """"checks":[{"name":"tests","state":"passed"}]}"""
+
+    private fun serving(routes: Map<String, Pair<Int, String>>) = cli(environment = withServer, api = serverOf(routes))
+
+    private fun answering(vararg routes: Pair<String, Pair<Int, String>>) = cli(
+        environment = withServer,
+        api = serverOf(mapOf("GET /api/v1/approvals/g1" to (200 to pending)) + routes),
+    )
+
+    @Test
+    fun theInboxListsTheRequestsThatWaitForYou() {
+        signIn("/home/maya/.config/ostrom")
+        val inbox = "GET /api/v1/approvals?mine=true&status=pending"
+        val two = """{"items":[$pending,{"id":"g2","title":"Deploy","commits":["c"]}]}"""
+        assertEquals(0, serving(mapOf(inbox to (200 to two))).run(arrayOf("inbox")))
+        assertOut("2 requests wait for your yes\n")
+        assertOut("  g1  Push to main  acme/api  @maya-k  2 commits\n  g2  Deploy  1 commit\n")
+        assertOut("Next: ostrom approve g1   or   ostrom deny g1\n")
+        assertEquals("ost_1", requests.single().second.token)
+        console.out.clear()
+        val one = """{"items":[{"id":"g3","title":"Publish"}]}"""
+        assertEquals(0, serving(mapOf(inbox to (200 to one))).run(arrayOf("inbox")))
+        assertOut("1 request waits for your yes\n  g3  Publish\n")
+        console.out.clear()
+        val none = mapOf(inbox to (200 to """{"items":[]}"""))
+        assertEquals(0, cli(environment = withServer, api = serverOf(none)).run(arrayOf("inbox")))
+        assertEquals("Nothing waits for you.\n", console.out.toString())
+        console.out.clear()
+        assertEquals(0, cli(environment = withServer, api = serverOf(none)).run(arrayOf("inbox", "--json")))
+        assertEquals("[]\n", console.out.toString())
+    }
+
+    @Test
+    fun aServerThatCannotAnswerGivesTheSpecsCodes() {
+        signIn("/home/maya/.config/ostrom")
+        val inbox = "GET /api/v1/approvals?mine=true&status=pending"
+        val error = """{"error":{"message":"not a member of acme"}}"""
+        for ((status, code) in listOf(401 to 65, 403 to 77, 404 to 66, 500 to 69)) {
+            val server = serverOf(mapOf(inbox to (status to error)))
+            assertEquals(code, cli(environment = withServer, api = server).run(arrayOf("inbox")), "HTTP $status")
+        }
+        assertTrue(console.err.contains("not a member of acme\n"), console.err.toString())
+        assertTrue(console.err.endsWith("Ostrom could not answer: not a member of acme\n"), console.err.toString())
+        val down: (String) -> OstromApi = { url ->
+            object : OstromApi {
+                override suspend fun get(path: String) = throw ServerUnreachableException(url, Exception("refused"))
+                override suspend fun send(request: ServerRequest) = get(request.path)
+            }
+        }
+        assertEquals(69, cli(environment = withServer, api = down).run(arrayOf("inbox")))
+        val unreachable = "Ostrom is unreachable at https://ostrom.example. Check your network, or the --server URL.\n"
+        assertTrue(console.err.endsWith(unreachable))
+        assertEquals(65, cli(environment = withServer).run(arrayOf("inbox", "--server", "https://x.example")))
+        assertTrue(console.err.endsWith("ostrom: not signed in to https://x.example: run `ostrom login`\n"))
+    }
+
+    @Test
+    fun approveShowsTheRequestThenAnswersWithTheDigestOfWhatWasShown() {
+        signIn("/home/maya/.config/ostrom")
+        val signed = "POST /api/v1/approvals/g1/answer" to (200 to """{"approval":{},"receipt":{"id":"R9"}}""")
+        assertEquals(0, answering(signed).run(arrayOf("approve", "g1", "--yes", "--note", "ok for 1.4.7")))
+        assertOut("Push to main · acme/api · asked by @maya-k\n")
+        assertOut("    a3f9c21 fix: v-prefixed versions\n    tests: passed\n")
+        assertOut("✓ Approved. Receipt R9 signed.\n")
+        val body = checkNotNull(requests.last().second.body)
+        assertEquals("""{"answer":"approve","shownDigest":"sha256:abc","comment":"ok for 1.4.7"}""", body)
+    }
+
+    @Test
+    fun approveAsksInATerminalAndOnlyAYesAnswers() {
+        signIn("/home/maya/.config/ostrom")
+        val signed = "POST /api/v1/approvals/g1/answer" to (200 to """{"approval":{}}""")
+        assertEquals(64, answering(signed).run(arrayOf("approve", "g1")), "no terminal: --yes or nothing")
+        assertTrue(console.err.endsWith("ostrom approve: no terminal to ask in; add --yes to answer.\n"))
+        console.isInteractive = true
+        typed += "Y "
+        assertEquals(0, answering(signed).run(arrayOf("approve", "g1")))
+        assertOut("Approve \"Push to main\"? [y/N] ")
+        assertOut("✓ Approved. Receipt ? signed.\n")
+        typed += "n"
+        assertEquals(2, answering(signed).run(arrayOf("approve", "g1")))
+        assertTrue(console.err.endsWith("Nothing was said.\n"))
+        assertEquals(2, answering(signed).run(arrayOf("approve", "g1")), "the end of the input is a no")
+    }
+
+    @Test
+    fun aDecidedUnknownOrChangedRequestIsNotAnswered() {
+        signIn("/home/maya/.config/ostrom")
+        val decided = """{"id":"g1","status":"approved","decidedBy":"omar"}"""
+        val get = "GET /api/v1/approvals/g1"
+        assertEquals(64, serving(mapOf(get to (200 to decided))).run(arrayOf("deny", "g1")))
+        assertTrue(console.err.endsWith("Already approved by @omar.\n"))
+        val anonymous = mapOf(get to (200 to """{"id":"g1","status":"rejected"}"""))
+        assertEquals(64, serving(anonymous).run(arrayOf("deny", "g1")))
+        assertTrue(console.err.endsWith("Already rejected by @?.\n"))
+        val expired = mapOf(get to (200 to """{"id":"g1","status":"expired"}"""))
+        assertEquals(64, serving(expired).run(arrayOf("deny", "g1")))
+        assertTrue(console.err.endsWith("This request expired.\n"))
+        assertEquals(66, serving(emptyMap()).run(arrayOf("approve", "g1")))
+        assertTrue(console.err.endsWith("No request g1.\n"))
+        val changed = "POST /api/v1/approvals/g1/answer" to (409 to """{"error":{"type":"shown_digest_mismatch"}}""")
+        assertEquals(1, answering(changed).run(arrayOf("approve", "g1", "--yes")))
+        assertTrue(console.err.endsWith("The request changed since it was shown. Run ostrom approve g1 again.\n"))
+        val asked = """{"error":{"message":"You asked for this one."}}"""
+        val self = "POST /api/v1/approvals/g1/answer" to (403 to asked)
+        assertEquals(77, answering(self).run(arrayOf("approve", "g1", "--yes")))
+        assertTrue(console.err.endsWith("You asked for this one.\n"))
+    }
+
+    @Test
+    fun denyAnswersAtOnceAndTellsTheAgentWhy() {
+        signIn("/home/maya/.config/ostrom")
+        val signed = "POST /api/v1/approvals/g1/answer" to (200 to """{"receipt":{"id":"R2"}}""")
+        assertEquals(0, answering(signed).run(arrayOf("deny", "g1", "--reason", "not on a Friday")))
+        assertOut("✓ Denied. Receipt R2 signed. The agent was told: \"not on a Friday\".\n")
+        val body = """{"answer":"reject","shownDigest":"sha256:abc","comment":"not on a Friday"}"""
+        assertEquals(body, requests.last().second.body)
+        assertEquals(0, answering(signed).run(arrayOf("deny", "g1")))
+        assertOut("✓ Denied. Receipt R2 signed.\n")
     }
 }
