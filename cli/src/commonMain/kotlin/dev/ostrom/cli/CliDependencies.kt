@@ -146,7 +146,7 @@ class CliDependencies(
                 selfUpdate = SelfUpdate(
                     DownloadsImpl(USER_AGENT),
                     FileSystem.SYSTEM,
-                    TarUnpacker(ProcessLauncherImpl()),
+                    TarUnpacker(ProcessLauncherImpl(), environment["SystemRoot"]),
                     { console.out("$it\n") },
                     AgentSessionsImpl(environment, FileSystem.SYSTEM, temporary, LoopbackHttpImpl()),
                 ),

@@ -4,6 +4,7 @@ package dev.ostrom.cli.commands
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.Context
 import com.github.ajalt.clikt.core.ProgramResult
+import com.github.ajalt.clikt.core.UsageError
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import dev.ostrom.cli.BuildInfo
@@ -26,6 +27,9 @@ internal class UpdateCommand(private val dependencies: CliDependencies) : CliktC
     val recordLatest by option("--record-latest", hidden = true).flag()
 
     override fun run() {
+        if (rollback && (check || version != null)) {
+            throw UsageError("--rollback goes back to the version kept: it takes neither --check nor --version")
+        }
         val updates = dependencies.selfUpdate
         val environment = dependencies.environment
         val request = UpdateRequest(

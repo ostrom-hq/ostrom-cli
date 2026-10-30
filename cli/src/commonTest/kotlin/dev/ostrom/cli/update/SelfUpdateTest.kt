@@ -140,6 +140,9 @@ class SelfUpdateTest {
         assertEquals("✓ ostrom 9.9.9 is up to date.", said.last())
         assertEquals(0, updater().update(request(checkOnly = true)))
         assertEquals("! ostrom 9.9.9 is available. Run ostrom update.", said.last())
+        serve("https://releases.example/download/0.9.0/latest.json", "OLDER")
+        assertEquals(0, updater().update(request(version = "v0.9.0", checkOnly = true)))
+        assertEquals("! ostrom 0.9.0 is available. Run ostrom update --version 0.9.0.", said.last())
         serve(latest, "OLDER")
         assertEquals(0, updater().update(request()))
         assertEquals("✓ ostrom 1.0.0 is up to date.", said.last())
@@ -175,8 +178,8 @@ class SelfUpdateTest {
         // S2-39: the agent used to downgrade the ostrom that runs its own hooks
         session = "OSTROM_LAUNCH_ID is set"
         fake.write("$binary.previous".toPath()) { writeUtf8("older") }
-        val refusal = "✗ ostrom does not update itself inside an agent's session (OSTROM_LAUNCH_ID is set). " +
-            "Nothing was changed. Run ostrom update in your own terminal once the session has ended."
+        val refusal = "✗ ostrom does not update itself while an agent's session runs (OSTROM_LAUNCH_ID is set): " +
+            "its hooks run this binary. Nothing was changed. Run ostrom update once the sessions have ended."
         assertEquals(77, updater().update(request()))
         assertEquals(refusal, said.last())
         assertEquals(77, updater().rollback(request()))
@@ -219,12 +222,12 @@ class SelfUpdateTest {
     @Test
     fun aManifestThatIsNotSignedByTheReleaseKeyChangesNothing() = runTest {
         serve(latest, "LATEST", signature = "SAME")
-        assertEquals(1, updater().update(request()))
+        assertEquals(78, updater().update(request()))
         assertEquals("✗ The release signature does not match. Nothing was changed.", said.last())
         routes["$latest.sig"] = { Download.Bytes("not base64 %%%".encodeToByteArray()) }
-        assertEquals(1, updater().update(request()))
+        assertEquals(78, updater().update(request()))
         val other = SelfUpdate({ _, _ -> routes.getValue(latest)() }, fake, { _, _ -> true }, { said += it }, { null })
-        assertEquals(1, other.update(request()), "the embedded key did not sign the test vectors")
+        assertEquals(78, other.update(request()), "the embedded key did not sign the test vectors")
         assertEquals("old", text(binary))
     }
 
@@ -246,7 +249,7 @@ class SelfUpdateTest {
     fun anArchiveThatIsNotTheSignedOneChangesNothing() = runTest {
         for (manifest in listOf("WRONG_SIZE", "WRONG_SHA")) {
             serve(latest, manifest)
-            assertEquals(1, updater().update(request()), manifest)
+            assertEquals(78, updater().update(request()), manifest)
             assertEquals("✗ The download does not match its signed checksum. Nothing was changed.", said.last())
         }
         serve(latest, "LATEST")
@@ -295,6 +298,63 @@ class SelfUpdateTest {
     }
 
     @Test
+    fun aVersionAskedForIsAVersionAndItsManifestMustBeItsOwn() = runTest {
+        // a version is never a path nor a query in the release's address
+        for (odd in listOf("../../x", "1.0.0?a=b", "1.0.0#x", "latest")) {
+            assertEquals(64, updater().update(request(version = odd)), odd)
+            assertEquals("ostrom update: $odd is not a version (1.2.3 or v1.2.3).", said.last())
+        }
+        assertEquals(emptyList(), fetched)
+        // the signed manifest of 9.9.9 replayed where 1.2.0's was asked
+        serve("https://releases.example/download/1.2.0/latest.json", "LATEST")
+        assertEquals(78, updater().update(request(version = "1.2.0")))
+        assertEquals(
+            "✗ The release at https://releases.example/download/1.2.0/latest.json is signed for ostrom 9.9.9, not " +
+                "1.2.0. Nothing was changed.",
+            said.last(),
+        )
+        assertEquals("old", text(binary))
+    }
+
+    @Test
+    fun anUpdateThatFailsKeepsTheVersionKeptBefore() = runTest {
+        fake.write("$binary.previous".toPath()) { writeUtf8("older") }
+        val failing = failingMoves { source -> source.name == "ostrom" && source.parent?.name == "ostrom.update" }
+        assertEquals(73, updater(failing).update(request()))
+        assertEquals("old", text(binary))
+        assertEquals("older", text("$binary.previous"), "the binary kept before is still there")
+        assertFalse(fake.exists("$binary.previous.old".toPath()))
+        assertEquals(0, updater().update(request()))
+        assertEquals("old", text("$binary.previous"))
+        assertFalse(fake.exists("$binary.previous.old".toPath()), "the one kept before is dropped once swapped")
+        // the move of the binary itself fails: the one kept before goes back too
+        fake.write(binary.toPath()) { writeUtf8("new") }
+        assertEquals(73, updater(failingMoves { it.toString() == binary }).update(request()))
+        assertEquals("old", text("$binary.previous"))
+    }
+
+    @Test
+    fun aVersionThatCannotBeRecordedLeavesNoWrongRecord() = runTest {
+        fake.write("$binary.previous.version".toPath()) { writeUtf8("0.1.0") }
+        val failing = failingWrites { it.name == "ostrom.previous.version" }
+        assertEquals(0, updater(failing).update(request()), "the binary is updated all the same")
+        assertEquals("new", text(binary))
+        assertFalse(fake.exists("$binary.previous.version".toPath()), "no stale record for --rollback")
+        assertTrue(said.any { it.startsWith("! The version kept for ostrom update --rollback could not be recorded") })
+    }
+
+    @Test
+    fun aRollbackThatCannotPutTheKeptBinaryInPlaceKeepsTheRunningOne() = runTest {
+        fake.write("$binary.previous".toPath()) { writeUtf8("older") }
+        fake.write("$binary.previous.version".toPath()) { writeUtf8("1.0.0") }
+        serve(latest, "LATEST_FLOOR")
+        assertEquals(73, updater(failingMoves { it.name == "ostrom.previous" }).rollback(request(current = "9.9.9")))
+        assertEquals("old", text(binary), "never an installation without its binary")
+        assertEquals("older", text("$binary.previous"))
+        assertFalse(fake.exists("$binary.swap".toPath()))
+    }
+
+    @Test
     fun versionsAreOrderedBySemVer() {
         val later = listOf(
             "1.0.1" to "1.0.0", "1.1.0" to "1.0.9", "2.0.0" to "1.9.9", "v2.0.0" to "1.9.9", "1.0.0" to "1.0.0-rc.1",
@@ -308,6 +368,14 @@ class SelfUpdateTest {
         assertFalse(newer("1.0.0", "1.0.0"))
         assertFalse(newer("1.0.0-a", "1.0.0-a"))
         assertFalse(newer("not a version", "1.0.0"))
+    }
+
+    /** The fake file system, where writing a file that matches [fails] throws. */
+    private fun failingWrites(fails: (Path) -> Boolean) = object : ForwardingFileSystem(fake) {
+        override fun sink(file: Path, mustCreate: Boolean): okio.Sink {
+            if (fails(file)) throw IOException("read-only")
+            return super.sink(file, mustCreate)
+        }
     }
 
     /** The fake file system, where a move whose source matches [fails] throws. */

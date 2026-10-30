@@ -43,5 +43,25 @@ class CredentialsTest {
         // S2-32: inside an agent's session the environment's token is never the developer's
         val inSession = store("OSTROM_TOKEN" to "env", "OSTROM_LAUNCH_ID" to "L1")
         assertEquals("saved", inSession.load("https://a.example")?.token)
+        val emptyLaunch = store("OSTROM_TOKEN" to "env", "OSTROM_LAUNCH_ID" to "")
+        assertEquals("env", emptyLaunch.load("https://a.example")?.token, "an empty launch id is no session")
+    }
+
+    @Test
+    fun theSavedEntryIsNeverTheEnvironments() {
+        files.texts[path] = """{"https://a.example":{"token":"saved","login":"alice"}}"""
+        val ci = store("OSTROM_TOKEN" to "env", "OSTROM_DEV" to "ci-bot")
+        assertEquals(Credentials("saved", "alice"), ci.saved("https://a.example"))
+        assertNull(ci.saved("https://b.example"))
+        val plain = object : CredentialStore {
+            override fun load(server: String) = Credentials("t", server)
+
+            override fun save(server: String, credentials: Credentials) = Unit
+
+            override fun forget(server: String) = Unit
+        }
+        assertEquals(Credentials("t", "s"), plain.saved("s"), "a store without its own saved entries loads")
+        plain.save("s", Credentials("t", "s"))
+        plain.forget("s")
     }
 }
