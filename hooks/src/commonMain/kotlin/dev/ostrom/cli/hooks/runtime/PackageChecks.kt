@@ -118,8 +118,10 @@ class PackageChecks(
         val sandbox: String,
         val head: String = "",
         val durationMs: Long = 0,
-        val cached: Boolean = false,
-    )
+    ) {
+        /** A pass taken from an earlier run on the same commit. */
+        val cached: Boolean get() = sandbox == CACHED
+    }
 
     /** A push read from a command, or the refusal it leads to. */
     private class PushRead(val push: Push?, val refusal: String?)
@@ -147,7 +149,7 @@ class PackageChecks(
         private fun readPush(first: CompiledHook): PushRead = try {
             PushRead(pushes.read(directory, subject.text), null)
         } catch (e: UnreadablePushException) {
-            PushRead(null, CheckTexts.unreadablePush(view.script(first.scriptId)?.label ?: "check", e.reason))
+            PushRead(null, CheckTexts.unreadablePush(labelOf(view.script(first.scriptId)), e.reason))
         }
 
         private fun runHook(hook: CompiledHook, push: Push?): String? {
@@ -159,7 +161,7 @@ class PackageChecks(
                     null
                 }
                 // what this check tests: each commit the push sends, else the working tree as it is
-                else -> (push?.shas ?: listOf(null)).firstNotNullOfOrNull { sha -> runOn(hook, script, sha) }
+                else -> (if (push == null) listOf(null) else push.shas).firstNotNullOfOrNull { runOn(hook, script, it) }
             }
         }
 
@@ -169,7 +171,7 @@ class PackageChecks(
             val head = sha ?: here
             return when {
                 key != null && cache[key] == true -> {
-                    val passed = Report(0, PASSED, "passed earlier on the same commit", "cached", head, cached = true)
+                    val passed = Report(0, PASSED, "passed earlier on the same commit", CACHED, head)
                     report(hook, script, script.sha256, passed)
                     null
                 }
@@ -208,7 +210,7 @@ class PackageChecks(
             key: String?,
         ): String? {
             val text = ports.files.read("${view.tmp}/${script.path}")
-            val sha = text?.encodeUtf8()?.sha256()?.hex().orEmpty()
+            val sha = text?.let { it.encodeUtf8().sha256().hex() }.orEmpty()
             val copy = "$sandbox/${script.id}.sh"
             val why = when {
                 text == null -> "script ${script.id} is missing"
@@ -258,7 +260,7 @@ class PackageChecks(
                 "nodeId" to JsonPrimitive(hook.nodeId),
                 "scriptId" to JsonPrimitive(script.id),
                 "scriptSha" to JsonPrimitive(scriptSha),
-                "exit" to (report.exit?.let { JsonPrimitive(it) } ?: JsonNull),
+                "exit" to (if (report.exit == null) JsonNull else JsonPrimitive(report.exit)),
                 "outcome" to JsonPrimitive(report.outcome),
                 "durationMs" to JsonPrimitive(report.durationMs),
                 "head" to JsonPrimitive(report.head),
@@ -299,6 +301,9 @@ class PackageChecks(
     private class ScriptTarget(val copy: String, val directory: String, val head: String, val key: String?)
 
     private companion object {
+        /** The label of a check whose script is not in the package. */
+        fun labelOf(script: CompiledScript?): String = if (script == null) "check" else script.label
+
         const val REPORT_MILLIS = 3_000
         const val MILLIS_PER_SECOND = 1_000
         const val SHORT_SHA = 12
@@ -307,5 +312,6 @@ class PackageChecks(
         const val TIMEOUT = "timeout"
         const val SKIPPED = "skipped"
         const val NOT_RUN = "not run"
+        const val CACHED = "cached"
     }
 }

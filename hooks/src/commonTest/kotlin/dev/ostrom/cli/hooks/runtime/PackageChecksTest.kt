@@ -350,7 +350,8 @@ class PackageChecksTest {
         assertTrue(checks().guards(bash("git push origin main")))
         assertFalse(checks().guards(bash("ls")))
         assertFalse(checks(listOf(shadowLint, tell)).guards(bash("git push origin main")))
-        assertFalse(checks(viewText = null).guards(bash("git push origin main")))
+        texts.remove("/t/package.json")
+        assertFalse(checks(viewText = null).guards(bash("git push origin main")), "no view, nothing guarded")
     }
 
     @Test

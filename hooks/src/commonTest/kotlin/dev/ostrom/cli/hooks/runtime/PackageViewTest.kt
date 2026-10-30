@@ -21,21 +21,25 @@ class PackageViewTest {
              "hooks":[{"id":"h1","nodeId":"n1","workflowId":"w","kind":"check","event":"PreToolUse","tools":["Bash"],
                        "patterns":["npm test"],"classes":[],"mode":"enforce","scriptId":"s1","order":3},
                       {"id":"h2","nodeId":"n2","kind":"notify","event":"PostToolUse","mode":"shadow","notifyId":"x",
-                       "order":"late","scriptId":null}],
+                       "order":"late","scriptId":null},
+                      {}],
              "scripts":[{"id":"s1","label":"Tests","path":"scripts/s1.sh","sha256":"ab","command":"npm test",
                          "timeoutSec":45,"network":true,"mode":"enforce","where":"workstation"},
                         {"id":"s2","timeoutSec":"soon","network":"maybe"},
-                        {"id":"s3","network":false}]}
+                        {"id":"s3","network":false},
+                        {}]}
             """.trimIndent(),
         )
         val tools = listOf("Bash")
         val check = CompiledHook("h1", "n1", "check", "PreToolUse", tools, listOf("npm test"), "enforce", "s1", null, 3)
         val notify = CompiledHook("h2", "n2", "notify", "PostToolUse", emptyList(), emptyList(), "shadow", null, "x", 0)
+        val blank = CompiledHook("", "", "", "", emptyList(), emptyList(), "", null, null, 0)
         val tests = CompiledScript("s1", "Tests", "scripts/s1.sh", "ab", "npm test", 45, network = true)
         val defaults = CompiledScript("s2", "check", "", "", "", 120, network = false)
         assertEquals(
             PackageView(
-                "sha256:p", "Rules.", "/t", listOf(check, notify), listOf(tests, defaults, defaults.copy("s3")),
+                "sha256:p", "Rules.", "/t", listOf(check, notify, blank),
+                listOf(tests, defaults, defaults.copy("s3"), defaults.copy("")),
             ),
             view,
         )

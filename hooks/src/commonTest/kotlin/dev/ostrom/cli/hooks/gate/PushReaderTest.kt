@@ -222,4 +222,9 @@ class PushReaderTest {
 
     private fun refusal(reader: PushReader, text: String): String =
         assertFailsWith<UnreadablePushException> { reader.read("/r", text) }.message.orEmpty()
+
+    @Test
+    fun aSegmentOfAssignmentsAloneRunsNoProgram() {
+        assertNull(reader().read("/r", "X=1; echo git push"), "`git push` is only text here")
+    }
 }

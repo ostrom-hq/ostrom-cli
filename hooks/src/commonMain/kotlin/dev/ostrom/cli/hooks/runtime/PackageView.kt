@@ -9,6 +9,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
@@ -132,7 +133,7 @@ data class PackageView(
             mode = fields.text("mode").orEmpty(),
             scriptId = fields.text("scriptId"),
             notifyId = fields.text("notifyId"),
-            order = fields.value("order")?.jsonPrimitive?.intOrNull ?: 0,
+            order = fields.primitive("order")?.intOrNull ?: 0,
         )
 
         private fun scriptOf(fields: JsonObject) = CompiledScript(
@@ -141,15 +142,17 @@ data class PackageView(
             path = fields.text("path").orEmpty(),
             sha256 = fields.text("sha256").orEmpty(),
             command = fields.text("command").orEmpty(),
-            timeoutSec = fields.value("timeoutSec")?.jsonPrimitive?.intOrNull ?: DEFAULT_TIMEOUT_SEC,
-            network = fields.value("network")?.jsonPrimitive?.booleanOrNull == true,
+            timeoutSec = fields.primitive("timeoutSec")?.intOrNull ?: DEFAULT_TIMEOUT_SEC,
+            network = fields.primitive("network")?.booleanOrNull == true,
         )
 
         private fun JsonObject.value(key: String): JsonElement? = this[key]?.takeIf { it !is JsonNull }
 
-        private fun JsonObject.text(key: String): String? = value(key)?.jsonPrimitive?.content
+        private fun JsonObject.primitive(key: String): JsonPrimitive? = value(key)?.let { it.jsonPrimitive }
+
+        private fun JsonObject.text(key: String): String? = primitive(key)?.content
 
         private fun <T> JsonObject.list(key: String, item: (JsonElement) -> T): List<T> =
-            value(key)?.jsonArray?.map(item).orEmpty()
+            value(key)?.let { it.jsonArray.map(item) }.orEmpty()
     }
 }
