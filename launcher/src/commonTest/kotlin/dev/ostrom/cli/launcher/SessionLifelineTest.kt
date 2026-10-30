@@ -153,7 +153,7 @@ class SessionLifelineTest {
         val workflow = "POST /api/v1/sessions/s1/workflow-receipt"
         server[workflow] = 409 to """{"error":{"type":"conflict","message":"open"}}"""
         lifeline.end(0, null, "codex", pack, receipts)
-        server[workflow] = 200 to """{"receipt":{}}"""
+        server[workflow] = 200 to "{}"
         lifeline.end(0, null, "codex", pack, receipts)
         server[workflow] = 200 to """{"receipt":{},"verification":{"ok":false}}"""
         lifeline.end(0, null, "codex", pack, receipts)
