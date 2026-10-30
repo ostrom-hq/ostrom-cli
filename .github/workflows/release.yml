@@ -174,7 +174,7 @@ jobs:
           merge-multiple: true
       - name: Install tools
         run: sudo apt-get update && sudo apt-get install -y jq osslsigncode zip
-      - uses: sigstore/cosign-installer@v4
+      - uses: sigstore/cosign-installer@v4.1.2
         with:
           cosign-release: v2.6.5
       - uses: anchore/sbom-action/download-syft@v0
@@ -303,7 +303,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: sigstore/cosign-installer@v4
+      - uses: sigstore/cosign-installer@v4.1.2
         with:
           cosign-release: v2.6.5
       - name: Build (and push on a tag)
