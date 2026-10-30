@@ -70,7 +70,9 @@ alternative: a second private file for `ostrom wait`, which a command of the age
   hooks check its signature against `OSTROM_INSTANCE_KEYS` and its expiry at every call, and hold every action without
   one, S2-20 and S2-38), `POST /mcp/{server}` for the launch's servers (to `/api/v1/mcp/{server}`, streamed, 401/403 from
   Ostrom become 502), and with inference `/v1/messages`, `/v1/chat/completions`, `/v1/models` (to
-  `/api/v1/inference/…`, 4 MiB, the response streamed, only the provider headers forwarded).
+  `/api/v1/inference/…`, 4 MiB, the response streamed, only the provider headers forwarded). Coming soon on the
+  server: ostrom-server `main` does not serve `POST /api/v1/sessions`, `/api/v1/notifications` nor
+  `GET /api/v1/gates/catalog/signed` yet (ostrom-core's `api/contract/served-routes.txt`).
 - Ostrom unreachable or too slow: 502 with `{"error":{"type":"unreachable","message":"Ostrom is unreachable (…)"}}`,
   and one line for the user per outage through the starter's `report`; Ktor's own logger is silenced.
 - `hooks` never depends on `relay`: it speaks plain HTTP to the loopback URL and capability the launcher hands it
@@ -148,9 +150,10 @@ receiving Ctrl-C, stdin read through `PeekNamedPipe`, UTF-8 output on the consol
 
 ## End-to-end bench
 
-`ci/build-linux.sh` builds the linuxX64 release binary into `dist/ostrom`. The binary reads `OSTROM_URL` (server),
-`OSTROM_HOME` (the CLI folder, instead of `~/.config/ostrom`) and `OSTROM_HOOK_DIALECT` today; `OSTROM_TOKEN` and
-`OSTROM_CLAUDE_BIN` / `OSTROM_CODEX_BIN` arrive with `login` and the launcher.
+`ci/build-linux.sh` builds the linuxX64 release binary into `dist/ostrom`. Besides the variables the launcher passes
+to the hooks, the binary reads `OSTROM_URL` (server), `OSTROM_HOME` (the CLI folder, instead of `~/.config/ostrom`),
+`OSTROM_TOKEN` (the console token of `ostrom import teamcode`), `OSTROM_TELEMETRY` and `OSTROM_HOOK_DIALECT`. It finds
+`claude`, `codex` and the other agents on `PATH`: no variable names their binary.
 
 ## Import from TeamCode
 
