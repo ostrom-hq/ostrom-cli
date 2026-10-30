@@ -208,15 +208,20 @@ internal class ReceiptsPullCommand(private val dependencies: CliDependencies) : 
         writing { dependencies.files.write(join(directory, "receipts", "$id.json"), pretty(bundle)) }
         dependencies.console.out("✓ Saved $id with its package.\n")
         val pin = ServerKeyPin(dependencies.files, dependencies.console)
-        val verifiable = writing { pin.pin(signed, receipt, directory) }
+        var verifiable = false
+        writing { verifiable = pin.pin(signed, receipt, directory) }
         if (!verifiable) throw ProgramResult(ExitCode.INCOMPLETE.code)
     }
 
     /** Runs [block], which writes a file, or exits 73 naming the file it could not write. */
-    private fun <T> writing(block: () -> T): T = try {
-        block()
-    } catch (e: FileWriteException) {
-        throw refuse(ExitCode.CANNOT_WRITE, "Could not write ${e.path}.")
+    private fun writing(block: () -> Unit) {
+        val unwritten = try {
+            block()
+            null
+        } catch (e: FileWriteException) {
+            e.path
+        }
+        if (unwritten != null) throw refuse(ExitCode.CANNOT_WRITE, "Could not write $unwritten.")
     }
 }
 

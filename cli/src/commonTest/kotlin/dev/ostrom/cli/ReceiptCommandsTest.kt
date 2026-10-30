@@ -422,6 +422,10 @@ class ReceiptCommandsTest {
         assertEquals(pem, pin["publicKeyPem"])
         assertTrue(pin.containsKey("pinnedAt"))
         assertEquals(0, cli(routes = null).run(arrayOf("verify", "W-e2e")))
+        fileSystem.delete("$home/server-keys.json".toPath())
+        assertEquals(0, cli(mapOf(pulled, key)).run(arrayOf("receipts", "pull", "W-e2e")), "with no pins at all")
+        val only = Json.parseToJsonElement(read("$home/server-keys.json")) as JsonObject
+        assertEquals(setOf("https://ostrom.example"), only.keys)
     }
 
     @Test
