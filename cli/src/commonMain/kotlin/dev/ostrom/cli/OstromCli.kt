@@ -17,6 +17,7 @@ import dev.ostrom.cli.commands.LoginCommand
 import dev.ostrom.cli.commands.LogoutCommand
 import dev.ostrom.cli.commands.McpCommand
 import dev.ostrom.cli.commands.RootCommand
+import dev.ostrom.cli.commands.UpdateCommand
 import dev.ostrom.cli.commands.VersionCommand
 import dev.ostrom.cli.commands.pendingCommands
 import dev.ostrom.cli.launcher.Agent
@@ -58,6 +59,7 @@ class OstromCli(private val dependencies: CliDependencies) {
             ApproveCommand(dependencies),
             DenyCommand(dependencies),
             LoginCommand(dependencies),
+            UpdateCommand(dependencies),
             LogoutCommand(dependencies),
             ConfigCommand(dependencies),
             DoctorCommand(dependencies),

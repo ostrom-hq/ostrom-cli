@@ -1,5 +1,6 @@
 package dev.ostrom.cli
 
+import dev.ostrom.cli.api.DownloadsImpl
 import dev.ostrom.cli.api.OstromApi
 import dev.ostrom.cli.api.OstromApiImpl
 import dev.ostrom.cli.hooks.HookRunner
@@ -29,6 +30,8 @@ import dev.ostrom.cli.platform.ProcessCaptureImpl
 import dev.ostrom.cli.platform.ProcessLauncherImpl
 import dev.ostrom.cli.platform.currentExecutable
 import dev.ostrom.cli.relay.LocalRelayStarterImpl
+import dev.ostrom.cli.update.SelfUpdate
+import dev.ostrom.cli.update.TarUnpacker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.delay
@@ -49,6 +52,7 @@ import okio.Path.Companion.toPath
  * @property agents Runs `ostrom <agent>`.
  * @property sleep Waits the given milliseconds (the device flow of login; virtual in tests).
  * @property readLine Reads a line the developer typed, or null at the end of the input.
+ * @property selfUpdate `ostrom update`.
  */
 @Suppress("LongParameterList") // The composition root: one parameter per dependency, each replaced in tests.
 class CliDependencies(
@@ -66,6 +70,7 @@ class CliDependencies(
     val agents: AgentRunner,
     val sleep: suspend (Long) -> Unit,
     val readLine: () -> String?,
+    val selfUpdate: SelfUpdate,
 ) {
     /** The device configuration, or null when no home folder is known. */
     val config: ConfigStore? by lazy {
@@ -111,6 +116,12 @@ class CliDependencies(
                 ),
                 sleep = { delay(it) },
                 readLine = ::readlnOrNull,
+                selfUpdate = SelfUpdate(
+                    DownloadsImpl(USER_AGENT),
+                    FileSystem.SYSTEM,
+                    TarUnpacker(ProcessLauncherImpl()),
+                    { console.out("$it\n") },
+                ),
             )
         }
 

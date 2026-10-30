@@ -1,10 +1,12 @@
 package dev.ostrom.cli
 
 import com.github.ajalt.clikt.core.Abort
+import dev.ostrom.cli.api.Download
 import dev.ostrom.cli.api.OstromApi
 import dev.ostrom.cli.api.ServerRequest
 import dev.ostrom.cli.api.ServerResponse
 import dev.ostrom.cli.api.ServerUnreachableException
+import dev.ostrom.cli.commands.releaseTarget
 import dev.ostrom.cli.hooks.HookRunner
 import dev.ostrom.cli.launch.AgentRunner
 import dev.ostrom.cli.launcher.Agent
@@ -20,6 +22,7 @@ import dev.ostrom.cli.platform.ExecutableFinder
 import dev.ostrom.cli.platform.FileStoreImpl
 import dev.ostrom.cli.platform.OperatingSystem
 import dev.ostrom.cli.platform.StandardInput
+import dev.ostrom.cli.update.SelfUpdate
 import kotlinx.coroutines.test.runTest
 import okio.Path.Companion.toPath
 import okio.fakefilesystem.FakeFileSystem
@@ -56,6 +59,7 @@ class OstromCliTest {
     private val launches = mutableListOf<Pair<LaunchRequest, LaunchSite>>()
     private val waits = mutableListOf<Long>()
     private val typed = ArrayDeque<String>()
+    private val releaseUrls = mutableListOf<String>()
     private val requests = mutableListOf<Pair<String, ServerRequest>>()
 
     /** A server that answers `METHOD path` from [routes] (404 otherwise), recording each request with its server. */
@@ -114,6 +118,12 @@ class OstromCliTest {
             agents = AgentRunner { request, site -> 7.also { launches += request to site } },
             sleep = { waits += it },
             readLine = { typed.removeFirstOrNull() },
+            selfUpdate = SelfUpdate(
+                downloads = { url, _ -> Download.Missing(404).also { releaseUrls += url } },
+                fileSystem = fileSystem,
+                unpack = { _, _ -> false },
+                say = { console.out("$it\n") },
+            ),
         ),
     )
 
@@ -360,6 +370,7 @@ class OstromCliTest {
         val dependencies = CliDependencies.create()
         dependencies.api("https://ostrom.example")
         dependencies.mcpServer()
+        assertEquals(66, dependencies.selfUpdate.rollback("/nowhere-ostrom/ostrom"))
         assertTrue(dependencies.configFile("/x").endsWith("config.toml"))
         assertTrue(dependencies.workingDirectory().isNotEmpty())
         assertEquals(null, dependencies.credentials("/nowhere-ostrom").load("https://ostrom.example")?.login)
@@ -563,5 +574,39 @@ class OstromCliTest {
         assertEquals(body, requests.last().second.body)
         assertEquals(0, answering(signed).run(arrayOf("deny", "g1")))
         assertOut("✓ Denied. Receipt R2 signed.\n")
+    }
+
+    @Test
+    fun updateReadsTheSignedManifestOfTheReleasesOnGitHub() {
+        assertEquals(66, cli().run(arrayOf("update", "--check")))
+        val latest = "https://github.com/ostrom-hq/ostrom-cli/releases/latest/download/latest.json"
+        assertEquals(listOf(latest), releaseUrls)
+        assertOut("No release at $latest (HTTP 404).\n")
+        val enterprise = mapOf("HOME" to "/home/maya", "OSTROM_GITHUB_WEB_URL" to "https://git.acme.example/")
+        assertEquals(66, cli(environment = enterprise).run(arrayOf("update", "--version", "1.2.3")))
+        val asked = "https://git.acme.example/ostrom-hq/ostrom-cli/releases/download/1.2.3/latest.json"
+        assertEquals(asked, releaseUrls.last())
+        val mirror = mapOf("HOME" to "/home/maya", "OSTROM_RELEASES_URL" to "http://127.0.0.1:9/releases")
+        assertEquals(66, cli(environment = mirror).run(arrayOf("update")))
+        assertEquals("http://127.0.0.1:9/releases/latest/download/latest.json", releaseUrls.last())
+    }
+
+    @Test
+    fun updateRollbackNeedsAKeptBinary() {
+        assertEquals(66, cli().run(arrayOf("update", "--rollback")))
+        assertOut("No previous version of ostrom is kept on this device.\n")
+    }
+
+    @Test
+    fun theReleaseTargetIsTheSystemAndTheArchitecture() {
+        val systems = mapOf(OperatingSystem.MACOS to "macos-arm64", OperatingSystem.LINUX to "linux-arm64")
+        for ((system, target) in systems + (OperatingSystem.WINDOWS to "windows-arm64")) {
+            val environment = object : Environment {
+                override fun get(name: String): String? = null
+                override val operatingSystem = system
+                override val architecture = "arm64"
+            }
+            assertEquals(target, releaseTarget(environment))
+        }
     }
 }
