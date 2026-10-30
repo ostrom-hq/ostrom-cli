@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // One actual per expect of the module, as in posixMain and mingwMain: their number follows the platform API.
 @file:Suppress("TooManyFunctions")
 
