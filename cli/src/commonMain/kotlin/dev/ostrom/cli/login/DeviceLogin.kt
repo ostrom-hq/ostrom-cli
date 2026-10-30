@@ -9,6 +9,7 @@ import dev.ostrom.cli.launcher.text
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.intOrNull
+import kotlin.text.RegexOption.IGNORE_CASE
 
 /** How a sign-in ended. */
 sealed interface LoginOutcome {
@@ -28,16 +29,19 @@ sealed interface LoginOutcome {
  * `ostrom login`: the device flow of Ostrom's GitHub app, through the server (`POST /api/v1/auth/device`, then
  * `POST /api/v1/auth/device/token` every `interval` seconds until the developer said yes on GitHub).
  *
- * The page the developer is sent to must be GitHub's (security audit S2-35): a server that is not Ostrom cannot send
- * them to a look-alike page to collect their code.
+ * The page the developer is sent to must be GitHub's, or one of the very origin of the server or of its console
+ * (security audit S2-35, widened by the decision of 30/10/2026): a server cannot send them to a look-alike page to
+ * collect their code.
  *
  * @param githubWeb GitHub's web address (`https://github.com`, or `OSTROM_GITHUB_WEB_URL`), without a trailing slash.
+ * @param console The console's address (`OSTROM_CONSOLE_URL`, else the server's with `app.` for `api.`).
  * @param sleep Waits the given milliseconds (virtual in tests).
  * @param say Prints a line for the developer.
  */
 class DeviceLogin(
     private val server: ServerJson,
     private val githubWeb: String,
+    private val console: String,
     private val sleep: suspend (Long) -> Unit,
     private val say: (String) -> Unit,
 ) {
@@ -52,11 +56,12 @@ class DeviceLogin(
         val deviceCode = body.text("deviceCode").orEmpty()
         val userCode = body.text("userCode").orEmpty()
         val page = body.text("verificationUri") ?: "$githubWeb/login/device"
-        // the code and the page go to the terminal: nothing but GitHub's page, and no control character in either
+        // the code and the page go to the terminal: GitHub's page or one of the server's own origin (S2-35, decision of
+        // 30/10/2026), and no control character in either
         val refusal = when {
-            !page.startsWith("$githubWeb/") || page.any(::isControl) ->
-                "$serverUrl sent a sign-in page that is not GitHub's (${page.filterNot(::isControl)}). " +
-                    "Check the --server URL."
+            !trusted(page, githubWeb, listOf(serverUrl, console)) || page.any(::isControl) ->
+                "$serverUrl sent a sign-in page that is neither GitHub's nor its own " +
+                    "(${page.filterNot(::isControl)}). Check the --server URL."
             deviceCode.isEmpty() || !USER_CODE.matches(userCode) ->
                 "$serverUrl answered without a usable sign-in code. Check the --server URL."
             else -> null
@@ -135,6 +140,32 @@ class DeviceLogin(
 
     /** The device flow's waits and limits. */
     companion object {
+        // an origin: the scheme, the host (a bracketed IPv6 or a name with no user in front) and the port if written
+        private val ORIGIN = Regex(
+            """(https?)://(\[[0-9a-f:.]+]|[^/?#@:\[\]]+)(?::(\d{1,5}))?(?:[/?#].*)?""",
+            IGNORE_CASE,
+        )
+        private val THIS_MACHINE = Regex("""http://(localhost|127\.0\.0\.1|\[::1]):\d+""")
+
+        /**
+         * Whether [page] is GitHub's, or of the very origin (scheme, host, port) of one of [homes], over HTTPS, or
+         * `http://` to this machine only: a look-alike host, a neighbour subdomain or a page in clear is never shown.
+         */
+        internal fun trusted(page: String, githubWeb: String, homes: List<String>): Boolean {
+            val origin = originOf(page)
+            return page.startsWith("$githubWeb/") ||
+                (origin != null && secure(origin) && homes.any { originOf(it) == origin })
+        }
+
+        /** `scheme://host:port` in lower case, the default port written out; null for anything else. */
+        private fun originOf(url: String): String? {
+            val match = ORIGIN.matchEntire(url) ?: return null
+            val (scheme, host, port) = match.destructured.toList().map { it.lowercase() }
+            return "$scheme://$host:" + port.ifEmpty { if (scheme == "https") "443" else "80" }
+        }
+
+        private fun secure(origin: String) = origin.startsWith("https://") || THIS_MACHINE.matches(origin)
+
         private const val START = "/api/v1/auth/device"
         private const val TOKEN = "/api/v1/auth/device/token"
         private const val MILLIS = 1_000L
