@@ -50,18 +50,45 @@ data class UpdateRequest(
 /** A step of [SelfUpdate] that stops it: the exit code and what is said. */
 private class Stop(val code: ExitCode, val text: String) : Exception(text)
 
-/** The signed release manifest's entry for one target. */
-private class Asset(val version: String, val url: String, val sha256: String, val size: Long)
+/** Stops [SelfUpdate] with [code], saying [text]. */
+private fun stop(code: ExitCode, text: String): Nothing = throw Stop(code, text)
+
+/** Stops [SelfUpdate] when an agent's session runs (S2-39): the agent never updates the ostrom of its own hooks. */
+private fun refuseIn(sessions: AgentSessions) {
+    sessions.running()?.let {
+        stop(
+            ExitCode.REFUSED,
+            "✗ ostrom does not update itself inside an agent's session ($it). Nothing was changed. Run ostrom " +
+                "update in your own terminal once the session has ended.",
+        )
+    }
+}
+
+/** The text of [path], or null when it cannot be read. */
+private fun FileSystem.textOf(path: Path): String? = try {
+    read(path) { readUtf8() }
+} catch (_: IOException) {
+    null
+}
+
+/** The signed release manifest's entry for one target, and the version floor the manifest publishes, if any. */
+private class Asset(val version: String, val url: String, val sha256: String, val size: Long, val floor: String?)
 
 /**
  * `ostrom update`: the signed self-update. The manifest's Ed25519 signature is checked over its exact bytes before
  * anything in it is read, the archive against the signed size and SHA-256, and the binary is swapped by two renames
  * in its own folder, the previous one kept beside it for `--rollback` (CLI.md `ostrom update`).
  *
+ * Never below the floor (security audit S2-39): `--version` and `--rollback` refuse a version under the floor the
+ * latest release publishes in its signed manifest (`floor`), and any move back when it publishes none. Neither an
+ * update nor a rollback runs inside an agent's session ([AgentSessions]): the agent could otherwise put back an
+ * `ostrom` whose gate it knows how to get around.
+ *
  * @param downloads Fetches the manifest and the archive.
  * @param fileSystem Where the binary is.
  * @param unpack Unpacks an archive into a folder; false when it could not.
  * @param say Writes a line for the developer (stdout).
+ * @param sessions Says whether this runs inside an agent's session.
  * @param releaseKeyPem The key the manifest must be signed with.
  */
 class SelfUpdate(
@@ -69,10 +96,12 @@ class SelfUpdate(
     private val fileSystem: FileSystem,
     private val unpack: Unpacker,
     private val say: (String) -> Unit,
+    private val sessions: AgentSessions,
     private val releaseKeyPem: String = RELEASE_KEY_PEM,
 ) {
     /** Runs [request]; the exit code. */
     suspend fun update(request: UpdateRequest): Int = try {
+        if (!request.checkOnly) refuseIn(sessions)
         val asset = manifest(request)
         when {
             request.version == null && !newer(asset.version, request.current) ->
@@ -81,26 +110,45 @@ class SelfUpdate(
                 ExitCode.OK.code.also { say("✓ ostrom ${request.current} is already installed.") }
             request.checkOnly ->
                 ExitCode.OK.code.also { say("! ostrom ${asset.version} is available. Run ostrom update.") }
-            else -> install(request, asset)
+            else -> {
+                val floor = if (request.version == null) asset.floor else manifest(request.copy(version = null)).floor
+                floorRefusal(asset.version, request.current, floor)?.let { stop(ExitCode.REFUSED, it) }
+                install(request, asset)
+            }
         }
     } catch (stopped: Stop) {
         say(stopped.text)
         stopped.code.code
     }
 
-    /** `ostrom update --rollback`: back to the version kept by the last update, which is kept in turn. */
-    fun rollback(executable: String?): Int {
-        val binary = executable?.toPath()
+    /**
+     * `ostrom update --rollback`: back to the version kept by the last update, which is kept in turn. The version kept
+     * is checked against the latest release's signed floor first, so the release must be reachable.
+     */
+    suspend fun rollback(request: UpdateRequest): Int = try {
+        refuseIn(sessions)
+        val binary = request.executable?.toPath()
         if (binary == null || !fileSystem.exists(previousOf(binary))) {
-            say("No previous version of ostrom is kept on this device.")
-            return ExitCode.NOT_FOUND.code
+            stop(ExitCode.NOT_FOUND, "No previous version of ostrom is kept on this device.")
         }
+        val recorded = fileSystem.textOf(keptVersionOf(binary))
+            ?: stop(ExitCode.REFUSED, "✗ The version of the ostrom kept is not recorded. $UNCHANGED $REINSTALL")
+        floorRefusal(recorded.trim(), request.current, manifest(request.copy(version = null)).floor)
+            ?.let { stop(ExitCode.REFUSED, it) }
+        swapBack(binary, request.current)
+    } catch (stopped: Stop) {
+        say(stopped.text)
+        stopped.code.code
+    }
+
+    private fun swapBack(binary: Path, current: String): Int {
         val previous = previousOf(binary)
         val swap = "$binary.swap".toPath()
         return try {
             fileSystem.atomicMove(binary, swap)
             fileSystem.atomicMove(previous, binary)
             fileSystem.atomicMove(swap, previous)
+            fileSystem.write(keptVersionOf(binary)) { writeUtf8(current) }
             say("✓ Back to the previous ostrom. Run ostrom update to come back.")
             ExitCode.OK.code
         } catch (failure: IOException) {
@@ -121,22 +169,23 @@ class SelfUpdate(
         val version = body.text("version") ?: unreadable()
         val entry = body.child("assets")?.child(request.target)
             ?: stop(ExitCode.NOT_FOUND, "No ostrom $version is built for ${request.target}.")
-        return assetOf(version, entry)
+        return assetOf(version, entry, body.text("floor"))
     }
 
-    private fun assetOf(version: String, entry: JsonObject): Asset {
+    private fun assetOf(version: String, entry: JsonObject, floor: String?): Asset {
         val url = entry.text("url")
         val sha256 = entry.text("sha256")
         val size = (entry["size"] as? JsonPrimitive)?.longOrNull
         if (url == null || sha256 == null || size == null) unreadable()
-        return Asset(version, url, sha256, size)
+        return Asset(version, url, sha256, size, floor)
     }
 
-    private fun unreadable() = Stop(ExitCode.FAILED, "✗ The release manifest cannot be read. Nothing was changed.")
+    private fun unreadable(): Nothing = stop(ExitCode.FAILED, "✗ The release manifest cannot be read. $UNCHANGED")
 
     private suspend fun install(request: UpdateRequest, asset: Asset): Int {
-        val binary = request.executable?.toPath()
+        val executable = request.executable
             ?: stop(ExitCode.CANNOT_WRITE, "ostrom cannot find its own binary. Reinstall it with the installer.")
+        val binary = executable.toPath()
         managerOf(binary)?.let { stop(ExitCode.USAGE, "This ostrom is managed by $it.") }
         val archive = fetch(asset.url, MAX_BINARY_BYTES, request)
         if (archive.size.toLong() != asset.size || sha256Hex(archive) != asset.sha256) {
@@ -153,6 +202,7 @@ class SelfUpdate(
                 stop(ExitCode.FAILED, "✗ The archive does not hold ${binary.name}. Nothing was changed.")
             }
             swap(binary, fresh)
+            fileSystem.write(keptVersionOf(binary)) { writeUtf8(request.current) }
         } catch (failure: IOException) {
             stop(ExitCode.CANNOT_WRITE, "ostrom could not write next to $binary: ${failure.message}")
         } finally {
@@ -198,8 +248,33 @@ class SelfUpdate(
         const val MAX_BINARY_BYTES = 256L * 1024 * 1024
         const val NOT_FOUND = 404
         const val CHECK_NETWORK = "Check your network."
+        const val REINSTALL = "Install the version you want with ostrom update --version."
     }
 }
+
+/** Where the version of the binary kept for `--rollback` is recorded. */
+internal fun keptVersionOf(binary: Path): Path = "$binary.previous.version".toPath()
+
+/**
+ * Why [target] may not be installed over [current] given the latest release's signed [floor], or null when it may: a
+ * version below the floor, a version that does not parse, or any move back when the release publishes no floor
+ * (security audit S2-39).
+ */
+internal fun floorRefusal(target: String, current: String, floor: String?): String? {
+    val wanted = SemVer.of(target)
+    val bottom = floor?.let { SemVer.of(it) }
+    return when {
+        wanted == null ->
+            "✗ ostrom cannot read the version $target to check it against the release's floor. $UNCHANGED"
+        bottom != null && wanted < bottom ->
+            "✗ ostrom $target is below $floor, the lowest version the latest release allows. $UNCHANGED"
+        bottom == null && newer(current, target) ->
+            "✗ The latest release publishes no version floor, so ostrom does not go back to $target. $UNCHANGED"
+        else -> null
+    }
+}
+
+private const val UNCHANGED = "Nothing was changed."
 
 /** Where the binary of [binary] is kept for `--rollback`. */
 internal fun previousOf(binary: Path): Path = "$binary.previous".toPath()

@@ -13,10 +13,6 @@ import com.github.ajalt.clikt.parameters.options.option
 // The commands of the spec (CLI.md § 2.1 and § 2.2) that are declared but not built yet. Each keeps the options and
 // arguments of the spec so that `--help` already documents it; its behaviour lands with the agent that owns it.
 
-/** Options shared by the commands that read from the server. */
-private fun CliktCommand.serverOption() =
-    option("--server", help = "Ostrom server URL (else OSTROM_URL, else the one of ostrom login)")
-
 private fun CliktCommand.jsonOption() = option("--json", help = "Machine-readable output").flag()
 
 private fun CliktCommand.yesOption() = option("--yes", help = "Do not ask for confirmation").flag()
