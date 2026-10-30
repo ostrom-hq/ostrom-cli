@@ -79,7 +79,8 @@ alternative: a second private file for `ostrom wait`, which a command of the age
 ## Exit codes
 
 `cli/.../ExitCode.kt`, from the spec (`CLI.md` § 2.3). A command declared but not built exits with 70
-(`NOT_IMPLEMENTED`) and says so on stderr; it disappears once every command is built.
+(`NOT_IMPLEMENTED`) and says so on stderr; it disappears once every command is built. An option of a built command
+that this version does not have yet (`ostrom claude --cloud`) is a usage error instead: 64 (`USAGE`).
 
 ## Add a command
 

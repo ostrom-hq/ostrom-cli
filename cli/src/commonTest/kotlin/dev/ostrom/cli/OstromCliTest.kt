@@ -145,7 +145,6 @@ class OstromCliTest : CliKit() {
         assertEquals("ostrom status: not implemented yet.\n", console.err.toString())
         assertEquals(70, cli().run(arrayOf("harness", "add", "git-safety", "--set", "a=b", "--yes")))
         assertEquals(70, cli().run(arrayOf("logs")))
-        assertEquals(70, cli().run(arrayOf("claude", "--cloud", "-p", "hello")))
         assertEquals(64, cli().run(arrayOf("approve")))
     }
 
