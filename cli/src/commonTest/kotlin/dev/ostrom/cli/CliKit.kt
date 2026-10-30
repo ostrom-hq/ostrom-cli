@@ -94,6 +94,7 @@ open class CliKit {
     /** Asserts that stdout contains [text], showing all of it otherwise. */
     protected fun assertOut(text: String) = assertTrue(console.out.contains(text), console.out.toString())
 
+    @Suppress("LongParameterList") // one default per dependency a test replaces
     protected fun cli(
         environment: Map<String, String> = mapOf("HOME" to "/home/maya"),
         installed: Set<String> = setOf("git", "claude"),
@@ -116,7 +117,7 @@ open class CliKit {
             mcpServer = { object : McpServer { override fun serve() = 0 } },
             credentials = { directory ->
                 val path = (directory.toPath() / "credentials.json").toString()
-                FileCredentialStore(LaunchFilesImpl(fileSystem) { _, _ -> }, path) { environment[it] }
+                FileCredentialStore(LaunchFilesImpl(fileSystem) { _, _ -> }, path, secrets) { environment[it] }
             },
             workingDirectory = { "/work/acme" },
             executable = executable,
@@ -136,13 +137,21 @@ open class CliKit {
         ),
     )
 
-    /** A secret store in [backend] that keeps nothing (doctor only reads where it is). */
+    /** What the test's secret store keeps, by name. */
+    protected val secretsKept = mutableMapOf<String, String>()
+
+    /** A secret store in [backend], in memory ([secretsKept]). */
     protected fun storeIn(backend: SecretBackend): () -> SecretStore = {
         object : SecretStore {
             override val backend = backend
-            override fun read(name: String): String? = null
-            override fun write(name: String, secret: String) = Unit
-            override fun delete(name: String) = Unit
+            override fun read(name: String): String? = secretsKept[name]
+            override fun write(name: String, secret: String) {
+                secretsKept[name] = secret
+            }
+
+            override fun delete(name: String) {
+                secretsKept -= name
+            }
         }
     }
 

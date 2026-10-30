@@ -7,7 +7,6 @@ import kotlinx.cinterop.IntVar
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.alloc
 import kotlinx.cinterop.allocArrayOf
-import kotlinx.cinterop.convert
 import kotlinx.cinterop.cstr
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.ptr
@@ -15,7 +14,6 @@ import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.toKString
 import kotlinx.cinterop.usePinned
 import kotlinx.cinterop.value
-import platform.posix.chmod
 import platform.posix.getenv
 import platform.posix.getuid
 import platform.posix.setenv
@@ -55,20 +53,6 @@ internal actual fun readStdin(buffer: ByteArray, offset: Int, timeoutMillis: Int
 internal actual fun environmentVariable(name: String): String? = getenv(name)?.toKString()
 
 internal actual fun currentUserId(): String = getuid().toString()
-
-internal actual fun restrictToOwner(path: String) {
-    chmod(path, OWNER_READ_WRITE.convert())
-}
-
-/** Mode 0600: read and write for the owner only. */
-private const val OWNER_READ_WRITE = 0x180
-
-internal actual fun restrictToOwnerExecutable(path: String) {
-    chmod(path, OWNER_ALL.convert())
-}
-
-/** Mode 0700: read, write and execute (or enter, for a folder) for the owner only. */
-private const val OWNER_ALL = 0x1C0
 
 internal actual fun captureOutput(
     command: List<String>,
