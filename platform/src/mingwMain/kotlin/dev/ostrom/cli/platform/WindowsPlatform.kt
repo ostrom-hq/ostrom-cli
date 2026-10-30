@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 @file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
 
 package dev.ostrom.cli.platform

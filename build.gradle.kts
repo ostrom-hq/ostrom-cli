@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 plugins {
     // Loaded once here so that every module shares the same Kotlin plugin classes.
     id("ostrom.kmp") apply false
