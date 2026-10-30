@@ -26,21 +26,6 @@ internal class StatusCommand : PendingCommand("status", "Everything about you, t
     val server by serverOption()
 }
 
-internal class InboxCommand : PendingCommand("inbox", "The yeses that wait for you") {
-    val json by jsonOption()
-}
-
-internal class ApproveCommand : PendingCommand("approve", "Say yes to a request") {
-    val id by argument("id")
-    val note by option("--note", help = "A note kept in the receipt")
-    val yes by yesOption()
-}
-
-internal class DenyCommand : PendingCommand("deny", "Say no to a request") {
-    val id by argument("id")
-    val reason by option("--reason", help = "Told to the agent")
-}
-
 internal class ReceiptsCommand :
     GroupCommand("receipts", "Receipts of your sessions and of your yeses", defaultSubcommand = "list")
 
@@ -155,16 +140,16 @@ internal class CheckCommand : PendingCommand("check", "Run a workflow check (use
 }
 
 /**
- * Every top-level command after the agents, in the order of the help screen, with the [implemented] ones (login,
- * logout, config, doctor, telemetry, version) at their place.
+ * Every top-level command after the agents, in the order of the help screen, with the [implemented] ones at their
+ * place.
  */
 fun pendingCommands(implemented: List<CliktCommand>): List<CliktCommand> {
     fun named(name: String) = implemented.first { it.commandName == name }
     return listOf(
         StatusCommand(),
-        InboxCommand(),
-        ApproveCommand(),
-        DenyCommand(),
+        named("inbox"),
+        named("approve"),
+        named("deny"),
         ReceiptsCommand().subcommands(ReceiptsListCommand(), ReceiptsShowCommand(), ReceiptsPullCommand()),
         VerifyCommand(),
         LogsCommand(),
