@@ -464,6 +464,8 @@ class OstromCliTest {
                 override fun run(arguments: List<String>) = 0
             },
             mcpServer = { object : McpServer { override fun serve() = 0 } },
+            postHogKey = "",
+            sendStatistics = { _, _ -> },
         )
         // The JVM test target has no system store: the encrypted file. Native targets get their system's.
         assertIs<SecretBackend>(dependencies.secrets().backend)
