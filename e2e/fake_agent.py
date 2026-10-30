@@ -12,6 +12,8 @@ Installed by the run as `claude` and `codex` (the name it is started under picks
 import json
 import os
 import re
+import shlex
+import statistics
 import subprocess
 import sys
 import time
@@ -44,6 +46,16 @@ def fire(command, event):
             "millis": round((time.monotonic() - started) * 1000, 1)}
 
 
+def timed(command, event, runs):
+    """The wall time of [runs] calls of a hook, started without a shell as the agent starts it: milliseconds each."""
+    argv, stdin, times = shlex.split(command), json.dumps(event), []
+    for _ in range(runs):
+        started = time.perf_counter()
+        subprocess.run(argv, input=stdin, capture_output=True, text=True, timeout=60)
+        times.append((time.perf_counter() - started) * 1000)
+    return times
+
+
 def main():
     name = os.path.basename(sys.argv[0]).split(".")[0]
     arguments = sys.argv[1:]
@@ -61,6 +73,10 @@ def main():
                                   capture_output=True, text=True, timeout=60)
             fired.append({"event": "wait", "tool": asked.group(1), "code": done.returncode, "stdout": done.stdout,
                           "stderr": done.stderr})
+    # the budget of a hook in a real session: the relay asked, Ostrom's signed policy checked, at every tool call
+    harmless = {**base, "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "ls -la"}}
+    runs = int(os.environ.get("E2E_TIMED_RUNS", "0"))
+    timing = timed(hooks["PreToolUse"], harmless, runs) if runs else []
     tool = {"tool_name": "Bash", "tool_input": {"command": "ls -la"}, "tool_response": {"stdout": ""}}
     fired.append(fire(hooks["PostToolUse"], {**base, "hook_event_name": "PostToolUse", **tool}))
     package = os.environ.get("OSTROM_PACKAGE")
@@ -73,7 +89,9 @@ def main():
     fired.append(fire(hooks["SessionEnd"], {**base, "hook_event_name": "SessionEnd", "reason": "exit"}))
     environment = {key: value for key, value in os.environ.items() if key.startswith(("OSTROM_", "ANTHROPIC_"))}
     report = {"agent": name, "arguments": arguments, "environment": environment, "cwd": cwd, "hooks": fired,
-              "path": os.environ.get("PATH", "")}
+              "path": os.environ.get("PATH", ""),
+              "timing": {"median": statistics.median(timing), "p95": sorted(timing)[int(len(timing) * 0.95) - 1]}
+              if timing else None}
     with open(os.environ["E2E_REPORT"], "w") as handle:
         json.dump(report, handle, indent=2)
     sys.exit(int(os.environ.get("E2E_EXIT", "3")))
