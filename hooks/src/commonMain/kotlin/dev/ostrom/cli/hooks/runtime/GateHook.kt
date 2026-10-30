@@ -67,7 +67,8 @@ class GateHook(
         val (subject, landing) = withPushTargets(raw, cwd)
         val action = catalogue.match(subject, patterns)
         val gate = action?.gate
-        val foreign = if (checks.guards(subject) || gate != null) {
+        // a gate only proposed (shadow) never stops the agent, not even from another clone
+        val foreign = if (checks.guards(subject) || gate?.enforce == true) {
             location.foreign(cwd, subject.text, context.launchTop, canonical)
         } else {
             null
@@ -79,7 +80,7 @@ class GateHook(
                 replies.deny(GateTexts.foreign(context, location.repositoryAt(context.launchTop), foreign))
             else -> checks.beforeTool(event, subject, cwd) ?: when {
                 action != null && gate != null ->
-                    requests.ask(GateAsk(event, written.text, subject, cwd, action, gate, catalogue.failMode))
+                    requests.ask(GateAsk(event, raw.text, subject, cwd, action, gate, catalogue.failMode))
                 landing != null -> landingReply(catalogue, subject, landing)
                 else -> replies.allow()
             }
@@ -115,7 +116,9 @@ class GateHook(
 
     /** The command with the scripts it runs appended, so that the patterns and the push reader read them too. */
     private fun withScripts(subject: ToolSubject, cwd: String): ToolSubject {
-        val scripts = ScriptTexts.of(subject.text, location.directory(cwd, subject.text), context.home, files::read)
+        val scripts = ScriptTexts.of(subject.text, location.directory(cwd, subject.text), context.home) {
+            files.readStart(it, ScriptTexts.MAX_CHARS)
+        }
         return if (scripts.isEmpty()) subject else subject.copy(text = subject.text + scripts)
     }
 

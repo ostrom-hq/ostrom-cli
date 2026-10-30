@@ -88,12 +88,15 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
     private val adapters = adapters.associateBy { it.agent }
     private val calls = LaunchCalls(dependencies)
 
-    /** Runs the launch; returns the exit code. */
+    /** Runs the launch; returns the exit code (73 when a file of the launch cannot be written, CLI.md § 2.3). */
     suspend fun launch(request: LaunchRequest, site: LaunchSite): Int = try {
         start(request, site)
     } catch (e: LaunchStopped) {
         dependencies.say("ostrom: ${e.message}")
         e.exitCode
+    } catch (e: IOException) {
+        dependencies.say("ostrom: a file of the launch cannot be written (${e.message})")
+        CANNOT_WRITE
     }
 
     private suspend fun start(request: LaunchRequest, site: LaunchSite): Int {
@@ -102,7 +105,11 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         val executable = dependencies.finder.find(agent.executable) ?: stop(AGENT_MISSING, missing(agent))
         val top = gitTop(site.cwd)
         val repo = request.repo ?: site.variable(LaunchVariables.REPO)?.takeIf { it.isNotEmpty() } ?: folderName(top)
-        val model = request.model ?: modelOf(request.arguments)
+        val models = (listOfNotNull(request.model) + modelsOf(request.arguments)).distinct()
+        if (models.size > 1) {
+            stop(USAGE, "two models are named (${models.joinToString()}): name one, the one the policy checks")
+        }
+        val model = models.firstOrNull()
         calls.checkPolicy(agent, model, site)
         val launch = calls.createLaunch(repo, agent, model, site)
         val pack = calls.packageOf(repo, site)
@@ -282,6 +289,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
 
     /** The variables and limits of a launch. */
     companion object {
+        private const val USAGE = 64
         private const val NO_ADAPTER = 70
         private const val CANNOT_WRITE = 73
         private const val AGENT_MISSING = 127
@@ -306,9 +314,24 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
 /** The agent's name in Ostrom: `claude-code` for Claude Code, else its command. */
 fun ostromName(agent: Agent): String = if (agent == Agent.CLAUDE) "claude-code" else agent.command
 
-/** The model asked in the agent's own arguments (`--model M` or `-m M`), or null. */
-fun modelOf(arguments: List<String>): String? {
-    val index = arguments.indexOfFirst { it == "--model" || it == "-m" }
+/**
+ * Every model [arguments] name: `--model M`, `--model=M`, `-m M`, and Codex's `-c model=M` or `--config model=M`
+ * (quotes dropped). The policy is checked against the model the agent runs, so none of them may hide.
+ */
+fun modelsOf(arguments: List<String>): List<String> = arguments.indices.mapNotNull { i ->
+    val word = arguments[i]
+    val next = arguments.getOrNull(i + 1)
+    when {
+        word == "--model" || word == "-m" -> next
+        word.startsWith(MODEL_EQUALS) -> word.removePrefix(MODEL_EQUALS)
+        (word == "-c" || word == "--config") && next?.startsWith(CONFIG_MODEL) == true ->
+            next.removePrefix(CONFIG_MODEL).trim('"', '\'')
+        else -> null
+    }
+}.distinct()
+
+private const val MODEL_EQUALS = "--model="
+private const val CONFIG_MODEL = "model="
     return if (index < 0) null else arguments.getOrNull(index + 1)
 }
 

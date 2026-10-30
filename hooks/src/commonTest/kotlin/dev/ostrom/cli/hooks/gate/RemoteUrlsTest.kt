@@ -36,7 +36,11 @@ class RemoteUrlsTest {
         assertEquals("/w/sub/x", location.directory("/w", "cd sub; git -C x push"))
         assertEquals("/abs/y", location.directory("/w", "cd /abs && git --no-pager -c a=b -C y push"))
         assertEquals("/home/me", location.directory("/w", "cd ~"))
-        assertEquals("/w", location.directory("/w", "cd"))
+        assertEquals("/home/me", location.directory("/w", "cd"), "cd alone goes home, as the shell does")
+        assertEquals("/other/repo", location.directory("/w", "cd . && cd /other/repo && git push origin main"))
+        assertEquals("/other", location.directory("/w", "cd -P /other && git push"), "options are skipped")
+        assertEquals("/other", location.directory("/w", "cd -- /other && git push"))
+        assertEquals("/w/-", location.directory("/w", "cd - && git push"), "the previous folder is unknown")
         assertEquals("/w", location.directory("/w", ""))
     }
 
