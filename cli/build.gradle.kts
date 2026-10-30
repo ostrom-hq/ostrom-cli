@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 @file:OptIn(org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeCacheApi::class)
 
 import org.jetbrains.kotlin.gradle.plugin.mpp.DisableCacheInKotlinVersion
