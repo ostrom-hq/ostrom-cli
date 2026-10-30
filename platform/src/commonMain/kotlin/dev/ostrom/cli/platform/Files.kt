@@ -27,6 +27,9 @@ interface FileStore {
     /** True when [path] exists; false when it does not, or cannot (a file in its path). */
     fun exists(path: String): Boolean
 
+    /** The names of the entries of the folder [path], sorted; none when it does not exist or is not a folder. */
+    fun list(path: String): List<String>
+
     /**
      * Runs [block] holding the exclusive lock of [path], which every ostrom process takes before it reads and then
      * rewrites that file: two at once (two `ostrom login`) would otherwise each write back what it read, and the
@@ -115,6 +118,11 @@ class FileStoreImpl(
     } catch (_: IOException) {
         // A file in its path ("not a directory"): nothing can be there, and the next write says why.
         false
+    }
+
+    override fun list(path: String): List<String> {
+        val entries = fileSystem.listOrNull(path.toPath()) ?: return emptyList()
+        return entries.map { it.name }.sorted()
     }
 }
 

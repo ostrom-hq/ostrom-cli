@@ -12,6 +12,7 @@ import base64
 import datetime
 import hashlib
 import json
+import os
 import re
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -132,7 +133,7 @@ def make_handler(state):
                     return self._answer(200, {"receipt": {"id": "W-e2e"}, "verification": {"ok": True}})
                 return self._answer(200, {"id": session})
             if (method, path) == ("GET", "/api/v1/receipts/W-e2e/bundle"):
-                return self._answer(200, {"receipt": {"id": "W-e2e"}})
+                return self._answer(200, state["bundle"])
             return self._error(404, "not_found", f"no {method} {path} in the e2e contract server")
 
         def do_GET(self):
@@ -152,7 +153,10 @@ def main():
     parser.add_argument("--package")
     args = parser.parse_args()
     package = json.load(open(args.package)) if args.package else None
-    state = {"lock": threading.Lock(), "log": open(args.log, "a"), "package": package}
+    # W-e2e, signed by the TEST key that signs vectors/package.json: `ostrom verify W-e2e` holds once the key is pinned
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "vectors", "receipt-bundle.json")) as handle:
+        bundle = json.load(handle)["bundle"]
+    state = {"lock": threading.Lock(), "log": open(args.log, "a"), "package": package, "bundle": bundle}
     server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(state))
     with open(args.ready, "w") as ready:
         ready.write(f"http://127.0.0.1:{server.server_address[1]}")

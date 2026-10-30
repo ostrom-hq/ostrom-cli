@@ -35,6 +35,15 @@ class FileStoreTest {
     }
 
     @Test
+    fun listGivesTheSortedNamesOfAFolderAndNothingElse() {
+        store.write((folder / "receipts" / "W-2.json").toString(), "{}")
+        store.write((folder / "receipts" / "W-1.json").toString(), "{}")
+        assertEquals(listOf("W-1.json", "W-2.json"), store.list((folder / "receipts").toString()))
+        assertEquals(emptyList(), store.list((folder / "receipts" / "W-1.json").toString()))
+        assertEquals(emptyList(), store.list((folder / "missing").toString()))
+    }
+
+    @Test
     fun writeIntoAFileInsteadOfAFolderFailsWithTheFileWriteError() {
         val blocker = (folder / "blocker").toString()
         store.write(blocker, "x")

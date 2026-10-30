@@ -26,29 +26,6 @@ internal class StatusCommand : PendingCommand("status", "Everything about you, t
     val server by serverOption()
 }
 
-internal class ReceiptsCommand :
-    GroupCommand("receipts", "Receipts of your sessions and of your yeses", defaultSubcommand = "list")
-
-internal class ReceiptsListCommand : PendingCommand("list", "List receipts, newest first") {
-    val json by jsonOption()
-    val local by option("--local", help = "Only the receipts kept on this device").flag()
-}
-
-internal class ReceiptsShowCommand : PendingCommand("show", "Show a receipt") {
-    val id by argument("id")
-}
-
-internal class ReceiptsPullCommand :
-    PendingCommand("pull", "Download a receipt with its package and keys, to verify it offline") {
-    val id by argument("id")
-}
-
-internal class VerifyCommand : PendingCommand("verify", "Verify a receipt offline, with no network call") {
-    val receipt by argument("receipt")
-    val key by option("--key", help = "Public key file")
-    val json by jsonOption()
-}
-
 internal class LogsCommand : PendingCommand("logs", "The thread of a session: tools, rules, requests") {
     val session by argument("session").optional()
     val follow by option("--follow", help = "Follow live").flag()
@@ -145,8 +122,8 @@ fun pendingCommands(implemented: List<CliktCommand>): List<CliktCommand> {
         named("inbox"),
         named("approve"),
         named("deny"),
-        ReceiptsCommand().subcommands(ReceiptsListCommand(), ReceiptsShowCommand(), ReceiptsPullCommand()),
-        VerifyCommand(),
+        named("receipts"),
+        named("verify"),
         LogsCommand(),
         named("attach"),
         HarnessCommand().subcommands(
