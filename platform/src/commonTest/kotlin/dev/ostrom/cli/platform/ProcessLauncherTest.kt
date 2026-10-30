@@ -15,4 +15,10 @@ class ProcessLauncherTest {
     fun aMissingExecutableIsNotFoundEverywhere() {
         assertEquals(ProcessResult.NotFound, ProcessLauncherImpl().run(listOf("ostrom-no-such-executable-4f2c")))
     }
+
+    @Test
+    fun anOutcomeCarriesItsCodeOrItsReason() {
+        assertEquals(3, ProcessResult.Exited(3).code)
+        assertEquals("no permission", ProcessResult.Failed("no permission").reason)
+    }
 }

@@ -41,6 +41,25 @@ class ExecutableFinderTest {
     }
 
     @Test
+    fun theExtensionlessNpmShimIsSkippedOnWindows() {
+        val fileSystem = FakeFileSystem()
+        fileSystem.createDirectories("/npm".toPath())
+        fileSystem.write("/npm/claude".toPath()) { writeUtf8("#!/bin/sh") }
+        fileSystem.write("/npm/claude.cmd".toPath()) { writeUtf8("") }
+        val finder = ExecutableFinderImpl(windows("PATH" to "/npm", "PATHEXT" to ".EXE;.CMD"), fileSystem)
+        assertEquals("/npm/claude.cmd".toPath().toString(), finder.find("claude"))
+    }
+
+    @Test
+    fun aNameWithItsExtensionIsFoundAsItIsOnWindows() {
+        val fileSystem = FakeFileSystem()
+        fileSystem.createDirectories("/tools".toPath())
+        fileSystem.write("/tools/git.exe".toPath()) { writeUtf8("") }
+        val finder = ExecutableFinderImpl(windows("PATH" to "/tools"), fileSystem)
+        assertEquals("/tools/git.exe".toPath().toString(), finder.find("git.exe"))
+    }
+
+    @Test
     fun noPathMeansNothingIsFound() {
         assertNull(ExecutableFinderImpl(linux(), FakeFileSystem()).find("git"))
     }
@@ -66,7 +85,7 @@ class ExecutableFinderTest {
 
     @Test
     fun aLinkToAnExecutableIsFoundUnderItsOwnName() {
-        val fileSystem = FakeFileSystem()
+        val fileSystem = FakeFileSystem().apply { allowSymlinks = true }
         fileSystem.createDirectories("/opt/claude".toPath())
         fileSystem.createDirectories("/bin".toPath())
         fileSystem.write("/opt/claude/cli.js".toPath()) { writeUtf8("") }
