@@ -71,6 +71,8 @@ class PackageTrustTest {
         assertEquals(PackageOutcome.None, fetch())
         server[packageRoute] = 500 to """{"error":{"type":"internal","message":"boom"}}"""
         assertEquals(PackageOutcome.Refused("boom"), fetch())
+        server.unreachable = setOf(packageRoute)
+        assertEquals(PackageOutcome.Refused("connection refused"), fetch(), "an unreachable server is no 404")
     }
 
     @Test
@@ -108,6 +110,10 @@ class PackageTrustTest {
         serve()
         server[keysRoute] = 503 to "down"
         assertEquals(PackageOutcome.Refused("the server does not publish the key ${PackageVector.KID}"), fetch())
+        serve()
+        server[keysRoute] = 200 to """{"keys":[{"kid":"${PackageVector.KID}"}]}"""
+        val noPem = fetch()
+        assertEquals(PackageOutcome.Refused("the server does not publish the key ${PackageVector.KID}"), noPem)
     }
 
     @Test
