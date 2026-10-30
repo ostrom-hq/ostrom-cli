@@ -4,6 +4,7 @@ package dev.ostrom.cli.launcher.receipts
 import dev.ostrom.cli.launcher.sha256Hex
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -176,8 +177,9 @@ class CanonicalJsonTest {
 
     @Test
     fun aDocumentNestedTooDeepIsRefusedNotRecursedInto() {
-        val deep = "[".repeat(10_000) + "]".repeat(10_000)
-        assertFailsWith<CanonicalJsonException> { CanonicalJson.encode(Json.parseToJsonElement(deep)) }
+        // Built, not parsed: kotlinx's own parser overflows the JVM test stack on 10 000 levels.
+        val deep = (1..10_000).fold<Int, JsonElement>(JsonArray(emptyList())) { inner, _ -> JsonArray(listOf(inner)) }
+        assertFailsWith<CanonicalJsonException> { CanonicalJson.encode(deep) }
         val shallow = "[".repeat(CanonicalJson.MAX_DEPTH + 1) + "]".repeat(CanonicalJson.MAX_DEPTH + 1)
         assertEquals(shallow, CanonicalJson.encode(Json.parseToJsonElement(shallow)))
     }
