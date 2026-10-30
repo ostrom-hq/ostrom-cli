@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/lib.sh"
 script="$here/../latest-json.sh"

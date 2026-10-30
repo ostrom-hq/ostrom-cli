@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 rootProject.name = "ostrom-cli"
 enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
@@ -19,7 +20,7 @@ dependencyResolutionManagement {
                 username = providers.gradleProperty("gpr.user").orElse(providers.environmentVariable("GITHUB_ACTOR")).orNull
                 password = providers.gradleProperty("gpr.key").orElse(providers.environmentVariable("GITHUB_TOKEN")).orNull
             }
-            content { includeGroup("run.ostrom") }
+            content { includeGroup("dev.ostrom") }
         }
     }
 }
@@ -29,6 +30,14 @@ dependencyResolutionManagement {
 listOf("../ostrom-core", "../../ostrom-core")
     .map { file(it) }
     .firstOrNull { it.resolve("settings.gradle.kts").exists() }
-    ?.let { includeBuild(it) }
+    ?.let { core ->
+        includeBuild(core) {
+            // ostrom-core publishes its projects under other names (`api` as `ostrom-api`): map them by hand.
+            dependencySubstitution {
+                substitute(module("dev.ostrom:ostrom-api")).using(project(":api"))
+                substitute(module("dev.ostrom:ostrom-receipts")).using(project(":receipts"))
+            }
+        }
+    }
 
 include(":platform", ":api-client", ":hooks", ":launcher", ":mcp", ":cli")

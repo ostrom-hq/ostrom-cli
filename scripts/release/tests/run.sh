@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # Runs every scripts/release/tests/test-*.sh; fails if one fails.
 here=$(cd "$(dirname "$0")" && pwd)
 status=0

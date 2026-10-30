@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 plugins {
-    id("ostrom.native-module")
+    id("ostrom.kmp")
 }
 
 kotlin {

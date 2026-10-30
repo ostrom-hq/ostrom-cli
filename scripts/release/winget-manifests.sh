@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # Usage: winget-manifests.sh <version> <releases-base-url> <dist-dir> <out-dir>
 # Writes the three winget manifest files (version, installer, defaultLocale) of OstromHQ.Ostrom into <out-dir>.
 set -eu

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # Usage: brew-formula.sh <version> <releases-base-url> <dist-dir>   (prints Formula/ostrom.rb)
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)

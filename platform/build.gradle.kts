@@ -1,8 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 import org.jetbrains.kotlin.konan.target.Family
 
 plugins {
-    id("ostrom.native-module")
+    id("ostrom.kmp")
 }
 
 kotlin {

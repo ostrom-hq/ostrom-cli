@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # Ostrom installer:  curl -fsSL https://ostrom.run/install.sh | sh
 #
 # Environment:

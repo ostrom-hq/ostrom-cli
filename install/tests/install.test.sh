@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # Tests of install.sh against a fake release served by python3 -m http.server on localhost.
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/../../scripts/release/tests/lib.sh"

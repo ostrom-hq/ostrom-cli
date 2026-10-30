@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # Shared helpers for the release scripts (POSIX sh).
 
 die() { printf '%s\n' "$*" >&2; exit 1; }

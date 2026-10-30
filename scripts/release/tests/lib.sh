@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # Tiny assertion helpers shared by the release script tests (POSIX sh).
 FAILS=0
 TESTS=0

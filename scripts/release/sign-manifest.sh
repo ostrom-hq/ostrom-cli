@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # Usage: sign-manifest.sh <file>
 # Signs <file> with Ed25519 (raw message, no prehash) using the PEM PKCS#8 key in $RELEASE_SIGNING_KEY and writes
 # the base64 signature (one line) to <file>.sig. Needs OpenSSL 3. The key never touches the disk unprotected

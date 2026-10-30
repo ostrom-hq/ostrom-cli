@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # Usage: latest-json.sh <version> <releases-base-url> <dist-dir>
 # Prints the update manifest read by `ostrom update` and the installers:
 #   {"version","date","assets":{"<target>":{"url","sha256","size"}}}

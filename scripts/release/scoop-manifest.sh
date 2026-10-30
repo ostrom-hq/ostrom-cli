@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # Usage: scoop-manifest.sh <version> <releases-base-url> <dist-dir>   (prints ostrom.json)
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)

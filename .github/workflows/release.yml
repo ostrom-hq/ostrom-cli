@@ -55,6 +55,7 @@ jobs:
 
   build-linux:
     name: build linuxX64, linuxArm64, mingwX64
+    needs: version
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -75,8 +76,9 @@ jobs:
       - name: Link the release executables
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: >-
-          ./gradlew
+          ./gradlew -PostromVersion="$VERSION"
           :cli:linkReleaseExecutableLinuxX64 :cli:linkReleaseExecutableLinuxArm64 :cli:linkReleaseExecutableMingwX64
       - name: Stage the binaries
         run: |
@@ -94,6 +96,7 @@ jobs:
   # macOS arm64 is the expensive runner: this is the only macOS job of the release.
   build-macos:
     name: build macosArm64
+    needs: version
     runs-on: macos-15
     timeout-minutes: 60
     env:
@@ -119,7 +122,8 @@ jobs:
       - name: Link the release executable
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./gradlew :cli:linkReleaseExecutableMacosArm64
+          VERSION: ${{ needs.version.outputs.version }}
+        run: ./gradlew -PostromVersion="$VERSION" :cli:linkReleaseExecutableMacosArm64
       - name: Stage the binary
         run: |
           set -eu
