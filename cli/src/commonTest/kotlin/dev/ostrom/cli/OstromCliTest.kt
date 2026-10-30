@@ -319,6 +319,8 @@ class OstromCliTest : CliKit() {
         assertTrue(dependencies.configFile("/x").endsWith("config.toml"))
         assertTrue(dependencies.workingDirectory().isNotEmpty())
         assertEquals(null, dependencies.credentials("/nowhere-ostrom").load("https://ostrom.example")?.login)
+        assertEquals(64, dependencies.gateWait().await("not an id!", 1).exitCode, "never sent")
+        pause(1)
     }
 
     @Test
@@ -603,6 +605,7 @@ class OstromCliTest : CliKit() {
             executable = null,
             temporaryDirectory = "/tmp",
             agents = AgentRunner { _, _ -> 0 },
+            gateWait = { error("no gate wait in this test") },
             sleep = {},
             mcpBridge = { object : McpServer { override fun serve() = 0 } },
             capture = FakeMysql(),

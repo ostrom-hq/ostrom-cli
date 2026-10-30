@@ -92,6 +92,7 @@ class AgentLaunchUseCaseTest {
         assertEquals("http://127.0.0.1:4100", environment[LaunchVariables.RELAY_URL])
         // S2-25: the agent gets its own capability; the hooks' is in a private file, never in an environment
         assertEquals("client-token", environment[LaunchVariables.RELAY_TOKEN])
+        assertEquals("client-token", environment[LaunchVariables.RELAY_CLIENT], "for ostrom wait in Codex's shell")
         val tokenFile = join(temporary, "relay-token")
         assertEquals(tokenFile, environment[LaunchVariables.RELAY_TOKEN_FILE])
         assertEquals("relay-token", filesWhileRunning[tokenFile])

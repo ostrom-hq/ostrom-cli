@@ -13,6 +13,12 @@ object LaunchVariables {
     /** The agent's capability on the relay, for this launch only: its MCP servers and inference, no hook route. */
     const val RELAY_TOKEN = "OSTROM_RELAY_TOKEN"
 
+    /**
+     * [RELAY_TOKEN] again, for `ostrom wait` in the agent's shell: Codex's default shell policy drops the variables
+     * named like a token, a key or a secret.
+     */
+    const val RELAY_CLIENT = "OSTROM_RELAY_CLIENT"
+
     /** The private file holding the hooks' capability on the relay, which never enters an environment (S2-25). */
     const val RELAY_TOKEN_FILE = "OSTROM_RELAY_TOKEN_FILE"
 

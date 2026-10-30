@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """A coding agent as `ostrom <agent>` sees one: it reads the harness Ostrom laid down for the session the way Claude
 Code (`--plugin-dir` → hooks/hooks.json) or Codex (`-c hooks.<Event>=[…]`) reads it, then plays the hooks a real
-session fires: session start, a harmless tool, a gated deployment, the after-tool hook, session end. What it saw and
-what each hook answered go to $E2E_REPORT. With a package, it then rewrites the package's hook view and fires one more
-tool, which the hooks must hold (S2-33); what; it exits with $E2E_EXIT (3 by default), which `ostrom` must hand back.
+session fires: session start, a harmless tool, a gated deployment (and, when the gate says so, `ostrom wait` as its own
+command, the way a model obeys the refusal; $E2E_OSTROM names the binary), the after-tool hook, session end. What it
+saw and what each hook answered go to $E2E_REPORT. With a package, it then rewrites the package's hook view and fires
+one more tool, which the hooks must hold (S2-33); it exits with $E2E_EXIT (3 by default), which `ostrom` must hand
+back.
 
 Installed by the run as `claude` and `codex` (the name it is started under picks the dialect).
 """
@@ -65,6 +67,12 @@ def main():
     for command in ("ls -la", "kubectl apply -f prod.yaml"):
         tool = {"tool_name": "Bash", "tool_input": {"command": command}}
         fired.append(fire(hooks["PreToolUse"], {**base, "hook_event_name": "PreToolUse", **tool}))
+        asked = re.search(r"ostrom wait ([A-Za-z0-9_-]+)", fired[-1]["stdout"] + fired[-1]["stderr"])
+        if asked and os.environ.get("E2E_OSTROM"):
+            done = subprocess.run([os.environ["E2E_OSTROM"], "wait", asked.group(1), "--timeout", "5"],
+                                  capture_output=True, text=True, timeout=60)
+            fired.append({"event": "wait", "tool": asked.group(1), "code": done.returncode, "stdout": done.stdout,
+                          "stderr": done.stderr})
     # the budget of a hook in a real session: the relay asked, Ostrom's signed policy checked, at every tool call
     harmless = {**base, "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "ls -la"}}
     runs = int(os.environ.get("E2E_TIMED_RUNS", "0"))
