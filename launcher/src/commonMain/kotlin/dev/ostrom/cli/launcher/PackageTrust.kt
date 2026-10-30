@@ -44,14 +44,22 @@ class PackageTrust(
      * @param token The device token.
      * @param repo The repository of the session.
      * @param configDirectory The CLI's folder.
+     * @param keep False for a dry run: nothing is written, neither the envelope nor the pin of a first key, which is
+     * only said (the first real launch pins it).
      */
-    suspend fun fetch(serverUrl: String, token: String, repo: String, configDirectory: String): PackageOutcome {
+    suspend fun fetch(
+        serverUrl: String,
+        token: String,
+        repo: String,
+        configDirectory: String,
+        keep: Boolean,
+    ): PackageOutcome {
         val route = "${Routes.PACKAGE}?repo=${Routes.encode(repo)}"
         val outcome = when (val answer = server.get(route, token, FETCH_MILLIS)) {
             is ServerAnswer.Failed ->
                 if (answer.status == NOT_FOUND) PackageOutcome.None else PackageOutcome.Refused(answer.message)
-            is ServerAnswer.Ok -> verify(answer.body, serverUrl, repo, configDirectory).also { verified ->
-                if (verified is PackageOutcome.Verified) {
+            is ServerAnswer.Ok -> verify(answer.body, Asked(serverUrl, repo, configDirectory, keep)).also { verified ->
+                if (verified is PackageOutcome.Verified && keep) {
                     val kept = join(configDirectory, "packages", "${verified.pack.digest}.json")
                     files.write(kept, answer.body.toString(), FileAccess.PRIVATE)
                 }
@@ -60,20 +68,18 @@ class PackageTrust(
         return outcome
     }
 
-    private suspend fun verify(
-        envelope: JsonObject,
-        serverUrl: String,
-        repo: String,
-        configDirectory: String,
-    ): PackageOutcome {
+    /** What a fetch was asked for: the server, the repository, the CLI's folder, and whether to keep anything. */
+    private class Asked(val serverUrl: String, val repo: String, val configDirectory: String, val keep: Boolean)
+
+    private suspend fun verify(envelope: JsonObject, asked: Asked): PackageOutcome {
         val payload = envelope.text("payload")
         val refusal = payload?.let { refusalOf(envelope, it) }
         return when {
             payload == null -> PackageOutcome.Refused("no payload")
             refusal != null -> PackageOutcome.Refused(refusal)
-            else -> when (val pin = pinnedKey(serverUrl, configDirectory, envelope.text("kid").orEmpty())) {
+            else -> when (val pin = pinnedKey(asked, envelope.text("kid").orEmpty())) {
                 is Pin.Refused -> PackageOutcome.Refused(pin.reason)
-                is Pin.Key -> signed(envelope, payload, pin.pem, repo)
+                is Pin.Key -> signed(envelope, payload, pin.pem, asked.repo)
             }
         }
     }
@@ -124,11 +130,11 @@ class PackageTrust(
     }
 
     /** The key of [serverUrl], pinned on first use: a new key of the server is refused until unpinned on purpose. */
-    private suspend fun pinnedKey(serverUrl: String, configDirectory: String, kid: String): Pin {
-        val path = join(configDirectory, "server-keys.json")
+    private suspend fun pinnedKey(asked: Asked, kid: String): Pin {
+        val path = join(asked.configDirectory, "server-keys.json")
         val all = parseObject(files.read(path)) ?: JsonObject(emptyMap())
-        val pinned = all.child(serverUrl)
-        return if (pinned != null) checkPin(pinned, kid, serverUrl, path) else pin(all, serverUrl, kid, path)
+        val pinned = all.child(asked.serverUrl)
+        return if (pinned != null) checkPin(pinned, kid, asked.serverUrl, path) else pin(all, asked, kid, path)
     }
 
     private fun checkPin(pinned: JsonObject, kid: String, serverUrl: String, path: String): Pin {
@@ -143,13 +149,18 @@ class PackageTrust(
         }
     }
 
-    private suspend fun pin(all: JsonObject, serverUrl: String, kid: String, path: String): Pin {
+    private suspend fun pin(all: JsonObject, asked: Asked, kid: String, path: String): Pin {
+        val serverUrl = asked.serverUrl
         val keys = (server.get(Routes.KEYS, null) as? ServerAnswer.Ok)?.let { it.body.list("keys") }.orEmpty()
         val key = keys.filterIsInstance<JsonObject>().firstOrNull { it.text("kid") == kid }
         val pem = key?.text("publicKeyPem") ?: return Pin.Refused("the server does not publish the key $kid")
-        val entry = objectOf("kid" to kid, "publicKeyPem" to pem, "pinnedAt" to now())
-        files.write(path, pretty(JsonObject(all + (serverUrl to entry))), FileAccess.PRIVATE)
-        say("pinned Ostrom's signing key $kid for $serverUrl (first use)")
+        if (asked.keep) {
+            val entry = objectOf("kid" to kid, "publicKeyPem" to pem, "pinnedAt" to now())
+            files.write(path, pretty(JsonObject(all + (serverUrl to entry))), FileAccess.PRIVATE)
+            say("pinned Ostrom's signing key $kid for $serverUrl (first use)")
+        } else {
+            say("Ostrom's signing key $kid for $serverUrl is not pinned yet: the first launch pins it")
+        }
         return Pin.Key(pem)
     }
 

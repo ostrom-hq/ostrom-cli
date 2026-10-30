@@ -29,13 +29,52 @@ interface FileStore {
 
     /** The names of the entries of the folder [path], sorted; none when it does not exist or is not a folder. */
     fun list(path: String): List<String>
+
+    /**
+     * Runs [block] holding the exclusive lock of [path], which every ostrom process takes before it reads and then
+     * rewrites that file: two at once (two `ostrom login`) would otherwise each write back what it read, and the
+     * second would lose the first one's change. The lock is a `<path>.lock` file beside it, never deleted.
+     *
+     * @throws FileWriteException When the lock file cannot be created or locked.
+     */
+    fun <T> exclusive(path: String, block: () -> T): T
 }
+
+/** Takes an exclusive lock on a file, released when the returned handle is closed. */
+interface FileLocker {
+    /**
+     * Waits for, then takes, the exclusive lock of the file at [path] (created, owner-only, when missing).
+     *
+     * @throws okio.IOException When the file cannot be created or locked.
+     */
+    fun lock(path: String): AutoCloseable
+}
+
+/** The operating system's own lock: `flock` on macOS and Linux, `LockFileEx` on Windows; other processes wait. */
+object SystemFileLocker : FileLocker {
+    override fun lock(path: String): AutoCloseable = lockFile(path)
+}
+
+/** No lock: a file system no other process sees (a test's fake) has nobody to keep out. */
+object NoFileLocker : FileLocker {
+    override fun lock(path: String): AutoCloseable = AutoCloseable { }
+}
+
+/** The lock of [SystemFileLocker] on this platform. */
+internal expect fun lockFile(path: String): AutoCloseable
 
 /** A file of the CLI could not be written (exit code 73). */
 class FileWriteException(val path: String, cause: Throwable) : Exception(cause)
 
-/** [FileStore] over okio's [FileSystem.SYSTEM]. */
-class FileStoreImpl(private val fileSystem: FileSystem = FileSystem.SYSTEM) : FileStore {
+/**
+ * [FileStore] over okio's [FileSystem.SYSTEM].
+ *
+ * @param locker Locks for [exclusive]: the system's for the real file system, none for another one (a test's fake).
+ */
+class FileStoreImpl(
+    private val fileSystem: FileSystem = FileSystem.SYSTEM,
+    private val locker: FileLocker = if (fileSystem === FileSystem.SYSTEM) SystemFileLocker else NoFileLocker,
+) : FileStore {
     override fun read(path: String): String? = try {
         fileSystem.read(path.toPath()) { readUtf8() }
     } catch (_: IOException) {
@@ -62,6 +101,17 @@ class FileStoreImpl(private val fileSystem: FileSystem = FileSystem.SYSTEM) : Fi
     }
 
     override fun delete(path: String) = fileSystem.delete(path.toPath(), mustExist = false)
+
+    override fun <T> exclusive(path: String, block: () -> T): T {
+        val lockPath = "$path.lock"
+        val lock = try {
+            fileSystem.createDirectories(requireNotNull(path.toPath().parent) { "$path is a root, not a file." })
+            locker.lock(lockPath)
+        } catch (e: IOException) {
+            throw FileWriteException(lockPath, e)
+        }
+        return lock.use { block() }
+    }
 
     override fun exists(path: String): Boolean = try {
         fileSystem.exists(path.toPath())

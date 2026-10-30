@@ -10,6 +10,18 @@ base=https://example.test/releases
 out=$(RELEASE_DATE=2026-10-30T10:00:00Z sh "$script" 1.2.3 "$base" "$tmp/dist")
 assert_eq "valid JSON" "1.2.3" "$(printf '%s' "$out" | jq -r .version)"
 assert_eq "date" "2026-10-30T10:00:00Z" "$(printf '%s' "$out" | jq -r .date)"
+assert_eq "the floor of the repository (S2-39)" "$(tr -d ' \n\r' < "$here/../../../release-floor.txt")" \
+  "$(printf '%s' "$out" | jq -r .floor)"
+floored=$(RELEASE_FLOOR=1.2.0 sh "$script" 1.2.3 "$base" "$tmp/dist")
+assert_eq "the floor given" "1.2.0" "$(printf '%s' "$floored" | jq -r .floor)"
+assert_eq "a floor equal to the version" "1.2.3" \
+  "$(RELEASE_FLOOR=1.2.3 sh "$script" 1.2.3 "$base" "$tmp/dist" | jq -r .floor)"
+assert_fails "a floor above the version" env RELEASE_FLOOR=1.2.4 sh "$script" 1.2.3 "$base" "$tmp/dist"
+make_fixture "$tmp/dist10" 1.10.0
+assert_eq "versions compared by number, not text" "1.9.0" \
+  "$(RELEASE_FLOOR=1.9.0 sh "$script" 1.10.0 "$base" "$tmp/dist10" | jq -r .floor)"
+assert_fails "a floor above, by number" env RELEASE_FLOOR=1.11.0 sh "$script" 1.10.0 "$base" "$tmp/dist10"
+assert_fails "a floor that is not a version" env RELEASE_FLOOR=latest sh "$script" 1.2.3 "$base" "$tmp/dist"
 assert_eq "four targets" "linux-arm64,linux-x64,macos-arm64,windows-x64" \
   "$(printf '%s' "$out" | jq -r '.assets | keys | join(",")')"
 assert_eq "url layout" "$base/download/1.2.3/ostrom-1.2.3-linux-x64.tar.gz" \
