@@ -31,7 +31,9 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 import urllib.error
+import urllib.parse
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -49,6 +51,8 @@ class Journey:
         self.work = options.work or tempfile.mkdtemp(prefix="ostrom-journey-")
         self.stamp = f"{int(time.time()):x}{os.getpid() % 4096:03x}"
         self.org_resolved = False
+        self.invitee = None
+        self.temporary = options.work is None
 
     # ---- what the run says -------------------------------------------------------------------------------------
 
@@ -112,11 +116,11 @@ class Journey:
         status, body, _ = self.call(method, path, {} if method not in ("GET", "HEAD", "DELETE") else None)
         if status != 404:
             return True
-        return not (isinstance(body, dict) and (body.get("error") or {}).get("message") == GENERIC_404)
+        return error_of(body) != GENERIC_404
 
     def mail_token(self, email, page, since):
         """The token of the newest mail to [email] whose link opens [page] (`/auth/email`, `/invite`)."""
-        pattern = re.compile(re.escape(page) + r"#token=([A-Za-z0-9._~%-]+)\s")
+        pattern = re.compile(re.escape(page) + r"#token=([A-Za-z0-9._~%-]+)")
         deadline = time.time() + MAIL_WAIT_S
         while time.time() < deadline:
             found = []
@@ -127,9 +131,10 @@ class Journey:
                 with open(path, encoding="utf-8", errors="replace") as handle:
                     text = handle.read()
                 head = text.split("\n\n", 1)[0].lower().splitlines()
+                to = any(line.startswith("to:") and email.lower() in line for line in head)
                 match = pattern.search(text + "\n")
-                if f"to: {email.lower()}" in head and match:
-                    found.append((os.path.getmtime(path), urllib.request.unquote(match.group(1))))
+                if to and match:
+                    found.append((os.path.getmtime(path), urllib.parse.unquote(match.group(1))))
             if found:
                 return max(found)[1]
             time.sleep(0.5)
@@ -221,11 +226,13 @@ class Journey:
         status, _, _ = self.call("POST", "/api/v1/auth/device/answer", {"userCode": user_code, "approve": True},
                                  session=session)
         self.check(status in (200, 204), f"{who(email)} says yes on the console ({status})")
+        # stderr is the reader's alone; stdout (two short lines) is read once the login has ended
         try:
-            out, _ = process.communicate(timeout=60)
+            process.wait(timeout=60)
         except subprocess.TimeoutExpired:
             process.kill()
-            out = ""
+            process.wait()
+        out = process.stdout.read()
         reader.join(5)
         self.step["commands"].append({"who": machine["name"], "command": f"ostrom login --server {self.server}",
                                       "exit": process.returncode, "stdout": out, "stderr": "".join(said)})
@@ -242,7 +249,6 @@ class Journey:
         owner_email = f"owner-{self.stamp}@e2e.ostrom.test"
         tom_email = f"tom-{self.stamp}@e2e.ostrom.test"
         maya = self.machine("maya")
-        tom = self.machine("tom")
 
         self.begin("5.1", "ostrom login: the device flow, approved on the console")
         if not self.needs(("POST", "/api/v1/auth/device"), ("POST", "/api/v1/auth/device/token"),
@@ -260,29 +266,30 @@ class Journey:
             return
         # A token made on the console is bound to no organisation: the server reads which one from Ostrom-Org.
         status, body, _ = self.call("GET", "/api/v1/workflows", token=maya["token"], org=org["id"])
-        message = (body or {}).get("error", {}).get("message", "") if isinstance(body, dict) else ""
-        self.org_resolved = not (status in (403, 404) and message in UNRESOLVED_ORG)
+        self.org_resolved = 200 <= status < 300
         if not self.org_resolved:
-            print(f"  note  the server answers {status} \"{message}\" to Ostrom-Org: {ORG_HEADER}", flush=True)
+            print(f"  note  GET /api/v1/workflows with Ostrom-Org answers {status} \"{error_of(body)}\": "
+                  f"{ORG_HEADER}", flush=True)
 
         self.begin("2.1", "ostrom init: the organisation, the repository, the agents' hooks, the starting rules")
         if self.needs(("GET", "/api/v1/orgs"), ("GET", "/api/v1/workflows"), on_main=True, org=True):
             self.init(maya, org)
-        self.team(maya, tom, tom_email, org)
+        self.team(maya, tom_email, org)
 
     def init(self, maya, org):
         done = self.ostrom(maya, "init", "--yes", "--json")
-        summary = read_json(done.stdout) if done.returncode == 0 else {}
+        summary = (read_json(done.stdout) if done.returncode == 0 else None) or {}
         self.check(done.returncode == 0, f"ostrom init exits 0 ({done.returncode}): {done.stderr.strip()[:300]}")
         self.check((summary.get("org") or {}).get("id") == org["id"], "init links the owner's organisation")
         self.check(summary.get("repo") == "acme-api", "init finds the repository")
         if summary.get("hooks") is not None:
-            with open(os.path.join(maya["home"], ".bashrc"), encoding="utf-8") as handle:
-                self.check("# >>> ostrom:" in handle.read(), "the agents start with Ostrom's hooks (~/.bashrc)")
+            bashrc = os.path.join(maya["home"], ".bashrc")
+            written = os.path.exists(bashrc) and "# >>> ostrom:" in open(bashrc, encoding="utf-8").read()
+            self.check(written, "the agents start with Ostrom's hooks (~/.bashrc)")
         again = self.ostrom(maya, "init", "--yes", console=True)
         self.check(again.returncode == 0, f"init again, with a console token, exits 0 ({again.returncode})")
 
-    def team(self, maya, tom, tom_email, org):
+    def team(self, maya, tom_email, org):
         """2.6, 2.7, then the policy, the rules, the harness and the launch."""
         self.begin("2.6", "ostrom invite and ostrom members")
         members = f"/api/v1/orgs/{org['id']}/members"
@@ -308,11 +315,11 @@ class Journey:
             self.check(done.returncode == 0 and len(members) == 2, f"members list shows the two of them "
                                                                    f"({done.returncode}, {len(members)})")
             tom_login = next((m.get("login") for m in members if m.get("role") != "owner"), None)
+            self.invitee = tom_login
             if tom_login:
                 done = self.ostrom(maya, "members", "role", tom_login, "admin", console=True)
                 self.check(done.returncode == 0, f"a console token makes @{tom_login} admin ({done.returncode}): "
                                                  f"{done.stderr.strip()[:300]}")
-                tom["login"] = tom_login
 
         self.begin("3.4", "ostrom policy: the models and who may start which agent")
         if self.needs(("GET", "/api/v1/policy/models"), org=True):
@@ -347,10 +354,10 @@ class Journey:
                       org=True):
             self.claude(maya)
 
-        if tom.get("login"):
+        if self.invitee:
             self.begin("2.6", "ostrom members remove")
-            done = self.ostrom(maya, "members", "remove", tom["login"], "--yes", console=True)
-            self.check(done.returncode == 0, f"a console token removes @{tom['login']} ({done.returncode}): "
+            done = self.ostrom(maya, "members", "remove", self.invitee, "--yes", console=True)
+            self.check(done.returncode == 0, f"a console token removes @{self.invitee} ({done.returncode}): "
                                              f"{done.stderr.strip()[:300]}")
 
     def harness(self, maya):
@@ -404,7 +411,9 @@ class Journey:
             return
         with open(report) as handle:
             seen = json.load(handle)
-        self.check("OSTROM_TOKEN" not in seen["environment"], "the device's token never reaches the agent")
+        self.check("OSTROM_TOKEN" not in seen["environment"] and
+                   maya["token"] not in json.dumps(seen["environment"]),
+                   "no Ostrom token of the developer is in the agent's environment")
         hooks = {(hook["event"], hook["tool"]): hook for hook in seen["hooks"]}
         start = hooks.get(("SessionStart", None)) or {}
         self.check(start.get("code") == 0, f"the session starts on the server (hook exit {start.get('code')})")
@@ -432,8 +441,6 @@ class Journey:
 
 
 CODE = re.compile(r"one-time code: (\S+)")
-# What a server that does not read Ostrom-Org answers a token bound to no organisation.
-UNRESOLVED_ORG = ("This credential belongs to no organization.", "Organization not found.")
 ORG_HEADER = "Ostrom-Org (the organisation of a token bound to none, server#64)"
 
 
@@ -442,6 +449,12 @@ def read_json(raw):
         return json.loads(raw) if raw else None
     except ValueError:
         return None
+
+
+def error_of(body):
+    """The message of an error answer, whatever its shape."""
+    error = body.get("error") if isinstance(body, dict) else None
+    return error.get("message", "") if isinstance(error, dict) else str(error or "")
 
 
 def who(email):
@@ -469,8 +482,18 @@ def main():
     journey = Journey(options)
     try:
         journey.run()
-    finally:
-        code = journey.report()
+    except BaseException as error:  # noqa: BLE001 - the step that stopped the run is failed in the report, then said
+        if journey.step is not None:
+            journey.step["status"] = "failed"
+            journey.step["checks"].append({"ok": False, "what": f"the step stopped: {type(error).__name__}"})
+        if not isinstance(error, SystemExit):
+            traceback.print_exc()
+        elif error.code not in (None, 0):
+            print(error.code, file=sys.stderr)
+    code = journey.report()
+    if journey.temporary:
+        # the machines hold the device tokens ostrom login stored
+        shutil.rmtree(journey.work, ignore_errors=True)
     sys.exit(code)
 
 

@@ -30,8 +30,6 @@ env:
 
 permissions:
   contents: read
-  # The real server's image, ghcr.io/ostrom-hq/ostrom-server (private), for the journey against the real server.
-  packages: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -43,6 +41,10 @@ jobs:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     timeout-minutes: 60
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      # The real server's image, ghcr.io/ostrom-hq/ostrom-server (private), for the journey against the real server.
+      packages: read
     env:
       HAS_SERVER_KEY: ${{ secrets.DEPLOY_KEY_SERVER != '' }}
     # The real server's database, for the CLI's journey against the real server (as ostrom-web's journeys). The
@@ -179,6 +181,7 @@ jobs:
           }
           if [ "$HAS_SERVER_KEY" != "true" ]; then
             # Never fatal: a pull request from outside has no deploy key.
+            echo "::warning title=Journey against the real server skipped::no deploy key for ostrom-server"
             echo "The CLI journey against the real server **skipped**: no deploy key for ostrom-server." \
               >> "$GITHUB_STEP_SUMMARY"
             echo "ready=false" >> "$GITHUB_OUTPUT"
