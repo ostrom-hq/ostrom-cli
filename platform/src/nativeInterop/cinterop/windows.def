@@ -6,6 +6,7 @@ linkerOpts = -lkernel32 -lws2_32
 #endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <mstcpip.h>
 #include <windows.h>
 #include <string.h>
 
@@ -149,7 +150,12 @@ static inline int ostrom_capture_w(const unsigned short *command_line, unsigned 
         if (GetTickCount64() - start >= (ULONGLONG)timeout_ms) { timed_out = 1; break; }
         DWORD available = 0;
         if (!PeekNamedPipe(read_end, NULL, 0, NULL, &available, NULL)) break;
-        if (available == 0) { Sleep(1); continue; }
+        if (available == 0) {
+            /* a child that exited is seen even if a grandchild keeps the pipe */
+            if (WaitForSingleObject(process.hProcess, 0) == WAIT_OBJECT_0) break;
+            Sleep(1);
+            continue;
+        }
         DWORD count = 0;
         BOOL read = total < capacity
             ? ReadFile(read_end, out + total, (DWORD)(capacity - total) < available ? (DWORD)(capacity - total) : available, &count, NULL)
@@ -158,8 +164,16 @@ static inline int ostrom_capture_w(const unsigned short *command_line, unsigned 
         if (total < capacity) total += (int)count;
     }
     CloseHandle(read_end);
-    if (timed_out) TerminateProcess(process.hProcess, 1);
-    WaitForSingleObject(process.hProcess, INFINITE);
+    if (!timed_out) {
+        /* the pipe is closed or broken: the child still has until the deadline to exit, never longer */
+        ULONGLONG spent = GetTickCount64() - start;
+        DWORD left = spent >= (ULONGLONG)timeout_ms ? 0 : (DWORD)((ULONGLONG)timeout_ms - spent);
+        if (WaitForSingleObject(process.hProcess, left) != WAIT_OBJECT_0) timed_out = 1;
+    }
+    if (timed_out) {
+        TerminateProcess(process.hProcess, 1);
+        WaitForSingleObject(process.hProcess, 5000);
+    }
     DWORD code = 0;
     GetExitCodeProcess(process.hProcess, &code);
     CloseHandle(process.hProcess);
@@ -219,12 +233,28 @@ static inline int ostrom_tcp_exchange(int port, const unsigned char *request, in
     address.sin_family = AF_INET;
     address.sin_port = htons((unsigned short)port);
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+#if defined(SIO_TCP_INITIAL_RTO) && defined(TCP_INITIAL_RTO_NO_SYN_RETRANSMISSIONS)
+    /* Windows retries a refused SYN for about two seconds, even on the loopback: a closed port must fail at once */
+    TCP_INITIAL_RTO_PARAMETERS rto = {TCP_INITIAL_RTO_UNSPECIFIED_RTT, TCP_INITIAL_RTO_NO_SYN_RETRANSMISSIONS};
+    DWORD returned = 0;
+    WSAIoctl(s, SIO_TCP_INITIAL_RTO, &rto, sizeof rto, NULL, 0, &returned, NULL, NULL);
+#endif
     if (connect(s, (struct sockaddr *)&address, sizeof address) != 0) {
         if (WSAGetLastError() != WSAEWOULDBLOCK) { closesocket(s); return -1; }
-        int ready = ostrom_wait_socket(s, POLLWRNORM, start, timeout_ms);
+        /* select, not WSAPoll: older WSAPoll never reports a connect that failed */
+        ULONGLONG spent = GetTickCount64() - start;
+        long left = spent >= (ULONGLONG)timeout_ms ? 0 : (long)((ULONGLONG)timeout_ms - spent);
+        fd_set writable, failed;
+        FD_ZERO(&writable);
+        FD_ZERO(&failed);
+        FD_SET(s, &writable);
+        FD_SET(s, &failed);
+        struct timeval delay = {left / 1000, (left % 1000) * 1000};
+        int ready = select(0, NULL, &writable, &failed, &delay);
         int error = 0;
         int size = sizeof error;
-        if (ready <= 0 || getsockopt(s, SOL_SOCKET, SO_ERROR, (char *)&error, &size) != 0 || error != 0) {
+        if (ready <= 0 || FD_ISSET(s, &failed) ||
+            getsockopt(s, SOL_SOCKET, SO_ERROR, (char *)&error, &size) != 0 || error != 0) {
             closesocket(s);
             return ready == 0 ? -2 : -1;
         }

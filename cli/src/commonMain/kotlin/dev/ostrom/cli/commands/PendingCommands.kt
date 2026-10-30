@@ -151,6 +151,7 @@ fun pendingCommands(implemented: List<CliktCommand>): List<CliktCommand> {
         InitCommand(),
         named("config"),
         named("doctor"),
+        named("telemetry"),
         named("update"),
         named("version"),
         InviteCommand(),
