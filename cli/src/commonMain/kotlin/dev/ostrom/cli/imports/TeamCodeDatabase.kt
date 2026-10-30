@@ -45,7 +45,7 @@ class TeamCodeDatabase(private val capture: ProcessCapture, private val mysql: S
             .groupBy({ it["t"].toString().lowercase() }, { it["c"].toString().lowercase() })
         val selects = WANTED.map { (table, wanted) ->
             val present = existing[table].orEmpty().toSet()
-            val missing = wanted.required - present
+            val missing = wanted.required + wanted.filtered - present
             if (missing.isNotEmpty()) {
                 throw TeamCodeReadException("TeamCode's $table table has no ${missing.joinToString()} column.")
             }
@@ -85,29 +85,42 @@ class TeamCodeDatabase(private val capture: ProcessCapture, private val mysql: S
     }
 
     /** The columns read from a table, and which rows. */
-    private class Wanted(val required: List<String>, val optional: List<String>, val filter: (String) -> String)
+    /** The columns read ([required], [optional] when there), those [filtered] on, and the filter for a team. */
+    private class Wanted(
+        val required: List<String>,
+        val optional: List<String>,
+        val filtered: List<String>,
+        val filter: (String) -> String,
+    )
 
     /** The queries of the read. */
     companion object {
         private const val TIMEOUT_MILLIS = 60_000
         private val TEAM = Regex("[A-Za-z0-9_-]{1,64}")
+        private val TEAM_ONLY = listOf("team_id")
+        private val TEAM_AND_KIND = listOf("team_id", "kind")
         private val COLUMNS = "SELECT 'columns' AS ${MysqlBatch.MARKER}; " +
             "SELECT table_name AS t, column_name AS c FROM " +
             "information_schema.columns WHERE table_schema = DATABASE() AND table_name IN ('members', 'variants', " +
             "'variant_assignments', 'mcp_tool_policies', 'accounts');"
         private val WANTED = mapOf(
-            "members" to Wanted(listOf("id", "username"), listOf("email")) { "team_id = '$it'" },
+            // a column filtered on is checked like a read one: a schema without it is named, not a mysql error
+            "members" to Wanted(listOf("id", "username"), listOf("email"), TEAM_ONLY) { "team_id = '$it'" },
             "variants" to Wanted(
                 listOf("id", "target", "name", "binding", "config"),
                 listOf("endpoint", "shared_secret", "transport", "command", "args"),
+                TEAM_AND_KIND,
             ) { "team_id = '$it' AND kind = 'MCP'" },
-            "variant_assignments" to Wanted(listOf("member_id", "variant_id"), listOf("member_secret")) {
+            "variant_assignments" to Wanted(listOf("member_id", "variant_id"), listOf("member_secret"), TEAM_AND_KIND) {
                 "team_id = '$it' AND kind = 'MCP'"
             },
-            "mcp_tool_policies" to Wanted(listOf("variant_id", "mode", "tools"), emptyList()) { "team_id = '$it'" },
+            "mcp_tool_policies" to Wanted(listOf("variant_id", "mode", "tools"), emptyList(), TEAM_ONLY) {
+                "team_id = '$it'"
+            },
             "accounts" to Wanted(
                 listOf("id", "provider", "provider_account_id", "display_name", "credential_envelope"),
                 listOf("email", "disabled"),
+                TEAM_ONLY,
             ) { "team_id = '$it'" },
         )
     }

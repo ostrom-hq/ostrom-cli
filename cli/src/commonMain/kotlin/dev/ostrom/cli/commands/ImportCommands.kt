@@ -37,6 +37,8 @@ internal class ImportTeamCodeCommand(private val dependencies: CliDependencies) 
     private val server by option("--server", help = "Ostrom server URL (else OSTROM_URL, else the one of ostrom login)")
 
     override fun run() {
+        // an agent would send every secret of the team, opened, to the server it names (S2-32)
+        dependencies.outsideSessions("import teamcode")
         val directory = dependencies.directory()
         val serverUrl = dependencies.serverOf(server, directory)
         // Ostrom refuses the device token of `ostrom login` for import:write: only a console token imports
@@ -50,7 +52,8 @@ internal class ImportTeamCodeCommand(private val dependencies: CliDependencies) 
             TeamCodeDatabase(dependencies.capture),
             ServerJson(ApiServerTransport(dependencies.api(serverUrl))),
             token,
-        ) { dependencies.console.out(it) }
+            { dependencies.console.out(it) },
+        ) { dependencies.console.err(it) }
         val request = ImportTeamCodeRequest(db, dependencies.files.read(keyFile), team, yes)
         throw ProgramResult(runBlocking { import(request) })
     }

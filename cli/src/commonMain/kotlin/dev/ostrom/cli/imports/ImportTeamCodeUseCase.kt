@@ -27,13 +27,15 @@ data class ImportTeamCodeRequest(val db: String, val key: String?, val team: Str
  * then imports only with `--yes`. TeamCode is only read; no secret is printed nor written to disk.
  *
  * @param token An owner's or admin's console token (`import:write`): Ostrom refuses device and agent tokens.
- * @param say Prints text (each line with its line break) for the developer.
+ * @param say Prints text (each line with its line break) for the developer: the plan, the report.
+ * @param fail Prints why the import stopped, apart from the plan (stderr).
  */
 class ImportTeamCodeUseCase(
     private val database: TeamCodeDatabase,
     private val server: ServerJson,
     private val token: String,
     private val say: (String) -> Unit,
+    private val fail: (String) -> Unit,
 ) {
     /** Runs the import and returns the exit code (CLI.md § 2.3). */
     suspend operator fun invoke(request: ImportTeamCodeRequest): Int = try {
@@ -51,10 +53,10 @@ class ImportTeamCodeUseCase(
         }
         ExitCode.OK.code
     } catch (e: TeamCodeReadException) {
-        say("ostrom import teamcode: ${e.message}\n")
+        fail("ostrom import teamcode: ${e.message}\n")
         ExitCode.FAILED.code
     } catch (e: Stop) {
-        say("ostrom import teamcode: ${e.message}\n")
+        fail("ostrom import teamcode: ${e.message}\n")
         e.code.code
     }
 
@@ -70,6 +72,7 @@ class ImportTeamCodeUseCase(
             cursor = body.text("next")?.takeIf { it.isNotEmpty() }
             page++
         } while (cursor != null && page < MAX_PAGES)
+        if (cursor != null) say("! Ostrom has more than ${members.size} members: those after them are not matched.\n")
         return members
     }
 
@@ -85,7 +88,9 @@ class ImportTeamCodeUseCase(
             val match = if (email != null) {
                 members.firstOrNull { it.text("email").equals(email, ignoreCase = true) }
             } else {
-                members.firstOrNull { it.text("login").equals(member["username"], ignoreCase = true) }
+                // no username either: nobody to match, never a member without login
+                member["username"]?.takeIf { it.isNotEmpty() }
+                    ?.let { name -> members.firstOrNull { it.text("login").equals(name, ignoreCase = true) } }
             }
             match?.text("id")?.let { member["id"].orEmpty() to it }
         }

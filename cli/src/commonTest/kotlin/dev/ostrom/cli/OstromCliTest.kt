@@ -180,7 +180,11 @@ class OstromCliTest {
         val mysql = FakeMysql(FULL_SCHEMA, TEAM_TABLES)
         val noKey = cli(environment = admin, api = serverOf(emptyMap()), capture = mysql)
         assertEquals(64, noKey.run(arguments))
-        assertOut("--key-file holds no TeamCode key")
+        assertTrue("--key-file holds no TeamCode key" in console.err.toString(), "a failure goes to stderr")
+        // S2-32: an agent would send every secret of the team, opened, to the server it names
+        val inSession = cli(environment = admin + ("OSTROM_LAUNCH_ID" to "L1"), capture = mysql)
+        assertEquals(64, inSession.run(arguments))
+        assertTrue("ostrom import teamcode does not run inside an agent's session" in console.err.toString())
         fileSystem.createDirectories("/keys".toPath())
         fileSystem.write("/keys/tc.key".toPath()) { writeUtf8(Sealed.KEY + "\n") }
         val routes = mapOf(

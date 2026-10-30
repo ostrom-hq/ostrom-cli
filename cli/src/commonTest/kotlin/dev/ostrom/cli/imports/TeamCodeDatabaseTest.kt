@@ -41,11 +41,13 @@ class TeamCodeDatabaseTest {
     @Test
     fun anOptionalColumnTeamCodeDoesNotHaveIsLeftOutAndARequiredOneStops() {
         val older = columns(
-            "members" to listOf("id", "username"),
-            "variants" to listOf("id", "target", "name", "binding", "config", "endpoint", "shared_secret"),
-            "variant_assignments" to listOf("member_id", "variant_id", "member_secret"),
-            "mcp_tool_policies" to listOf("variant_id", "mode", "tools"),
-            "accounts" to listOf("id", "provider", "provider_account_id", "display_name", "credential_envelope"),
+            "members" to listOf("id", "username", "team_id"),
+            "variants" to
+                listOf("id", "target", "name", "binding", "config", "endpoint", "shared_secret", "team_id", "kind"),
+            "variant_assignments" to listOf("member_id", "variant_id", "member_secret", "team_id", "kind"),
+            "mcp_tool_policies" to listOf("variant_id", "mode", "tools", "team_id"),
+            "accounts" to
+                listOf("id", "provider", "provider_account_id", "display_name", "credential_envelope", "team_id"),
         )
         val mysql = FakeMysql(older, CaptureResult.Exited(0, ""))
         val tables = TeamCodeDatabase(mysql, "/opt/mysql").read("mysql://ro@db/teamcode", "team-1")
@@ -55,12 +57,15 @@ class TeamCodeDatabaseTest {
         assertTrue("SELECT `id`, `username` FROM `members`" in script, script)
         assertTrue("`transport`" !in script, script)
         assertEquals(listOf("/opt/mysql", "--port=3306"), mysql.commands.first().let { listOf(it[0], it[4]) })
-        val noBinding =
-            columns("variants" to listOf("id", "target", "name", "config"), "members" to listOf("id", "username"))
+        val members = "members" to listOf("id", "username", "team_id")
+        val noBinding = columns("variants" to listOf("id", "target", "name", "config", "team_id", "kind"), members)
         assertEquals("TeamCode's variants table has no binding column.", fails(FakeMysql(noBinding)))
-        val noVariants = columns("members" to listOf("id", "username"))
+        // a column the read filters on is named too, not left to a mysql error
+        val noKind = columns("variants" to listOf("id", "target", "name", "binding", "config", "team_id"), members)
+        assertEquals("TeamCode's variants table has no kind column.", fails(FakeMysql(noKind)))
+        val noVariants = columns(members)
         assertEquals(
-            "TeamCode's variants table has no id, target, name, binding, config column.",
+            "TeamCode's variants table has no id, target, name, binding, config, team_id, kind column.",
             fails(FakeMysql(noVariants)),
         )
     }

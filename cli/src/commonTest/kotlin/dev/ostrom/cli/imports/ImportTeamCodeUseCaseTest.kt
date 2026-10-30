@@ -16,6 +16,7 @@ import kotlin.test.assertTrue
 class ImportTeamCodeUseCaseTest {
     private val calls = mutableListOf<ServerCall>()
     private val said = StringBuilder()
+    private val failed = StringBuilder()
     private val replies = mutableMapOf(
         "GET /api/v1/members" to ServerReply(
             200,
@@ -37,7 +38,10 @@ class ImportTeamCodeUseCaseTest {
         key: String? = Sealed.KEY,
         mysql: FakeMysql = FakeMysql(FULL_SCHEMA, TEAM_TABLES),
     ): Int {
-        val useCase = ImportTeamCodeUseCase(TeamCodeDatabase(mysql), server, "ost_console") { said.append(it) }
+        val useCase = ImportTeamCodeUseCase(TeamCodeDatabase(mysql), server, "ost_console", { said.append(it) }) {
+            failed.append(it)
+            said.append(it)
+        }
         return useCase(ImportTeamCodeRequest("mysql://ro@db/teamcode", key, "default", apply))
     }
 
@@ -76,6 +80,19 @@ class ImportTeamCodeUseCaseTest {
         replies["GET /api/v1/members?before=p%2F2"] = ServerReply(200, """{"items":[],"next":"p/2"}""")
         assertEquals(0, import())
         assertEquals(20, calls.count { it.path.startsWith("/api/v1/members") })
+        val more = "! Ostrom has more than 1 members: those after them are not matched.\n"
+        assertTrue(said.contains(more), said.toString())
+        assertEquals("", failed.toString(), "nothing failed")
+    }
+
+    @Test
+    fun aMemberWithoutEmailNorUsernameMatchesNoOne() = runTest {
+        // never the Ostrom member without a login: null is not a name
+        val nameless = batch("members", listOf("id", "username", "email"), listOf("m3", null, null))
+        val tables = CaptureResult.Exited(0, nameless)
+        replies["GET /api/v1/members"] = ServerReply(200, """{"items":[{"id":"u-5"}]}""")
+        assertEquals(0, import(mysql = FakeMysql(FULL_SCHEMA, tables)))
+        assertEquals(parseObject("{}"), parseObject(calls.last().body)?.child("memberMap"))
     }
 
     @Test

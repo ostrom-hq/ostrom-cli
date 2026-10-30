@@ -41,11 +41,11 @@ val ACCOUNT_COLUMNS =
 
 /** TeamCode's schema with every column the import reads. */
 val FULL_SCHEMA = columns(
-    "members" to listOf("id", "username", "email", "password_hash"),
-    "variants" to VARIANT_COLUMNS,
-    "variant_assignments" to listOf("member_id", "variant_id", "member_secret"),
-    "mcp_tool_policies" to listOf("variant_id", "mode", "tools"),
-    "accounts" to ACCOUNT_COLUMNS,
+    "members" to listOf("id", "username", "email", "password_hash", "team_id"),
+    "variants" to VARIANT_COLUMNS + listOf("team_id", "kind"),
+    "variant_assignments" to listOf("member_id", "variant_id", "member_secret", "team_id", "kind"),
+    "mcp_tool_policies" to listOf("variant_id", "mode", "tools", "team_id"),
+    "accounts" to ACCOUNT_COLUMNS + "team_id",
 )
 
 /** Envelopes sealed with [KEY] by Python's `cryptography` (AESGCM), as TeamCode's CredentialCipher seals them. */

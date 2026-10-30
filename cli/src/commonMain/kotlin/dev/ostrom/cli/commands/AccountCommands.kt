@@ -32,7 +32,7 @@ internal fun CliDependencies.serverOf(option: String?, directory: String): Strin
  * Refuses an account command inside an agent's session: the agent would sign the developer out, or point the device
  * at another server (security audit S2-32).
  */
-private fun CliDependencies.outsideSessions(command: String) {
+internal fun CliDependencies.outsideSessions(command: String) {
     if (!environment[LaunchVariables.LAUNCH_ID].isNullOrEmpty()) {
         val message = "ostrom: ostrom $command does not run inside an agent's session: run it in your own terminal"
         throw PrintMessage(message, ExitCode.USAGE.code, true)

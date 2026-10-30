@@ -7,6 +7,7 @@ import dev.ostrom.cli.launcher.text
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.longOrNull
@@ -33,12 +34,15 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
         val skipped = mutableListOf<String>()
         val left = mutableSetOf<String?>()
         val servers = tables.variants.mapNotNull { variant ->
-            server(variant, policies[variant["id"]]).also {
-                if (it == null) {
-                    skipped += unsupported(variant)
-                    left += variant["id"]
-                }
+            val policy = policies[variant["id"]]
+            // a tool list that cannot be read is never sent as "no tool": a deny list would then deny nothing
+            val tools = strings(policy?.get("tools"))
+            val server = if (tools == null) null else server(variant, policy, tools)
+            if (server == null) {
+                skipped += if (tools == null) unreadablePolicy(variant) else unsupported(variant)
+                left += variant["id"]
             }
+            server
         }
         val accounts = tables.accounts.mapNotNull { row ->
             account(row).also { if (it == null) skipped += "account ${row["display_name"].orEmpty()}: $INCOMPLETE" }
@@ -46,8 +50,11 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
         val body = objectOf(
             "members" to tables.members.map { mapOf("id" to it["id"], "username" to it["username"]) },
             "mcpServers" to servers,
-            // the assignments of a server left out go with it
-            "assignments" to tables.assignments.filter { it["variant_id"] !in left }.map(::assignment),
+            // the assignments of a server left out go with it, and those of a member no one in Ostrom stands for:
+            // their secrets are never opened nor sent
+            "assignments" to tables.assignments
+                .filter { it["variant_id"] !in left && it["member_id"] in memberMap }
+                .map(::assignment),
             "accounts" to accounts,
             "memberMap" to memberMap,
         )
@@ -58,9 +65,12 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
         "(${commandOf(variant, configOf(variant)).ifEmpty { "none" }}) is not one Ostrom installs a package with " +
         "(${LAUNCHERS.keys.joinToString()}), or it names no package."
 
+    private fun unreadablePolicy(variant: Row) = "MCP server ${variant["target"]} (${variant["name"]}): its tool " +
+        "policy is not a list of tool names in TeamCode."
+
     private fun configOf(variant: Row) = parseObject(variant["config"]) ?: JsonObject(emptyMap())
 
-    private fun server(variant: Row, policy: Row?): Map<String, Any?>? {
+    private fun server(variant: Row, policy: Row?, tools: List<String>): Map<String, Any?>? {
         val id = variant["id"].orEmpty()
         val config = configOf(variant)
         val stdio = (variant["transport"] ?: config.text("transport")).equals("stdio", ignoreCase = true)
@@ -76,7 +86,7 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
             "sharedSecret" to secret.takeUnless { stdio },
             "stdio" to launch?.let { stdio(it, secret) },
             "toolMode" to policy?.get("mode"),
-            "tools" to strings(policy?.get("tools")),
+            "tools" to tools,
         )
     }
 
@@ -85,19 +95,19 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
         (variant["command"] ?: config.text("command")).orEmpty().substringAfterLast('/').substringAfterLast('\\')
             .lowercase().removeSuffix(".cmd").removeSuffix(".exe")
 
-    /** The registry and the arguments of a stdio variant (its package first), or null when Ostrom cannot install it. */
+    /**
+     * The registry and the arguments of a stdio variant, its package first, or null when Ostrom cannot install it. The
+     * launcher's own flags before the package (`npx -y`, `uvx --quiet`) are the launcher's, not the server's.
+     */
     private fun launchOf(variant: Row, config: JsonObject): Pair<String, List<String>>? {
         val launcher = LAUNCHERS[commandOf(variant, config)]
-        val arguments = strings(variant["args"] ?: config["args"]?.toString())
-        return if (launcher == null || arguments.isEmpty()) null else launcher to arguments
+        val arguments = strings(variant["args"] ?: config["args"]?.toString())?.dropWhile { it.startsWith("-") }
+        return if (launcher == null || arguments.isNullOrEmpty()) null else launcher to arguments
     }
 
     /** A stdio variant: its package is the first argument; its secret is a JSON object of variables. */
     private fun stdio(launch: Pair<String, List<String>>, secret: String?): Map<String, Any?> {
-        // only plain values are variables; anything else in TeamCode's object is not one
-        val variables = parseObject(secret).orEmpty()
-            .mapNotNull { (name, value) -> (value as? JsonPrimitive)?.let { name to it.content } }
-            .toMap()
+        val variables = variablesOf(secret)
         return mapOf(
             "launcher" to launch.first,
             "packageName" to launch.second.first(),
@@ -121,14 +131,18 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
     @OptIn(ExperimentalTime::class)
     private fun account(row: Row): Map<String, Any?>? {
         val label = row["display_name"].orEmpty()
-        val credential = parseObject(open(row["credential_envelope"].orEmpty(), "$team:${row["id"]}", "account $label"))
-            ?: throw TeamCodeReadException("account $label: its credential is not the JSON TeamCode writes.")
-        val expires = (credential["expiresAtMillis"] as? JsonPrimitive)?.longOrNull
+        // an account TeamCode never finished (no credential at all) is incomplete, not a key that does not open
+        val envelope = row["credential_envelope"]?.takeIf { it.isNotEmpty() }
+        val credential = envelope?.let {
+            parseObject(open(it, "$team:${row["id"]}", "account $label"))
+                ?: throw TeamCodeReadException("account $label: its credential is not the JSON TeamCode writes.")
+        }
+        val expires = (credential?.get("expiresAtMillis") as? JsonPrimitive)?.longOrNull
         val fields = listOf(
             row["provider"],
             row["provider_account_id"],
-            credential.text("accessToken"),
-            credential.text("refreshToken"),
+            credential?.text("accessToken"),
+            credential?.text("refreshToken"),
         )
         if (expires == null || fields.any { it.isNullOrEmpty() }) return null
         val (provider, accountId, access, refresh) = fields
@@ -155,14 +169,25 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
         private val LAUNCHERS =
             mapOf("npx" to "npm", "npm" to "npm", "bunx" to "npm", "uvx" to "pypi", "pipx" to "pypi")
 
-        /** A JSON array of strings, as TeamCode stores tools and arguments; empty when it is not one. */
-        private fun strings(text: String?): List<String> {
+        /** A stdio secret's variables: only plain values are; anything else in TeamCode's object (null too) is not. */
+        internal fun variablesOf(secret: String?): Map<String, String> = parseObject(secret).orEmpty()
+            .mapNotNull { (name, value) ->
+                (value as? JsonPrimitive)?.takeUnless { it is JsonNull }?.let { name to it.content }
+            }
+            .toMap()
+
+        /**
+         * A JSON array of strings, as TeamCode stores tools and arguments: empty when there is none, null when there
+         * is one that is not a list of strings (a number in it, or no JSON at all).
+         */
+        private fun strings(text: String?): List<String>? {
             val array = try {
-                text?.let { Json.parseToJsonElement(it) as? JsonArray }
+                if (text == null) JsonArray(emptyList()) else Json.parseToJsonElement(text) as? JsonArray
             } catch (_: SerializationException) {
                 null
             }
-            return array.orEmpty().mapNotNull { (it as? JsonPrimitive)?.takeIf(JsonPrimitive::isString)?.content }
+            val items = array?.map { (it as? JsonPrimitive)?.takeIf(JsonPrimitive::isString)?.content }
+            return items?.takeIf { null !in it }?.filterNotNull()
         }
     }
 }
