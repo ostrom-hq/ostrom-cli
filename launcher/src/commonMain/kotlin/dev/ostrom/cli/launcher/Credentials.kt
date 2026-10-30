@@ -30,17 +30,20 @@ interface CredentialStore {
 /**
  * [CredentialStore] with the device token in the device's secret store ([SecretStore]: Keychain, Credential Manager,
  * Secret Service, or the encrypted file), named by the server's URL, and the GitHub login in
- * `<config>/credentials.json` (0600), one entry per server. A token found in that file (put there by hand or by a
- * provisioning script) is still read when the secret store has none. `OSTROM_TOKEN` (with `OSTROM_DEV`) wins when set,
- * for CI; the launcher removes it from the agent's environment, and inside an agent's session it is never read
- * (security audit S2-32: a token the agent put there would speak for the developer).
+ * `<config>/credentials.json` (0600), one entry per server. A token found in clear in that file (an older ostrom, a
+ * provisioning script) is moved into the secret store and removed from the file, once, with a notice (S2-32); a store
+ * that does not answer leaves the file as it is. `OSTROM_TOKEN` (with `OSTROM_DEV`) wins when set, for CI; the launcher
+ * removes it from the agent's environment, and inside an agent's session it is never read (security audit S2-32: a
+ * token the agent put there would speak for the developer).
  *
  * @param secrets Opens the secret store; opened once, on the first call that needs it (opening probes the system).
+ * @param notice Tells the developer a line (the move of a token).
  */
 class FileCredentialStore(
     private val files: LaunchFiles,
     private val path: String,
     secrets: () -> SecretStore,
+    private val notice: (String) -> Unit,
     private val variable: (String) -> String?,
 ) : CredentialStore {
     private val store by lazy(secrets)
@@ -54,8 +57,18 @@ class FileCredentialStore(
 
     override fun saved(server: String): Credentials? {
         val entry = all().child(server)
-        val token = store.read(server) ?: entry?.text("token")
-        return if (token.isNullOrEmpty()) null else Credentials(token, entry?.text("login") ?: UNKNOWN)
+        val login = entry?.text("login") ?: UNKNOWN
+        val written = entry?.text("token")?.takeIf { it.isNotEmpty() }
+        if (written != null) moveToStore(server, written, login)
+        val token = store.read(server)
+        return if (token.isNullOrEmpty()) null else Credentials(token, login)
+    }
+
+    /** S2-32: the token left in clear in the file goes to the secret store (unless it holds one), then off the file. */
+    private fun moveToStore(server: String, token: String, login: String) {
+        if (store.read(server) == null) store.write(server, token)
+        files.write(path, pretty(JsonObject(all() + (server to objectOf("login" to login)))), FileAccess.PRIVATE)
+        notice("ostrom: the device token of $server moved from credentials.json to ${store.backend.displayName}")
     }
 
     override fun save(server: String, credentials: Credentials) {

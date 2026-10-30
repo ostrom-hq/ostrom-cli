@@ -121,7 +121,8 @@ class CliDependencies(
                 mcpServer = { McpServerImpl(McpDispatcher(BuildInfo.VERSION), console) },
                 mcpBridge = { McpBridge(it, LoopbackHttpImpl(), console) },
                 credentials = { directory ->
-                    FileCredentialStore(launchFiles, join(directory, "credentials.json"), secrets) { environment[it] }
+                    val path = join(directory, "credentials.json")
+                    FileCredentialStore(launchFiles, path, secrets, { console.err("$it\n") }) { environment[it] }
                 },
                 workingDirectory = { FileSystem.SYSTEM.canonicalize(".".toPath()).toString() },
                 executable = currentExecutable(),
