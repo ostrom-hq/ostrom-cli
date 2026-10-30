@@ -49,7 +49,8 @@ private val HTTPS = Regex("https://.*", RegexOption.IGNORE_CASE)
 
 /** `http://` to this machine, with or without a port and a path. */
 private val LOCAL_HTTP = Regex("""http://(localhost|127\.0\.0\.1|\[::1])(:\d{1,5})?(/.*)?""", RegexOption.IGNORE_CASE)
-private val USER_INFO = Regex("//[^/@]*@")
+// up to the last @ before the path: a password may hold one
+private val USER_INFO = Regex("//[^/]*@")
 
 /**
  * Refuses an account command inside an agent's session: the agent would sign the developer out, or point the device
@@ -77,10 +78,13 @@ internal class LoginCommand(private val dependencies: CliDependencies) : CliktCo
         val directory = dependencies.directory()
         val serverUrl = dependencies.serverOf(server, directory)
         refuseInClear(serverUrl, "the sign-in code and the token")
+        // the console the server sends to: OSTROM_CONSOLE_URL, else the server's with app. for api.
+        val console = dependencies.environment["OSTROM_CONSOLE_URL"]
+            ?: serverUrl.replaceFirst("://api.", "://app.", ignoreCase = true)
         val login = DeviceLogin(
             ServerJson(ApiServerTransport(dependencies.api(serverUrl))),
             dependencies.environment["OSTROM_GITHUB_WEB_URL"]?.trimEnd('/') ?: "https://github.com",
-            dependencies.environment["OSTROM_CONSOLE_URL"] ?: serverUrl.replaceFirst("://api.", "://app."),
+            console,
             dependencies.sleep,
         ) { dependencies.console.err("$it\n") }
         when (val outcome = runBlocking { login.signIn(serverUrl) }) {
