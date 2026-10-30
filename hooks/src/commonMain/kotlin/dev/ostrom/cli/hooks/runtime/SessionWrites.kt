@@ -41,7 +41,7 @@ class SessionWrites(private val calls: OstromCalls, private val ids: SessionIds,
      */
     fun reopen(closed: String): Pair<String, String>? {
         val answer = calls.call(Routes.reopen(closed), jsonOf("launchId" to launchId), REOPEN_MILLIS)
-        val session = (answer as? CallResult.Ok)?.body?.get("session") as? JsonObject
+        val session = (answer as? CallResult.Ok)?.let { it.body["session"] } as? JsonObject
         return session?.string("id")?.takeIf { it.isNotEmpty() }?.let { id ->
             id to (session.string("agentSessionId") ?: closed.substringBefore('~'))
         }

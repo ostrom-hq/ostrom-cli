@@ -96,8 +96,9 @@ class ServerJson(private val transport: ServerTransport) {
     ): ServerAnswer =
         call("POST", path, body, token, timeoutMillis)
 
-    private companion object {
-        val SUCCESS = 200..299
-        const val DEFAULT_MILLIS = 10_000L
+    /** The answers that are a success. */
+    companion object {
+        private val SUCCESS = 200..299
+        private const val DEFAULT_MILLIS = 10_000L
     }
 }
