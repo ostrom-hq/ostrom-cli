@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.hooks.gate
 
 /** Names a repository from a git remote URL, the way the approver reads it. */
@@ -11,7 +12,7 @@ object RemoteUrls {
         val scheme = trimmed.indexOf("://")
         val colon = trimmed.indexOf(':')
         val path = when {
-            scheme >= 0 -> trimmed.substring(scheme + 3).substringAfter('/', "")
+            scheme >= 0 -> trimmed.substring(scheme + "://".length).substringAfter('/', "")
             colon > 0 && '/' !in trimmed.substring(0, colon) && !ShellPaths.isAbsolute(trimmed) ->
                 trimmed.substring(colon + 1)
             else -> return ShellPaths.fileName(trimmed)

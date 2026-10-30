@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.hooks.runtime
 
 import dev.ostrom.cli.hooks.gate.GateCatalogue
@@ -54,9 +55,9 @@ class CatalogueStoreTest {
     @Test
     fun pastTheTtlTheCatalogueIsRefreshedInLineAndKept() {
         val files = FakeFiles(mutableMapOf("/s/gates.json" to copy), mutableMapOf("/s/gates.json" to 30_000))
-        val calls = FakeCalls().on("/api/bridge/gates/catalog", served)
+        val calls = FakeCalls().on("/api/v1/gates/catalog", served)
         assertEquals("new", store(files, calls).current().actions.single().actionClass)
-        assertEquals("/api/bridge/gates/catalog?repo=acme%2Fapp", calls.calls.single().path)
+        assertEquals("/api/v1/gates/catalog?repo=acme%2Fapp", calls.calls.single().path)
         assertEquals(800, calls.calls.single().timeoutMillis)
         val kept = files.texts.getValue("/s/gates.json")
         assertContains(kept, "\"failMode\":\"closed\"", message = "the rest of the copy is kept")
@@ -67,17 +68,17 @@ class CatalogueStoreTest {
     fun whenOstromCannotServeItTheCopyElseNothingIsMatched() {
         val stale = FakeFiles(mutableMapOf("/s/gates.json" to copy), mutableMapOf("/s/gates.json" to 60_000))
         assertEquals("old", store(stale, FakeCalls()).current().actions.single().actionClass)
-        val bad = FakeCalls().on("/api/bridge/gates/catalog", ok("""{"actions":3}"""))
+        val bad = FakeCalls().on("/api/v1/gates/catalog", ok("""{"actions":3}"""))
         assertEquals("old", store(stale, bad).refresh(1).first.actions.single().actionClass)
         assertEquals(GateCatalogue(), store(FakeFiles(), FakeCalls()).current())
-        val noActions = FakeCalls().on("/api/bridge/gates/catalog", ok())
+        val noActions = FakeCalls().on("/api/v1/gates/catalog", ok())
         assertEquals(GateCatalogue() to false, store(FakeFiles(), noActions).refresh(1))
     }
 
     @Test
     fun aDamagedCopyIsReplacedWhole() {
         val files = FakeFiles(mutableMapOf("/s/gates.json" to "{"))
-        val calls = FakeCalls().on("/api/bridge/gates/catalog", served)
+        val calls = FakeCalls().on("/api/v1/gates/catalog", served)
         assertEquals("new", store(files, calls).current().actions.single().actionClass)
         assertEquals("""{"actions":[{"class":"new"}]}""", files.texts["/s/gates.json"])
     }
@@ -85,7 +86,7 @@ class CatalogueStoreTest {
     @Test
     fun outsideASessionTheCatalogueIsAskedEveryTime() {
         val context = contextOf("OSTROM_GATES" to "")
-        val calls = FakeCalls().on("/api/bridge/gates/catalog", served)
+        val calls = FakeCalls().on("/api/v1/gates/catalog", served)
         val store = store(FakeFiles(), calls, context)
         assertEquals("new", store.current().actions.single().actionClass)
         store.refreshNow()
@@ -97,7 +98,7 @@ class CatalogueStoreTest {
         val files = FakeFiles(mutableMapOf("/s/gates.json.refreshing" to "refreshing"))
         store(files, FakeCalls()).refreshNow()
         assertTrue("/s/gates.json.refreshing" in files.texts)
-        val calls = FakeCalls().on("/api/bridge/gates/catalog", served)
+        val calls = FakeCalls().on("/api/v1/gates/catalog", served)
         store(files, calls).refreshNow()
         assertFalse("/s/gates.json.refreshing" in files.texts)
         assertEquals(5_000, calls.calls.single().timeoutMillis)

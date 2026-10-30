@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.hooks.runtime
 
 import dev.ostrom.cli.hooks.gate.GitRunner
@@ -36,11 +37,11 @@ class RelayCalls(
         } catch (_: IllegalArgumentException) {
             null
         }
-        return if (response.status in SUCCESS) {
-            CallResult.Ok(json ?: JsonObject(emptyMap()))
-        } else {
-            CallResult.Failed(json?.string("error") ?: "HTTP ${response.status}")
-        }
+        if (response.status in SUCCESS) return CallResult.Ok(json ?: JsonObject(emptyMap()))
+        // the contract's refusal is {"error":{"type","message"}}; the prototype's was {"error":"…"}
+        val detail = json?.get("error") as? JsonObject
+        val message = detail?.string("message") ?: json?.string("error") ?: "HTTP ${response.status}"
+        return CallResult.Failed(message, detail?.string("type"))
     }
 
     private companion object {

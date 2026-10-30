@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.hooks.runtime
 
 import dev.ostrom.cli.hooks.HookKind
@@ -74,6 +75,9 @@ class AdaptersTest {
         assertEquals(CallResult.Failed("session closed: s1"), call(409, """{"error":"session closed: s1"}"""))
         assertEquals(CallResult.Failed("HTTP 502"), call(502, "bad gateway"))
         assertEquals(CallResult.Failed("HTTP 403"), call(403, """{"error":3}"""))
+        val contract = call(409, """{"error":{"type":"session_closed","message":"session s1 is closed"}}""")
+        assertEquals(CallResult.Failed("session s1 is closed", "session_closed"), contract)
+        assertEquals(CallResult.Failed("HTTP 404"), call(404, """{"error":{"message":3}}"""))
         val down = Http(Result.failure(LoopbackException(LoopbackFailure.TIMED_OUT)))
         val late = RelayCalls("http://127.0.0.1:1", null, down).call("/", null, 1)
         assertEquals(CallResult.Failed("the local relay did not answer in time"), late)
@@ -152,7 +156,7 @@ class AdaptersTest {
         assertEquals(HookReply(), processor.process(HookKind.GATE, gate.encodeToByteArray(), "claude"))
         assertEquals(listOf(listOf("/opt/ostrom", "hook", "gates-refresh")), capture.detached)
         assertEquals(HookReply(), processor.process(HookKind.GATES_REFRESH, null, "claude"))
-        assertEquals("/api/bridge/gates/catalog?repo=", http.sent.single().second.path)
+        assertEquals("/api/v1/gates/catalog?repo=", http.sent.single().second.path)
         val plain = SessionHooks.processor(Variables(emptyMap()), fileSystem, capture, http, SessionHooks::epochMillis)
         assertEquals(HookReply(), plain.process(HookKind.SESSION, null, "claude"))
         assertTrue(SessionHooks.epochMillis() > 1_700_000_000_000)

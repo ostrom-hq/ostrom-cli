@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.hooks.runtime
 
 import dev.ostrom.cli.hooks.HookReply
@@ -17,7 +18,7 @@ class SessionHook(
     private val checks: WorkflowChecks,
     private val workingDirectory: String,
 ) {
-    private val writes = SessionWrites(calls, ids)
+    private val writes = SessionWrites(calls, ids, context.launchId)
 
     /** Answers one event (normalised to the Claude Code shape). */
     fun handle(event: JsonObject): HookReply {
@@ -39,15 +40,18 @@ class SessionHook(
     }
 
     private fun firstModelCall(event: JsonObject, agentSession: String): HookReply {
-        val mark = context.sessionFile?.let { "$it.context-$agentSession" } ?: return HookReply()
-        if (files.read(mark) != null) return HookReply()
-        return start(event, agentSession).fold(
-            onSuccess = { text ->
-                files.write(mark, "1")
-                HookReply(stdout = JsonObject(mapOf("context" to JsonPrimitive(text))).toString() + "\n")
-            },
-            onFailure = { HookReply(stderr = "Ostrom unreachable (${it.message}): session not recorded.\n") },
-        )
+        val mark = context.sessionFile?.let { "$it.context-$agentSession" }?.takeIf { files.read(it) == null }
+        return if (mark == null) {
+            HookReply()
+        } else {
+            start(event, agentSession).fold(
+                onSuccess = { text ->
+                    files.write(mark, "1")
+                    HookReply(stdout = JsonObject(mapOf("context" to JsonPrimitive(text))).toString() + "\n")
+                },
+                onFailure = { HookReply(stderr = "Ostrom unreachable (${it.message}): session not recorded.\n") },
+            )
+        }
     }
 
     private fun start(event: JsonObject, agentSession: String): Result<String> {
@@ -60,12 +64,10 @@ class SessionHook(
             "dev" to context.developer,
             "harnessVersion" to context.harnessVersion,
             "model" to (event.string("model") ?: context.model),
-            "source" to event["source"],
-            "launcher" to "kotlin",
             "launchId" to context.launchId,
             "packageDigest" to checks.digest,
         )
-        val answer = calls.call("/api/bridge/sessions", body, START_MILLIS)
+        val answer = calls.call(Routes.SESSIONS, body, START_MILLIS)
         if (answer is CallResult.Failed) return Result.failure(IllegalStateException(answer.message))
         val reply = (answer as CallResult.Ok).body
         // a resumed session is a new segment on Ostrom's side: its id is the one every hook of this launch sends
@@ -78,15 +80,19 @@ class SessionHook(
     private fun end(event: JsonObject): HookReply {
         val session = ids.of(event.string("session_id"))
         val body = jsonOf("source" to (event.string("reason") ?: "SessionEnd"))
-        val path = "/api/bridge/sessions/${Urls.encode(session)}/end"
-        return when (val answer = calls.call(path, body, context.sessionEndMillis)) {
+        return when (val answer = calls.call(Routes.end(session), body, context.sessionEndMillis)) {
             is CallResult.Failed ->
                 HookReply(stderr = "Ostrom unreachable (${answer.message}): session receipt not signed.\n")
             is CallResult.Ok -> {
-                val receipt = (answer.body["session"] as? JsonObject)?.string("receiptId") ?: "?"
+                val signed = answer.body["receipt"] as? JsonObject
+                val session = answer.body["session"] as? JsonObject
+                val receipt = session?.string("receiptId") ?: signed?.string("id") ?: "?"
                 val verification = answer.body["verification"] as? JsonObject
-                val valid = (verification?.get("ok") as? JsonPrimitive)?.content == "true"
-                val state = if (valid) "signature valid" else "not verified"
+                val state = when {
+                    (verification?.get("ok") as? JsonPrimitive)?.content == "true" -> "signature valid"
+                    signed?.string("signature") != null -> "signed"
+                    else -> "not verified"
+                }
                 HookReply(stderr = "Ostrom: session receipt $receipt ($state)\n")
             }
         }

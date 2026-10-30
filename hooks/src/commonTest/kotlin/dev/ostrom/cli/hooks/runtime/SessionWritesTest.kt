@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.hooks.runtime
 
 import kotlinx.serialization.json.Json
@@ -6,55 +7,69 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class SessionWritesTest {
     private val files = FakeFiles()
     private val ids = SessionIds("/s/session", files)
     private fun json(text: String) = Json.parseToJsonElement(text) as JsonObject
+    private fun runs(session: String) = Routes.CHECKS to json("""{"sessionId":"$session","check":"lint"}""")
 
     @Test
     fun aWriteToAClosedSessionGoesToItsNewSegmentOnce() {
         val calls = FakeCalls()
-            .on("/api/compiler/runs", CallResult.Failed("session closed: s1"), ok("""{"ok":true}"""))
-            .on("/api/bridge/sessions/s1/reopen", ok("""{"session":{"id":"s1~2"}}"""))
-        val body = json("""{"runs":[{"sessionId":"s1","check":"lint"},3]}""")
-        assertEquals(ok("""{"ok":true}"""), SessionWrites(calls, ids).send("/api/compiler/runs", body, null, 900))
-        assertEquals("""{"runs":[{"sessionId":"s1~2","check":"lint"},3]}""", calls.calls.last().body.toString())
+            .on(Routes.CHECKS, CallResult.Failed("session closed", "session_closed"), ok("""{"ok":true}"""))
+            .on("/api/v1/sessions/s1/reopen", ok("""{"session":{"id":"s1~2"}}"""))
+        assertEquals(ok("""{"ok":true}"""), SessionWrites(calls, ids, "L1").send("s1", null, 900, ::runs))
+        assertEquals("""{"launchId":"L1"}""", calls.calls[1].body.toString(), "the reopening names the launch")
+        assertEquals("""{"sessionId":"s1~2","check":"lint"}""", calls.calls.last().body.toString())
         assertEquals(900, calls.calls.last().timeoutMillis)
         assertEquals("s1~2", files.texts["/s/session"])
         assertEquals("s1~2", ids.of("s1"), "the agent's id defaults to the closed one's, before its segment suffix")
     }
 
     @Test
+    fun withoutAnAgentIdTheReopenedSegmentNamesIt() {
+        val calls = FakeCalls().on(Routes.CHECKS, CallResult.Failed("gone", "session_closed"), ok())
+            .on("/api/v1/sessions/s1/reopen", ok("""{"session":{"id":"s1~2","agentSessionId":"ag"}}"""))
+        assertEquals(ok(), SessionWrites(calls, ids, null).send("s1", "", 1, ::runs))
+        assertEquals("s1~2", ids.of("ag"))
+    }
+
+    @Test
     fun otherFailuresAndUnreopenableSessionsAreReturnedAsIs() {
         val unreachable = CallResult.Failed("HTTP 502")
-        val writes = SessionWrites(FakeCalls().on("/x", unreachable), ids)
-        assertEquals(unreachable, writes.send("/x", json("""{"sessionId":"s1"}"""), "a1", 1))
+        val writes = SessionWrites(FakeCalls().on(Routes.CHECKS, unreachable), ids, null)
+        assertEquals(unreachable, writes.send("s1", "a1", 1, ::runs))
         val closed = CallResult.Failed("session closed: s1")
-        val noId = FakeCalls().on("/x", closed)
-        assertEquals(closed, SessionWrites(noId, ids).send("/x", json("""{"runs":[]}"""), "a1", 1))
-        assertEquals(listOf("/x"), noId.paths(), "nothing says which session to reopen")
-        val refused = FakeCalls().on("/x", closed).on("/api/bridge/sessions/s1/reopen", ok("""{"session":{"id":""}}"""))
-        assertEquals(closed, SessionWrites(refused, ids).send("/x", json("""{"sessionId":"s1"}"""), "a1", 1))
+        val noId = FakeCalls().on(Routes.CHECKS, closed)
+        assertEquals(closed, SessionWrites(noId, ids, null).send("", "a1", 1, ::runs))
+        assertEquals(listOf(Routes.CHECKS), noId.paths(), "nothing says which session to reopen")
+        val refused = FakeCalls().on(Routes.CHECKS, closed)
+            .on("/api/v1/sessions/s1/reopen", ok("""{"session":{"id":""}}"""))
+        assertEquals(closed, SessionWrites(refused, ids, null).send("s1", "a1", 1, ::runs))
+        assertEquals("{}", refused.calls[1].body.toString(), "no launch, no launchId")
+    }
+
+    @Test
+    fun aClosedSessionIsReadFromTheContractOrThePrototype() {
+        assertTrue(CallResult.Failed("gone", "session_closed").sessionClosed)
+        assertTrue(CallResult.Failed("session closed: s1").sessionClosed)
+        assertFalse(CallResult.Failed("gone", "not_found").sessionClosed)
+        assertFalse(CallResult.Failed("HTTP 409").sessionClosed)
     }
 
     @Test
     fun aReopenedSegmentIsReadFromOstromsAnswer() {
         fun reopen(answer: CallResult) =
-            SessionWrites(FakeCalls().on("/api/bridge/sessions/", answer), ids).reopen("a1~1")
+            SessionWrites(FakeCalls().on("/api/v1/sessions/", answer), ids, null).reopen("a1~1")
         assertEquals("a1~2" to "agent", reopen(ok("""{"session":{"id":"a1~2","agentSessionId":"agent"}}""")))
         assertEquals("a1~2" to "a1", reopen(ok("""{"session":{"id":"a1~2"}}""")))
         assertNull(reopen(ok("""{"session":{"agentSessionId":"a"}}""")))
         assertNull(reopen(ok("""{"session":"a1~2"}""")))
         assertNull(reopen(CallResult.Failed("HTTP 404")))
-    }
-
-    @Test
-    fun aBodyWithoutSessionFieldsIsLeftAlone() {
-        assertEquals(json("""{"a":1}"""), withSessionId(json("""{"a":1}"""), "x"))
-        val moved = withSessionId(json("""{"sessionId":"y","runs":[]}"""), "x")
-        assertEquals(json("""{"sessionId":"x","runs":[]}"""), moved)
     }
 
     @Test

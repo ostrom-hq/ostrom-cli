@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.hooks.runtime
 
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -10,22 +10,28 @@ import kotlinx.serialization.json.JsonPrimitive
  * anything sent to a closed session (`session closed: …`: the machine slept past Ostrom's wait and the agent acts
  * before the next sign of life). A new segment of this launch, chained to the closed one, is then opened and adopted,
  * and the same write is sent again there, once (prototype `call_in_session`, CORRECTIFS-3 and 4).
+ *
+ * @param launchId The launch the hooks belong to, sent with a reopening.
  */
-class SessionWrites(private val calls: OstromCalls, private val ids: SessionIds) {
+class SessionWrites(private val calls: OstromCalls, private val ids: SessionIds, private val launchId: String?) {
     /**
-     * @param path The write's route.
-     * @param body Its body; every `sessionId` in it (and in each element of `runs`) is set to the new segment on a
-     * retry.
+     * @param sessionId The session the write is for.
      * @param agentSessionId The agent's own session id of the event, to map to the new segment.
+     * @param request The route and body of the write for a session id: called again with the new segment's id.
      */
-    fun send(path: String, body: JsonObject, agentSessionId: String?, timeoutMillis: Int): CallResult {
+    fun send(
+        sessionId: String,
+        agentSessionId: String?,
+        timeoutMillis: Int,
+        request: (String) -> Pair<String, JsonObject>,
+    ): CallResult {
+        val (path, body) = request(sessionId)
         val first = calls.call(path, body, timeoutMillis)
-        if (!(first is CallResult.Failed && first.message.startsWith(CLOSED))) return first
-        val closed = sessionIdOf(body)
-        if (closed.isEmpty()) return first
-        val reopened = reopen(closed) ?: return first
+        val closed = first is CallResult.Failed && first.sessionClosed && sessionId.isNotEmpty()
+        val reopened = (if (closed) reopen(sessionId) else null) ?: return first
         ids.adopt(agentSessionId?.takeIf { it.isNotEmpty() } ?: reopened.second, reopened.first)
-        return calls.call(path, withSessionId(body, reopened.first), timeoutMillis)
+        val (again, retried) = request(reopened.first)
+        return calls.call(again, retried, timeoutMillis)
     }
 
     /**
@@ -34,39 +40,19 @@ class SessionWrites(private val calls: OstromCalls, private val ids: SessionIds)
      * @return The new segment's id and the agent's session id, or null when Ostrom did not open one.
      */
     fun reopen(closed: String): Pair<String, String>? {
-        val path = "/api/bridge/sessions/${Urls.encode(closed)}/reopen"
-        val answer = calls.call(path, JsonObject(emptyMap()), REOPEN_MILLIS)
-        val session = ((answer as? CallResult.Ok)?.body?.get("session") as? JsonObject) ?: return null
-        val id = session.string("id")?.takeIf { it.isNotEmpty() } ?: return null
-        return id to (session.string("agentSessionId") ?: closed.substringBefore('~'))
+        val answer = calls.call(Routes.reopen(closed), jsonOf("launchId" to launchId), REOPEN_MILLIS)
+        val session = (answer as? CallResult.Ok)?.body?.get("session") as? JsonObject
+        return session?.string("id")?.takeIf { it.isNotEmpty() }?.let { id ->
+            id to (session.string("agentSessionId") ?: closed.substringBefore('~'))
+        }
     }
 
     /** Remembers the session the start hook got from Ostrom. */
     fun adopt(agentSessionId: String?, ostromId: String) = ids.adopt(agentSessionId, ostromId)
 
-    private fun sessionIdOf(body: JsonObject): String =
-        body.string("sessionId")
-            ?: ((body["runs"] as? JsonArray)?.firstOrNull() as? JsonObject)?.string("sessionId").orEmpty()
-
     private companion object {
-        const val CLOSED = "session closed:"
         const val REOPEN_MILLIS = 5_000
     }
-}
-
-/** [body] with its `sessionId`, and that of each element of its `runs`, set to [id]. */
-internal fun withSessionId(body: JsonObject, id: String): JsonObject {
-    val fields = body.toMutableMap()
-    if ("sessionId" in fields) fields["sessionId"] = JsonPrimitive(id)
-    val runs = fields["runs"] as? JsonArray
-    if (runs != null) {
-        fields["runs"] = JsonArray(
-            runs.map { run ->
-                (run as? JsonObject)?.let { JsonObject(it + ("sessionId" to JsonPrimitive(id))) } ?: run
-            },
-        )
-    }
-    return JsonObject(fields)
 }
 
 /** The string field [key], or null when it is absent or not a string. */

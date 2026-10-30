@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.hooks.gate
 
 /**
@@ -31,10 +32,11 @@ object ShellPaths {
 
     /** Whether [path] is absolute on POSIX (`/x`) or on Windows (`C:\x`, `C:/x`, `\\server\x`). */
     fun isAbsolute(path: String): Boolean =
-        path.startsWith("/") || path.startsWith("\\\\") || WINDOWS_DRIVE.matches(path.take(3))
+        path.startsWith("/") || path.startsWith("\\\\") || WINDOWS_DRIVE.matches(path.take(DRIVE_PREFIX))
 
     /** The last part of a path, `/` and `\` both separators. */
     fun fileName(path: String): String = path.trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\')
 
+    private const val DRIVE_PREFIX = 3 // `C:\\`
     private val WINDOWS_DRIVE = Regex("[A-Za-z]:[\\\\/]")
 }

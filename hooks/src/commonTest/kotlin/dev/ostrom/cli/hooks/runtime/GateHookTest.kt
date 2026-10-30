@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.hooks.runtime
 
 import dev.ostrom.cli.hooks.HookReply
@@ -45,7 +46,10 @@ class GateHookTest {
         "/o|remote get-url origin" to "https://github.com/acme/other",
     )
 
-    private class Checks(private val refusal: HookReply? = null, private val guarded: Boolean = false) : WorkflowChecks {
+    private class Checks(
+        private val refusal: HookReply? = null,
+        private val guarded: Boolean = false,
+    ) : WorkflowChecks {
         val after = mutableListOf<String>()
         override val digest: String? = null
         override val context: String? = null
@@ -86,7 +90,7 @@ class GateHookTest {
         event("Bash", JsonObject(mapOf("command" to JsonPrimitive(command))).toString(), after, cwd)
 
     private fun answer(json: String) {
-        calls = FakeCalls().on("/api/bridge/gates/request", ok(json))
+        calls = FakeCalls().on("/api/v1/gates", ok(json))
     }
 
     @Test
@@ -105,7 +109,7 @@ class GateHookTest {
         assertEquals(2, reply.exitCode)
         assertTrue(reply.stderr.startsWith("Ostrom: waiting for a yes. Run `ostrom wait G1` as its own command"))
         assertContains(reply.stderr, "needs a yes from omar (gate \"Main\")")
-        val body = calls.bodyOf("/api/bridge/gates/request")
+        val body = calls.bodyOf("/api/v1/gates")
         assertEquals(
             """{"sessionId":"a1","repo":"acme/app","class":"push-main","tool":"Bash",""" +
                 """"command":"git push origin main\n# ostrom: git push to: main","dev":"lena","harnessVersion":"7",""" +
@@ -116,7 +120,7 @@ class GateHookTest {
         assertEquals(3_000, calls.calls.single().timeoutMillis)
         // the agent runs nothing; its after-tool hook (Hermes) is ignored and clears the mark
         assertEquals(HookReply(), hook().handle(bash("git push origin main", after = true)))
-        assertEquals(listOf("/api/bridge/gates/request"), calls.paths())
+        assertEquals(listOf("/api/v1/gates"), calls.paths())
         assertEquals("{}", files.texts["/s/session.refused.json"])
     }
 
@@ -124,7 +128,7 @@ class GateHookTest {
     fun aPushFromMainThatDoesNotNameItIsGatedAsMain() {
         answer("""{"id":"G2","status":"pending"}""")
         assertEquals(2, hook().handle(bash("git push origin HEAD")).exitCode)
-        val command = calls.bodyOf("/api/bridge/gates/request")["command"] as JsonPrimitive
+        val command = calls.bodyOf("/api/v1/gates")["command"] as JsonPrimitive
         assertEquals("git push origin HEAD\n# ostrom: git push to: main", command.content)
         assertEquals(2, hook().handle(bash("git push")).exitCode, "a bare push to the upstream main")
     }
@@ -176,15 +180,16 @@ class GateHookTest {
     fun aClosedSessionIsReopenedOnceAndTheRequestSentThere() {
         val approved = ok("""{"status":"approved","decidedBy":"omar"}""")
         calls = FakeCalls()
-            .on("/api/bridge/gates/request", CallResult.Failed("session closed: a1"), approved)
-            .on("/api/bridge/sessions/a1/reopen", ok("""{"session":{"id":"a1~2","agentSessionId":"a1"}}"""))
+            .on("/api/v1/gates", CallResult.Failed("session closed: a1"), approved)
+            .on("/api/v1/sessions/a1/reopen", ok("""{"session":{"id":"a1~2","agentSessionId":"a1"}}"""))
         assertEquals(0, hook().handle(bash("git push origin main")).exitCode)
-        assertEquals("a1~2", (calls.bodyOf("/api/bridge/gates/request")["sessionId"] as JsonPrimitive).content)
+        assertEquals("a1~2", (calls.bodyOf("/api/v1/gates")["sessionId"] as JsonPrimitive).content)
         assertEquals("a1~2", files.texts["/s/session"])
-        calls = FakeCalls().on("/api/bridge/gates/request", CallResult.Failed("session closed: a1~2"))
+        assertEquals("""{"launchId":"L1"}""", calls.calls[1].body.toString())
+        calls = FakeCalls().on("/api/v1/gates", CallResult.Failed("closed", "session_closed"))
         val stuck = hook().handle(bash("git push origin main"))
-        assertContains(stuck.stderr, "closed on Ostrom's side and could not be reopened (session closed: a1~2)")
-        assertEquals(listOf("/api/bridge/gates/request", "/api/bridge/sessions/a1~2/reopen"), calls.paths())
+        assertContains(stuck.stderr, "closed on Ostrom's side and could not be reopened (closed)")
+        assertEquals(listOf("/api/v1/gates", "/api/v1/sessions/a1~2/reopen"), calls.paths())
     }
 
     @Test
@@ -234,13 +239,14 @@ class GateHookTest {
         val soft = catalogue.replace("\"enforce\":true,\"label\":\"Main\"", "\"label\":\"Main\"")
         answer("""{"id":"G3","status":"pending"}""")
         assertEquals(2, hook(catalogueText = soft).handle(bash("git push origin main && git push up main")).exitCode)
-        assertFalse("push" in calls.bodyOf("/api/bridge/gates/request"), "an unread push is asked without its commits")
+        assertFalse("push" in calls.bodyOf("/api/v1/gates"), "an unread push is asked without its commits")
         val unread = bash("git push --all origin")
         assertEquals(HookReply(), hook(catalogueText = soft).handle(unread), "no enforced gate on main")
         val observed = """{"actions":[{"class":"push-seen","tools":["Bash"],"patterns":["push"]}]}"""
         assertEquals(HookReply(), hook(catalogueText = observed).handle(bash("git push --all origin")))
         assertEquals(HookReply(), hook(catalogueText = "{}").handle(bash("git push --all origin")))
-        val nameless = """{"actions":[{"class":"push-x","tools":["Bash"],"patterns":["main"],"gate":{"enforce":true}}]}"""
+        val nameless =
+            """{"actions":[{"class":"push-x","tools":["Bash"],""" + """"patterns":["main"],"gate":{"enforce":true}}]}"""
         val refusal = hook(catalogueText = nameless).handle(unread).stderr
         assertContains(refusal, "\"push-x\" needs a yes from the gate owner (gate \"gate\")")
     }
@@ -249,48 +255,58 @@ class GateHookTest {
     fun aGatedActionThatIsNotAPushShowsTheOutgoingCommitsOfAPushClass() {
         answer("""{"id":"G4","status":"pending"}""")
         hook().handle(bash("gh pr merge 3"))
-        val body = calls.bodyOf("/api/bridge/gates/request")
+        val body = calls.bodyOf("/api/v1/gates")
         assertEquals("m1 fix (lena)\n\n+fix", (body["diff"] as JsonPrimitive).content)
         hook().handle(bash("./deploy.sh"))
-        assertFalse("diff" in calls.bodyOf("/api/bridge/gates/request"))
+        assertFalse("diff" in calls.bodyOf("/api/v1/gates"))
     }
 
     @Test
     fun anActionThatRanUsesUpItsYes() {
-        calls = FakeCalls().on("/api/bridge/gates/consume", ok())
+        answer("""{"gate":{"id":"G1","status":"approved","decidedBy":"omar"}}""")
+        assertEquals(0, hook().handle(bash("git push origin main")).exitCode)
+        calls = FakeCalls().on("/api/v1/gates/G1/consume", ok())
         val checks = Checks()
         assertEquals(HookReply(), hook(checks = checks).handle(bash("git push origin main", after = true)))
         assertEquals(listOf("git push origin main\n# ostrom: git push to: main"), checks.after)
-        assertEquals(
-            """{"sessionId":"a1","repo":"acme/app","class":"push-main","command":"git push origin main\n# ostrom: """ +
-                """git push to: main","push":{"remote":"acme/app","refs":[{"ref":"main","sha":"M"}],"force":false},""" +
-                """"realRepo":"acme/app"}""",
-            calls.bodyOf("/api/bridge/gates/consume").toString(),
-        )
+        assertEquals(listOf("/api/v1/gates/G1/consume"), calls.paths())
+        assertEquals("{}", calls.calls.single().body.toString())
         assertEquals(2_000, calls.calls.single().timeoutMillis)
-        hook().handle(event("mcp__github__merge_pr", """{"pr":1}""", after = true))
-        assertFalse("push" in calls.bodyOf("/api/bridge/gates/consume"))
-        hook().handle(bash("git push origin main && git push up main", after = true))
-        assertFalse("push" in calls.bodyOf("/api/bridge/gates/consume"), "an unread push is consumed by its text")
-        val before = calls.calls.size
+        assertEquals(HookReply(), hook().handle(bash("git push origin main", after = true)))
+        assertEquals(1, calls.calls.size, "one yes, one action")
         assertEquals(HookReply(), hook().handle(bash("npm run lint", after = true)))
-        assertEquals(before, calls.calls.size, "an ungated action has no yes to use up")
+        assertEquals(1, calls.calls.size, "an ungated action has no yes to use up")
+    }
+
+    @Test
+    fun theContractsAnswerAndThePrototypesAreBothRead() {
+        answer("""{"gate":{"id":"G7","status":"pending","gate":{"label":"Release","approvers":["ana"]}}}""")
+        val reply = hook().handle(bash("git push origin main")).stderr
+        assertContains(reply, "`ostrom wait G7`")
+        assertContains(reply, "needs a yes from ana (gate \"Release\")")
+        answer("""{"gate":{"label":"Release"},"id":"G8","status":"pending"}""")
+        assertContains(hook().handle(bash("git push origin main")).stderr, "`ostrom wait G8`")
+        answer("{}")
+        assertContains(hook().handle(bash("git push origin main")).stderr, "`ostrom wait ?`")
+        answer("""{"status":"pending"}""")
+        val merge = hook().handle(event("mcp__github__merge_pr", """{"pr":1}""")).stderr
+        assertContains(merge, "\"merge\" needs a yes from the gate owner (gate \"gate\")")
     }
 
     @Test
     fun theSkillsAndSubagentsOfThePackageAreReportedWhenOpened() {
-        calls = FakeCalls().on("/api/compiler/seen", ok())
+        calls = FakeCalls().on("/api/v1/sessions/a1/seen", ok())
         hook().handle(event("Skill", """{"skill":"ostrom-review"}""", after = true))
         assertEquals(
-            """{"sessionId":"a1","kind":"skill","name":"ostrom-review","via":"Skill"}""",
-            calls.bodyOf("/api/compiler/seen").toString(),
+            """{"kind":"skill","name":"ostrom-review","via":"Skill"}""",
+            calls.bodyOf("/api/v1/sessions/a1/seen").toString(),
         )
         hook().handle(event("Task", """{"subagent_type":"ostrom-tester"}""", after = true))
-        assertEquals("subagent", (calls.bodyOf("/api/compiler/seen")["kind"] as JsonPrimitive).content)
+        assertEquals("subagent", (calls.bodyOf("/api/v1/sessions/a1/seen")["kind"] as JsonPrimitive).content)
         hook().handle(event("Read", """{"file_path":"/w/.claude/skills/ostrom-ship/SKILL.md"}""", after = true))
-        assertEquals("/ostrom-ship/", (calls.bodyOf("/api/compiler/seen")["name"] as JsonPrimitive).content)
+        assertEquals("/ostrom-ship/", (calls.bodyOf("/api/v1/sessions/a1/seen")["name"] as JsonPrimitive).content)
         hook().handle(bash("cat skills/ostrom-x/SKILL.md", after = true))
-        assertEquals("/ostrom-x/", (calls.bodyOf("/api/compiler/seen")["name"] as JsonPrimitive).content)
+        assertEquals("/ostrom-x/", (calls.bodyOf("/api/v1/sessions/a1/seen")["name"] as JsonPrimitive).content)
         val before = calls.calls.size
         hook().handle(event("Skill", """{"skill":"review"}""", after = true))
         hook().handle(event("Agent", """{}""", after = true))

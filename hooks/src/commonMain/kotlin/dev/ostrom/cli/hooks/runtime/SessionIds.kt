@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.hooks.runtime
 
 import kotlinx.serialization.json.Json
@@ -49,6 +50,26 @@ class SessionIds(private val sessionFile: String?, private val files: HookFiles)
             else -> return
         }
         files.write(file, JsonObject(updated.mapValues { JsonPrimitive(true) }).toString())
+    }
+
+    /**
+     * Remembers that the yes of gate request [gateId] lets the action [text] run now, so that the after-tool hook
+     * uses it up (`POST /gates/{id}/consume`: one yes, one action).
+     */
+    fun rememberYes(text: String, gateId: String) {
+        val file = sessionFile?.let { "$it.yes.json" } ?: return
+        val yeses = read(file) + (Sha256.hex(text) to gateId)
+        files.write(file, JsonObject(yeses.mapValues { JsonPrimitive(it.value) }).toString())
+    }
+
+    /** The gate request whose yes the action [text] ran under, forgotten once read; null when it ran without one. */
+    fun takeYes(text: String): String? {
+        val file = sessionFile?.let { "$it.yes.json" } ?: return null
+        val yeses = read(file)
+        val key = Sha256.hex(text)
+        val gateId = yeses[key] ?: return null
+        files.write(file, JsonObject((yeses - key).mapValues { JsonPrimitive(it.value) }).toString())
+        return gateId
     }
 
     /** Whether the before-tool hook refused the action [text]. */

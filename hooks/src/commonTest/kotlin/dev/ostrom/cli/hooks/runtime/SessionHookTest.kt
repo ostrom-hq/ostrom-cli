@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.hooks.runtime
 
 import dev.ostrom.cli.hooks.HookReply
@@ -19,14 +20,18 @@ class SessionHookTest {
         override fun afterTool(event: JsonObject, subject: ToolSubject) = Unit
     }
 
-    private fun hook(calls: FakeCalls, context: HookContext = contextOf(), checks: WorkflowChecks = NoWorkflowChecks) =
+    private fun hook(
+        calls: FakeCalls,
+        context: HookContext = contextOf(),
+        checks: WorkflowChecks = NoWorkflowChecks,
+    ) =
         SessionHook(context, calls, SessionIds(context.sessionFile, files), files, checks, "/w")
 
     private fun event(json: String) = Json.parseToJsonElement(json) as JsonObject
 
     @Test
     fun theStartRecordsTheSessionAndHandsItsContextToTheAgent() {
-        val calls = FakeCalls().on("/api/bridge/sessions", ok("""{"context":"Rules.","session":{"id":"a1~2"}}"""))
+        val calls = FakeCalls().on("/api/v1/sessions", ok("""{"context":"Rules.","session":{"id":"a1~2"}}"""))
         val start = event("""{"hook_event_name":"SessionStart","session_id":"a1","source":"resume","model":"opus"}""")
         val reply = hook(calls, checks = Package("sha256:p", "Package rules.")).handle(start)
         assertEquals(
@@ -36,8 +41,8 @@ class SessionHookTest {
         )
         assertEquals(
             """{"id":"a1","repo":"acme/app","cwd":"/w","agent":"claude-code","dev":"lena","harnessVersion":"7",""" +
-                """"model":"opus","source":"resume","launcher":"kotlin","launchId":"L1","packageDigest":"sha256:p"}""",
-            calls.bodyOf("/api/bridge/sessions").toString(),
+                """"model":"opus","launchId":"L1","packageDigest":"sha256:p"}""",
+            calls.bodyOf("/api/v1/sessions").toString(),
         )
         assertEquals(8_000, calls.calls.single().timeoutMillis)
         assertEquals("a1~2", files.texts["/s/session"], "a resumed session is a new segment")
@@ -46,14 +51,14 @@ class SessionHookTest {
 
     @Test
     fun aStartWithoutContextOrSegmentKeepsTheAgentsId() {
-        val calls = FakeCalls().on("/api/bridge/sessions", ok("""{"session":{"id":""}}"""))
+        val calls = FakeCalls().on("/api/v1/sessions", ok("""{"session":{"id":""}}"""))
         val context = contextOf("OSTROM_MODEL" to "gpt-5")
         val start = event("""{"hook_event_name":"SessionStart","session_id":"a1","cwd":"/w/x"}""")
         val reply = hook(calls, context).handle(start)
         val empty = """{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":""}}"""
         assertEquals(empty + "\n", reply.stdout)
         assertEquals("a1", files.texts["/s/session"])
-        val body = calls.bodyOf("/api/bridge/sessions")
+        val body = calls.bodyOf("/api/v1/sessions")
         assertEquals("gpt-5", body.string("model"))
         assertEquals("/w/x", body.string("cwd"))
         assertTrue("packageDigest" !in body)
@@ -62,7 +67,7 @@ class SessionHookTest {
     @Test
     fun grokAndHermesTakeTheirRulesElsewhere() {
         for (dialect in listOf("grok", "hermes")) {
-            val calls = FakeCalls().on("/api/bridge/sessions", ok("""{"context":"Rules."}"""))
+            val calls = FakeCalls().on("/api/v1/sessions", ok("""{"context":"Rules."}"""))
             val start = event("""{"hook_event_name":"SessionStart"}""")
             val reply = hook(calls, contextOf("OSTROM_HOOK_DIALECT" to dialect)).handle(start)
             assertEquals(HookReply(), reply)
@@ -77,7 +82,7 @@ class SessionHookTest {
 
     @Test
     fun hermesGetsItsRulesOnTheFirstModelCallOnly() {
-        val calls = FakeCalls().on("/api/bridge/sessions", ok("""{"context":"Rules."}"""))
+        val calls = FakeCalls().on("/api/v1/sessions", ok("""{"context":"Rules."}"""))
         val hermes = hook(calls, contextOf("OSTROM_HOOK_DIALECT" to "hermes"))
         val call = event("""{"hook_event_name":"PreLLMCall","session_id":"h1"}""")
         assertEquals(HookReply(stdout = """{"context":"Rules."}""" + "\n"), hermes.handle(call))
@@ -94,16 +99,22 @@ class SessionHookTest {
     fun theEndSignsTheReceiptOfTheLaunchSegment() {
         files.texts["/s/session.map.json"] = """{"a1":"a1~2"}"""
         val signed = ok("""{"session":{"receiptId":"R9"},"verification":{"ok":true}}""")
-        val calls = FakeCalls().on("/api/bridge/sessions/a1~2/end", signed)
+        val calls = FakeCalls().on("/api/v1/sessions/a1~2/end", signed)
         val reply = hook(calls, contextOf("OSTROM_SESSION_END_MS" to "2500"))
             .handle(event("""{"hook_event_name":"SessionEnd","session_id":"a1","reason":"exit"}"""))
         assertEquals(HookReply(stderr = "Ostrom: session receipt R9 (signature valid)\n"), reply)
         assertEquals("""{"source":"exit"}""", calls.calls.single().body.toString())
         assertEquals(2_500, calls.calls.single().timeoutMillis)
-        val unverified = FakeCalls().on("/api/bridge/sessions/", ok("""{"verification":{"ok":false}}"""))
+        val unverified = FakeCalls().on("/api/v1/sessions/", ok("""{"verification":{"ok":false}}"""))
         val plain = hook(unverified).handle(event("""{"hook_event_name":"SessionEnd"}"""))
         assertEquals("Ostrom: session receipt ? (not verified)\n", plain.stderr)
         assertEquals("""{"source":"SessionEnd"}""", unverified.calls.single().body.toString())
+        fun ended(answer: String) =
+            hook(FakeCalls().on("/api/v1/sessions/", ok(answer))).handle(event("""{"hook_event_name":"SessionEnd"}"""))
+        val signedOnly = ended("""{"receipt":{"id":"R3","signature":"s"}}""").stderr
+        assertEquals("Ostrom: session receipt R3 (signed)\n", signedOnly)
+        val unsigned = ended("""{"session":{},"receipt":{"id":"R4"}}""").stderr
+        assertEquals("Ostrom: session receipt R4 (not verified)\n", unsigned)
         assertEquals(
             "Ostrom unreachable (HTTP 404): session receipt not signed.\n",
             hook(FakeCalls()).handle(event("""{"hook_event_name":"SessionEnd","session_id":"a1"}""")).stderr,

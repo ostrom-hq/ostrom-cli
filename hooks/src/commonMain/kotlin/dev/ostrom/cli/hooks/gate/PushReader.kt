@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.hooks.gate
 
 /**
@@ -46,15 +47,18 @@ class PushReader(private val git: GitRunner, private val home: String) {
         if (!mentions(text)) return null
         val segments = ShellWords.segments(text)
         val pushes = segments.indices.filter { pushOf(segments[it]) != null }
-        if (pushes.isEmpty()) throw UnreadablePushException(NOT_PLAIN)
-        val other = segments.subList(0, pushes.last()).firstOrNull { pushOf(it) == null && it.first() != "cd" }
-        if (other != null) {
-            throw UnreadablePushException(
-                "run the push as its own command, after `${other.joinToString(" ").take(80)}` has run: Ostrom checks " +
-                    "and asks a yes for the commits a push sends, and they must exist before the command starts. " +
-                    "Run `git push …` alone.",
-            )
+        val other = pushes.lastOrNull()?.let { last ->
+            segments.subList(0, last).firstOrNull { pushOf(it) == null && it.first() != "cd" }
         }
+        val refusal = when {
+            pushes.isEmpty() -> NOT_PLAIN
+            other != null ->
+                "run the push as its own command, after `${other.joinToString(" ").take(SHOWN)}` has run: Ostrom " +
+                    "checks and asks a yes for the commits a push sends, and they must exist before the command " +
+                    "starts. Run `git push …` alone."
+            else -> null
+        }
+        if (refusal != null) throw UnreadablePushException(refusal)
         var remote = ""
         val refs = mutableListOf<PushRef>()
         var force = false
@@ -148,29 +152,21 @@ class PushReader(private val git: GitRunner, private val home: String) {
      */
     private fun barePush(directory: String, remote: String, branch: String): PushRef {
         val configured = git.run(directory, listOf("config", "--get-all", "remote.$remote.push"))
-        if (configured.isNotEmpty()) {
-            throw UnreadablePushException(
+        val refusal = when {
+            configured.isNotEmpty() ->
                 "this push follows remote.$remote.push (${configured.lines().joinToString(", ")}), which Ostrom " +
-                    "does not read: name what you push (`git push $remote <branch>`), as its own command.",
-            )
-        }
-        if (git.run(directory, listOf("config", "--bool", "remote.$remote.mirror")) == "true") {
-            throw UnreadablePushException(
-                "remote $remote is a mirror: every ref would be pushed. Push each branch by name, as its own command.",
-            )
-        }
-        if (git.run(directory, listOf("config", "push.default")) == "matching") {
-            throw UnreadablePushException(
+                    "does not read: name what you push (`git push $remote <branch>`), as its own command."
+            git.run(directory, listOf("config", "--bool", "remote.$remote.mirror")) == "true" ->
+                "remote $remote is a mirror: every ref would be pushed. Push each branch by name, as its own command."
+            git.run(directory, listOf("config", "push.default")) == "matching" ->
                 "push.default is \"matching\": a bare push sends every branch that exists on both sides. Name what " +
-                    "you push (`git push origin <branch>`), as its own command.",
-            )
-        }
-        if (branch.isEmpty()) {
-            throw UnreadablePushException(
+                    "you push (`git push origin <branch>`), as its own command."
+            branch.isEmpty() ->
                 "a bare `git push` from a detached HEAD: name what you push (`git push origin HEAD:main`), as its " +
-                    "own command.",
-            )
+                    "own command."
+            else -> null
         }
+        if (refusal != null) throw UnreadablePushException(refusal)
         val upstream = git.run(directory, listOf("config", "branch.$branch.merge"))
         return PushRef(commitOf(directory, "HEAD"), if (upstream.isEmpty()) branch else shortRef(upstream))
     }
@@ -221,6 +217,7 @@ class PushReader(private val git: GitRunner, private val home: String) {
         private val REDIRECTION = Regex("^(>|2>|1>|<|&>)")
         private val EVERYTHING = setOf("--all", "--mirror", "--branches", "--tags")
         private val OPTIONS_WITH_VALUE = setOf("-o", "--push-option", "--repo", "--receive-pack", "--exec")
+        private const val SHOWN = 80 // characters of the command quoted in a refusal
         private const val NOT_PLAIN =
             "Ostrom cannot read which commits this push sends (the push is not a plain `git push` command). Run " +
                 "`git push <remote> <branch>` as its own command."

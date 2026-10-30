@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.hooks.runtime
 
 import kotlinx.serialization.json.JsonElement
@@ -9,10 +10,15 @@ sealed interface CallResult {
     data class Ok(val body: JsonObject) : CallResult
 
     /**
-     * No usable answer: the server's `error` field when it sent one (`session closed: …`), else `HTTP <status>`,
-     * else why the call did not reach it.
+     * No usable answer: the server's error message when it sent one, else `HTTP <status>`, else why the call did not
+     * reach it.
+     *
+     * @property type The server's stable error key (`session_closed`), or null.
      */
-    data class Failed(val message: String) : CallResult
+    data class Failed(val message: String, val type: String? = null) : CallResult {
+        /** Ostrom refused the write because its session is closed (the machine slept past Ostrom's wait). */
+        val sessionClosed: Boolean get() = type == "session_closed" || message.startsWith("session closed:")
+    }
 }
 
 /**

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.hooks.runtime
 
 import dev.ostrom.cli.hooks.gate.GateCatalogue
@@ -39,8 +40,7 @@ class CatalogueStore(
     fun refresh(timeoutMillis: Int): Pair<GateCatalogue, Boolean> {
         val path = context.gatesFile
         val local = path?.let { files.read(it) }
-        val path = "/api/bridge/gates/catalog?repo=${Urls.encode(context.repository)}"
-        val answer = calls.call(path, null, timeoutMillis)
+        val answer = calls.call(Routes.catalog(context.repository), null, timeoutMillis)
         val actions = (answer as? CallResult.Ok)?.body?.get("actions")
         if (actions != null) {
             val merged = parseObject(local) + ("actions" to actions)

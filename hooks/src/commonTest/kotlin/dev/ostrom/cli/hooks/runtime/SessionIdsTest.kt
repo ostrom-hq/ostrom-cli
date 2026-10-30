@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.hooks.runtime
 
 import kotlin.test.Test
@@ -46,6 +47,21 @@ class SessionIdsTest {
         assertFalse(ids.wasRefused("git status"))
         ids.markRefused("git push", refused = false)
         assertFalse(ids.wasRefused("git push"))
+    }
+
+    @Test
+    fun aYesIsUsedUpByTheActionItWasGivenFor() {
+        val files = FakeFiles()
+        val ids = SessionIds("/s/session", files)
+        assertEquals(null, ids.takeYes("git push"), "no yes yet")
+        ids.rememberYes("git push", "g1")
+        ids.rememberYes("git push up", "g2")
+        assertEquals("g1", ids.takeYes("git push"))
+        assertEquals(null, ids.takeYes("git push"), "one yes, one action")
+        assertEquals("g2", ids.takeYes("git push up"))
+        val none = SessionIds(null, files)
+        none.rememberYes("x", "g3")
+        assertEquals(null, none.takeYes("x"), "without a session file nothing is kept")
     }
 
     @Test

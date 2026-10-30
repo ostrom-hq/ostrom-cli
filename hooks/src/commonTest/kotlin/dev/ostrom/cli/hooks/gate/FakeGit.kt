@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.hooks.gate
 
 /** A git that answers from a table: `"<dir>|<args joined by spaces>"` to its output; anything else fails (""). */
