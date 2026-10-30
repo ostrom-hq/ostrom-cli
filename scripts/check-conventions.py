@@ -21,7 +21,8 @@ MODULE_GRAPH: dict = {
     "api-client": {"platform"},  # platform in tests only (the environment of the network test)
     "launcher": {"platform"},
     "mcp": {"platform"},
-    "cli": {"platform", "hooks", "launcher", "mcp", "apiClient"},
+    "relay": {"platform"},  # never a dependency of hooks: hooks stay light (docs/MODULES.md)
+    "cli": {"platform", "hooks", "launcher", "mcp", "apiClient", "relay"},
 }
 
 PRODUCTION_SOURCE_SET = re.compile(r"/src/[A-Za-z0-9]*Main/")

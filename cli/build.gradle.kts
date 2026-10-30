@@ -58,6 +58,7 @@ kotlin {
                 implementation(projects.launcher)
                 implementation(projects.mcp)
                 implementation(projects.apiClient)
+                implementation(projects.relay)
                 implementation(libs.clikt)
                 implementation(libs.coroutines.core)
                 implementation(libs.serialization.json)

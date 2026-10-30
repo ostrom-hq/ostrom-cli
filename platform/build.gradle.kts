@@ -12,6 +12,12 @@ kotlin {
         compilations.getByName("main").cinterops.create("native") {
             definitionFile.set(project.file("src/nativeInterop/cinterop/$shim.def"))
         }
+        if (konanTarget.family == Family.MINGW) {
+            // BCryptGenRandom (secureRandomBytes): its header is not part of Kotlin/Native's platform.windows.
+            compilations.getByName("main").cinterops.create("random") {
+                definitionFile.set(project.file("src/nativeInterop/cinterop/random-windows.def"))
+            }
+        }
     }
     sourceSets {
         // Shared POSIX code, compiled with each family's own interop (macOS and Linux).

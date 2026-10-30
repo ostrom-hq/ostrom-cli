@@ -39,4 +39,4 @@ listOf("../ostrom-core", "../../ostrom-core")
         }
     }
 
-include(":platform", ":api-client", ":hooks", ":launcher", ":mcp", ":cli")
+include(":platform", ":api-client", ":hooks", ":launcher", ":mcp", ":relay", ":cli")
