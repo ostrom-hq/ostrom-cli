@@ -542,6 +542,11 @@ class OstromCliTest {
                 override fun run(arguments: List<String>) = 0
             },
             mcpServer = { object : McpServer { override fun serve() = 0 } },
+            credentials = { error("no credentials in this test") },
+            workingDirectory = { "/work/acme" },
+            executable = null,
+            temporaryDirectory = "/tmp",
+            agents = AgentRunner { _, _ -> 0 },
             postHogKey = "",
             sendStatistics = { _, _ -> },
         )
