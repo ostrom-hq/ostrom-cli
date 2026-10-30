@@ -10,6 +10,7 @@ import dev.ostrom.cli.CliDependencies
 import dev.ostrom.cli.ExitCode
 import dev.ostrom.cli.launch.ApiServerTransport
 import dev.ostrom.cli.launcher.CredentialStore
+import dev.ostrom.cli.launcher.LaunchVariables
 import dev.ostrom.cli.launcher.ServerAnswer
 import dev.ostrom.cli.launcher.ServerJson
 import dev.ostrom.cli.launcher.join
@@ -18,7 +19,9 @@ import dev.ostrom.cli.login.DeviceLogin
 import dev.ostrom.cli.login.LoginOutcome
 import dev.ostrom.cli.platform.ConfigKey
 import dev.ostrom.cli.platform.ConfigStoreImpl
+import dev.ostrom.cli.platform.FileWriteException
 import kotlinx.coroutines.runBlocking
+import okio.IOException
 
 /** The server of an account command: `--server`, else `OSTROM_URL`, else the one of the last login, else Ostrom's. */
 internal fun CliDependencies.serverOf(option: String?, directory: String): String =
@@ -30,7 +33,7 @@ internal fun CliDependencies.serverOf(option: String?, directory: String): Strin
  * at another server (security audit S2-32).
  */
 private fun CliDependencies.outsideSessions(command: String) {
-    if (!environment["OSTROM_LAUNCH_ID"].isNullOrEmpty()) {
+    if (!environment[LaunchVariables.LAUNCH_ID].isNullOrEmpty()) {
         val message = "ostrom: ostrom $command does not run inside an agent's session: run it in your own terminal"
         throw PrintMessage(message, ExitCode.USAGE.code, true)
     }
@@ -58,11 +61,26 @@ internal class LoginCommand(private val dependencies: CliDependencies) : CliktCo
         when (val outcome = runBlocking { login.signIn(serverUrl) }) {
             is LoginOutcome.Stopped -> throw PrintMessage(outcome.message, outcome.exitCode, printError = true)
             is LoginOutcome.SignedIn -> {
-                dependencies.credentials(directory).save(serverUrl, outcome.credentials)
-                ConfigStoreImpl(dependencies.files, dependencies.configFile(directory)).set(ConfigKey.SERVER, serverUrl)
+                keep(directory, serverUrl, outcome)
                 dependencies.console.out("✓ Signed in as @${outcome.credentials.login} on $serverUrl\n")
                 dependencies.console.out("Next: cd into a repository and run ostrom claude\n")
             }
+        }
+    }
+
+    /** Keeps the token and the server; a folder that cannot be written is exit 73 (the session expires on its own). */
+    private fun keep(directory: String, serverUrl: String, outcome: LoginOutcome.SignedIn) {
+        val written = try {
+            dependencies.credentials(directory).save(serverUrl, outcome.credentials)
+            ConfigStoreImpl(dependencies.files, dependencies.configFile(directory)).set(ConfigKey.SERVER, serverUrl)
+            null
+        } catch (e: FileWriteException) {
+            e.path
+        } catch (e: IOException) {
+            "$directory (${e.message})"
+        }
+        if (written != null) {
+            throw PrintMessage("ostrom: signed in, but could not write $written", ExitCode.CANNOT_WRITE.code, true)
         }
     }
 }
