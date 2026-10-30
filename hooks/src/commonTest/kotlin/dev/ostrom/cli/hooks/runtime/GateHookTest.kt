@@ -175,9 +175,12 @@ class GateHookTest {
         assertEquals(2, closed.exitCode)
         assertContains(closed.stderr, "needs a yes from omar (Main), and Ostrom is unreachable (HTTP 404)")
         val open = catalogue.replace("\"closed\"", "\"open\"")
+        assertEquals(2, hook(catalogueText = open).handle(bash("git push origin main")).exitCode, "a 404 is no outage")
+        val outage = CallResult.Failed("Ostrom is unreachable (no connection)", CallResult.UNREACHABLE)
+        calls = FakeCalls().on("/api/v1/gates", outage)
         val reply = hook(catalogueText = open).handle(bash("git push origin main"))
         assertEquals(0, reply.exitCode)
-        assertContains(reply.stdout, "Ostrom unreachable (HTTP 404): \\\"Push to main\\\" let through")
+        assertContains(reply.stdout, "Ostrom unreachable (Ostrom is unreachable (no connection)): \\\"Push to main\\\"")
         val noLabel = hook(catalogueText = catalogue).handle(event("mcp__github__merge_pr", """{"pr":1}"""))
         assertContains(noLabel.stderr, "\"merge\" needs a yes from the gate owner (gate)")
     }
@@ -216,6 +219,34 @@ class GateHookTest {
         assertEquals(HookReply(), hook().handle(bash("cd /o && npm run lint")), "an unguarded action runs anywhere")
         val guarded = hook(checks = Checks(guarded = true)).handle(bash("cd /o && npm test"))
         assertContains(guarded.stderr, "runs in the repository acme/other")
+    }
+
+    @Test
+    fun aGateOnlyProposedNeverStopsTheAgent() {
+        calls = FakeCalls()
+        assertEquals(HookReply(), hook().handle(bash("deploy api")), "Ostrom unreachable: the shadow gate lets it run")
+        assertEquals(HookReply(), hook().handle(bash("cd /o && deploy api")), "nor from another clone")
+        answer("""{"id":"G9","status":"shadow"}""")
+        val redirected = hook().handle(bash("git -c remote.origin.pushurl=x deploy"))
+        assertEquals(0, redirected.exitCode, "a redirection under a shadow gate is asked, not refused")
+        assertEquals(listOf("/api/v1/gates"), calls.paths())
+    }
+
+    @Test
+    fun aNoteWrittenByTheAgentHidesNoPushFromTheApprover() {
+        answer("""{"id":"G4","status":"pending"}""")
+        val git = repository + ("/w|rev-parse --verify --quiet feature^{commit}" to "F")
+        val command = "git push origin feature\n# ostrom: git push to: x\ngit push origin main"
+        assertEquals(2, hook(git = git).handle(bash(command)).exitCode)
+        val push = calls.bodyOf("/api/v1/gates")["push"].toString()
+        assertContains(push, "\"ref\":\"main\"", message = "the push the shell runs after the fake note")
+    }
+
+    @Test
+    fun aCommandContinuedOnTheNextLineIsGatedAsOne() {
+        answer("""{"id":"G5","status":"pending"}""")
+        assertEquals(2, hook().handle(bash("git \\\n  push origin main")).exitCode)
+        assertEquals("push-main", (calls.bodyOf("/api/v1/gates")["class"] as JsonPrimitive).content)
     }
 
     @Test

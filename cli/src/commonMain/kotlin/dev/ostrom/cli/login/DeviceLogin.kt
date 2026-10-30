@@ -6,6 +6,7 @@ import dev.ostrom.cli.launcher.ServerAnswer
 import dev.ostrom.cli.launcher.ServerJson
 import dev.ostrom.cli.launcher.objectOf
 import dev.ostrom.cli.launcher.text
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.intOrNull
 
@@ -41,10 +42,13 @@ class DeviceLogin(
     private val say: (String) -> Unit,
 ) {
     /** Signs in on [serverUrl]. */
-    suspend fun signIn(serverUrl: String): LoginOutcome {
-        val start = server.post(START, objectOf(), null)
-        if (start is ServerAnswer.Failed) return LoginOutcome.Stopped(codeOf(start), messageOf(start, serverUrl))
-        val body = (start as ServerAnswer.Ok).body
+    suspend fun signIn(serverUrl: String): LoginOutcome = when (val start = server.post(START, objectOf(), null)) {
+        is ServerAnswer.Failed -> LoginOutcome.Stopped(codeOf(start), messageOf(start, serverUrl))
+        is ServerAnswer.Ok -> started(start.body, serverUrl)
+    }
+
+    /** Shows the code of a started flow, then waits for GitHub's yes. */
+    private suspend fun started(body: JsonObject, serverUrl: String): LoginOutcome {
         val deviceCode = body.text("deviceCode") ?: ""
         val userCode = body.text("userCode") ?: "?"
         val page = body.text("verificationUri") ?: "$githubWeb/login/device"

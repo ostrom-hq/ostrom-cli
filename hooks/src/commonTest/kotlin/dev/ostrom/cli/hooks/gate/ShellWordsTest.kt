@@ -31,6 +31,14 @@ class ShellWordsTest {
     }
 
     @Test
+    fun aBackslashAtTheEndOfALineJoinsItToTheNextOneAsTheShellDoes() {
+        assertEquals(listOf(listOf("git", "push", "origin", "main")), ShellWords.segments("git \\\n  push origin main"))
+        assertEquals(listOf(listOf("git", "push")), ShellWords.segments("gi\\\nt push"), "inside a word too")
+        assertEquals(listOf(listOf("echo", "ab")), ShellWords.segments("echo \"a\\\nb\""), "and in double quotes")
+        assertEquals(listOf(listOf("echo", "a\\\nb")), ShellWords.segments("echo 'a\\\nb'"), "never in single quotes")
+    }
+
+    @Test
     fun aCommentRunsToTheEndOfItsLineOnly() {
         assertEquals(listOf(listOf("a"), listOf("b")), ShellWords.segments("a # note\nb"))
         assertEquals(listOf(listOf("a#b")), ShellWords.segments("a#b"), "a # inside a word is not a comment")
