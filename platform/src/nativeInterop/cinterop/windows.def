@@ -348,3 +348,29 @@ static inline int ostrom_tcp_exchange(int port, const unsigned char *request, in
     closesocket(s);
     return result;
 }
+
+/*
+ * Opens (creating it) and locks the whole file at the UTF-16 `path` with LockFileEx, waiting for any other process
+ * that holds it. Returns the handle to give back to ostrom_unlock_file_w, or NULL. Closing the handle (or the process
+ * ending) releases the lock.
+ */
+static inline void *ostrom_lock_file_w(const unsigned short *path) {
+    HANDLE file = CreateFileW((LPCWSTR)path, GENERIC_READ | GENERIC_WRITE,
+                              FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_ALWAYS,
+                              FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE) return NULL;
+    OVERLAPPED whole;
+    ZeroMemory(&whole, sizeof whole);
+    if (!LockFileEx(file, LOCKFILE_EXCLUSIVE_LOCK, 0, MAXDWORD, MAXDWORD, &whole)) {
+        CloseHandle(file);
+        return NULL;
+    }
+    return file;
+}
+
+static inline void ostrom_unlock_file_w(void *file) {
+    OVERLAPPED whole;
+    ZeroMemory(&whole, sizeof whole);
+    UnlockFileEx((HANDLE)file, 0, MAXDWORD, MAXDWORD, &whole);
+    CloseHandle((HANDLE)file);
+}
