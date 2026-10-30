@@ -70,7 +70,8 @@ data class GitInvocation(
             while (i < words.size) {
                 val word = words[i]
                 val transparent = isAssignment(word) || word in TRANSPARENT_PREFIXES
-                if (!transparent && !(word.startsWith("-") && i > 0 && words[i - 1] in TRANSPARENT_PREFIXES)) break
+                val optionOfPrefix = word.startsWith("-") && i > 0 && words[i - 1] in TRANSPARENT_PREFIXES
+                if (!transparent && !optionOfPrefix) break
                 i++
             }
             return i

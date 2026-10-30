@@ -226,7 +226,7 @@ class RelayHooksTest {
     fun anEngineFailureIsUnreachableToo() {
         val ostrom = FakeOstrom { error("TLS handshake failed") }
         relayTest(ostrom) {
-            val response = client.post("/api/v1/checks") { bearerAuth(TOKEN) }
+            val response = client.post("/api/v1/notifications") { bearerAuth(TOKEN) }
             assertEquals(HttpStatusCode.BadGateway, response.status)
             assertTrue(response.bodyAsText().contains("Ostrom is unreachable (no connection)"))
         }
