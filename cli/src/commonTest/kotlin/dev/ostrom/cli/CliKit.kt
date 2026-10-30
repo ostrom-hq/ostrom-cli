@@ -6,6 +6,7 @@ import dev.ostrom.cli.api.ServerRequest
 import dev.ostrom.cli.api.ServerResponse
 import dev.ostrom.cli.hooks.HookRunner
 import dev.ostrom.cli.hooks.runtime.GateWait
+import dev.ostrom.cli.imports.FakeMysql
 import dev.ostrom.cli.launch.AgentRunner
 import dev.ostrom.cli.launcher.FileCredentialStore
 import dev.ostrom.cli.launcher.LaunchFilesImpl
@@ -17,6 +18,7 @@ import dev.ostrom.cli.platform.Environment
 import dev.ostrom.cli.platform.ExecutableFinder
 import dev.ostrom.cli.platform.FileStoreImpl
 import dev.ostrom.cli.platform.OperatingSystem
+import dev.ostrom.cli.platform.ProcessCapture
 import dev.ostrom.cli.platform.SecretBackend
 import dev.ostrom.cli.platform.SecretStore
 import dev.ostrom.cli.platform.StandardInput
@@ -97,6 +99,7 @@ open class CliKit {
         api: (String) -> OstromApi = { error("no server in this test") },
         executable: String? = "/opt/ostrom",
         gateWait: () -> GateWait = { error("no gate wait in this test") },
+        capture: ProcessCapture = FakeMysql(),
         secrets: () -> SecretStore = storeIn(SecretBackend.KEYCHAIN),
         postHogKey: String = "",
     ) = OstromCli(
@@ -125,6 +128,7 @@ open class CliKit {
             readLine = { typed.removeFirstOrNull() },
             openUrl = { url -> browser.also { opened += url } },
             gateWait = gateWait,
+            capture = capture,
             postHogKey = postHogKey,
             sendStatistics = { _, body -> statistics += body },
             secrets = secrets,
