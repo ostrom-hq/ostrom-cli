@@ -28,6 +28,12 @@ class ProcessLauncherWindowsTest {
     }
 
     @Test
+    fun aVariableIsSetForTheChild() {
+        val command = listOf("cmd.exe", "/c", "if", "defined", "OSTROM_TEST_SET", "(exit", "0)", "else", "(exit", "1)")
+        assertEquals(ProcessResult.Exited(0), launcher.run(command, mapOf("OSTROM_TEST_SET" to "1")))
+    }
+
+    @Test
     fun aMissingExecutableIsNotFound() {
         assertIs<ProcessResult.NotFound>(launcher.run(listOf("ostrom-no-such-executable-4f2c.exe")))
     }
