@@ -21,10 +21,14 @@ import platform.posix.setenv
 import platform.posix.unsetenv
 import dev.ostrom.cli.platform.interop.ostrom_capture
 import dev.ostrom.cli.platform.interop.ostrom_is_terminal
+import dev.ostrom.cli.platform.interop.ostrom_raw_enter
+import dev.ostrom.cli.platform.interop.ostrom_raw_restore
 import dev.ostrom.cli.platform.interop.ostrom_read_stdin
 import dev.ostrom.cli.platform.interop.ostrom_spawn_detached
 import dev.ostrom.cli.platform.interop.ostrom_spawn_wait
 import dev.ostrom.cli.platform.interop.ostrom_tcp_exchange
+import dev.ostrom.cli.platform.interop.ostrom_terminal_read
+import dev.ostrom.cli.platform.interop.ostrom_terminal_size
 import dev.ostrom.cli.platform.interop.ostrom_write
 
 internal actual fun spawnAndWait(command: List<String>, environment: Map<String, String?>): ProcessResult = memScoped {
@@ -103,3 +107,12 @@ internal actual fun tcpExchange(
     }
     return count to response
 }
+
+internal actual fun terminalEnterRaw(): Boolean = ostrom_raw_enter() == 1
+
+internal actual fun terminalRestore() = ostrom_raw_restore()
+
+internal actual fun terminalSize(): Long = ostrom_terminal_size()
+
+internal actual fun terminalRead(buffer: ByteArray, timeoutMillis: Int): Int =
+    buffer.usePinned { ostrom_terminal_read(it.addressOf(0).reinterpret(), buffer.size, timeoutMillis) }

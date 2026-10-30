@@ -3,6 +3,9 @@ package dev.ostrom.cli
 
 import dev.ostrom.cli.api.OstromApi
 import dev.ostrom.cli.api.OstromApiImpl
+import dev.ostrom.cli.api.TerminalChannels
+import dev.ostrom.cli.cloud.CloudRunner
+import dev.ostrom.cli.cloud.CloudRunnerImpl
 import dev.ostrom.cli.hooks.HookRunner
 import dev.ostrom.cli.hooks.HookRunnerImpl
 import dev.ostrom.cli.hooks.runtime.SessionHooks
@@ -28,6 +31,7 @@ import dev.ostrom.cli.platform.FileStoreImpl
 import dev.ostrom.cli.platform.LoopbackHttpImpl
 import dev.ostrom.cli.platform.ProcessCaptureImpl
 import dev.ostrom.cli.platform.ProcessLauncherImpl
+import dev.ostrom.cli.platform.RawTerminalImpl
 import dev.ostrom.cli.platform.currentExecutable
 import dev.ostrom.cli.relay.LocalRelayStarterImpl
 import kotlinx.coroutines.Dispatchers
@@ -51,6 +55,7 @@ import okio.Path.Companion.toPath
  * @property sleep Waits the given milliseconds (the device flow of login; virtual in tests).
  * @property readLine Reads a line the developer typed, or null at the end of the input.
  * @property openUrl Opens a page in the developer's browser; false when it could not.
+ * @property cloud Runs `ostrom <agent> --cloud` and `ostrom attach`.
  */
 @Suppress("LongParameterList") // The composition root: one parameter per dependency, each replaced in tests.
 class CliDependencies(
@@ -69,6 +74,7 @@ class CliDependencies(
     val sleep: suspend (Long) -> Unit,
     val readLine: () -> String?,
     val openUrl: (String) -> Boolean,
+    val cloud: CloudRunner,
 ) {
     /** The device configuration, or null when no home folder is known. */
     val config: ConfigStore? by lazy {
@@ -115,6 +121,13 @@ class CliDependencies(
                 sleep = { delay(it) },
                 readLine = ::readlnOrNull,
                 openUrl = BrowserOpener(ProcessLauncherImpl(), environment.operatingSystem)::open,
+                cloud = CloudRunnerImpl(
+                    console = console,
+                    api = api,
+                    channels = { url, path, token -> TerminalChannels(url, USER_AGENT).open(path, token) },
+                    terminal = RawTerminalImpl(),
+                    capture = ProcessCaptureImpl(),
+                ),
             )
         }
 

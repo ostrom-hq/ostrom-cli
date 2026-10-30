@@ -153,6 +153,7 @@ fun pendingCommands(implemented: List<CliktCommand>): List<CliktCommand> {
         ReceiptsCommand().subcommands(ReceiptsListCommand(), ReceiptsShowCommand(), ReceiptsPullCommand()),
         VerifyCommand(),
         LogsCommand(),
+        named("attach"),
         HarnessCommand().subcommands(
             HarnessListCommand(), HarnessShowCommand(), HarnessAddCommand(),
             HarnessEnforceCommand(), HarnessUpdateCommand(), HarnessRemoveCommand(),

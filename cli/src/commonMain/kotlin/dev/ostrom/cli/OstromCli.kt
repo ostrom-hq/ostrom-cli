@@ -8,6 +8,7 @@ import com.github.ajalt.clikt.core.parse
 import com.github.ajalt.clikt.core.subcommands
 import dev.ostrom.cli.commands.AgentCommand
 import dev.ostrom.cli.commands.ApproveCommand
+import dev.ostrom.cli.commands.AttachCommand
 import dev.ostrom.cli.commands.ConfigCommand
 import dev.ostrom.cli.commands.DenyCommand
 import dev.ostrom.cli.commands.DoctorCommand
@@ -58,6 +59,7 @@ class OstromCli(private val dependencies: CliDependencies) {
             InboxCommand(dependencies),
             ApproveCommand(dependencies),
             DenyCommand(dependencies),
+            AttachCommand(dependencies),
             LoginCommand(dependencies),
             LogoutCommand(dependencies),
             ConfigCommand(dependencies),

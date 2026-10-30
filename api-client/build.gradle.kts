@@ -30,6 +30,8 @@ kotlin {
         commonTest.dependencies {
             implementation(projects.platform)
             implementation(libs.ktor.client.mock)
+            implementation(libs.ktor.server.test.host)
+            implementation(libs.ktor.server.websockets)
             implementation(libs.coroutines.test)
         }
     }

@@ -6,6 +6,8 @@ import dev.ostrom.cli.api.OstromApi
 import dev.ostrom.cli.api.ServerRequest
 import dev.ostrom.cli.api.ServerResponse
 import dev.ostrom.cli.api.ServerUnreachableException
+import dev.ostrom.cli.cloud.CloudRunner
+import dev.ostrom.cli.cloud.CloudSite
 import dev.ostrom.cli.hooks.HookRunner
 import dev.ostrom.cli.launch.AgentRunner
 import dev.ostrom.cli.launcher.Agent
@@ -14,6 +16,7 @@ import dev.ostrom.cli.launcher.FileCredentialStore
 import dev.ostrom.cli.launcher.LaunchFilesImpl
 import dev.ostrom.cli.launcher.LaunchRequest
 import dev.ostrom.cli.launcher.LaunchSite
+import dev.ostrom.cli.launcher.cloud.CloudStart
 import dev.ostrom.cli.mcp.McpServer
 import dev.ostrom.cli.platform.Console
 import dev.ostrom.cli.platform.Environment
@@ -55,6 +58,8 @@ class OstromCliTest {
     private val hookCalls = mutableListOf<List<String>>()
     private val withServer = mapOf("HOME" to "/home/maya", "OSTROM_URL" to "https://ostrom.example")
     private val launches = mutableListOf<Pair<LaunchRequest, LaunchSite>>()
+    private val clouds = mutableListOf<Pair<CloudStart, CloudSite>>()
+    private val attached = mutableListOf<Pair<String, CloudSite>>()
     private val waits = mutableListOf<Long>()
     private val typed = ArrayDeque<String>()
     private val opened = mutableListOf<String>()
@@ -118,6 +123,11 @@ class OstromCliTest {
             sleep = { waits += it },
             readLine = { typed.removeFirstOrNull() },
             openUrl = { url -> browser.also { opened += url } },
+            cloud = object : CloudRunner {
+                override suspend fun start(start: CloudStart, site: CloudSite) = 5.also { clouds += start to site }
+
+                override suspend fun attach(id: String, site: CloudSite) = 6.also { attached += id to site }
+            },
         ),
     )
 
@@ -229,7 +239,6 @@ class OstromCliTest {
         assertEquals("ostrom status: not implemented yet.\n", console.err.toString())
         assertEquals(70, cli().run(arrayOf("harness", "add", "git-safety", "--set", "a=b", "--yes")))
         assertEquals(70, cli().run(arrayOf("receipts")))
-        assertEquals(70, cli().run(arrayOf("claude", "--cloud", "-p", "hello")))
         assertEquals(70, cli().run(arrayOf("codex", "--dry-run")))
         assertTrue(console.err.endsWith("ostrom codex --dry-run: not implemented yet.\n"), console.err.toString())
         assertEquals(64, cli().run(arrayOf("approve")))
@@ -567,5 +576,29 @@ class OstromCliTest {
         assertEquals(66, serving(emptyMap()).run(arrayOf("approve", "g1")))
         assertTrue(console.err.endsWith("No request g1.\n"))
         assertTrue(opened.isEmpty())
+    }
+
+    @Test
+    fun cloudStartsTheAgentInOstromsCloudWithTheCredentialsOfThisDevice() {
+        signIn("/home/maya/.config/ostrom")
+        val arguments = arrayOf("codex", "--cloud", "--repo", "acme/api", "--model", "gpt-5")
+        assertEquals(5, cli(environment = withServer).run(arguments), "the session's exit code")
+        val site = CloudSite("https://ostrom.example", "ost_1", "/work/acme")
+        assertEquals(listOf(CloudStart(Agent.CODEX, "gpt-5", "acme/api") to site), clouds)
+        assertEquals(64, cli(environment = withServer).run(arrayOf("claude", "--cloud", "-p", "hello")))
+        val said = "ostrom: agent arguments do not go to a cloud session (-p hello): start it with " +
+            "`ostrom claude --cloud`, then type in it\n"
+        assertTrue(console.err.endsWith(said), console.err.toString())
+        assertEquals(1, clouds.size, "nothing started")
+        assertTrue(launches.isEmpty(), "never launched here")
+    }
+
+    @Test
+    fun attachGivesThisTerminalToACloudSession() {
+        assertEquals(65, cli(environment = withServer).run(arrayOf("attach", "cs1")), "not signed in")
+        signIn("/home/maya/.config/ostrom")
+        assertEquals(6, cli(environment = withServer).run(arrayOf("attach", "cs1")))
+        assertEquals(listOf("cs1" to CloudSite("https://ostrom.example", "ost_1", "/work/acme")), attached)
+        assertEquals(64, cli(environment = withServer).run(arrayOf("attach")), "the session is required")
     }
 }

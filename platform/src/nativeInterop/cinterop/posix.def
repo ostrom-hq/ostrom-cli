@@ -1,6 +1,8 @@
 package = dev.ostrom.cli.platform.interop
 ---
 #include <errno.h>
+#include <sys/ioctl.h>
+#include <termios.h>
 #include <poll.h>
 #include <signal.h>
 #include <spawn.h>
@@ -272,4 +274,49 @@ static inline int ostrom_tcp_exchange(int port, const unsigned char *request, in
     }
     close(fd);
     return result;
+}
+
+/* The terminal mode before ostrom_raw_enter, kept to give it back. */
+static struct termios ostrom_saved_mode;
+static int ostrom_mode_saved = 0;
+
+/* Raw mode on stdin (no echo, no line editing, no signal keys). 1 when set, 0 when stdin is no terminal. */
+static inline int ostrom_raw_enter(void) {
+    if (!isatty(STDIN_FILENO) || tcgetattr(STDIN_FILENO, &ostrom_saved_mode) != 0) return 0;
+    struct termios raw = ostrom_saved_mode;
+    /* what cfmakeraw does, written out: cfmakeraw is not POSIX and some C modes hide it */
+    raw.c_iflag &= ~(tcflag_t)(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL | IXON);
+    raw.c_oflag &= ~(tcflag_t)OPOST;
+    raw.c_lflag &= ~(tcflag_t)(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
+    raw.c_cflag &= ~(tcflag_t)(CSIZE | PARENB);
+    raw.c_cflag |= CS8;
+    raw.c_cc[VMIN] = 1;
+    raw.c_cc[VTIME] = 0;
+    if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) != 0) return 0;
+    ostrom_mode_saved = 1;
+    return 1;
+}
+
+/* The mode ostrom_raw_enter found; nothing when it set none. */
+static inline void ostrom_raw_restore(void) {
+    if (ostrom_mode_saved) tcsetattr(STDIN_FILENO, TCSANOW, &ostrom_saved_mode);
+    ostrom_mode_saved = 0;
+}
+
+/* columns << 16 | rows of stdout's terminal, or -1. */
+static inline long long ostrom_terminal_size(void) {
+    struct winsize size;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) != 0 || size.ws_col == 0) return -1;
+    return ((long long)size.ws_col << 16) | size.ws_row;
+}
+
+/* Bytes from stdin as they come: count, 0 when none within timeout_ms, -1 at the end or on an error. */
+static inline int ostrom_terminal_read(unsigned char *buffer, int capacity, int timeout_ms) {
+    struct pollfd input = {STDIN_FILENO, POLLIN, 0};
+    int ready = poll(&input, 1, timeout_ms);
+    if (ready == 0 || (ready < 0 && errno == EINTR)) return 0;
+    if (ready < 0) return -1;
+    ssize_t count = read(STDIN_FILENO, buffer, (size_t)capacity);
+    if (count < 0) return errno == EINTR || errno == EAGAIN ? 0 : -1;
+    return count == 0 ? -1 : (int)count;
 }
