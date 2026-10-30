@@ -195,7 +195,7 @@ internal class VerifyCommand(private val dependencies: CliDependencies) : CliktC
         val directory = dependencies.directory()
         val read = dependencies.files::read
         val input = inputOf(directory, read)
-        val trusted = TrustedKeys.pinned(read(join(directory, "server-keys.json"))) + keys.flatMap(::given)
+        val trusted = TrustedKeys.pinned(read(join(directory, "server-keys.json"))) + keys.flatMap { given(it) }
         val report = VerifyReceiptUseCaseImpl(KeptCopiesImpl(read, directory))(input, trusted)
         dependencies.console.out(if (json) report.toJson() + "\n" else report.render())
         if (report.code != ExitCode.OK.code) throw ProgramResult(report.code)
