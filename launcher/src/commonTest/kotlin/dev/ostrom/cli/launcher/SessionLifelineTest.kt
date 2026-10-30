@@ -143,11 +143,14 @@ class SessionLifelineTest {
         lifeline.end(0, null, "codex", pack, receipts)
         server[workflow] = 200 to """{"receipt":{}}"""
         lifeline.end(0, null, "codex", pack, receipts)
+        server[workflow] = 200 to """{"receipt":{},"verification":{"ok":false}}"""
+        lifeline.end(0, null, "codex", pack, receipts)
         server[workflow] = 200 to """{"receipt":{"id":"W2"}}"""
         lifeline.end(0, null, "codex", pack, receipts)
         assertEquals(
             listOf(
                 "workflow receipt not signed: open",
+                "workflow receipt ? (NOT verified) · package ?",
                 "workflow receipt ? (NOT verified) · package ?",
                 "workflow receipt W2 (NOT verified) · package ?",
                 "receipt bundle not fetched (no GET /api/v1/receipts/W2/bundle)",
