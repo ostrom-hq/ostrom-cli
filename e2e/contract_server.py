@@ -21,6 +21,8 @@ from urllib.parse import parse_qs, urlsplit
 import ed25519
 
 DEVICE_TOKEN = "ost_e2e_device"
+# What `GET /api/v1/health` reports, of the contract's MAJOR.MINOR as the server's own "0.1.0-dev" is
+SERVER_VERSION = "0.1.0-e2e"
 AGENT_TOKEN = "agt_e2e_launch"
 # The instance's key in this run, which signs the gate policy (S2-20). A test key: never a real one.
 POLICY_SEED = hashlib.sha256(b"ostrom-cli e2e only: instance key").digest()
@@ -73,6 +75,11 @@ def make_handler(state):
             self.end_headers()
             self.wfile.write(data)
 
+        def _empty(self, status):
+            self.send_response(status)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
         def _error(self, status, kind, message):
             self._answer(status, {"error": {"type": kind, "message": message}})
 
@@ -109,6 +116,17 @@ def make_handler(state):
                 return self._answer(200, {"items": []})
             if (method, path) == ("GET", "/api/v1/inference/v1/models"):
                 return self._error(404, "not_found", "no gateway")
+            # the routes the developer's own commands call (e2e/commands.py): doctor, inbox, receipts, logout
+            if (method, path) == ("GET", "/api/v1/health"):
+                return self._answer(200, {"status": "ok", "version": SERVER_VERSION, "checks": {"database": "ok"}})
+            if (method, path) in (("GET", "/api/v1/approvals"), ("GET", "/api/v1/receipts")) and device:
+                return self._answer(200, {"items": []})
+            if (method, path) == ("GET", "/api/v1/receipts/W-e2e/bundle") and device:
+                return self._answer(200, state["bundle"])
+            if method == "GET" and re.fullmatch(r"/api/v1/receipts/[^/]+", path) and device:
+                return self._error(404, "not_found", "no such receipt")
+            if (method, path) == ("POST", "/api/v1/auth/logout") and device:
+                return self._empty(204)
             if not agent:
                 return self._error(401, "unauthorized", "the launch's agent token only")
             if (method, path) == ("GET", "/api/v1/gates/catalog/signed"):
