@@ -77,22 +77,22 @@ class SecretStoreTest {
         assertEquals(expected, read.message)
         for (code in listOf(-128, -25293)) {
             vault.failWith = VaultAnswer(3, code = code)
-            val asked = assertFailsWith<SecretStoreException> { store.read("s") }.message!!
+            val asked = assertFailsWith<SecretStoreException> { store.read("s") }.message
             assertTrue(asked.endsWith("choose Always Allow."), asked)
         }
         vault.failWith = VaultAnswer(3, code = -34018)
         val other = assertFailsWith<SecretStoreException> { store.read("s") }.message
         assertEquals("macOS Keychain could not read the secret s (error -34018): unlock it and try again.", other)
         vault.failWith = VaultAnswer(3, code = -25308)
-        assertTrue(assertFailsWith<SecretStoreException> { store.write("s", "x") }.message!!.contains("could not keep"))
-        assertTrue(assertFailsWith<SecretStoreException> { store.delete("s") }.message!!.contains("could not forget"))
+        assertTrue(assertFailsWith<SecretStoreException> { store.write("s", "x") }.message.contains("could not keep"))
+        assertTrue(assertFailsWith<SecretStoreException> { store.delete("s") }.message.contains("could not forget"))
         vault.failWith = VaultAnswer(VAULT_TOO_LARGE)
         assertEquals(
             "The secret s in macOS Keychain is too large to read.",
             assertFailsWith<SecretStoreException> { store.read("s") }.message,
         )
         vault.failWith = VaultAnswer(VAULT_UNREACHABLE)
-        val stopped = assertFailsWith<SecretStoreException> { store.read("s") }.message!!
+        val stopped = assertFailsWith<SecretStoreException> { store.read("s") }.message
         assertTrue(stopped.startsWith("macOS Keychain stopped answering"), stopped)
         vault.failWith = null
         assertFailsWith<SecretStoreException> { store.write("s", "x".repeat(MAX_SECRET_BYTES + 1)) }
@@ -173,7 +173,7 @@ class SecretStoreTest {
     @Test
     fun withNeitherAStoreNorAFolderNorAMachineThereIsNoPlaceForSecrets() {
         val noHome = assertFailsWith<SecretStoreException> { secretStoreOf(null, FakeEnvironment(emptyMap()), files) }
-        assertTrue(noHome.message!!.startsWith("No secret store on this device"))
+        assertTrue(noHome.message.startsWith("No secret store on this device"))
         assertFailsWith<SecretStoreException> { secretStoreOf(null, home, files) }
     }
 
@@ -191,7 +191,7 @@ class SecretStoreTest {
         fileSystem.createDirectories("/home/maya/.config".toPath())
         fileSystem.write("/home/maya/.config/ostrom".toPath()) { writeUtf8("not a folder") }
         val refused = assertFailsWith<SecretStoreException> { secretStoreOf(null, home, files).write("a", "x") }
-        assertTrue(refused.message!!.startsWith("Could not write"), refused.message)
+        assertTrue(refused.message.startsWith("Could not write"), refused.message)
     }
 
     @Test
@@ -201,7 +201,7 @@ class SecretStoreTest {
         val store = secretStoreOf(null, home, files)
         assertNull(store.read("a"))
         val refused = assertFailsWith<SecretStoreException> { store.write("a", "x") }
-        assertTrue(refused.message!!.endsWith("cannot be read: check that it is yours, then try again."))
+        assertTrue(refused.message.endsWith("cannot be read: check that it is yours, then try again."))
     }
 
     @Test
