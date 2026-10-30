@@ -78,6 +78,9 @@ internal class InboxCommand(private val dependencies: CliDependencies) : CliktCo
             cursor = body.text("next")?.takeIf { it.isNotEmpty() }
             page++
         } while (cursor != null && page < MAX_PAGES)
+        if (cursor != null) {
+            dependencies.console.err("! More requests wait than ostrom lists: see the others on the console.\n")
+        }
         return items
     }
 
@@ -169,9 +172,11 @@ internal class DenyCommand(dependencies: CliDependencies) : AnswerCommand(depend
  * The console of [serverUrl], where requests are answered: `OSTROM_CONSOLE_URL` when set, else `app.<domain>` for an
  * `api.<domain>` server (api.ostrom.run → app.ostrom.run), else the server itself.
  */
-internal fun consoleOf(dependencies: CliDependencies, serverUrl: String): String =
+internal fun consoleOf(dependencies: CliDependencies, serverUrl: String): String {
+    val set = dependencies.environment["OSTROM_CONSOLE_URL"]?.trimEnd('/')
     // only a web page goes to the system's opener: a `file:` URL or a path would start whatever handles it
-    dependencies.environment["OSTROM_CONSOLE_URL"]?.trimEnd('/')?.takeIf { WEB.any(it::startsWith) }
-        ?: serverUrl.replaceFirst("://api.", "://app.")
+    return if (set != null && WEB.matches(set)) set else serverUrl.replaceFirst("://api.", "://app.")
+}
 
-private val WEB = listOf("https://", "http://")
+/** A web page, its scheme in any case. */
+private val WEB = Regex("https?://.+", RegexOption.IGNORE_CASE)
