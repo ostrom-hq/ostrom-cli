@@ -188,6 +188,12 @@ class AgentLaunchUseCaseTest {
         server.unreachable = emptySet()
         server[policy] = 500 to """{"error":{"type":"internal","message":"boom"}}"""
         assertEquals(69, start())
+        server[policy] = 200 to "<html>portal</html>"
+        assertEquals(69, start(), "a page that is not the policy never lets the agent start")
+        server[policy] = 401 to """{"error":{"type":"unauthorized","message":"expired"}}"""
+        assertEquals(65, start())
+        server[policy] = 403 to """{"error":{"type":"forbidden","message":"agent not allowed"}}"""
+        assertEquals(77, start())
         assertEquals(
             listOf(
                 "ostrom: refused by your organisation's policy: over budget",
@@ -195,6 +201,9 @@ class AgentLaunchUseCaseTest {
                 "ostrom: your organisation's policy could not be checked (connection refused): the agent is not " +
                     "started",
                 "ostrom: your organisation's policy could not be checked (boom): the agent is not started",
+                "ostrom: your organisation's policy could not be read: the agent is not started",
+                "ostrom: not signed in to https://ostrom.example: run `ostrom login`",
+                "ostrom: refused by your organisation's policy: agent not allowed",
             ),
             said,
         )
@@ -347,11 +356,31 @@ class AgentLaunchUseCaseTest {
     }
 
     @Test
+    fun aFileOfTheLaunchThatCannotBeWrittenIs73() = runTest {
+        serveALaunch()
+        files.failWrites = true
+        assertEquals(73, start())
+        val written = said.any { it.startsWith("ostrom: a file of the launch cannot be written (disk full)") }
+        assertTrue(written, said.toString())
+    }
+
+    @Test
+    fun twoModelsNamedStopTheLaunchBeforeAnyPolicyIsAsked() = runTest {
+        serveALaunch()
+        assertEquals(64, start(model = "a", arguments = listOf("--model=b")))
+        assertTrue("ostrom: two models are named (a, b): name one, the one the policy checks" in said, said.toString())
+        assertTrue(server.requests.none { it.path.startsWith(Routes.POLICY) })
+    }
+
+    @Test
     fun theAgentsArgumentsAreReadAndExtendedInPlace() {
-        assertEquals("o", modelOf(listOf("--model", "o")))
-        assertEquals("s", modelOf(listOf("-p", "-m", "s")))
-        assertNull(modelOf(listOf("--model")))
-        assertNull(modelOf(emptyList()))
+        assertEquals(listOf("o"), modelsOf(listOf("--model", "o")))
+        assertEquals(listOf("s"), modelsOf(listOf("-p", "-m", "s")))
+        assertEquals(emptyList(), modelsOf(listOf("--model")))
+        assertEquals(emptyList(), modelsOf(emptyList()))
+        assertEquals(listOf("f"), modelsOf(listOf("--model=f")), "the = form")
+        assertEquals(listOf("g", "h"), modelsOf(listOf("-c", "model=\"g\"", "--config", "model=h", "-c", "x=1", "-c")))
+        assertEquals(listOf("a", "b"), modelsOf(listOf("--model", "a", "--", "--model", "b", "--model", "a")))
         assertEquals(listOf("a", "x", "--", "b"), beforeSeparator(listOf("a", "--", "b"), listOf("x")))
         assertEquals(listOf("a", "x"), beforeSeparator(listOf("a"), listOf("x")))
         assertEquals("claude-code", ostromName(Agent.CLAUDE))
