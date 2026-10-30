@@ -3,6 +3,8 @@ package dev.ostrom.cli
 
 import dev.ostrom.cli.api.OstromApi
 import dev.ostrom.cli.api.OstromApiImpl
+import dev.ostrom.cli.api.StatisticsSender
+import dev.ostrom.cli.api.TraceContext
 import dev.ostrom.cli.hooks.HookProcessorImpl
 import dev.ostrom.cli.hooks.HookRunner
 import dev.ostrom.cli.hooks.HookRunnerImpl
@@ -20,6 +22,7 @@ import dev.ostrom.cli.platform.ExecutableFinder
 import dev.ostrom.cli.platform.ExecutableFinderImpl
 import dev.ostrom.cli.platform.FileStore
 import dev.ostrom.cli.platform.FileStoreImpl
+import dev.ostrom.cli.telemetry.UsageStatistics
 import okio.Path.Companion.toPath
 
 /**
@@ -29,6 +32,8 @@ import okio.Path.Companion.toPath
  * @property api Builds the client of the server at the given URL.
  * @property hookRunner Runs `ostrom hook <kind>`.
  * @property mcpServer Builds the local MCP server.
+ * @property postHogKey The usage statistics destination of this build; blank means none.
+ * @property sendStatistics Posts usage statistics (opt-in only).
  */
 @Suppress("LongParameterList") // The composition root: one parameter per dependency, each replaced in tests.
 class CliDependencies(
@@ -39,7 +44,14 @@ class CliDependencies(
     val api: (String) -> OstromApi,
     val hookRunner: HookRunner,
     val mcpServer: () -> McpServer,
+    val postHogKey: String,
+    val sendStatistics: suspend (url: String, body: String) -> Unit,
 ) {
+    /** The opt-in usage statistics. */
+    val usage: UsageStatistics by lazy {
+        UsageStatistics(environment, config, postHogKey, BuildInfo.VERSION, sendStatistics)
+    }
+
     /** The device configuration, or null when no home folder is known. */
     val config: ConfigStore? by lazy {
         environment.configDirectory?.let { ConfigStoreImpl(files, configFile(it)) }
@@ -54,14 +66,20 @@ class CliDependencies(
         fun create(): CliDependencies {
             val console = ConsoleImpl()
             val environment = EnvironmentImpl()
+            // One trace for the whole command, whatever the number of servers or calls it makes.
+            val trace = TraceContext()
+            // Built on first send only: with statistics off (the default) no HTTP client is made.
+            val statistics by lazy { StatisticsSender() }
             return CliDependencies(
                 console = console,
                 environment = environment,
                 files = FileStoreImpl(),
                 finder = ExecutableFinderImpl(environment),
-                api = { url -> OstromApiImpl(url, "ostrom/${BuildInfo.VERSION}") },
+                api = { url -> OstromApiImpl(url, "ostrom/${BuildInfo.VERSION}", trace = trace) },
                 hookRunner = hookRunner(console, environment),
                 mcpServer = { McpServerImpl(McpDispatcher(BuildInfo.VERSION), console) },
+                postHogKey = BuildInfo.POSTHOG_KEY,
+                sendStatistics = { url, body -> statistics.send(url, body) },
             )
         }
 
