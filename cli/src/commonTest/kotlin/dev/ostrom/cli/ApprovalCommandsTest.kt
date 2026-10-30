@@ -61,6 +61,7 @@ class ApprovalCommandsTest : CliKit() {
         val endless = mapOf(inbox to again, "$inbox&before=x" to again)
         assertEquals(0, serving(endless).run(arrayOf("inbox")))
         assertEquals(20, requests.size)
+        assertTrue("! More requests wait than ostrom lists" in console.err.toString(), "never a silent cut")
     }
 
     @Test
@@ -68,7 +69,10 @@ class ApprovalCommandsTest : CliKit() {
         signIn("/home/maya/.config/ostrom")
         val inbox = "GET /api/v1/approvals?mine=true&status=pending"
         val error = """{"error":{"message":"not a member of acme"}}"""
-        for ((status, code) in listOf(401 to 65, 403 to 77, 404 to 66, 500 to 69)) {
+        // a redirection the client does not follow is no refusal of Ostrom's: it could not answer
+        val refusals = listOf(401 to 65, 403 to 77, 404 to 66, 409 to 64, 410 to 64, 429 to 1, 422 to 1)
+        val codes = refusals + listOf(302 to 69, 500 to 69)
+        for ((status, code) in codes) {
             val server = serverOf(mapOf(inbox to (status to error)))
             assertEquals(code, cli(environment = withServer, api = server).run(arrayOf("inbox")), "HTTP $status")
         }
@@ -148,6 +152,9 @@ class ApprovalCommandsTest : CliKit() {
         val file = official + ("OSTROM_CONSOLE_URL" to "file:///Applications/Calculator.app")
         assertEquals(0, cli(environment = file, api = serverOf(get)).run(arrayOf("approve", "g/1")))
         assertEquals("https://app.ostrom.run/yes/g%2F1", opened.last())
+        val upper = official + ("OSTROM_CONSOLE_URL" to "HTTPS://console.acme.example")
+        assertEquals(0, cli(environment = upper, api = serverOf(get)).run(arrayOf("approve", "g/1")))
+        assertEquals("HTTPS://console.acme.example/yes/g%2F1", opened.last(), "the scheme in any case")
         val plain = official + ("OSTROM_CONSOLE_URL" to "http://localhost:3000")
         assertEquals(0, cli(environment = plain, api = serverOf(get)).run(arrayOf("approve", "g/1")))
         assertEquals("http://localhost:3000/yes/g%2F1", opened.last())

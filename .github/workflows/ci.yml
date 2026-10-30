@@ -120,9 +120,9 @@ jobs:
           name: coverage-reports
           path: '**/build/reports/**'
           retention-days: 7
-      - name: Hook start-up budget (15 ms median) and binary sizes
+      - name: Hook start-up budget (15 ms median, 40 ms for a git push) and binary sizes
         run: >-
-          python3 scripts/measure.py --label linuxX64
+          python3 scripts/measure.py --label linuxX64 --max-push-ms 40
           --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
           --sizes cli/build/bin/*/releaseExecutable/ostrom.*
       - name: End to end, the real binary with fake Claude Code and Codex against the contract's server

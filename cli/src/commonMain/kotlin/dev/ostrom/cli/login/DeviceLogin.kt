@@ -66,9 +66,9 @@ class DeviceLogin(
         say("  Open $page and enter it.")
         // a server's interval of 0 would ask GitHub in a tight loop, and a huge expiry would never end
         val interval = ((body["interval"] as? JsonPrimitive)?.intOrNull ?: DEFAULT_INTERVAL_SECONDS)
-            .coerceIn(1, MAX_INTERVAL_SECONDS)
+            .coerceAtLeast(1).coerceAtMost(MAX_INTERVAL_SECONDS)
         val expiresIn = ((body["expiresIn"] as? JsonPrimitive)?.intOrNull ?: DEFAULT_EXPIRY_SECONDS)
-            .coerceIn(1, MAX_EXPIRY_SECONDS)
+            .coerceAtLeast(1).coerceAtMost(MAX_EXPIRY_SECONDS)
         return poll(deviceCode, interval * MILLIS, expiresIn * MILLIS, serverUrl)
     }
 
@@ -146,7 +146,9 @@ class DeviceLogin(
         private const val SERVER_ERROR = 500
         private const val TOO_MANY = 429
         private val USER_CODE = Regex("[A-Za-z0-9-]{1,32}")
-        private const val PENDING = 428
+        // an Int? like the answer's status: a lost connection (no status) never gets here, so no null test either
+        @Suppress("MayBeConst") // a const cannot be an Int?, and an Int would bring the null test back
+        private val PENDING: Int? = 428
         private const val FORBIDDEN = 403
         private const val EXPIRED = 1
         private const val CANCELLED = 2
