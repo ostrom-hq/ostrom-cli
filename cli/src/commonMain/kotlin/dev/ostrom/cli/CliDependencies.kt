@@ -125,6 +125,7 @@ class CliDependencies(
             val files = FileStoreImpl()
             val self = currentExecutable()
             val sessions = AgentSessionsImpl(environment, FileSystem.SYSTEM, temporary, LoopbackHttpImpl())
+            val secrets = { systemSecretStore(environment, files) }
             return CliDependencies(
                 console = console,
                 environment = environment,
@@ -134,7 +135,7 @@ class CliDependencies(
                 hookRunner = hookRunner(console, environment),
                 mcpServer = { McpServerImpl(McpDispatcher(BuildInfo.VERSION), console) },
                 credentials = { directory ->
-                    FileCredentialStore(launchFiles, join(directory, "credentials.json")) { environment[it] }
+                    FileCredentialStore(launchFiles, join(directory, "credentials.json"), secrets) { environment[it] }
                 },
                 workingDirectory = { FileSystem.SYSTEM.canonicalize(".".toPath()).toString() },
                 executable = self,
@@ -167,6 +168,7 @@ class CliDependencies(
                     detachedRefresh(self, ProcessCaptureImpl()),
                 ),
                 postHogKey = BuildInfo.POSTHOG_KEY,
+                secrets = secrets,
                 sendStatistics = { url, body -> statistics.send(url, body) },
             )
         }
