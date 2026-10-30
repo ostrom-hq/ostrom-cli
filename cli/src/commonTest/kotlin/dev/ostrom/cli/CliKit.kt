@@ -19,6 +19,8 @@ import dev.ostrom.cli.platform.Environment
 import dev.ostrom.cli.platform.ExecutableFinder
 import dev.ostrom.cli.platform.FileStoreImpl
 import dev.ostrom.cli.platform.OperatingSystem
+import dev.ostrom.cli.platform.SecretBackend
+import dev.ostrom.cli.platform.SecretStore
 import dev.ostrom.cli.platform.StandardInput
 import okio.Path.Companion.toPath
 import okio.fakefilesystem.FakeFileSystem
@@ -97,6 +99,7 @@ open class CliKit {
         installed: Set<String> = setOf("git", "claude"),
         api: (String) -> OstromApi = { error("no server in this test") },
         executable: String? = "/opt/ostrom",
+        secrets: () -> SecretStore = storeIn(SecretBackend.KEYCHAIN),
         postHogKey: String = "",
     ) = OstromCli(
         CliDependencies(
@@ -129,8 +132,19 @@ open class CliKit {
             },
             postHogKey = postHogKey,
             sendStatistics = { _, body -> statistics += body },
+            secrets = secrets,
         ),
     )
+
+    /** A secret store in [backend] that keeps nothing (doctor only reads where it is). */
+    protected fun storeIn(backend: SecretBackend): () -> SecretStore = {
+        object : SecretStore {
+            override val backend = backend
+            override fun read(name: String): String? = null
+            override fun write(name: String, secret: String) = Unit
+            override fun delete(name: String) = Unit
+        }
+    }
 
     protected fun signIn(directory: String, server: String = "https://ostrom.example") {
         fileSystem.createDirectories(directory.toPath())

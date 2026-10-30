@@ -34,7 +34,9 @@ import dev.ostrom.cli.platform.LoopbackHttpImpl
 import dev.ostrom.cli.platform.ProcessCaptureImpl
 import dev.ostrom.cli.platform.ProcessLauncherImpl
 import dev.ostrom.cli.platform.RawTerminalImpl
+import dev.ostrom.cli.platform.SecretStore
 import dev.ostrom.cli.platform.currentExecutable
+import dev.ostrom.cli.platform.systemSecretStore
 import dev.ostrom.cli.relay.LocalRelayStarterImpl
 import dev.ostrom.cli.telemetry.UsageStatistics
 import kotlinx.coroutines.Dispatchers
@@ -59,6 +61,9 @@ import okio.Path.Companion.toPath
  * @property readLine Reads a line the developer typed, or null at the end of the input.
  * @property openUrl Opens a page in the developer's browser; false when it could not.
  * @property cloud Runs `ostrom <agent> --cloud` and `ostrom attach`.
+ * @property secrets Opens the secret store of this device (system store, or encrypted file). Each call chooses and
+ * probes the store again (up to a second on Linux): a command calls it once and keeps the store; the hook's fast
+ * path never calls it.
  * @property postHogKey The usage statistics destination of this build; blank means none.
  * @property sendStatistics Posts usage statistics (opt-in only).
  */
@@ -82,6 +87,7 @@ class CliDependencies(
     val cloud: CloudRunner,
     val postHogKey: String,
     val sendStatistics: suspend (url: String, body: String) -> Unit,
+    val secrets: () -> SecretStore = { systemSecretStore(environment, files) },
 ) {
     /** The opt-in usage statistics. */
     val usage: UsageStatistics by lazy {
