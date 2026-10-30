@@ -1,0 +1,80 @@
+package = dev.ostrom.cli.platform.vault
+linkerOpts = -framework Security -framework CoreFoundation
+---
+#include <CoreFoundation/CoreFoundation.h>
+#include <Security/Security.h>
+#include <string.h>
+
+/*
+ * The macOS Keychain, generic passwords of the login keychain. Statuses of the three calls: 0 done, 1 not found,
+ * 2 secret larger than the buffer, 3 any other failure (its OSStatus in *code: -25308 is a locked keychain that
+ * cannot ask the user, as in an SSH session).
+ */
+static CFMutableDictionaryRef ostrom_keychain_query(const char *service, const char *account) {
+    CFMutableDictionaryRef query = CFDictionaryCreateMutable(
+        NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    CFStringRef service_string = CFStringCreateWithCString(NULL, service, kCFStringEncodingUTF8);
+    CFStringRef account_string = CFStringCreateWithCString(NULL, account, kCFStringEncodingUTF8);
+    CFDictionarySetValue(query, kSecClass, kSecClassGenericPassword);
+    CFDictionarySetValue(query, kSecAttrService, service_string);
+    CFDictionarySetValue(query, kSecAttrAccount, account_string);
+    CFRelease(service_string);
+    CFRelease(account_string);
+    return query;
+}
+
+static inline int ostrom_keychain_status(OSStatus status, int *code) {
+    *code = (int)status;
+    if (status == errSecSuccess) return 0;
+    if (status == errSecItemNotFound) return 1;
+    return 3;
+}
+
+static inline int ostrom_keychain_write(
+    const char *service, const char *account, const unsigned char *secret, int length, int *code) {
+    CFMutableDictionaryRef query = ostrom_keychain_query(service, account);
+    CFDataRef data = CFDataCreate(NULL, secret, length);
+    CFMutableDictionaryRef update = CFDictionaryCreateMutable(
+        NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    CFDictionarySetValue(update, kSecValueData, data);
+    OSStatus status = SecItemUpdate(query, update);
+    if (status == errSecItemNotFound) {
+        CFDictionarySetValue(query, kSecValueData, data);
+        CFStringRef label = CFStringCreateWithCString(NULL, "Ostrom", kCFStringEncodingUTF8);
+        CFDictionarySetValue(query, kSecAttrLabel, label);
+        CFRelease(label);
+        status = SecItemAdd(query, NULL);
+    }
+    CFRelease(update);
+    CFRelease(data);
+    CFRelease(query);
+    return ostrom_keychain_status(status, code);
+}
+
+static inline int ostrom_keychain_read(
+    const char *service, const char *account, unsigned char *buffer, int capacity, int *length, int *code) {
+    *length = 0;
+    CFMutableDictionaryRef query = ostrom_keychain_query(service, account);
+    CFDictionarySetValue(query, kSecReturnData, kCFBooleanTrue);
+    CFDictionarySetValue(query, kSecMatchLimit, kSecMatchLimitOne);
+    CFTypeRef result = NULL;
+    OSStatus status = SecItemCopyMatching(query, &result);
+    CFRelease(query);
+    int answer = ostrom_keychain_status(status, code);
+    if (answer != 0) return answer;
+    CFIndex size = CFDataGetLength((CFDataRef)result);
+    if (size > capacity) answer = 2;
+    else {
+        memcpy(buffer, CFDataGetBytePtr((CFDataRef)result), (size_t)size);
+        *length = (int)size;
+    }
+    CFRelease(result);
+    return answer;
+}
+
+static inline int ostrom_keychain_delete(const char *service, const char *account, int *code) {
+    CFMutableDictionaryRef query = ostrom_keychain_query(service, account);
+    OSStatus status = SecItemDelete(query);
+    CFRelease(query);
+    return ostrom_keychain_status(status, code);
+}
