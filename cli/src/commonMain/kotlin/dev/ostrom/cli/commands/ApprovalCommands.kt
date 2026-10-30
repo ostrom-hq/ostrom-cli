@@ -31,6 +31,9 @@ internal fun ServerAnswer.orStop(serverUrl: String, notFound: String): JsonObjec
         UNAUTHORIZED -> stop(ExitCode.SIGN_IN_REQUIRED, "ostrom: not signed in to $serverUrl: run `ostrom login`")
         FORBIDDEN -> stop(ExitCode.REFUSED, message)
         NOT_FOUND -> stop(ExitCode.NOT_FOUND, notFound)
+        // a request already decided or expired (409, 410) is the spec's 64; another refusal of Ostrom is not an outage
+        CONFLICT, GONE -> stop(ExitCode.USAGE, message)
+        in CLIENT_ERRORS -> stop(ExitCode.FAILED, "Ostrom refused: $message")
         else -> stop(ExitCode.UNREACHABLE, "Ostrom could not answer: $message")
     }
 }
@@ -38,6 +41,9 @@ internal fun ServerAnswer.orStop(serverUrl: String, notFound: String): JsonObjec
 private const val UNAUTHORIZED = 401
 private const val FORBIDDEN = 403
 private const val NOT_FOUND = 404
+private const val CONFLICT = 409
+private const val GONE = 410
+private val CLIENT_ERRORS = 400..499
 private const val CHECK_NETWORK = "Check your network, or the --server URL."
 
 /** `ostrom inbox`: the requests that wait for this developer's yes. */
