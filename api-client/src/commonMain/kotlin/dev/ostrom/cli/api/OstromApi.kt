@@ -67,7 +67,7 @@ interface OstromApi : AutoCloseable {
     /**
      * Fetches [path] of the server.
      *
-     * @param path An absolute path such as `/api/health`.
+     * @param path An absolute path such as `/api/v1/health`.
      *
      * @return The response, whatever its status.
      *
