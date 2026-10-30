@@ -104,6 +104,8 @@ jobs:
           OSTROM_NETWORK_TESTS: '1'
           OSTROM_SECRET_SERVICE_TESTS: '1'
         run: |
+          # the script is the inner bash's: its variables expand there, inside the D-Bus session
+          # shellcheck disable=SC2016
           dbus-run-session -- bash -ec '
             printf ci-keyring | gnome-keyring-daemon --unlock --components=secrets > /dev/null
             other=()

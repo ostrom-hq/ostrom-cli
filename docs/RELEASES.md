@@ -12,8 +12,10 @@ How the `ostrom` CLI is released, what is signed, and how to check it.
 A pre-release is any version with a dash (`1.0.0-rc.1`): the release is marked as such.
 
 **Dry run.** Run the workflow by hand (`Actions > Release > Run workflow`, or
-`gh workflow run release.yml -f version=0.0.0-dryrun`). It does everything except publish: no GitHub Release, no
-image push, no tap push. The packed and signed files are in the `release-dist` artifact of the run.
+`gh workflow run release.yml`). It does everything except publish: no GitHub Release, no image push, no tap push.
+Without a `version`, the label is the version floor's (`1.0.0-dryrun` for a floor of 1.0.0): a label under the floor
+stops the manifest step, as a real release under it would. The packed and signed files are in the `release-dist`
+artifact of the run.
 
 **Draft or public.** While the repository is private the release is created as a **draft** (only the team sees it).
 At the go: make the repositories public, set the repository variable `RELEASE_DRAFT` to `false`
