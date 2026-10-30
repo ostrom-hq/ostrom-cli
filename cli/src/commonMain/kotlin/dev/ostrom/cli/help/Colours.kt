@@ -5,10 +5,10 @@ import com.github.ajalt.mordant.rendering.AnsiLevel
 import dev.ostrom.cli.platform.Environment
 
 /**
- * The colours of help and usage errors, decided before the line is parsed, so that a help or an error printed before
- * any command runs follows them too. In order: `--no-color` among the options of `ostrom` itself, `NO_COLOR` set to
- * anything (no-color.org), `ostrom config set color never|always`, `TERM=dumb`, and last whether stdout is a
- * terminal: never a colour in a pipe, a file, a CI log or an agent.
+ * The colours of help, decided before the line is parsed, so that a help printed before any command runs follows
+ * them too (a usage error, on stderr, never has any). In order: `--no-color` among the options of `ostrom` itself,
+ * `NO_COLOR` set and not empty (no-color.org), `ostrom config set color never|always`, `TERM=dumb`, and last whether
+ * stdout is a terminal: never a colour in a pipe, a file, a CI log or an agent.
  *
  * @param args The command line, the options of `ostrom` first.
  * @param setting The `color` setting of this device (`auto`, `always`, `never`), null when unset.
