@@ -13,7 +13,9 @@ import dev.ostrom.cli.platform.ProcessCapture
  * @param variable Reads one variable of the hook's environment.
  * @param sandboxExec Whether `/usr/bin/sandbox-exec` is there to confine the script (macOS).
  * @param home The user's home folder, whose credential folders the sandbox hides.
- * @param canonical A folder with its symbolic links resolved: `sandbox-exec` matches real paths only.
+ * @param canonical A folder with its symbolic links resolved: `sandbox-exec` matches real paths only, so every path of
+ *   the profile, the hidden credentials' included, goes through it.
+ * @param budget What is left of the agent's limit on the hook: a script is cut to it, and not started once it is spent.
  */
 class SandboxedScripts(
     private val capture: ProcessCapture,
@@ -21,6 +23,7 @@ class SandboxedScripts(
     private val sandboxExec: Boolean,
     private val home: String,
     private val canonical: (String) -> String,
+    private val budget: HookBudget = HookBudget.NONE,
 ) : ScriptRunner {
     override fun run(request: ScriptRequest): ScriptRun {
         val temporary = "${request.sandbox}/tmp"
@@ -35,7 +38,9 @@ class SandboxedScripts(
         } else {
             NO_SANDBOX
         }
-        return when (val result = capture.capture(environment + confinement + shell, request.timeoutMillis)) {
+        val limit = budget.cap(request.timeoutMillis)
+        return when (val result = limit?.let { capture.capture(environment + confinement + shell, it) }) {
+            null -> ScriptRun(null, SPENT, how, started = false)
             is CaptureResult.Exited -> ScriptRun(result.code, result.output, how)
             CaptureResult.TimedOut -> ScriptRun(null, "", how)
             else -> ScriptRun(null, "the script could not be started", how, started = false)
@@ -45,7 +50,7 @@ class SandboxedScripts(
     /** The `sandbox-exec` profile of the prototype (`profile` in `package.mjs`, `sandbox_profile` in `package.rs`). */
     fun profile(request: ScriptRequest): String {
         val real = { path: String -> canonical(path).replace("\"", "") }
-        val hidden = HIDDEN.joinToString(" ") { "(subpath \"${"${home.trimEnd('/')}/$it".replace("\"", "")}\")" }
+        val hidden = HIDDEN.joinToString(" ") { "(subpath \"${real("${home.trimEnd('/')}/$it")}\")" }
         val tmp = real(request.tmp)
         val network = if (request.network) "" else "(deny network*)\n(allow network* (remote unix-socket))\n"
         return "(version 1)\n(allow default)\n$network(deny file-write*)\n" +
@@ -64,6 +69,9 @@ class SandboxedScripts(
         /** How a script runs where there is no sandbox. */
         const val NO_SANDBOX = "none on this OS (clean environment and time limit only)"
 
+        /** Why a script was not started: the agent's limit on the hook is reached. */
+        private const val SPENT = "the agent's time limit for a hook is reached, so the script was not started"
+
         private val KEPT = listOf("PATH", "HOME", "LANG", "LC_ALL", "USER", "SHELL")
         private val HIDDEN = listOf(
             ".ssh", ".config/ostrom", ".config/gh", ".aws", ".netrc", ".docker/config.json", ".npmrc", ".gnupg",
@@ -76,11 +84,18 @@ class SandboxedScripts(
 }
 
 /**
- * [CommitCheckouts] over the real `git`.
+ * [CommitCheckouts] over the real `git`. These commands run in the hook's own process, outside the sandbox, on a
+ * repository the agent controls: its hooks (`post-checkout`), its fsmonitor and the Git LFS filters are switched off,
+ * so none of the repository's code runs with the hook's rights.
  *
  * @param git The `git` the launcher resolved (`OSTROM_GIT`).
+ * @param budget What is left of the agent's limit on the hook: a command it leaves no time for is not run, and fails.
  */
-class GitCheckouts(private val capture: ProcessCapture, private val git: String) : CommitCheckouts {
+class GitCheckouts(
+    private val capture: ProcessCapture,
+    private val git: String,
+    private val budget: HookBudget = HookBudget.NONE,
+) : CommitCheckouts {
     override fun clean(repository: String): Boolean {
         val status = run(repository, listOf("status", "--porcelain", "--untracked-files=all"), SHORT_MILLIS)
         return status is CaptureResult.Exited && status.code == 0 && status.output.isEmpty()
@@ -96,10 +111,18 @@ class GitCheckouts(private val capture: ProcessCapture, private val git: String)
         run(repository, listOf("worktree", "prune"), SHORT_MILLIS)
     }
 
-    private fun run(repository: String, arguments: List<String>, timeoutMillis: Int): CaptureResult =
-        capture.capture(listOf(git, "-C", repository) + arguments, timeoutMillis)
+    private fun run(repository: String, arguments: List<String>, timeoutMillis: Int): CaptureResult {
+        val command = listOf(git) + SAFE + listOf("-C", repository) + arguments
+        return budget.cap(timeoutMillis)?.let { capture.capture(command, it) } ?: CaptureResult.TimedOut
+    }
 
     private companion object {
+        /** No hook, no fsmonitor, no LFS filter (an empty filter command is no filter for git). */
+        val SAFE = listOf(
+            "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "filter.lfs.smudge=",
+            "-c", "filter.lfs.process=", "-c", "filter.lfs.clean=", "-c", "filter.lfs.required=false",
+        )
+
         const val SHORT_MILLIS = 5_000
 
         /** A checkout writes the whole tree of a commit. */

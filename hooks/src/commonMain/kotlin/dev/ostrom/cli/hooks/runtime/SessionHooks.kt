@@ -39,8 +39,11 @@ object SessionHooks {
         val checks = environment["OSTROM_PACKAGE"]?.let { view ->
             val sandboxExec = environment.operatingSystem == OperatingSystem.MACOS &&
                 files.readStart(SandboxedScripts.SANDBOX_EXEC, 1) != null
-            val scripts = SandboxedScripts(capture, environment::get, sandboxExec, context.home, files::canonical)
-            val checkouts = GitCheckouts(capture, context.git)
+            // a check never outlives the agent's limit on its hook: past it, Grok runs the action unchecked
+            val budget = HookBudget.of(environment["OSTROM_HOOK_BUDGET_MS"], clock)
+            val home = context.home
+            val scripts = SandboxedScripts(capture, environment::get, sandboxExec, home, files::canonical, budget)
+            val checkouts = GitCheckouts(capture, context.git, budget)
             PackageChecks(view, context, CheckPorts(files, calls, git, checkouts, scripts, clock))
         } ?: NoWorkflowChecks
         val ports = HookPorts(

@@ -24,8 +24,14 @@ class CheckProcessesTest {
     private val variables = mapOf("PATH" to "/usr/bin:/bin", "HOME" to "/home/lena", "OSTROM_TOKEN" to "secret")
     private val request = ScriptRequest("s1", "/t/sbx/s1.sh", "/w", "/t/sbx", "/t", network = false, 30_000)
 
-    private fun runner(capture: Capture, sandboxExec: Boolean) =
-        SandboxedScripts(capture, variables::get, sandboxExec, "/home/lena", { "/real$it" })
+    private fun runner(capture: Capture, sandboxExec: Boolean, budget: HookBudget = HookBudget.NONE) =
+        SandboxedScripts(capture, variables::get, sandboxExec, "/home/lena", { "/real$it" }, budget)
+
+    /** What every git command of a check is given before its own arguments. */
+    private val safe = listOf(
+        "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "filter.lfs.smudge=",
+        "-c", "filter.lfs.process=", "-c", "filter.lfs.clean=", "-c", "filter.lfs.required=false",
+    )
 
     private val shell = listOf(
         "/bin/sh", "-c", "exec 2>&1 && mkdir -p \"$3\" && cd \"$1\" && exec /bin/sh \"$2\"", "ostrom-check", "/w",
@@ -55,7 +61,7 @@ class CheckProcessesTest {
         val hidden = listOf(
             ".ssh", ".config/ostrom", ".config/gh", ".aws", ".netrc", ".docker/config.json", ".npmrc", ".gnupg",
             "Library/Keychains",
-        ).joinToString(" ") { "(subpath \"/home/lena/$it\")" }
+        ).joinToString(" ") { "(subpath \"/real/home/lena/$it\")" }
         assertEquals(
             "(version 1)\n(allow default)\n(deny network*)\n(allow network* (remote unix-socket))\n" +
                 "(deny file-write*)\n(allow file-write* (subpath \"/real/w\") (subpath \"/real/t/sbx\") " +
@@ -71,6 +77,25 @@ class CheckProcessesTest {
         assertEquals(allowed, open.run(networked).sandbox)
         assertTrue(open.profile(networked).startsWith("(version 1)\n(allow default)\n(deny file-write*)\n"))
         assertTrue("(subpath \"/real/wx\")" in open.profile(networked), "a quote never ends a path of the profile")
+        val linked = SandboxedScripts(Capture(), variables::get, true, "/home/lena", { it.replace("/home", "/Users") })
+        assertTrue(
+            "(subpath \"/Users/lena/.ssh\")" in linked.profile(request),
+            "a credential folder reached through a link is hidden at its real path",
+        )
+    }
+
+    @Test
+    fun aScriptIsCutToTheHookBudgetAndNotStartedOnceItIsSpent() {
+        var now = 0L
+        val budget = HookBudget(11_000) { now }
+        val capture = Capture(CaptureResult.TimedOut)
+        assertEquals(ScriptRun(null, "", SandboxedScripts.NO_SANDBOX), runner(capture, false, budget).run(request))
+        assertEquals(10_000, capture.captured.single().second, "the script ends a second before the agent's limit")
+        now = 10_000
+        val spent = runner(capture, false, budget).run(request)
+        val why = "the agent's time limit for a hook is reached, so the script was not started"
+        assertEquals(ScriptRun(null, why, SandboxedScripts.NO_SANDBOX, started = false), spent)
+        assertEquals(1, capture.captured.size, "nothing is started once the budget is spent")
     }
 
     @Test
@@ -92,7 +117,8 @@ class CheckProcessesTest {
         assertFalse(clean(CaptureResult.TimedOut))
         val capture = Capture(CaptureResult.Exited(0, ""))
         GitCheckouts(capture, "/usr/bin/git").clean("/w")
-        val status = listOf("/usr/bin/git", "-C", "/w", "status", "--porcelain", "--untracked-files=all")
+        val status = listOf("/usr/bin/git") + safe +
+            listOf("-C", "/w", "status", "--porcelain", "--untracked-files=all")
         assertEquals(status to 5_000, capture.captured.single())
     }
 
@@ -104,13 +130,29 @@ class CheckProcessesTest {
         checkouts.remove("/w", "/t/sbx/wt-M")
         assertEquals(
             listOf(
-                listOf("git", "-C", "/w", "worktree", "add", "--detach", "--force", "/t/sbx/wt-M", "M") to 60_000,
-                listOf("git", "-C", "/w", "worktree", "remove", "--force", "/t/sbx/wt-M") to 60_000,
-                listOf("git", "-C", "/w", "worktree", "prune") to 5_000,
+                git("worktree", "add", "--detach", "--force", "/t/sbx/wt-M", "M") to 60_000,
+                git("worktree", "remove", "--force", "/t/sbx/wt-M") to 60_000,
+                git("worktree", "prune") to 5_000,
             ),
             capture.captured,
         )
         assertFalse(GitCheckouts(Capture(CaptureResult.Exited(128, "")), "git").add("/w", "/p", "M"))
         assertFalse(GitCheckouts(Capture(CaptureResult.NotFound), "git").add("/w", "/p", "M"))
+    }
+
+    private fun git(vararg arguments: String) = listOf("git") + safe + listOf("-C", "/w") + arguments
+
+    @Test
+    fun gitIsCutToTheHookBudgetAndNotRunOnceItIsSpent() {
+        var now = 0L
+        val capture = Capture(CaptureResult.Exited(0, ""))
+        val checkouts = GitCheckouts(capture, "git", HookBudget(4_000) { now })
+        assertTrue(checkouts.add("/w", "/p", "M"))
+        assertEquals(3_000, capture.captured.single().second, "the checkout ends a second before the agent's limit")
+        now = 3_000
+        assertFalse(checkouts.clean("/w"), "no time to read the tree: it is not taken as clean")
+        assertFalse(checkouts.add("/w", "/p", "M"))
+        checkouts.remove("/w", "/p")
+        assertEquals(1, capture.captured.size, "nothing is run once the budget is spent")
     }
 }
