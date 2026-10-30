@@ -89,6 +89,9 @@ def make_handler(state):
                 return self._answer(201, {"session": {"id": session}, "context": "[Ostrom] e2e rules"})
             if method == "POST" and path == "/api/v1/gates":
                 return self._answer(201, {"gate": {"id": "G-e2e", "status": "pending", "receiptId": None}})
+            if (method, path) == ("GET", "/api/v1/gates/G-e2e"):
+                return self._answer(200, {"gate": {"id": "G-e2e", "status": "approved", "decidedBy": "@lena",
+                                                   "receiptId": "R-gate"}})
             match = re.fullmatch(r"/api/v1/sessions/([^/]+)/(alive|end|seen|reopen|workflow-receipt)", path)
             if method == "POST" and match:
                 session, action = match.groups()

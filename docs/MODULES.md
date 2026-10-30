@@ -10,7 +10,7 @@ all Ostrom repositories are in `ostrom-core/docs/CONVENTIONS.md`; this page only
 | Module | Package | Holds | Depends on |
 | --- | --- | --- | --- |
 | `platform` | `dev.ostrom.cli.platform` | everything that touches the OS: processes sharing the terminal, stdin with a deadline, unbuffered stdout/stderr, environment, files, `config.toml`, PATH lookup | okio |
-| `hooks` | `dev.ostrom.cli.hooks` | `ostrom hook gate\|session`: event parsing (all agents' dialects), the gate, the reply | `platform` |
+| `hooks` | `dev.ostrom.cli.hooks` | `ostrom hook gate\|session`: event parsing (all agents' dialects), the gate, the reply; `ostrom wait` (`GateWait`) | `platform` |
 | `api-client` | `dev.ostrom.cli.api` | the server over HTTPS (Ktor, platform engine) | ostrom-core (once published) |
 | `launcher` | `dev.ostrom.cli.launcher` | the agents (`Agent`) and starting one in this terminal | `platform` |
 | `mcp` | `dev.ostrom.cli.mcp` | the local MCP server on stdio (`ostrom mcp`) | `platform` |
@@ -44,6 +44,10 @@ it when the agent exits. The agent's hooks, its MCP client
 and, when the launch relays it, its inference reach Ostrom through it with the relay's random capability
 (`LocalRelay.token`, 64 hexadecimal characters from `secureRandomBytes`); the relay adds the launch's agent token,
 which never enters the agent's environment (audit A12/A13).
+
+`ostrom wait GATE_ID`, which a gate's refusal tells the agent to run as its own command, reaches Ostrom the same way
+(`GET /api/v1/gates/{id}?wait=`, 55 s at most per read, the relay's 70 s bound): the agent's shell inherits the
+relay's URL and capability, never a token of Ostrom.
 
 - Every request needs the capability (`Authorization: Bearer`, `x-api-key` or `x-ostrom-local-token`, compared in
   constant time): 401 otherwise. An `Origin` header or a `Host` that is not the loopback: 403.

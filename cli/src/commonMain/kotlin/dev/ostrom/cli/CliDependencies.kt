@@ -5,6 +5,8 @@ import dev.ostrom.cli.api.OstromApi
 import dev.ostrom.cli.api.OstromApiImpl
 import dev.ostrom.cli.hooks.HookRunner
 import dev.ostrom.cli.hooks.HookRunnerImpl
+import dev.ostrom.cli.hooks.runtime.GateWait
+import dev.ostrom.cli.hooks.runtime.RelayCalls
 import dev.ostrom.cli.hooks.runtime.SessionHooks
 import dev.ostrom.cli.launch.AgentRunner
 import dev.ostrom.cli.launch.AgentRunnerImpl
@@ -32,6 +34,8 @@ import dev.ostrom.cli.platform.currentExecutable
 import dev.ostrom.cli.relay.LocalRelayStarterImpl
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import okio.FileSystem
 import okio.Path.Companion.toPath
 
@@ -47,6 +51,7 @@ import okio.Path.Companion.toPath
  * @property executable This binary, or null when the system does not say.
  * @property temporaryDirectory Where a launch makes its private folder.
  * @property agents Runs `ostrom <agent>`.
+ * @property gateWait Builds `ostrom wait`, which asks through the session's relay.
  */
 @Suppress("LongParameterList") // The composition root: one parameter per dependency, each replaced in tests.
 class CliDependencies(
@@ -62,6 +67,7 @@ class CliDependencies(
     val executable: String?,
     val temporaryDirectory: String,
     val agents: AgentRunner,
+    val gateWait: () -> GateWait,
 ) {
     /** The device configuration, or null when no home folder is known. */
     val config: ConfigStore? by lazy {
@@ -105,6 +111,14 @@ class CliDependencies(
                     blocking = Dispatchers.IO,
                     userAgent = USER_AGENT,
                 ),
+                gateWait = {
+                    val relay = RelayCalls(
+                        environment["OSTROM_RELAY_URL"],
+                        environment["OSTROM_RELAY_TOKEN"],
+                        LoopbackHttpImpl(),
+                    )
+                    GateWait(relay, SessionHooks::epochMillis, ::pause, console::err)
+                },
             )
         }
 
@@ -123,3 +137,6 @@ class CliDependencies(
         }
     }
 }
+
+/** Blocks the thread [millis] milliseconds: `ostrom wait` runs as a plain command, never inside a hook. */
+internal fun pause(millis: Long) = runBlocking { delay(millis) }

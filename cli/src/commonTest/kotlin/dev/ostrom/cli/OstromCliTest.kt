@@ -7,6 +7,9 @@ import dev.ostrom.cli.api.ServerRequest
 import dev.ostrom.cli.api.ServerResponse
 import dev.ostrom.cli.api.ServerUnreachableException
 import dev.ostrom.cli.hooks.HookRunner
+import dev.ostrom.cli.hooks.runtime.CallResult
+import dev.ostrom.cli.hooks.runtime.GateWait
+import dev.ostrom.cli.hooks.runtime.OstromCalls
 import dev.ostrom.cli.launch.AgentRunner
 import dev.ostrom.cli.launcher.Agent
 import dev.ostrom.cli.launcher.Credentials
@@ -21,11 +24,14 @@ import dev.ostrom.cli.platform.ExecutableFinder
 import dev.ostrom.cli.platform.FileStoreImpl
 import dev.ostrom.cli.platform.OperatingSystem
 import dev.ostrom.cli.platform.StandardInput
-import okio.Path.Companion.toPath
-import okio.fakefilesystem.FakeFileSystem
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import okio.Path.Companion.toPath
+import okio.fakefilesystem.FakeFileSystem
 
 class OstromCliTest {
     private class FakeConsole : Console {
@@ -71,6 +77,7 @@ class OstromCliTest {
         installed: Set<String> = setOf("git", "claude"),
         api: (String) -> OstromApi = { error("no server in this test") },
         executable: String? = "/opt/ostrom",
+        gateWait: () -> GateWait = { error("no gate wait in this test") },
     ) = OstromCli(
         CliDependencies(
             console = console,
@@ -92,6 +99,7 @@ class OstromCliTest {
             executable = executable,
             temporaryDirectory = "/tmp",
             agents = AgentRunner { request, site -> 7.also { launches += request to site } },
+            gateWait = gateWait,
         ),
     )
 
@@ -341,6 +349,26 @@ class OstromCliTest {
         assertTrue(dependencies.configFile("/x").endsWith("config.toml"))
         assertTrue(dependencies.workingDirectory().isNotEmpty())
         assertEquals(null, dependencies.credentials("/nowhere-ostrom").load("https://ostrom.example")?.login)
+        assertEquals(64, dependencies.gateWait().await("not an id!", 1).exitCode, "never sent")
+        pause(1)
+    }
+
+    @Test
+    fun waitPrintsTheLineTheModelReadsAndExitsWithItsCode() {
+        val paths = mutableListOf<String>()
+        val calls = object : OstromCalls {
+            override fun call(path: String, body: JsonElement?, timeoutMillis: Int): CallResult {
+                paths += path
+                return CallResult.Ok(JsonObject(mapOf("status" to JsonPrimitive("rejected"))))
+            }
+        }
+        val wait = { GateWait(calls, { 0L }, {}, {}) }
+        assertEquals(2, cli(gateWait = wait).run(arrayOf("wait", "g1", "--timeout", "5")))
+        assertOut("rejected by the gate owner (receipt -). Do not run the command; tell the user.\n")
+        assertEquals(listOf("/api/v1/gates/g1?wait=5"), paths)
+        assertEquals(64, cli(gateWait = wait).run(arrayOf("wait", "g1", "--timeout", "0")), "at least a second")
+        assertEquals(0, cli(gateWait = wait).run(arrayOf("wait", "--help")))
+        assertOut("Seconds to wait (default 110)")
     }
 
     @Test
