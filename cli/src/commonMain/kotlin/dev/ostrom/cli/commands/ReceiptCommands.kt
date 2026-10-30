@@ -12,6 +12,7 @@ import com.github.ajalt.clikt.parameters.options.option
 import dev.ostrom.cli.CliDependencies
 import dev.ostrom.cli.ExitCode
 import dev.ostrom.cli.launcher.Routes
+import dev.ostrom.cli.launcher.ServerKeyPins
 import dev.ostrom.cli.launcher.ServerAnswer
 import dev.ostrom.cli.launcher.child
 import dev.ostrom.cli.launcher.join
@@ -241,7 +242,7 @@ internal class VerifyCommand(private val dependencies: CliDependencies) : CliktC
         val directory = dependencies.directory()
         val read = dependencies.files::read
         val input = inputOf(directory, read)
-        val trusted = TrustedKeys.pinned(read(join(directory, "server-keys.json"))) + keys.flatMap { given(it) }
+        val trusted = TrustedKeys.pinned(read(ServerKeyPins.path(directory))) + keys.flatMap { given(it) }
         val report = VerifyReceiptUseCaseImpl(KeptCopiesImpl(read, directory))(input, trusted)
         dependencies.console.out(if (json) report.toJson() + "\n" else report.render())
         if (report.code != ExitCode.OK.code) throw ProgramResult(report.code)

@@ -443,7 +443,9 @@ class ReceiptCommandsTest {
         assertEquals(kept, read("$home/server-keys.json"), "the same key is not written again")
         val pinnedOther = mapOf(
             """{"kid":"0000000000000000","publicKeyPem":"p"}""" to "key 0000000000000000",
-            """{"kid":"${ReceiptBundleVector.KID}"}""" to "key ${ReceiptBundleVector.KID}",
+            """{"kid":"${ReceiptBundleVector.KID}"}""" to "an unusable key ${ReceiptBundleVector.KID}",
+            """{"kid":"${ReceiptBundleVector.KID}","publicKeyPem":"p"}""" to
+                "an unusable key ${ReceiptBundleVector.KID}",
             """{"publicKeyPem":"p"}""" to "no usable key",
         )
         for ((entry, what) in pinnedOther) {
