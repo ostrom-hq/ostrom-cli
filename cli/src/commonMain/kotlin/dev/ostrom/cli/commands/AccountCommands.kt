@@ -24,7 +24,7 @@ import kotlinx.coroutines.runBlocking
 import okio.IOException
 
 /** The server of an account command: `--server`, else `OSTROM_URL`, else the one of the last login, else Ostrom's. */
-private fun CliDependencies.serverOf(option: String?, directory: String): String =
+internal fun CliDependencies.serverOf(option: String?, directory: String): String =
     (option ?: environment["OSTROM_URL"] ?: ConfigStoreImpl(files, configFile(directory)).get(ConfigKey.SERVER)
         ?: DEFAULT_SERVER).trimEnd('/')
 
@@ -40,7 +40,7 @@ private fun CliDependencies.outsideSessions(command: String) {
 }
 
 /** The CLI folder, or exit 73. */
-private fun CliDependencies.directory(): String = environment.configDirectory
+internal fun CliDependencies.directory(): String = environment.configDirectory
     ?: throw PrintMessage("ostrom: no folder for ostrom's files: set OSTROM_HOME", ExitCode.CANNOT_WRITE.code, true)
 
 /** `ostrom login [--server URL]`: signs this device in with GitHub, through Ostrom (CLI.md § 2.2). */
@@ -123,3 +123,25 @@ internal class LogoutCommand(private val dependencies: CliDependencies) : CliktC
 }
 
 private const val DEFAULT_SERVER = "https://api.ostrom.run"
+
+/**
+ * The signed-in device for a command that reads or writes on the server.
+ *
+ * @property serverUrl The server, without a trailing slash.
+ * @property token The device token.
+ * @property login The developer's GitHub login.
+ * @property server The server's JSON API.
+ */
+internal class SignedIn(val serverUrl: String, val token: String, val login: String, val server: ServerJson)
+
+/** The device signed in to the server of [option], or exit 65 with `ostrom login` to run. */
+internal fun CliDependencies.signedIn(option: String?): SignedIn {
+    val directory = directory()
+    val serverUrl = serverOf(option, directory)
+    val credentials = credentials(directory).load(serverUrl) ?: throw PrintMessage(
+        "ostrom: not signed in to $serverUrl: run `ostrom login`",
+        ExitCode.SIGN_IN_REQUIRED.code,
+        printError = true,
+    )
+    return SignedIn(serverUrl, credentials.token, credentials.login, ServerJson(ApiServerTransport(api(serverUrl))))
+}
