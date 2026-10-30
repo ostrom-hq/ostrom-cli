@@ -9,22 +9,24 @@ import com.github.ajalt.clikt.parameters.options.option
 import dev.ostrom.cli.BuildInfo
 import dev.ostrom.cli.CliDependencies
 import dev.ostrom.cli.ExitCode
+import dev.ostrom.cli.launcher.LaunchVariables
 import dev.ostrom.cli.launcher.Routes
 import dev.ostrom.cli.launcher.ServerAnswer
 import dev.ostrom.cli.launcher.child
 import dev.ostrom.cli.launcher.join
 import dev.ostrom.cli.launcher.list
-import dev.ostrom.cli.launcher.objectOf
 import dev.ostrom.cli.launcher.parseObject
 import dev.ostrom.cli.launcher.text
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import okio.Path
 import okio.Path.Companion.toPath
 
 /**
  * `ostrom status [--json]`: who, which organization, this repository's harness, the yeses waiting, this device
- * (CLI.md § `ostrom status`). Offline, only the device's line, and 69.
+ * (CLI.md § `ostrom status`). When Ostrom is unreachable or fails (5xx), only the device's line, and 69; `--json`
+ * stays JSON, with the same keys, null for what is not known.
  */
 internal class StatusCommand(private val dependencies: CliDependencies) : CliktCommand(name = "status") {
     override fun help(context: Context) = "Everything about you, this repository and this device"
@@ -38,21 +40,47 @@ internal class StatusCommand(private val dependencies: CliDependencies) : CliktC
         val kid = pinnedKid(dependencies, signed.directory, signed.serverUrl)
         val device = "ostrom ${BuildInfo.VERSION} · " + if (kid == null) "no key pinned yet" else "key $kid pinned"
         val me = runBlocking { signed.server.get(ME, signed.token) }
-        if (me is ServerAnswer.Failed && me.status == null) {
-            dependencies.console.out("This device $device\n")
-            dependencies.console.err("! Ostrom is unreachable: server lines not shown.\n")
-            throw ProgramResult(ExitCode.UNREACHABLE.code)
+        val failed = me as? ServerAnswer.Failed
+        val status = failed?.status
+        if (failed != null && (status == null || status >= SERVER_ERROR)) {
+            val known = Facts(JsonObject(emptyMap()), signed.login, host, null, null, null)
+            down(failed, known, signed.serverUrl, kid, device)
         }
         val caller = me.orStop(signed.serverUrl, "No account on ${signed.serverUrl}.")
         val repository = repositoryOf(dependencies)
         val (harness, waiting) = runBlocking {
             val pack = repository?.let { signed.server.get("$PACKAGE${Routes.encode(it)}", signed.token) }
-            val inbox = signed.server.get(INBOX, signed.token)
-            val version = (pack as? ServerAnswer.Ok)?.let { it.body.text("version") }
-            version to (inbox as? ServerAnswer.Ok)?.let { it.body.list("items").size }
+            // a revoked package is one the launcher refuses: no harness is in force
+            val live = (pack as? ServerAnswer.Ok)?.let { ok -> ok.body.takeIf { it["revoked"] != JsonPrimitive(true) } }
+            val version = live?.text("version")
+            version to waitingOf(signed)
         }
         val facts = Facts(caller, signed.login, host, repository, harness, waiting)
         dependencies.console.out(if (json) facts.json(signed.serverUrl, kid) + "\n" else facts.text(device))
+    }
+
+    /** Ostrom did not answer: the device's line (or the JSON of what is known), what happened, and exit 69. */
+    private fun down(me: ServerAnswer.Failed, facts: Facts, serverUrl: String, kid: String?, device: String): Nothing {
+        val out = if (json) facts.json(serverUrl, kid) + "\n" else "This device $device\n"
+        dependencies.console.out(out)
+        val why = if (me.status == null) "is unreachable" else "answers HTTP ${me.status}"
+        dependencies.console.err("! Ostrom $why: server lines not shown.\n")
+        throw ProgramResult(ExitCode.UNREACHABLE.code)
+    }
+
+    /** The requests waiting for this developer's yes, every page of the inbox (as `ostrom inbox`), or null. */
+    private suspend fun waitingOf(signed: SignedIn): Int? {
+        var count = 0
+        var cursor: String? = null
+        var page = 0
+        do {
+            val before = if (cursor == null) "" else "&before=${Routes.encode(cursor)}"
+            val answer = signed.server.get("$INBOX$before", signed.token) as? ServerAnswer.Ok ?: return null
+            count += answer.body.list("items").size
+            cursor = answer.body.text("next")?.takeIf { it.isNotEmpty() }
+            page++
+        } while (cursor != null && page < MAX_PAGES)
+        return count
     }
 
     /** What status shows, read from the server's answers. */
@@ -85,16 +113,19 @@ internal class StatusCommand(private val dependencies: CliDependencies) : CliktC
             return "Signed in   $who\nRepository  $repo\nWaiting     $yes\nThis device $device\n"
         }
 
-        fun json(serverUrl: String, kid: String?): String = objectOf(
-            "login" to login,
-            "organization" to organization,
-            "role" to role,
-            "server" to serverUrl,
-            "repository" to repository,
-            "harness" to harness,
-            "waiting" to waiting,
-            "version" to BuildInfo.VERSION,
-            "pinnedKey" to kid,
+        /** Always the same keys (CLI.md principle 6): what is not known is null, never missing. */
+        fun json(serverUrl: String, kid: String?): String = JsonObject(
+            mapOf(
+                "login" to JsonPrimitive(login),
+                "organization" to JsonPrimitive(organization),
+                "role" to JsonPrimitive(role),
+                "server" to JsonPrimitive(serverUrl),
+                "repository" to JsonPrimitive(repository),
+                "harness" to JsonPrimitive(harness),
+                "waiting" to JsonPrimitive(waiting),
+                "version" to JsonPrimitive(BuildInfo.VERSION),
+                "pinnedKey" to JsonPrimitive(kid),
+            ),
         ).toString()
     }
 
@@ -102,6 +133,8 @@ internal class StatusCommand(private val dependencies: CliDependencies) : CliktC
         const val ME = "/api/v1/auth/me"
         const val PACKAGE = "${Routes.PACKAGE}?repo="
         const val INBOX = "/api/v1/approvals?mine=true&status=pending"
+        const val SERVER_ERROR = 500
+        const val MAX_PAGES = 20
     }
 }
 
@@ -109,8 +142,17 @@ internal class StatusCommand(private val dependencies: CliDependencies) : CliktC
 internal fun pinnedKid(dependencies: CliDependencies, directory: String, serverUrl: String): String? =
     parseObject(dependencies.files.read(join(directory, "server-keys.json")))?.child(serverUrl)?.text("kid")
 
-/** The repository `ostrom` runs in, named as a launch names it (the folder of the git top), or null outside one. */
+/**
+ * The repository `ostrom` runs in, named as a launch names it: `OSTROM_REPO` when set, else the folder of the git top;
+ * null outside one.
+ */
 internal fun repositoryOf(dependencies: CliDependencies): String? {
+    val named = dependencies.environment[LaunchVariables.REPO]
+    return if (named.isNullOrEmpty()) gitTopOf(dependencies) else named
+}
+
+/** The folder name of the git top `ostrom` runs under, or null. */
+private fun gitTopOf(dependencies: CliDependencies): String? {
     var folder: Path? = dependencies.workingDirectory().toPath()
     while (folder != null) {
         if (dependencies.files.exists((folder / ".git").toString())) return folder.name

@@ -53,6 +53,14 @@ class StatusCommandTest : CliKit() {
                 "This device ostrom ${BuildInfo.VERSION} · no key pinned yet\n",
             console.out.toString(),
         )
+        console.out.clear()
+        assertEquals(0, serving(bare).run(arrayOf("status", "--json")))
+        assertEquals(
+            """{"login":"maya","organization":null,"role":null,"server":"https://ostrom.example",""" +
+                """"repository":null,"harness":null,"waiting":null,"version":"${BuildInfo.VERSION}",""" +
+                """"pinnedKey":null}""" + "\n",
+            console.out.toString(),
+        )
         fileSystem.createDirectories("/work/.git".toPath())
         for ((items, line) in listOf("[]" to "nothing waits for your yes", "[{}]" to "1 request needs your yes")) {
             console.out.clear()
@@ -60,6 +68,72 @@ class StatusCommandTest : CliKit() {
             assertOut("Repository  work · no harness yet\n")
             assertOut("Waiting     $line")
         }
+    }
+
+    @Test
+    fun theWaitingCountReadsEveryPageOfTheInbox() {
+        signIn("/home/maya/.config/ostrom")
+        val paged = mapOf(
+            me,
+            inbox to (200 to """{"items":[{}],"next":"n 1"}"""),
+            "$inbox&before=n%201" to (200 to """{"items":[{},{}],"next":""}"""),
+        )
+        assertEquals(0, serving(paged).run(arrayOf("status")))
+        assertOut("Waiting     3 requests need your yes (ostrom inbox)\n")
+        console.out.clear()
+        val endless = mapOf(
+            me,
+            inbox to (200 to """{"items":[{}],"next":"c"}"""),
+            "$inbox&before=c" to (200 to """{"items":[{}],"next":"c"}"""),
+        )
+        assertEquals(0, serving(endless).run(arrayOf("status")))
+        assertOut("Waiting     20 requests need your yes (ostrom inbox)\n")
+        console.out.clear()
+        val broken = mapOf(me, inbox to (200 to """{"items":[{}],"next":"c"}"""), "$inbox&before=c" to (500 to "{}"))
+        assertEquals(0, serving(broken).run(arrayOf("status")))
+        assertOut("Waiting     unknown\n")
+    }
+
+    @Test
+    fun theRepositoryIsTheOneTheLaunchWouldName() {
+        signIn("/home/maya/.config/ostrom")
+        fileSystem.createDirectories("/work/acme/.git".toPath())
+        val routes = mapOf(
+            me,
+            "GET /api/v1/packages/current?repo=acme-payments" to (200 to """{"version":"p2026-4"}"""),
+        )
+        val named = withServer + ("OSTROM_REPO" to "acme-payments")
+        assertEquals(0, cli(environment = named, api = serverOf(routes)).run(arrayOf("status")))
+        assertOut("Repository  acme-payments · harness p2026-4\n")
+        console.out.clear()
+        val revoked = mapOf(
+            me,
+            "GET /api/v1/packages/current?repo=acme-payments" to (200 to """{"version":"p2026-4","revoked":true}"""),
+        )
+        assertEquals(0, cli(environment = named, api = serverOf(revoked)).run(arrayOf("status")))
+        assertOut("Repository  acme-payments · no harness yet\n")
+        console.out.clear()
+        val empty = withServer + ("OSTROM_REPO" to "")
+        assertEquals(0, cli(environment = empty, api = serverOf(routes)).run(arrayOf("status")))
+        assertOut("Repository  acme · no harness yet\n")
+    }
+
+    @Test
+    fun aFailingServerStillShowsTheDeviceAndJsonStaysJson() {
+        signIn("/home/maya/.config/ostrom")
+        pinKey()
+        val failing = mapOf("GET /api/v1/auth/me" to (503 to "{}"))
+        assertEquals(69, serving(failing).run(arrayOf("status")))
+        assertEquals("This device ostrom ${BuildInfo.VERSION} · key a1b2c3d4 pinned\n", console.out.toString())
+        assertTrue(console.err.endsWith("! Ostrom answers HTTP 503: server lines not shown.\n"), console.err.toString())
+        console.out.clear()
+        assertEquals(69, serving(failing).run(arrayOf("status", "--json")))
+        assertEquals(
+            """{"login":"maya","organization":null,"role":null,"server":"https://ostrom.example",""" +
+                """"repository":null,"harness":null,"waiting":null,"version":"${BuildInfo.VERSION}",""" +
+                """"pinnedKey":"a1b2c3d4"}""" + "\n",
+            console.out.toString(),
+        )
     }
 
     @Test

@@ -52,7 +52,8 @@ class RunDoctorUseCaseImpl(
     private val pinnedKey: (String) -> String?,
 ) : RunDoctorUseCase {
     override suspend fun invoke(): List<DoctorCheck> {
-        val url = environment["OSTROM_URL"] ?: config?.get(ConfigKey.SERVER)
+        // the URL as login and the launcher key it: without its trailing slash
+        val url = (environment["OSTROM_URL"] ?: config?.get(ConfigKey.SERVER))?.trimEnd('/')
         return listOfNotNull(
             DoctorCheck(
                 CheckStatus.OK,
