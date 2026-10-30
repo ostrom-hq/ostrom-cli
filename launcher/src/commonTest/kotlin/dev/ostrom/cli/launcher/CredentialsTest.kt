@@ -1,28 +1,65 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.launcher
 
+import dev.ostrom.cli.platform.SecretBackend
+import dev.ostrom.cli.platform.SecretStore
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class CredentialsTest {
     private val files = MemoryFiles()
     private val path = join("/config", "credentials.json")
+    private val kept = mutableMapOf<String, String>()
+    private var opened = 0
+
+    private val secrets = object : SecretStore {
+        override val backend = SecretBackend.KEYCHAIN
+
+        override fun read(name: String) = kept[name]
+
+        override fun write(name: String, secret: String) {
+            kept[name] = secret
+        }
+
+        override fun delete(name: String) {
+            kept -= name
+        }
+    }
 
     private fun store(vararg variables: Pair<String, String>) =
-        FileCredentialStore(files, path) { mapOf(*variables)[it] }
+        FileCredentialStore(files, path, { secrets.also { opened++ } }) { mapOf(*variables)[it] }
 
     @Test
-    fun theTokenIsSavedPerServerOwnerOnly() {
+    fun theTokenIsKeptInTheSecretStoreAndTheLoginInTheFile() {
         val store = store()
         assertNull(store.load("https://a.example"))
         store.save("https://a.example", Credentials("ost_a", "alice"))
         store.save("https://b.example", Credentials("ost_b", "bob"))
         assertEquals(Credentials("ost_a", "alice"), store.load("https://a.example"))
+        assertEquals(mapOf("https://a.example" to "ost_a", "https://b.example" to "ost_b"), kept)
+        assertTrue("ost_a" !in files.texts.getValue(path), "never the token in the file")
         assertEquals(FileAccess.PRIVATE, files.access[path])
+        assertEquals(1, opened, "the secret store is opened once")
         store.forget("https://a.example")
         assertNull(store.load("https://a.example"))
+        assertEquals(mapOf("https://b.example" to "ost_b"), kept)
         assertEquals(Credentials("ost_b", "bob"), store.load("https://b.example"))
+    }
+
+    @Test
+    fun forgettingATokenReadFromTheFileForgetsItInBothStores() {
+        files.texts[path] = """{"https://a.example":{"token":"from-file","login":"alice"}}"""
+        val store = store()
+        assertEquals(Credentials("from-file", "alice"), store.saved("https://a.example"))
+        kept["https://a.example"] = "in-store"
+        assertEquals("in-store", store.saved("https://a.example")?.token, "the secret store first")
+        store.forget("https://a.example")
+        assertEquals(emptyMap(), kept)
+        assertNull(store.saved("https://a.example"))
+        kept["https://c.example"] = "t"
+        assertEquals(Credentials("t", "unknown"), store.saved("https://c.example"), "a token without its file entry")
     }
 
     @Test
