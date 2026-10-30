@@ -144,7 +144,6 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         val files = dependencies.files
         files.createPrivateDirectory(run.plugin)
         val view = run.pack?.let { PackageLayout(files).layDown(it, run.plugin, run.temporary) }
-        calls.prefetchCatalogue(run.repo, run.launch.agentToken, run.gates)
         val mcp = (calls.mcpServers(run.site) + run.pack?.mcpServers.orEmpty()).distinct()
         val inference = inferenceRelayed(run)
         val settings = RelaySettings(
@@ -154,6 +153,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
             run.launch.launchId,
             mcp.toSet(),
             inference,
+            run.pack?.gateCatalog,
         )
         return dependencies.relays.start(settings).use { relay ->
             val prepared = prepare(run, RelayView(relay.url, relay.token, mcp, inference))
@@ -210,7 +210,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
             LaunchVariables.REPO to run.repo,
             LaunchVariables.DEV to site.credentials.login,
             LaunchVariables.AGENT to run.name,
-            LaunchVariables.BIN to site.executable,
+            LaunchVariables.GIT to dependencies.finder.find("git"),
             LaunchVariables.GATES to run.gates,
             LaunchVariables.SESSION_FILE to run.sessionFile,
             LaunchVariables.HARNESS_VERSION to run.pack?.version.orEmpty(),

@@ -10,7 +10,7 @@ all Ostrom repositories are in `ostrom-core/docs/CONVENTIONS.md`; this page only
 | Module | Package | Holds | Depends on |
 | --- | --- | --- | --- |
 | `platform` | `dev.ostrom.cli.platform` | everything that touches the OS: processes sharing the terminal, stdin with a deadline, unbuffered stdout/stderr, environment, files, `config.toml`, PATH lookup | okio |
-| `hooks` | `dev.ostrom.cli.hooks` | `ostrom hook gate\|session\|gates-refresh`: event parsing (all agents' dialects), the gate, the reply | `platform` |
+| `hooks` | `dev.ostrom.cli.hooks` | `ostrom hook gate\|session`: event parsing (all agents' dialects), the gate, the reply | `platform` |
 | `api-client` | `dev.ostrom.cli.api` | the server over HTTPS (Ktor, platform engine) | ostrom-core (once published) |
 | `launcher` | `dev.ostrom.cli.launcher` | the agents (`Agent`) and starting one in this terminal | `platform` |
 | `mcp` | `dev.ostrom.cli.mcp` | the local MCP server on stdio (`ostrom mcp`) | `platform` |
@@ -23,8 +23,8 @@ Rules that keep the binary fast and the modules apart:
   Linux, `windows.def` for Windows). Shared POSIX Kotlin lives in `src/posixMain`, added to `macosMain` and
   `linuxMain`; Windows code in `src/mingwMain`.
 - `hooks` stays light: no Clikt, no Ktor, no coroutines. `main` sends `ostrom hook …` straight to `HookRunner` before
-  building anything else (`cli/.../Main.kt`). A hook that needs the server reads a local cache and refreshes it in a
-  detached `ostrom hook gates-refresh`, as the prototype does; it never waits on the network.
+  building anything else (`cli/.../Main.kt`). A hook reaches Ostrom only through the launcher's local relay, which
+  answers the gate catalogue from its own memory; the hook trusts no cache on disk the agent could edit (S2-20).
 - Interfaces and their implementation: `XxxRepository` / `XxxRepositoryImpl`, `XxxUseCase` with
   `operator fun invoke`, KDoc on everything public, no `!!`, a `CancellationException` is always rethrown
   (`ostrom-core/docs/CONVENTIONS.md`).
@@ -48,8 +48,10 @@ which never enters the agent's environment (audit A12/A13).
 - Every request needs the capability (`Authorization: Bearer`, `x-api-key` or `x-ostrom-local-token`, compared in
   constant time): 401 otherwise. An `Origin` header or a `Host` that is not the loopback: 403.
 - Only an allow-list is forwarded, everything else is 404 (never an open proxy): the hook routes
-  (`/api/v1/sessions…`, `/api/v1/gates…`, `/api/v1/checks`, `/api/v1/notifications`, as they are, 2 MiB, 15 s, 70 s
-  for a gate wait), `POST /mcp/{server}` for the launch's servers (to `/api/v1/mcp/{server}`, streamed, 401/403 from
+  (`POST /api/v1/sessions`, `/sessions/{id}/reopen|seen`, `/api/v1/gates`, `/api/v1/notifications`, `GET
+  /api/v1/gates/{id}` and `/gates/catalog`, as they are, 2 MiB, 15 s, 70 s for a gate wait; ending a session, its sign
+  of life, the use of a yes and check runs are the launcher's and Ostrom's, never forwarded for the agent, S2-25 and
+  S2-29), the catalogue of the verified package answered from memory when there is one (S2-20), `POST /mcp/{server}` for the launch's servers (to `/api/v1/mcp/{server}`, streamed, 401/403 from
   Ostrom become 502), and with inference `/v1/messages`, `/v1/chat/completions`, `/v1/models` (to
   `/api/v1/inference/…`, 4 MiB, the response streamed, only the provider headers forwarded).
 - Ostrom unreachable or too slow: 502 with `{"error":{"type":"unreachable","message":"Ostrom is unreachable (…)"}}`,
@@ -106,17 +108,19 @@ C function in the `.def` file and call it. Test it for real in `posixTest` / `mi
 Do not build on a shared Mac directly: CI builds everything. Locally, if unavoidable, go through
 `~/git/ostrom-hq/.coord/build-lock.sh ./gradlew …`.
 
-Every pull request runs two required checks on Linux:
+Every pull request marked ready runs one required check on Linux, `ci` (drafts use no runner):
 
-- `coverage`: `scripts/check-conventions.py` (module graph, broad catches that drop a cancellation), detekt (zero issue), `jvmTest`, and
-  `koverVerify` at 100 % of lines and branches. On failure, `scripts/uncovered.py` lists what is not covered.
-- `native-tests`: `linuxX64Test`; the linuxArm64 and mingwX64 test binaries and the release binaries of the three
-  Linux-built targets; `scripts/measure.py` measures `ostrom hook gate` and `ostrom version` start-up (fails above a
-  15 ms median) and the binary sizes; `ci/build-linux.sh` leaves `dist/ostrom` for the end-to-end bench.
+- `scripts/check-conventions.py` (module graph, broad catches that drop a cancellation), detekt (zero issue), `jvmTest`,
+  and `koverVerify` at 100 % of lines and branches. On failure, `scripts/uncovered.py` lists what is not covered.
+- `linuxX64Test`; the linuxArm64 and mingwX64 test binaries and the release binaries of the three Linux-built targets;
+  `scripts/measure.py` measures `ostrom hook gate` and `ostrom version` start-up (fails above a 15 ms median) and the
+  binary sizes; `ci/build-linux.sh` leaves `dist/ostrom` for the end-to-end bench.
 
-On `main`, on tags, and on demand (`workflow_dispatch` with `full_validation`), three more jobs run: the
+On `main` and on demand (`workflow_dispatch` with `full_validation`), three more jobs run: the
 cross-compiled test binaries of every module on `ubuntu-24.04-arm` and on `windows-latest` (no Gradle there; the
 Windows start-up budget is 40 ms, process creation costs more), and macosArm64 tests and binary on `macos-15`.
+CI does not run on tags: it uploads binaries as artifacts and keeps a Gradle cache, which zizmor refuses in a
+workflow that publishes (cache poisoning). The release workflow, built without cache, publishes the binaries.
 
 `OSTROM_NETWORK_TESTS=1` turns on the real HTTPS test of `api-client` (each platform's TLS and certificate store).
 

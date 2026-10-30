@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli
 
 import com.github.ajalt.clikt.core.Abort
@@ -208,7 +209,7 @@ class OstromCliTest {
     @Test
     fun helpPlumbingListsTheHiddenCommands() {
         assertEquals(0, cli().run(arrayOf("help", "plumbing")))
-        assertTrue(console.out.contains("ostrom hook gate|session|gates-refresh"))
+        assertTrue(console.out.contains("ostrom hook gate|session"))
     }
 
     @Test

@@ -145,9 +145,10 @@ class AdaptersTest {
         assertTrue("developer_instructions=\"Rule \\\"one\\\"\\n\"" in overrides)
         assertTrue(
             "mcp_servers.ostrom-github={url=\"http://127.0.0.1:4100/mcp/github\"," +
-                "bearer_token_env_var=\"OSTROM_RELAY_TOKEN\",default_tools_approval_mode=\"approve\"}" in overrides,
+                "bearer_token_env_var=\"OSTROM_RELAY_TOKEN\"}" in overrides,
         )
-        assertEquals(mapOf<String, String?>("OSTROM_SESSION_END_MS" to "2500"), launch.environment)
+        assertFalse(overrides.any { "default_tools_approval_mode" in it }, "S2-37: Codex asks before an MCP tool")
+        assertEquals(emptyMap(), launch.environment)
         assertFalse("--dangerously-bypass-hook-trust" in arguments, "no package: no hook to trust")
         assertEquals("-c", CodexAdapter().prepare(layout(arguments = listOf("hi")), files).arguments.first())
         assertEquals(listOf("-c"), CodexAdapter().prepare(layout(), files).arguments.take(1))

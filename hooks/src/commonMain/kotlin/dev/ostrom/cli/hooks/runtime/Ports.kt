@@ -35,23 +35,14 @@ interface OstromCalls {
     fun call(path: String, body: JsonElement?, timeoutMillis: Int): CallResult
 }
 
-/** The small files of a session the hooks read and write (catalogue copy, session map, marks). */
+/**
+ * The small files of a session the hooks read and write (session map, marks). The agent can write them too: nothing
+ * that lets an action through is read from them (S2-20, S2-29).
+ */
 interface HookFiles {
     /** The text of the file, or null when it does not exist or cannot be read. */
     fun read(path: String): String?
 
     /** Replaces the file whole (a reader sees the old or the new text, never half); false when it cannot be written. */
     fun write(path: String, text: String): Boolean
-
-    /** Deletes the file; nothing happens when it does not exist. */
-    fun delete(path: String)
-
-    /** How long ago the file was last written, in milliseconds, or null when it does not exist. */
-    fun ageMillis(path: String): Long?
-}
-
-/** Starts `ostrom hook gates-refresh` detached from the hook: no shared stream, its own session, not waited for. */
-fun interface BackgroundRefresh {
-    /** @return False when it could not be started. */
-    fun start(): Boolean
 }
