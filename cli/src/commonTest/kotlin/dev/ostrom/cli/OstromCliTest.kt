@@ -531,6 +531,15 @@ class OstromCliTest {
     }
 
     @Test
+    fun aRequestNobodyIsNamedOnShowsOnlyItsTitle() {
+        signIn("/home/maya/.config/ostrom")
+        val bare = """{"id":"g1","title":"Push to main","status":"pending","askedBy":[]}"""
+        assertEquals(0, serving(mapOf("GET /api/v1/approvals/g1" to (200 to bare))).run(arrayOf("approve", "g1")))
+        assertOut("Push to main\n")
+        assertTrue("asked by" !in console.out, console.out.toString())
+    }
+
+    @Test
     fun anAgentSessionCannotAnswer() {
         signIn("/home/maya/.config/ostrom")
         val session = withServer + ("OSTROM_LAUNCH_ID" to "L1")
