@@ -32,12 +32,19 @@ val generateBuildInfo by tasks.registering {
         // Written into a Kotlin string literal: only the characters of a version.
         requireNotNull(versions.singleOrNull()) { "no info.version that reads as a version in $file" }
     }.orEmpty()
+    // The release floor (security audit S2-39) this binary is built with: `ostrom update` never goes below it, even
+    // when an old manifest, signed but with a lower floor, is served again.
+    // Read when the task runs, not when Gradle configures: a missing or wrong file fails this task alone.
+    val floorFile = rootProject.layout.projectDirectory.file("release-floor.txt")
     val output = generatedBuildInfo
     inputs.property("version", version)
     inputs.property("contractVersion", contract)
     inputs.property("postHogKey", postHogKey)
+    inputs.file(floorFile)
     outputs.dir(output)
     doLast {
+        val floor = floorFile.asFile.readText().trim()
+        require(Regex("[0-9]+\\.[0-9]+\\.[0-9]+").matches(floor)) { "release-floor.txt is not a version: $floor" }
         val file = output.get().file("dev/ostrom/cli/BuildInfo.kt").asFile
         file.parentFile.mkdirs()
         file.writeText(
@@ -56,6 +63,9 @@ val generateBuildInfo by tasks.registering {
             |
             |    /** `info.version` of the API contract this build speaks (ostrom-core), blank without its checkout. */
             |    const val CONTRACT_VERSION = "$contract"
+            |
+            |    /** The lowest version `ostrom update` installs, from `release-floor.txt` at build time (S2-39). */
+            |    const val FLOOR = "$floor"
             |}
             |""".trimMargin(),
         )

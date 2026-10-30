@@ -131,15 +131,14 @@ class PackageTrust(
 
     /** The key of [serverUrl], pinned on first use: a new key of the server is refused until unpinned on purpose. */
     private suspend fun pinnedKey(asked: Asked, kid: String): Pin {
-        val path = join(asked.configDirectory, "server-keys.json")
-        val all = parseObject(files.read(path)) ?: JsonObject(emptyMap())
-        val pinned = all.child(asked.serverUrl)
-        return if (pinned != null) checkPin(pinned, kid, asked.serverUrl, path) else pin(all, asked, kid, path)
+        val path = ServerKeyPins.path(asked.configDirectory)
+        val pinned = ServerKeyPins.all(files.read(path)).child(asked.serverUrl)
+        return if (pinned != null) checkPin(pinned, kid, asked.serverUrl, path) else pin(asked, kid, path)
     }
 
     private fun checkPin(pinned: JsonObject, kid: String, serverUrl: String, path: String): Pin {
-        val pem = pinned.text("publicKeyPem")
-        return if (pinned.text("kid") == kid && pem != null) {
+        val pem = ServerKeyPins.pinnedPem(pinned, kid)
+        return if (pem != null) {
             Pin.Key(pem)
         } else {
             Pin.Refused(
@@ -149,14 +148,15 @@ class PackageTrust(
         }
     }
 
-    private suspend fun pin(all: JsonObject, asked: Asked, kid: String, path: String): Pin {
+    private suspend fun pin(asked: Asked, kid: String, path: String): Pin {
         val serverUrl = asked.serverUrl
-        val keys = (server.get(Routes.KEYS, null) as? ServerAnswer.Ok)?.let { it.body.list("keys") }.orEmpty()
-        val key = keys.filterIsInstance<JsonObject>().firstOrNull { it.text("kid") == kid }
-        val pem = key?.text("publicKeyPem") ?: return Pin.Refused("the server does not publish the key $kid")
+        val answer = server.get(Routes.KEYS, null)
+        val pem = if (answer is ServerAnswer.Ok) ServerKeyPins.publishedKey(answer.body, kid) else null
+        if (pem == null) return Pin.Refused("the server does not publish the key $kid")
         if (asked.keep) {
-            val entry = objectOf("kid" to kid, "publicKeyPem" to pem, "pinnedAt" to now())
-            files.write(path, pretty(JsonObject(all + (serverUrl to entry))), FileAccess.PRIVATE)
+            // read again after the network: another ostrom may have pinned a server meanwhile
+            val pins = ServerKeyPins.withPin(ServerKeyPins.all(files.read(path)), serverUrl, kid, pem, now())
+            files.write(path, pretty(pins), FileAccess.PRIVATE)
             say("pinned Ostrom's signing key $kid for $serverUrl (first use)")
         } else {
             say("Ostrom's signing key $kid for $serverUrl is not pinned yet: the first launch pins it")
