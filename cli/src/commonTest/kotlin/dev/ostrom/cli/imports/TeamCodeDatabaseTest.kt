@@ -63,6 +63,9 @@ class TeamCodeDatabaseTest {
         // a column the read filters on is named too, not left to a mysql error
         val noKind = columns("variants" to listOf("id", "target", "name", "binding", "config", "team_id"), members)
         assertEquals("TeamCode's variants table has no kind column.", fails(FakeMysql(noKind)))
+        // a schema mysql lists nothing of (no TeamCode in that database) misses every table
+        val nothing = fails(FakeMysql(CaptureResult.Exited(0, "")))
+        assertTrue(nothing.startsWith("TeamCode's ") && nothing.endsWith(" column."), nothing)
         val noVariants = columns(members)
         assertEquals(
             "TeamCode's variants table has no id, target, name, binding, config, team_id, kind column.",

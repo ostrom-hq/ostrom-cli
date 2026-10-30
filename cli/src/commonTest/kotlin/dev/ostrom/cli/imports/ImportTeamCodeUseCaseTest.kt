@@ -110,15 +110,25 @@ class ImportTeamCodeUseCaseTest {
     fun twoMembersOnOneOstromMemberAndARowLeftOutAreSaid() = runTest {
         val tables = CaptureResult.Exited(
             0,
-            batch("members", listOf("id", "username", "email"), listOf("m1", "maya", ""), listOf("m2", "tom", null)) +
+            batch(
+                "members",
+                listOf("id", "username", "email"),
+                listOf("m1", "maya", ""),
+                listOf("m2", "tom", null),
+                listOf("m3", null, "ann@acme.example"),
+            ) +
                 batch("accounts", ACCOUNT_COLUMNS, listOf("a1", null, "acc-1", "Team Max", Sealed.ACCOUNT, null, "0")),
         )
-        val same = """{"items":[{"id":"u-1","login":"maya"},{"id":"u-1","login":"tom"}]}"""
+        val same = """{"items":[{"id":"u-1","login":"maya"},{"id":"u-1","login":"tom"},""" +
+            """{"id":"u-1","login":"ann","email":"ANN@acme.example"}]}"""
         replies["GET /api/v1/members"] = ServerReply(200, same)
         assertEquals(0, import(mysql = FakeMysql(FULL_SCHEMA, tables)))
         assertEquals(parseObject("{}"), parseObject(calls.last().body)?.child("memberMap"), "no secret to one person")
         val lines = said.lines()
-        assertEquals("! maya, tom match the same Ostrom member: their assignments are skipped.", lines[0])
+        assertEquals(
+            "! maya, tom, ann@acme.example match the same Ostrom member: their assignments are skipped.",
+            lines[0],
+        )
         assertEquals(
             "! Left out: account Team Max: no provider, account id, tokens or expiry in TeamCode: it could never " +
                 "sign in.",

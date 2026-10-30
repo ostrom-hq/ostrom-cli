@@ -97,7 +97,8 @@ class ImportTeamCodeUseCase(
         val shared = found.groupBy({ it.second }, { it.first }).filterValues { it.size > 1 }.values.flatten().toSet()
         val map = found.filter { it.first !in shared }.toMap()
         if (shared.isNotEmpty()) {
-            val names = tables.members.filter { it["id"] in shared }.map { it["username"].orEmpty() }
+            // a member matched has an email or a username: one of the two names them
+            val names = tables.members.filter { it["id"] in shared }.map { it["username"] ?: it["email"] }
             say("! ${names.joinToString()} match the same Ostrom member: their assignments are skipped.\n")
         }
         val unmatched = tables.members.filter { it["id"] !in map && it["id"] !in shared }
