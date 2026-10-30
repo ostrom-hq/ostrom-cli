@@ -8,6 +8,16 @@ plugins {
     id("ostrom.kmp")
 }
 
+// The API contract this build speaks: ostrom-core's, from the checkout next to this one that CI and local builds use
+// (ostrom.core.local, settings.gradle.kts). ContractRoutesTest checks the routes; its version goes in BuildInfo.
+val apiContractFile = rootDir.resolve("../ostrom-core/api/openapi.yaml")
+
+// `info.version` of the contract, compared by `ostrom doctor` with the server's; blank without the checkout.
+val contractVersion = apiContractFile.takeIf { it.isFile }?.readLines().orEmpty()
+    .dropWhile { it != "info:" }.drop(1).takeWhile { it.startsWith(" ") }
+    .firstNotNullOfOrNull { Regex("""^ {2}version: *['"]?([^'"\s]+)['"]? *$""").find(it)?.groupValues?.get(1) }
+    .orEmpty()
+
 // The version printed by `ostrom version`, written into a generated source at build time.
 val generatedBuildInfo = layout.buildDirectory.dir("generated/build-info")
 val generateBuildInfo by tasks.registering {
@@ -17,8 +27,12 @@ val generateBuildInfo by tasks.registering {
     val postHogKey = providers.gradleProperty("ostromPosthogKey").orElse("").get()
     // Written into a Kotlin string literal: only the characters a PostHog key has, so nothing can break or inject.
     require(Regex("[A-Za-z0-9_-]*").matches(postHogKey)) { "ostromPosthogKey has characters a PostHog key never has" }
+    // Written into a Kotlin string literal: only the characters of a version.
+    require(Regex("[0-9A-Za-z.+-]*").matches(contractVersion)) { "the contract's version is not one: $contractVersion" }
+    val contract = contractVersion
     val output = generatedBuildInfo
     inputs.property("version", version)
+    inputs.property("contractVersion", contract)
     inputs.property("postHogKey", postHogKey)
     outputs.dir(output)
     doLast {
@@ -37,15 +51,16 @@ val generateBuildInfo by tasks.registering {
             |
             |    /** The usage statistics destination (`-PostromPosthogKey`), blank when the build has none. */
             |    const val POSTHOG_KEY = "$postHogKey"
+            |
+            |    /** `info.version` of the API contract this build speaks (ostrom-core), blank without its checkout. */
+            |    const val CONTRACT_VERSION = "$contract"
             |}
             |""".trimMargin(),
         )
     }
 }
 
-// The API contract the routes of the CLI are checked against (ContractRoutesTest): ostrom-core's, from the checkout
-// next to this one that CI and local builds use (ostrom.core.local, settings.gradle.kts).
-val apiContract = rootDir.resolve("../ostrom-core/api/openapi.yaml").absolutePath
+val apiContract = apiContractFile.absolutePath
 tasks.withType<Test>().configureEach {
     systemProperty("ostrom.contract", apiContract)
     // an input of the tests, so that a new contract runs them again (files() accepts a missing file: the test says so)
