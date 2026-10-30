@@ -10,10 +10,18 @@ interface LocalRelay : AutoCloseable {
     val url: String
 
     /**
-     * The capability the agent presents (`Authorization: Bearer`, `x-api-key` or `x-ostrom-local-token`): 64
-     * hexadecimal characters drawn from the system's secure random source, valid for this relay only.
+     * The hooks' capability (`Authorization: Bearer`, `x-api-key` or `x-ostrom-local-token`): 64 hexadecimal
+     * characters drawn from the system's secure random source, valid for this relay only. It opens the hook routes
+     * only.
      */
     val token: String
+
+    /**
+     * The capability the agent itself presents to its MCP servers and its inference (`OSTROM_RELAY_TOKEN`): it opens no
+     * hook route, so the agent cannot ask a gate, open a session or read the gate policy as its hooks do (S2-25). Drawn
+     * apart from [token], which the hooks read from a private file and never from the agent's environment.
+     */
+    val clientToken: String
 }
 
 /** Starts relays, one per launch. */

@@ -13,6 +13,10 @@ class HookContextTest {
             "OSTROM_MODEL" to "gpt-5",
             "OSTROM_HOOK_DIALECT" to "codex",
             "OSTROM_GIT" to "/usr/bin/git",
+            "OSTROM_INSTANCE_KEYS" to "{}",
+            "OSTROM_PACKAGE_SEAL" to "abc",
+            "OSTROM_PACKAGE_MANIFEST" to "/s/package.sha256",
+            "OSTROM_RELAY_TOKEN_FILE" to "/s/relay-token",
         )
         assertEquals("acme/app", context.repository)
         assertEquals("codex", context.agent)
@@ -22,6 +26,10 @@ class HookContextTest {
         assertEquals("/home/lena", context.home)
         assertEquals("L1", context.launchId)
         assertEquals("/s/gates.json", context.gatesFile)
+        assertEquals("{}", context.instanceKeys)
+        assertEquals("abc", context.packageSeal)
+        assertEquals("/s/package.sha256", context.packageManifest)
+        assertEquals("/s/relay-token", context.relayTokenFile)
     }
 
     @Test
@@ -35,6 +43,7 @@ class HookContextTest {
         assertEquals("C:\\Users\\omar", bare.home)
         assertNull(bare.gatesFile)
         assertNull(bare.model)
+        assertNull(bare.relayTokenFile, "outside a session, no relay")
         val nobody = HookContext.read { name -> mapOf("OSTROM_LAUNCH_TOP" to "/w/app")[name] }
         assertEquals("app", nobody.repository)
         assertEquals("unknown", nobody.developer)

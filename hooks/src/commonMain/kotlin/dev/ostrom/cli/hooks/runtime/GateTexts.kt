@@ -14,6 +14,14 @@ object GateTexts {
         "Ostrom: denied. The gate could not read this tool call (too large, too slow or not JSON), so it was not " +
             "run. Split the command or the file, then try again."
 
+    /**
+     * No gate policy to trust (unsigned, expired, the relay or Ostrom unreachable, the package changed): every action
+     * is held (S2-20, S2-38).
+     */
+    fun held(reason: String): String =
+        "Ostrom: denied. $reason, so every action of this session is held and this one was not run. Do not work " +
+            "around it; tell the user. A new session (`ostrom <agent>`) reads the policy again."
+
     /** A guarded action run in another repository than the session's. */
     fun foreign(context: HookContext, mine: RealRepository, real: RealRepository): String {
         val launchTop = context.launchTop
