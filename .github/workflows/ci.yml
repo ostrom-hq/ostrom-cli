@@ -1,7 +1,8 @@
-# CI of ostrom-cli (ostrom-core CONVENTIONS.md section 11). Pull requests: Linux only, one required check `ci`
-# (conventions, detekt, jvmTest + koverVerify 100 %, linuxX64Test, the linuxArm64 and mingwX64 links, the release
-# binaries and the hook start-up budget). On main and on demand (full_validation), the cross-compiled test binaries
-# also run on linuxArm64 and Windows runners, and macosArm64 is built and tested. No run on tags: the release workflow
+# CI of ostrom-cli (ostrom-core CONVENTIONS.md section 11). Pull requests: Linux only, jvm and linuxX64 only (CI cost,
+# orchestrator 05:10), one required check `ci` (conventions, detekt, jvmTest + koverVerify 100 %, linuxX64Test, the
+# linuxX64 release binary and the hook start-up budget). On main and on demand (full_validation), `ci` also links the
+# linuxArm64 and mingwX64 tests and binaries, which then run on linuxArm64 and Windows runners, and macosArm64 is
+# built and tested. No run on tags: the release workflow
 # publishes, and a cache in a publishing workflow is refused by zizmor (cache poisoning).
 name: CI
 
@@ -18,6 +19,8 @@ on:
         default: false
 
 env:
+  # Main and full_validation build every target; a pull request only jvm and linuxX64.
+  FULL: ${{ github.event_name == 'push' || inputs.full_validation == true }}
   ORG_GRADLE_PROJECT_ostromVersion: ${{ github.ref_type == 'tag' && github.ref_name || '0.1.0-SNAPSHOT' }}
   # The usage statistics destination, compiled into release builds only (a public, write-only PostHog project key,
   # kept in the repository variable OSTROM_POSTHOG_KEY). Unset, or any other build: no destination, nothing sent.
@@ -40,6 +43,22 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: ostrom-core version
+        id: core
+        run: echo "ref=$(tr -d '[:space:]' < gradle/ostrom-core.ref)" >> "$GITHUB_OUTPUT"
+      # GITHUB_TOKEN cannot read another repository's Maven packages: ostrom-core is built from its commit (05:50).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ostrom-hq/ostrom-core
+          ref: ${{ steps.core.outputs.ref }}
+          ssh-key: ${{ secrets.DEPLOY_KEY_CORE }}
+          path: ostrom-core
+          persist-credentials: false
+      - name: Build ostrom-core from that checkout
+        run: |
+          mv ostrom-core ../ostrom-core
+          mkdir -p ~/.gradle
+          echo "ostrom.core.local=true" >> ~/.gradle/gradle.properties
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
@@ -53,8 +72,9 @@ jobs:
           path: ~/.konan
           key: konan-${{ runner.os }}-${{ runner.arch }}-${{ env.KOTLIN_VERSION }}-${{ hashFiles('gradle/libs.versions.toml') }}
           restore-keys: konan-${{ runner.os }}-${{ runner.arch }}-${{ env.KOTLIN_VERSION }}-
-      - name: Install native link dependencies
-        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+      # libcurl for Ktor's Linux engine; GNOME Keyring for the Secret Service test of the secret store.
+      - name: Install native link and test dependencies
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev gnome-keyring dbus libsecret-1-0
       - name: Never serve a test task from the cache (ENG-032)
         run: |
           mkdir -p ~/.gradle/init.d
@@ -68,7 +88,7 @@ jobs:
           KTS
       - run: python3 scripts/check-conventions.py --self-test && python3 scripts/check-conventions.py
       # Coverage first, in its own step, so that its report is printed even when the native links that follow are cut
-      # short (a runner lost while linking used to cancel the job before the report, ostrom-cli#25).
+      # short (a runner lost while linking used to cancel the job before the report, ostrom-cli#25 and #27).
       - name: detekt, JVM tests and coverage (100 % lines and branches)
         env:
           OSTROM_NETWORK_TESTS: '1'
@@ -76,15 +96,24 @@ jobs:
       - name: Lines and branches not covered
         if: failure()
         run: python3 scripts/uncovered.py
-      - name: linuxX64 tests; other targets linked
+      # On a private session bus with an unlocked GNOME Keyring, the linuxX64 tests use the real Secret Service. The
+      # links run two at a time: several Kotlin/Native links at once exhaust the runner's memory (JOURNAL 06:52).
+      - name: linuxX64 tests; other targets linked when FULL
         if: ${{ !cancelled() }}
         env:
           OSTROM_NETWORK_TESTS: '1'
-        run: >-
-          ./gradlew --continue
-          linuxX64Test
-          linkDebugTestLinuxArm64 linkDebugTestMingwX64
-          :cli:linkReleaseExecutableLinuxX64 :cli:linkReleaseExecutableLinuxArm64 :cli:linkReleaseExecutableMingwX64
+          OSTROM_SECRET_SERVICE_TESTS: '1'
+        run: |
+          dbus-run-session -- bash -ec '
+            printf ci-keyring | gnome-keyring-daemon --unlock --components=secrets > /dev/null
+            other=()
+            if [ "$FULL" = true ]; then
+              other=(linkDebugTestLinuxArm64 linkDebugTestMingwX64
+                :cli:linkReleaseExecutableLinuxArm64 :cli:linkReleaseExecutableMingwX64)
+            fi
+            ./gradlew --continue --max-workers=2 \
+              linuxX64Test :cli:linkReleaseExecutableLinuxX64 "${other[@]}"
+          '
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -95,9 +124,7 @@ jobs:
         run: >-
           python3 scripts/measure.py --label linuxX64
           --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
-          --sizes cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
-          cli/build/bin/linuxArm64/releaseExecutable/ostrom.kexe
-          cli/build/bin/mingwX64/releaseExecutable/ostrom.exe
+          --sizes cli/build/bin/*/releaseExecutable/ostrom.*
       - name: End to end, the real binary with fake Claude Code and Codex against the contract's server
         run: python3 e2e/run.py --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
       - name: The bench's build contract
@@ -108,11 +135,13 @@ jobs:
           path: cli/build/bin/*/releaseExecutable/ostrom.*
           retention-days: 7
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.FULL == 'true'
         with:
           name: tests-linuxArm64
           path: '*/build/bin/linuxArm64/debugTest/test.kexe'
           retention-days: 2
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.FULL == 'true'
         with:
           name: tests-mingwX64
           path: '*/build/bin/mingwX64/debugTest/test.exe'
@@ -187,6 +216,22 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: ostrom-core version
+        id: core
+        run: echo "ref=$(tr -d '[:space:]' < gradle/ostrom-core.ref)" >> "$GITHUB_OUTPUT"
+      # GITHUB_TOKEN cannot read another repository's Maven packages: ostrom-core is built from its commit (05:50).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ostrom-hq/ostrom-core
+          ref: ${{ steps.core.outputs.ref }}
+          ssh-key: ${{ secrets.DEPLOY_KEY_CORE }}
+          path: ostrom-core
+          persist-credentials: false
+      - name: Build ostrom-core from that checkout
+        run: |
+          mv ostrom-core ../ostrom-core
+          mkdir -p ~/.gradle
+          echo "ostrom.core.local=true" >> ~/.gradle/gradle.properties
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
