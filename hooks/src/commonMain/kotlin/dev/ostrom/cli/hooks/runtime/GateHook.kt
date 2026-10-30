@@ -61,8 +61,14 @@ class GateHook(
         }
     }
 
-    private fun beforeTool(event: JsonObject, written: ToolSubject, cwd: String): HookReply {
-        val catalogue = catalogues.current()
+    private fun beforeTool(event: JsonObject, written: ToolSubject, cwd: String): HookReply =
+        when (val read = catalogues.current()) {
+            // no policy to trust: every action is held, not only a few classes of commands (S2-20, S2-38)
+            is CatalogueRead.Held -> replies.deny(GateTexts.held(read.reason))
+            is CatalogueRead.Verified -> beforeTool(event, written, cwd, read.catalogue)
+        }
+
+    private fun beforeTool(event: JsonObject, written: ToolSubject, cwd: String, catalogue: GateCatalogue): HookReply {
         val raw = if (written.kind == ToolKind.BASH) withScripts(written, cwd) else written
         val (subject, landing) = withPushTargets(raw, cwd)
         val action = catalogue.match(subject, patterns)

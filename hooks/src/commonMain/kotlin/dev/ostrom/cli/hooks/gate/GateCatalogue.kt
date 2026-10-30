@@ -43,7 +43,9 @@ data class GateAction(
 }
 
 /**
- * The gate catalogue of a session (`GET /api/v1/gates/catalog`).
+ * The gate catalogue of a session: the actions of the organisation's signed policy (`ostrom.gates/1`, read by the
+ * hooks' `SignedGatePolicy`), with those the session's package adds. Without a policy to trust, no catalogue stands in:
+ * every action is held (security audit S2-38).
  *
  * @property actions The classes of actions.
  * @property failMode `open` to let a gated action through when Ostrom is unreachable; anything else, and no value,
@@ -107,38 +109,6 @@ data class GateCatalogue(val actions: List<GateAction>, val failMode: String?) {
         private const val PROPOSED = 1
         private const val OBSERVED = 0
         private const val CLOSED_MODE = "closed"
-        private const val LINE = "[^\\n;&|]*"
-        private val OFFLINE = Gate(enforce = true, label = "Ostrom unreachable", approvers = emptyList())
-
-        private fun bash(actionClass: String, label: String, vararg patterns: String) =
-            GateAction(actionClass, label, listOf("Bash"), patterns.toList(), OFFLINE)
-
-        /**
-         * The catalogue when Ostrom's cannot be read (S2-20): the boundary actions every organisation guards, failing
-         * closed. A gated action then asks Ostrom, which it cannot reach, and is refused.
-         */
-        val CLOSED = GateCatalogue(
-            listOf(
-                bash("push", "git push", "\\bgit\\b${LINE}\\bpush\\b"),
-                bash(
-                    "deploy",
-                    "deployment",
-                    "\\bkubectl\\b$LINE\\b(apply|create|delete|replace|patch|rollout|scale|set|edit|drain)\\b",
-                    "\\bhelm\\b$LINE\\b(install|upgrade|uninstall|rollback|delete)\\b",
-                    "\\b(terraform|tofu)\\b$LINE\\b(apply|destroy|import)\\b",
-                    "\\bpulumi\\b$LINE\\b(up|destroy)\\b",
-                ),
-                bash("merge", "merge or release", "\\bgh\\b$LINE\\b(pr\\s+merge|release\\s+create)\\b"),
-                bash(
-                    "publish",
-                    "package publication",
-                    "\\b(npm|pnpm|yarn|cargo)\\b$LINE\\bpublish\\b",
-                    "\\bdocker\\b$LINE\\bpush\\b",
-                    "\\btwine\\b$LINE\\bupload\\b",
-                ),
-            ),
-            CLOSED_MODE,
-        )
 
         /**
          * The catalogue in [text] (the contract's `GateCatalog`, unknown fields ignored), or null when it is not one: a
