@@ -79,7 +79,8 @@ internal actual fun currentArchitecture(): String = when (val arch = System.getP
 @ExcludeFromCoverage
 internal actual fun restrictToOwner(path: String) {
     val file = Paths.get(path)
-    if (Files.getFileStore(file).supportsFileAttributeView("posix")) {
+    // Like chmod in the native actual, a missing file (tests on okio's FakeFileSystem) is left alone.
+    if (Files.exists(file) && Files.getFileStore(file).supportsFileAttributeView("posix")) {
         Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-------"))
     }
 }

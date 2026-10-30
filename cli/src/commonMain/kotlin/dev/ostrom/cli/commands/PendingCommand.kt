@@ -2,7 +2,8 @@ package dev.ostrom.cli.commands
 
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.Context
-import com.github.ajalt.clikt.core.ProgramResult
+import com.github.ajalt.clikt.core.PrintHelpMessage
+import com.github.ajalt.clikt.core.PrintMessage
 import dev.ostrom.cli.ExitCode
 
 /**
@@ -22,12 +23,8 @@ open class PendingCommand(
     override val hiddenFromHelp: Boolean
         get() = hidden
 
-    /** Prints `ostrom <command path>: not implemented yet.` and exits with 70. */
-    override fun run() {
-        val path = currentContext.commandNameWithParents().joinToString(" ")
-        echo("$path: not implemented yet.", err = true)
-        throw ProgramResult(ExitCode.NOT_IMPLEMENTED.code)
-    }
+    /** Prints `ostrom <command path>: not implemented yet.` on stderr and exits with 70. */
+    override fun run(): Unit = throw notImplemented(currentContext.commandNameWithParents())
 }
 
 /**
@@ -55,14 +52,13 @@ open class GroupCommand(
         runDefault()
     }
 
-    /** What the group does with no subcommand. */
+    /** What the group does with no subcommand: its help, or its default subcommand (not built yet). */
     protected open fun runDefault() {
-        if (defaultSubcommand == null) {
-            echo(getFormattedHelp().orEmpty())
-            return
-        }
-        val path = (currentContext.commandNameWithParents() + defaultSubcommand).joinToString(" ")
-        echo("$path: not implemented yet.", err = true)
-        throw ProgramResult(ExitCode.NOT_IMPLEMENTED.code)
+        if (defaultSubcommand == null) throw PrintHelpMessage(currentContext)
+        throw notImplemented(currentContext.commandNameWithParents() + defaultSubcommand)
     }
 }
+
+/** The error printed, through the CLI's console, by a command that is declared but not built yet (exit 70). */
+private fun notImplemented(path: List<String>) =
+    PrintMessage("${path.joinToString(" ")}: not implemented yet.", ExitCode.NOT_IMPLEMENTED.code, printError = true)

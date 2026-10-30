@@ -119,6 +119,7 @@ class OstromCliTest {
     @Test
     fun aDeclaredCommandNotBuiltYetExitsWith70() {
         assertEquals(70, cli().run(arrayOf("status", "--json")))
+        assertEquals("ostrom status: not implemented yet.\n", console.err.toString())
         assertEquals(70, cli().run(arrayOf("harness", "add", "git-safety", "--set", "a=b", "--yes")))
         assertEquals(70, cli().run(arrayOf("receipts")))
         assertEquals(70, cli().run(arrayOf("claude", "--resume", "-p", "hello")))
@@ -190,6 +191,7 @@ class OstromCliTest {
         assertEquals(0, cli().run(arrayOf("harness")))
         assertTrue(console.out.contains("enforce"), console.out.toString())
         assertEquals(70, cli().run(arrayOf("members")))
+        assertTrue(console.err.endsWith("ostrom members list: not implemented yet.\n"), console.err.toString())
         assertEquals(70, cli().run(arrayOf("policy")))
     }
 
