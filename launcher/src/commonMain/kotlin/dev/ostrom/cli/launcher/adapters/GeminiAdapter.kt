@@ -28,7 +28,11 @@ class GeminiAdapter : AgentAdapter {
         val own = setOf("settings.json", "GEMINI.md", "skills")
         val directory = overlayHome(files, real, join(root, ".gemini"), own)
         skillsInto(files, layout.plugin, join(directory, "skills"), join(real, "skills"))
-        val theirs = parseObject(files.read(join(real, "settings.json"))) ?: JsonObject(emptyMap())
+        val text = files.read(join(real, "settings.json"))
+        val parsed = parseObject(text)
+        val theirs = parsed ?: JsonObject(emptyMap())
+        // comments, a trailing comma or a BOM: Gemini reads them, strict JSON does not, so the session goes without
+        val notes = if (parsed == null && !text.isNullOrBlank()) listOf(UNREAD) else emptyList()
         files.write(join(directory, "settings.json"), pretty(settings(layout, theirs)), FileAccess.PRIVATE)
         val rules = files.read(join(real, "GEMINI.md")).orEmpty() + "\n" + layout.rules
         files.write(join(directory, "GEMINI.md"), rules)
@@ -37,7 +41,7 @@ class GeminiAdapter : AgentAdapter {
             LaunchVariables.HOOK_DIALECT to "gemini",
             LaunchVariables.HOOK_BUDGET_MS to BUDGET_MILLIS,
         )
-        return AgentLaunch(layout.arguments, environment)
+        return AgentLaunch(layout.arguments, environment, notes)
     }
 
     private fun settings(layout: SessionLayout, theirs: JsonObject): JsonObject {
@@ -74,5 +78,7 @@ class GeminiAdapter : AgentAdapter {
         const val END_SECONDS = 30L
         const val MILLIS = 1_000L
         const val BUDGET_MILLIS = "590000"
+        const val UNREAD = "gemini: your settings.json is not plain JSON (comments or a trailing comma?): this " +
+            "session starts without your settings"
     }
 }

@@ -27,8 +27,9 @@ class GrokAdapter : AgentAdapter {
         val skills = join(home, "skills")
         skillsInto(files, layout.plugin, skills, join(real, "skills"))
         files.createPrivateDirectory(join(home, "hooks"))
-        files.list(join(real, "hooks")).forEach { files.link(join(real, "hooks", it), join(home, "hooks", it)) }
-        files.write(join(home, "hooks", "ostrom.json"), pretty(hooks(layout)))
+        files.list(join(real, "hooks")).filter { it != OURS }
+            .forEach { files.link(join(real, "hooks", it), join(home, "hooks", it)) }
+        files.write(join(home, "hooks", OURS), pretty(hooks(layout)))
         val config = config(layout, files.read(join(real, "config.toml")).orEmpty(), skills)
         files.write(join(home, "config.toml"), config, FileAccess.PRIVATE)
         val environment = mapOf(
@@ -58,12 +59,28 @@ class GrokAdapter : AgentAdapter {
         layout.stdioServers.forEach { (label, arguments) ->
             toml.append("[mcp_servers.$label]\ncommand = ${quoted(layout.executable)}\nargs = ${jsonOf(arguments)}\n\n")
         }
-        if (theirs.lines().none { it.trim() == "[skills]" }) toml.append("[skills]\npaths = [${quoted(skills)}]\n")
-        return toml.toString()
+        val lines = theirs.lines()
+        val table = lines.indexOfFirst { it.trim() == "[skills]" }
+        if (table < 0) {
+            toml.append("[skills]\npaths = [${quoted(skills)}]\n")
+            return toml.toString()
+        }
+        // the developer's [skills] table: the package's folder goes first in its paths (TOML has one table per name)
+        val end = (table + 1 until lines.size).firstOrNull { lines[it].trim().startsWith("[") } ?: lines.size
+        val paths = (table + 1 until end).firstOrNull { PATHS.matches(lines[it]) }
+        val merged = lines.toMutableList()
+        if (paths == null) {
+            merged.add(table + 1, "paths = [${quoted(skills)}]")
+        } else {
+            merged[paths] = merged[paths].replaceFirst("[", "[${quoted(skills)}, ")
+        }
+        return StringBuilder(merged.joinToString("\n")).append(toml.substring(theirs.length)).toString()
     }
 
     private companion object {
         const val TIMEOUT = 5
+        const val OURS = "ostrom.json"
+        val PATHS = Regex("\\s*paths\\s*=\\s*\\[.*")
         const val BUDGET_MILLIS = "4000"
     }
 }

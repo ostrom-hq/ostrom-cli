@@ -36,6 +36,9 @@ class MoreAdaptersTest {
             assertFalse("'node'" in plugin || "bin/" in plugin || "\${" in plugin, plugin)
         }
         assertEquals(1, EmbeddedPlugins.PI.split(EmbeddedPlugins.MCP_SERVERS).size - 1)
+        // OpenCode refuses on any failed gate, not only a refusal, and sends the arguments of the call after it
+        assertTrue("if (r.code !== 0) throw new Error('Ostrom gate failed" in EmbeddedPlugins.OPENCODE)
+        assertTrue("argsOf.get(input.callID)" in EmbeddedPlugins.OPENCODE)
     }
 
     @Test
@@ -67,11 +70,30 @@ class MoreAdaptersTest {
     }
 
     @Test
-    fun grokKeepsTheDevelopersSkillsTable() {
-        files.texts[join("/elsewhere", "config.toml")] = "[skills]\npaths = [\"/mine\"]\n"
-        GrokAdapter().prepare(layout(variables = mapOf("GROK_HOME" to "/elsewhere")), files)
-        val config = checkNotNull(files.texts[join("/tmp/run", "grok-home", "config.toml")])
-        assertEquals(1, config.split("[skills]").size - 1, config)
+    fun grokPutsThePackagesSkillsInTheDevelopersSkillsTable() {
+        val ours = quoted(join("/tmp/run", "grok-home", "skills"))
+        val cases = mapOf(
+            "[skills]\npaths = [\"/mine\"]\n" to "[skills]\npaths = [$ours, \"/mine\"]\n",
+            "[skills]\nauto = true\n[ui]\npaths = [\"x\"]\n" to
+                "[skills]\npaths = [$ours]\nauto = true\n[ui]\npaths = [\"x\"]\n",
+            "[skills]" to "[skills]\npaths = [$ours]",
+        )
+        for ((theirs, merged) in cases) {
+            files.texts[join("/elsewhere", "config.toml")] = theirs
+            GrokAdapter().prepare(layout(variables = mapOf("GROK_HOME" to "/elsewhere")), files)
+            val config = checkNotNull(files.texts[join("/tmp/run", "grok-home", "config.toml")])
+            assertTrue(config.startsWith(merged + "\n# --- Ostrom"), config)
+            assertEquals(1, config.split("[skills]").size - 1, config)
+        }
+    }
+
+    @Test
+    fun grokNeverLinksADevelopersOstromJson() {
+        files.texts[join("/home/dev", ".grok", "hooks", "ostrom.json")] = "{\"mine\":true}"
+        GrokAdapter().prepare(layout(), files)
+        val ours = join("/tmp/run", "grok-home", "hooks", "ostrom.json")
+        assertFalse(ours in files.links, "written, never through a link to the developer's file")
+        assertTrue("PreToolUse" in checkNotNull(files.texts[ours]))
     }
 
     @Test
@@ -106,13 +128,19 @@ class MoreAdaptersTest {
     }
 
     @Test
-    fun geminiStartsFromNothingWhenTheDeveloperHasNoSettings() {
-        files.texts[join("/g", ".gemini", "settings.json")] = "not json"
-        GeminiAdapter().prepare(layout(rules = "R", variables = mapOf("GEMINI_CLI_HOME" to "/g")), files)
+    fun geminiStartsFromNothingWhenTheDeveloperHasNoSettingsAndSaysSoWhenTheyAreUnreadable() {
+        val variables = mapOf("GEMINI_CLI_HOME" to "/g")
+        assertEquals(emptyList(), GeminiAdapter().prepare(layout(rules = "R", variables = variables), files).notes)
+        files.texts[join("/g", ".gemini", "settings.json")] = "{\"theme\":\"dark\",}"
+        val launch = GeminiAdapter().prepare(layout(rules = "R", variables = variables), files)
+        val note = launch.notes.single()
+        assertTrue(note.startsWith("gemini: your settings.json is not plain JSON"), note)
         val directory = join("/tmp/run", "gemini-home", ".gemini")
         val settings = checkNotNull(parseObject(files.texts[join(directory, "settings.json")]))
         assertEquals(setOf("hooks", "mcpServers"), settings.keys)
         assertEquals("\nR", files.texts[join(directory, "GEMINI.md")])
+        files.texts[join("/g", ".gemini", "settings.json")] = "  "
+        assertEquals(emptyList(), GeminiAdapter().prepare(layout(variables = variables), files).notes, "blank")
     }
 
     @Test
@@ -132,11 +160,17 @@ class MoreAdaptersTest {
     }
 
     @Test
-    fun hermesWarnsWhenTheDeveloperHasHooksOfTheirOwn() {
-        files.texts[join("/home/dev", ".hermes", "config.yaml")] = "hooks:\n  pre_tool_call: []\n"
+    fun hermesLeavesOutTheDevelopersHooksAndServersAndSaysSo() {
+        // a YAML key appears once: a second `hooks:` would drop one of the two, or break the file
+        val theirs = "model: x\nhooks:\n  pre_tool_call: []\n\n# mine\nmcp_servers:\n- a\n- b\ntheme: dark\n"
+        files.texts[join("/home/dev", ".hermes", "config.yaml")] = theirs
         val launch = HermesAdapter().prepare(layout(arguments = listOf("-q", "hi")), files)
         assertEquals(listOf("--accept-hooks", "-q", "hi"), launch.arguments)
-        assertTrue(launch.notes.single().startsWith("hermes: your config.yaml already has hooks"))
+        assertTrue(launch.notes.single().startsWith("hermes: the hooks and mcp_servers of your config.yaml"))
+        val yaml = checkNotNull(files.texts[join("/tmp/run", "hermes-home", "config.yaml")])
+        assertTrue(yaml.startsWith("model: x\n# mine\ntheme: dark\n\n# --- Ostrom"), yaml)
+        assertEquals(1, yaml.lines().count { it.startsWith("hooks:") }, yaml)
+        assertEquals("a: 1\nhooksy: 2", withoutTopLevel("a: 1\nhooksy: 2", setOf("hooks")), "a key, not a prefix")
     }
 
     @Test
@@ -150,7 +184,7 @@ class MoreAdaptersTest {
             listOf("-e", extension, "--append-system-prompt", rules, "--skill", skill, "-p", "hi"),
             launch.arguments,
         )
-        assertEquals(mapOf("OSTROM_HOOK_DIALECT" to "claude"), launch.environment)
+        assertEquals(mapOf("OSTROM_HOOK_DIALECT" to "claude", "OSTROM_BIN" to "/opt/ostrom"), launch.environment)
         assertEquals("R", files.texts[rules])
         val code = checkNotNull(files.texts[extension])
         assertTrue("const SERVERS: Record<string, string[]> = {\"ostrom\":${jsonList(bridge)}};" in code, code)
@@ -164,6 +198,7 @@ class MoreAdaptersTest {
         assertEquals(listOf("run", "hi"), launch.arguments)
         assertEquals(folder, launch.environment["OPENCODE_CONFIG_DIR"])
         assertEquals(join("/tmp/run", "plugin"), launch.environment["OSTROM_PLUGIN_ROOT"])
+        assertEquals("/opt/ostrom", launch.environment["OSTROM_BIN"], "the plugin runs the hooks through it")
         assertEquals(EmbeddedPlugins.OPENCODE, files.texts[join(folder, "plugins", "ostrom.js")])
         assertEquals(join("/tmp/run", "plugin", "skills", "ship"), files.links[join(folder, "skills", "ship")])
         val config = checkNotNull(parseObject(launch.environment["OPENCODE_CONFIG_CONTENT"]))

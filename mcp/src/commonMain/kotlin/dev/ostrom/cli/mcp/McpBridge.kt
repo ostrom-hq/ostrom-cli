@@ -26,12 +26,18 @@ data class BridgeTarget(val port: Int, val token: String, val server: String) {
     companion object {
         private val RELAY_URL = Regex("http://127\\.0\\.0\\.1:(\\d{1,5})/?")
 
-        /** The target for [server], or null when [settings] name no relay. */
+        private val SERVER_NAME = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+
+        /**
+         * The target for [server], or null when [settings] name no relay, or [server] is not a plain name (it goes
+         * into the request line: `x/../v1/messages`, a `?` or a new line would reach another route of the relay).
+         */
         fun of(settings: String?, server: String): BridgeTarget? {
             val values = parsed(settings)
             val port = RELAY_URL.matchEntire(values["OSTROM_RELAY_URL"].orEmpty())?.let { it.groupValues[1] }
             val token = values["OSTROM_RELAY_TOKEN"]
-            return if (port == null || token == null) null else BridgeTarget(port.toInt(), token, server)
+            val plain = SERVER_NAME.matches(server) && ".." !in server
+            return if (port == null || token == null || !plain) null else BridgeTarget(port.toInt(), token, server)
         }
 
         private fun parsed(settings: String?): Map<String, String> {

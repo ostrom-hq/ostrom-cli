@@ -20,7 +20,7 @@ class HermesAdapter : AgentAdapter {
         val real = layout.realHome("HERMES_HOME", ".hermes")
         val home = overlayHome(files, real, join(layout.temporary, "hermes-home"), setOf("config.yaml", "skills"))
         skillsInto(files, layout.plugin, join(home, "skills"), join(real, "skills"))
-        val theirs = files.read(join(real, "config.yaml")).orEmpty()
+        val developers = files.read(join(real, "config.yaml")).orEmpty()
         val ours = mapOf(
             "hooks" to mapOf(
                 "pre_tool_call" to hook(layout, "gate", BEFORE_SECONDS),
@@ -33,11 +33,12 @@ class HermesAdapter : AgentAdapter {
                 mapOf("command" to layout.executable, "args" to arguments)
             },
         )
+        // a YAML key appears once: the developer's hooks and mcp_servers are left out of the session, said in a note
+        val theirs = withoutTopLevel(developers, ours.keys)
         val yaml = StringBuilder(theirs).append("\n# --- Ostrom (this session only)\n")
         ours.forEach { (key, value) -> yaml.append("$key: ${jsonOf(value)}\n") }
         files.write(join(home, "config.yaml"), yaml.toString(), FileAccess.PRIVATE)
-        val clash = theirs.lines().any { line -> ours.keys.any { line.startsWith("$it:") } }
-        val notes = if (clash) listOf(CLASH) else emptyList()
+        val notes = if (theirs == developers) emptyList() else listOf(CLASH)
         val chat = layout.arguments.take(1).filter { it == "chat" }
         val arguments = chat + "--accept-hooks" + layout.arguments.drop(chat.size)
         val environment = mapOf(
@@ -57,7 +58,21 @@ class HermesAdapter : AgentAdapter {
         const val START_SECONDS = 20
         const val END_SECONDS = 30
         const val BUDGET_MILLIS = "290000"
-        const val CLASH = "hermes: your config.yaml already has hooks or mcp_servers; Ostrom's are added after " +
-            "them (YAML: the last one wins)"
+        const val CLASH = "hermes: the hooks and mcp_servers of your config.yaml are not used in this session; " +
+            "Ostrom's take their place"
     }
+}
+
+/**
+ * [yaml] without the top-level blocks of [keys]: the `key:` line and what belongs to it (indented lines, a sequence
+ * at the first column, blank lines), up to the next top-level line.
+ */
+internal fun withoutTopLevel(yaml: String, keys: Set<String>): String {
+    var skipping = false
+    val kept = yaml.lines().filter { line ->
+        val topLevel = line.isNotEmpty() && !line[0].isWhitespace() && !line.startsWith("-")
+        if (topLevel) skipping = keys.any { line.startsWith("$it:") }
+        !skipping
+    }
+    return kept.joinToString("\n")
 }

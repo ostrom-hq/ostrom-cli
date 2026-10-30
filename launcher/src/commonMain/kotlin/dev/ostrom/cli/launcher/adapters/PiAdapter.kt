@@ -25,9 +25,13 @@ class PiAdapter : AgentAdapter {
         val skillArguments = skillsInto(files, layout.plugin, skills, null)
             .flatMap { listOf("--skill", join(skills, it)) }
         val arguments = listOf("-e", extension, "--append-system-prompt", rules) + skillArguments + layout.arguments
-        return AgentLaunch(arguments, mapOf(LaunchVariables.HOOK_DIALECT to "claude"))
+        val environment = mapOf(LaunchVariables.HOOK_DIALECT to "claude", BIN to layout.executable)
+        return AgentLaunch(arguments, environment)
     }
 }
+
+/** The binary the embedded plugins of OpenCode and Pi run the hooks and MCP bridges through. */
+internal const val BIN = "OSTROM_BIN"
 
 /** The rules and the package's context as one file of the session's plugin, for agents that read them from a file. */
 internal fun sessionRules(layout: SessionLayout, files: LaunchFiles): String {

@@ -32,6 +32,8 @@ class OpenCodeAdapter : AgentAdapter {
             "OPENCODE_CONFIG_DIR" to folder,
             "OPENCODE_CONFIG_CONTENT" to config.toString(),
             "OSTROM_PLUGIN_ROOT" to layout.plugin,
+            // the plugin runs the hooks through this binary
+            BIN to layout.executable,
         )
         return AgentLaunch(layout.arguments, environment)
     }

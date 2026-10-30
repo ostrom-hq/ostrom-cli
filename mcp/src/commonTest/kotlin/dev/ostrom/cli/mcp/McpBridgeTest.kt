@@ -51,6 +51,11 @@ class McpBridgeTest {
             assertNull(BridgeTarget.of(none, "ostrom"), none)
         }
         assertNull(BridgeTarget.of("""{"OSTROM_RELAY_URL":"http://127.0.0.1:4100"}""", "ostrom"), "no token")
+        // the name goes into the request line: never another route of the relay
+        for (name in listOf("x/../v1/messages", "a?b", "a b", "a\r\nX: 1", "..", "a..b", "", "-x")) {
+            assertNull(BridgeTarget.of(settings, name), name)
+        }
+        assertEquals(BridgeTarget(4100, "t", "my_server.v2"), BridgeTarget.of(settings, "my_server.v2"))
         assertNull(BridgeTarget.of("""{"OSTROM_RELAY_URL":"https://ostrom.example","OSTROM_RELAY_TOKEN":"t"}""", "x"))
     }
 

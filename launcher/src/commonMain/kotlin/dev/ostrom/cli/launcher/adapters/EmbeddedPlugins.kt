@@ -41,6 +41,8 @@ internal object EmbeddedPlugins {
         |}
         |
         |const started = new Set();
+        |// tool.execute.after does not carry the arguments: those of tool.execute.before, by call
+        |const argsOf = new Map();
         |
         |const server = async ({ directory, worktree }) => {
         |  const cwd = worktree || directory || process.cwd();
@@ -67,11 +69,16 @@ internal object EmbeddedPlugins {
         |    },
         |    'tool.execute.before': async (input, output) => {
         |      await startOnce(input.sessionID);
+        |      argsOf.set(input.callID, output?.args);
         |      const r = await run('gate', event('PreToolUse', input, output), 610000);
+        |      // fail closed: a refusal (2), but also a crash, a spawn error or a hook killed at its limit
         |      if (r.code === 2) throw new Error(r.err.trim() || 'Ostrom: this action waits for a human yes.');
+        |      if (r.code !== 0) throw new Error('Ostrom gate failed (' + r.err.trim().slice(0, 300) + '); the action was not run.');
         |    },
         |    'tool.execute.after': async (input) => {
-        |      await run('gate', event('PostToolUse', input, { args: input.args }), 15000);
+        |      const args = argsOf.get(input.callID) ?? input.args;
+        |      argsOf.delete(input.callID);
+        |      await run('gate', event('PostToolUse', input, { args }), 15000);
         |    },
         |  };
         |};
