@@ -169,6 +169,12 @@ class AdaptersTest {
         SessionHooks.processor(missing, fileSystem, capture, http, SessionHooks::epochMillis)
             .process(HookKind.GATE, push.encodeToByteArray(), "claude")
         assertEquals(emptyMap(), http.sent.last().second.headers, "no token file, no token")
+        // Grok's hooks get a budget: a call that would end after it is not made, and the gate refuses
+        val grok = Variables(mapOf("OSTROM_RELAY_URL" to "http://127.0.0.1:4100", "OSTROM_HOOK_BUDGET_MS" to "100"))
+        val sent = http.sent.size
+        SessionHooks.processor(grok, fileSystem, capture, http, SessionHooks::epochMillis)
+            .process(HookKind.GATE, push.encodeToByteArray(), "claude")
+        assertEquals(sent, http.sent.size, "no time left for any call")
         val plain = SessionHooks.processor(Variables(emptyMap()), fileSystem, capture, http, SessionHooks::epochMillis)
         assertEquals(HookReply(), plain.process(HookKind.SESSION, null, "claude"))
         assertTrue(SessionHooks.epochMillis() > 1_700_000_000_000)
