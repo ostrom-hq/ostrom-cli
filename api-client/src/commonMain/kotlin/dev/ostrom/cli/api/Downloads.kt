@@ -2,6 +2,7 @@
 package dev.ostrom.cli.api
 
 import io.ktor.client.HttpClient
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.timeout
 import io.ktor.client.request.header
 import io.ktor.client.request.prepareGet
@@ -42,11 +43,31 @@ fun interface Downloads {
     suspend fun fetch(url: String, maxBytes: Long): Download
 }
 
-/** [Downloads] over Ktor; an archive gets [DOWNLOAD_TIMEOUT_MILLIS] instead of the API's 10 s. */
+/**
+ * The client of public files: it follows redirects (a GitHub release answers 302 towards its storage), never from
+ * HTTPS down to HTTP, and carries no token to follow anywhere.
+ */
+fun downloadHttpClient(): HttpClient = HttpClient {
+    expectSuccess = false
+    followRedirects = true
+    install(HttpTimeout) {
+        connectTimeoutMillis = DOWNLOAD_CONNECT_MILLIS
+    }
+}
+
+private const val DOWNLOAD_CONNECT_MILLIS = 10_000L
+
+/**
+ * [Downloads] over Ktor; an archive gets [DOWNLOAD_TIMEOUT_MILLIS] instead of the API's 10 s.
+ *
+ * @param factory Builds the client at the first download: `ostrom hook` and `ostrom version` never pay for an engine.
+ */
 class DownloadsImpl(
     private val userAgent: String,
-    private val client: HttpClient = defaultHttpClient(),
+    factory: () -> HttpClient = ::downloadHttpClient,
 ) : Downloads {
+    private val client by lazy(factory)
+
     override suspend fun fetch(url: String, maxBytes: Long): Download {
         try {
             val request = client.prepareGet(url) {
