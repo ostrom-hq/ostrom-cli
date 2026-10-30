@@ -2,7 +2,6 @@
 package dev.ostrom.cli.launcher
 
 import okio.IOException
-import okio.Path
 
 /** A server answering by `METHOD path` (query included); anything else is a 404. Records every request. */
 class FakeServer(private val routes: MutableMap<String, ServerReply> = mutableMapOf()) : ServerTransport {
@@ -52,11 +51,9 @@ class MemoryFiles : LaunchFiles {
         if (!directories.add(path)) throw IOException("$path already exists")
     }
 
-    override fun list(path: String): List<String> {
-        val prefix = path + Path.DIRECTORY_SEPARATOR
-        return (texts.keys + directories + links.keys).filter { it.startsWith(prefix) }
-            .map { it.removePrefix(prefix).substringBefore(Path.DIRECTORY_SEPARATOR) }.distinct().sorted()
-    }
+    override fun list(path: String): List<String> =
+        (texts.keys + directories + links.keys).mapNotNull { below(path, it) }
+            .map { it.substringBefore('/').substringBefore('\\') }.distinct().sorted()
 
     override fun exists(path: String) = path in texts || path in directories
 
@@ -67,9 +64,20 @@ class MemoryFiles : LaunchFiles {
 
     override fun deleteRecursively(path: String) {
         deleted += path
-        val under = { entry: String -> entry == path || entry.startsWith(path + Path.DIRECTORY_SEPARATOR) }
+        val under = { entry: String -> entry == path || below(path, entry) != null }
         texts.keys.removeAll(under)
         directories.removeAll(under)
         links.keys.removeAll(under)
+    }
+
+    /**
+     * What follows [path] in [entry], or null when [entry] is not under it. Okio keeps the separator a path was written
+     * with (on Windows, `"/tmp".toPath() / "a"` is `/tmp/a`), and a real file system takes both: so does this one.
+     */
+    private fun below(path: String, entry: String): String? =
+        SEPARATORS.map { path + it }.firstOrNull { entry.startsWith(it) }?.let { entry.removePrefix(it) }
+
+    private companion object {
+        val SEPARATORS = listOf("/", "\\")
     }
 }
