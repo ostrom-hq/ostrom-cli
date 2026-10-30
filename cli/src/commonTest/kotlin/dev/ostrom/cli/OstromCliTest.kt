@@ -13,6 +13,7 @@ import dev.ostrom.cli.launcher.FileCredentialStore
 import dev.ostrom.cli.launcher.LaunchFilesImpl
 import dev.ostrom.cli.launcher.LaunchRequest
 import dev.ostrom.cli.launcher.LaunchSite
+import dev.ostrom.cli.mcp.BridgeTarget
 import dev.ostrom.cli.mcp.McpServer
 import dev.ostrom.cli.platform.Console
 import dev.ostrom.cli.platform.Environment
@@ -55,6 +56,7 @@ class OstromCliTest {
     private val withServer = mapOf("HOME" to "/home/maya", "OSTROM_URL" to "https://ostrom.example")
     private val launches = mutableListOf<Pair<LaunchRequest, LaunchSite>>()
     private val waits = mutableListOf<Long>()
+    private val bridged = mutableListOf<BridgeTarget>()
     private val requests = mutableListOf<Pair<String, ServerRequest>>()
 
     /** A server that answers `METHOD path` from [routes] (404 otherwise), recording each request with its server. */
@@ -103,6 +105,7 @@ class OstromCliTest {
                 override fun run(arguments: List<String>): Int = 0.also { hookCalls += arguments }
             },
             mcpServer = { object : McpServer { override fun serve() = 0 } },
+            mcpBridge = { target -> object : McpServer { override fun serve() = 5.also { bridged += target } } },
             credentials = { directory ->
                 val path = (directory.toPath() / "credentials.json").toString()
                 FileCredentialStore(LaunchFilesImpl(fileSystem) { _, _ -> }, path) { environment[it] }
@@ -314,6 +317,20 @@ class OstromCliTest {
     }
 
     @Test
+    fun mcpWithASessionBridgesToItsRelay() {
+        fileSystem.createDirectories("/tmp/run".toPath())
+        fileSystem.write("/tmp/run/session-env.json".toPath()) {
+            writeUtf8("""{"OSTROM_RELAY_URL":"http://127.0.0.1:4100","OSTROM_RELAY_TOKEN":"t"}""")
+        }
+        assertEquals(5, cli().run(arrayOf("mcp", "--session", "/tmp/run/session-env.json", "--server", "github")))
+        assertEquals(BridgeTarget(4100, "t", "github"), bridged.single())
+        assertEquals(5, cli().run(arrayOf("mcp", "--session", "/tmp/run/session-env.json")))
+        assertEquals("ostrom", bridged.last().server)
+        assertEquals(66, cli().run(arrayOf("mcp", "--session", "/tmp/run/missing.json")))
+        assertTrue(console.err.endsWith("ostrom mcp: no local relay in /tmp/run/missing.json\n"))
+    }
+
+    @Test
     fun aConfigFileThatCannotBeWrittenIsExit73() {
         fileSystem.createDirectories("/home/maya".toPath())
         fileSystem.write("/home/maya/.config".toPath()) { writeUtf8("a file where the folder should be") }
@@ -358,6 +375,7 @@ class OstromCliTest {
         val dependencies = CliDependencies.create()
         dependencies.api("https://ostrom.example")
         dependencies.mcpServer()
+        dependencies.mcpBridge(BridgeTarget(1, "t", "ostrom"))
         assertTrue(dependencies.configFile("/x").endsWith("config.toml"))
         assertTrue(dependencies.workingDirectory().isNotEmpty())
         assertEquals(null, dependencies.credentials("/nowhere-ostrom").load("https://ostrom.example")?.login)

@@ -47,6 +47,13 @@ data class SessionLayout(
     /** `ostrom mcp --session <file>`: the stdio MCP server of the session, for agents that start it themselves. */
     val mcpArguments: List<String> get() = listOf("mcp", "--session", join(temporary, SESSION_SETTINGS))
 
+    /**
+     * The relayed MCP servers for an agent that only starts stdio servers: each label to the arguments of this binary
+     * that serve it (`ostrom mcp --session <file> --server <name>`, a stdio bridge to the local relay).
+     */
+    val stdioServers: Map<String, List<String>>
+        get() = relay.mcpServers.associate { mcpLabel(it) to mcpArguments + listOf("--server", it) }
+
     /** The PreToolUse limit: every enforced check runs in the one hook, plus a margin, and never under 10 s. */
     val beforeToolSeconds: Long get() = maxOf((pack?.enforcedCheckSeconds ?: 0L) + CHECK_MARGIN_SECONDS, MIN_SECONDS)
 
@@ -67,8 +74,13 @@ data class SessionLayout(
  *
  * @property arguments The arguments, the developer's included, in order.
  * @property environment Variables set (a value) or removed (null) for the agent.
+ * @property notes What the developer should know about this session's harness (said before the agent starts).
  */
-data class AgentLaunch(val arguments: List<String>, val environment: Map<String, String?>)
+data class AgentLaunch(
+    val arguments: List<String>,
+    val environment: Map<String, String?>,
+    val notes: List<String> = emptyList(),
+)
 
 /** Puts the harness in place for one session, through the agent's own mechanism, without touching its real config. */
 interface AgentAdapter {

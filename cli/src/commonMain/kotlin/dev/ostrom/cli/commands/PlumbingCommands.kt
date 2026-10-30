@@ -6,8 +6,11 @@ import com.github.ajalt.clikt.core.ProgramResult
 import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.arguments.multiple
 import com.github.ajalt.clikt.parameters.arguments.optional
+import com.github.ajalt.clikt.parameters.options.default
+import com.github.ajalt.clikt.parameters.options.option
 import dev.ostrom.cli.CliDependencies
 import dev.ostrom.cli.ExitCode
+import dev.ostrom.cli.mcp.BridgeTarget
 
 /**
  * `ostrom hook gate|session|gates-refresh`, called by the agents' hooks. `main` answers it before the command tree
@@ -25,9 +28,14 @@ class HookCommand(private val dependencies: CliDependencies) : CliktCommand(name
     }
 }
 
-/** `ostrom mcp [workflow]`: the local MCP server on stdio, started by the agent. */
+/**
+ * `ostrom mcp [workflow]`: the local MCP server on stdio, started by the agent. With `--session <file>`, a stdio
+ * bridge to the session's local relay instead, for the server named by `--server` (Ostrom's own by default).
+ */
 class McpCommand(private val dependencies: CliDependencies) : CliktCommand(name = "mcp") {
     private val workflow by argument("workflow").optional()
+    private val session by option("--session", help = "The session's settings (session-env.json): bridge to its relay")
+    private val server by option("--server", help = "The relayed MCP server to bridge to").default("ostrom")
 
     override val hiddenFromHelp = true
 
@@ -38,7 +46,14 @@ class McpCommand(private val dependencies: CliDependencies) : CliktCommand(name 
             dependencies.console.err("ostrom mcp workflow: not implemented yet.\n")
             throw ProgramResult(ExitCode.NOT_IMPLEMENTED.code)
         }
-        throw ProgramResult(dependencies.mcpServer().serve())
+        val settings = session
+        if (settings == null) throw ProgramResult(dependencies.mcpServer().serve())
+        val target = BridgeTarget.of(dependencies.files.read(settings), server)
+        if (target == null) {
+            dependencies.console.err("ostrom mcp: no local relay in $settings\n")
+            throw ProgramResult(ExitCode.NOT_FOUND.code)
+        }
+        throw ProgramResult(dependencies.mcpBridge(target).serve())
     }
 }
 

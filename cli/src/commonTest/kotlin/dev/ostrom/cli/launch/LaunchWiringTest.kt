@@ -128,6 +128,8 @@ class LaunchWiringTest {
         )
         assertEquals(127, runner.run(LaunchRequest(Agent.CODEX, emptyList(), null, null), site))
         assertEquals("ostrom: Codex is not installed (`codex` is not on your PATH).\n", said.toString())
-        assertEquals(70, runner.run(LaunchRequest(Agent.GROK, emptyList(), null, null), site))
+        for (agent in Agent.entries) {
+            assertEquals(127, runner.run(LaunchRequest(agent, emptyList(), null, null), site), "$agent has an adapter")
+        }
     }
 }

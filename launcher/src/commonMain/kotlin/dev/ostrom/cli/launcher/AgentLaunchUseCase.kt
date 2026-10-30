@@ -145,7 +145,8 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         files.createPrivateDirectory(run.plugin)
         val view = run.pack?.let { PackageLayout(files).layDown(it, run.plugin, run.temporary) }
         calls.prefetchCatalogue(run.repo, run.launch.agentToken, run.gates)
-        val mcp = (calls.mcpServers(run.site) + run.pack?.mcpServers.orEmpty()).distinct()
+        // `ostrom` (rules_for, request_approval, get_receipt) is built into every Ostrom server
+        val mcp = (listOf(BUILT_IN_MCP) + calls.mcpServers(run.site) + run.pack?.mcpServers.orEmpty()).distinct()
         val inference = inferenceRelayed(run)
         val settings = RelaySettings(
             run.site.serverUrl,
@@ -157,6 +158,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         )
         return dependencies.relays.start(settings).use { relay ->
             val prepared = prepare(run, RelayView(relay.url, relay.token, mcp, inference))
+            prepared.notes.forEach { dependencies.say("ostrom: $it") }
             val environment = environmentOf(run, relay, view) + prepared.environment
             val settingsFile = join(run.temporary, SessionLayout.SESSION_SETTINGS)
             files.write(settingsFile, sessionSettings(environment).toString(), FileAccess.PRIVATE)
@@ -280,6 +282,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
 
     private companion object {
         const val NO_ADAPTER = 70
+        const val BUILT_IN_MCP = "ostrom"
         const val CANNOT_WRITE = 73
         const val AGENT_MISSING = 127
         const val INFERENCE_MILLIS = 3_000L
