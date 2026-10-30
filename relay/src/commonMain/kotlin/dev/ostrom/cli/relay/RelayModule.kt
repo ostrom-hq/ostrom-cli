@@ -17,7 +17,9 @@ import io.ktor.server.response.respond
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeSource
 
 /** Default bound of a hook call. */
 private val HOOK_TIMEOUT = 15.seconds
@@ -25,24 +27,38 @@ private val HOOK_TIMEOUT = 15.seconds
 /** A gate wait: the server holds it up to 60 s, plus the time to answer. */
 private val LONG_POLL_TIMEOUT = 70.seconds
 
+/** How long the signed gate policy is answered from memory: a policy tightened on the server reaches the hooks then. */
+private val POLICY_FRESH_FOR = 30.seconds
+
 private const val CAPABILITY_REQUIRED = "A local Ostrom capability is required."
 private const val NOT_LOCAL = "Browser or non-loopback requests are not accepted."
+private const val WRONG_CAPABILITY = "This Ostrom capability does not open this route."
 
 /**
  * The relay's application: every request goes through one handler, which checks the capability (401), then that the
- * request comes from a local program (403), then the allow-list (404).
+ * request comes from a local program (403), then the allow-list (404), then that the capability opens the route (403:
+ * the hooks' [token] opens the hook routes, the agent's [clientToken] its MCP servers and inference, S2-25).
+ *
+ * @param policyFreshFor How long the signed gate policy is answered from memory.
+ * @param clock Measures that time.
  */
+@Suppress("LongParameterList") // the relay's settings, all defaulted but the launch's own
 internal fun Application.relayModule(
     config: RelayConfig,
     token: String,
     upstream: () -> HttpClient,
     notices: FailureNotices,
     timeouts: RelayTimeouts = RelayTimeouts(HOOK_TIMEOUT, LONG_POLL_TIMEOUT),
+    clientToken: String = token,
+    policyFreshFor: Duration = POLICY_FRESH_FOR,
+    clock: TimeSource = TimeSource.Monotonic,
 ) {
     val shared = upstream()
     monitor.subscribe(ApplicationStopped) { shared.close() }
     val upstreamConfig = config.copy(serverUrl = config.serverUrl.trimEnd('/'))
-    val relay = Relay(upstreamConfig, token, shared, upstream, notices, timeouts)
+    val capabilities = Capabilities(token, clientToken)
+    val memory = PolicyMemory(policyFreshFor, clock)
+    val relay = Relay(upstreamConfig, capabilities, shared, upstream, notices, timeouts, memory)
     routing {
         route("{...}") {
             // The agent hanging up cancels the call, and with it the upstream call (a long poll, a stream).
@@ -52,28 +68,42 @@ internal fun Application.relayModule(
     }
 }
 
+/** The hooks' capability and the agent's own (S2-25). */
+private class Capabilities(val hooks: String, val client: String)
+
 /** Admits a request and sends it to its forwarder. */
+@Suppress("LongParameterList") // the forwarders' collaborators, built once per relay
 private class Relay(
     private val config: RelayConfig,
-    private val token: String,
+    private val capabilities: Capabilities,
     shared: HttpClient,
     upstream: () -> HttpClient,
     notices: FailureNotices,
     timeouts: RelayTimeouts,
+    memory: PolicyMemory,
 ) {
     private val exchange = UpstreamExchange(notices)
     private val hooks = HookForwarder(config, shared, exchange, timeouts)
     private val mcp = McpForwarder(config, upstream, exchange)
     private val inference = InferenceForwarder(config, upstream, exchange)
+    private val policy = SignedCatalogForwarder(config, shared, exchange, timeouts.hook, memory)
 
     suspend fun handle(call: ApplicationCall) {
         val headers = call.request.headers
+        val hooks = hasCapability(headers, capabilities.hooks)
+        val client = hasCapability(headers, capabilities.client)
         when {
-            !hasCapability(headers, token) ->
-                call.respondText(CAPABILITY_REQUIRED, status = HttpStatusCode.Unauthorized)
-            !isLocalRequest(headers) ->
-                call.respondText(NOT_LOCAL, status = HttpStatusCode.Forbidden)
-            else -> dispatch(call, resolveTarget(call.request.httpMethod, call.request.path(), config))
+            !hooks && !client -> call.respondText(CAPABILITY_REQUIRED, status = HttpStatusCode.Unauthorized)
+            !isLocalRequest(headers) -> call.respondText(NOT_LOCAL, status = HttpStatusCode.Forbidden)
+            else -> admitted(call, resolveTarget(call.request.httpMethod, call.request.path(), config), hooks, client)
+        }
+    }
+
+    private suspend fun admitted(call: ApplicationCall, target: RelayTarget, hooks: Boolean, client: Boolean) {
+        if (opens(target, hooks, client)) {
+            dispatch(call, target)
+        } else {
+            call.respondText(WRONG_CAPABILITY, status = HttpStatusCode.Forbidden)
         }
     }
 
@@ -81,6 +111,7 @@ private class Relay(
         when (target) {
             is RelayTarget.Hook -> hooks.forward(call, target.longPoll)
             is RelayTarget.Catalog -> call.respondText(target.catalog, ContentType.Application.Json)
+            RelayTarget.SignedCatalog -> policy.forward(call)
             is RelayTarget.Mcp -> mcp.forward(call, target.server)
             is RelayTarget.Inference -> inference.forward(call, target.upstreamPath)
             RelayTarget.McpMethodNotAllowed -> {

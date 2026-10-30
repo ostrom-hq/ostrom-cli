@@ -8,14 +8,22 @@ the run then points OSTROM_URL at the real server and keeps every assertion.
     python3 e2e/contract_server.py --port 0 --log requests.jsonl --ready ready.txt [--package vectors/package.json]
 """
 import argparse
+import base64
+import datetime
+import hashlib
 import json
 import re
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
+
+import ed25519
 
 DEVICE_TOKEN = "ost_e2e_device"
 AGENT_TOKEN = "agt_e2e_launch"
+# The instance's key in this run, which signs the gate policy (S2-20). A test key: never a real one.
+POLICY_SEED = hashlib.sha256(b"ostrom-cli e2e only: instance key").digest()
+POLICY_KID = "e2e-instance"
 
 CATALOGUE = {
     "failMode": "closed",
@@ -29,6 +37,24 @@ CATALOGUE = {
         }
     ],
 }
+
+
+def instance_keys():
+    """`GET /api/v1/instance/keys`, as the server answers it."""
+    key = {"keyId": POLICY_KID, "algorithm": "ed25519", "publicKeyPem": ed25519.public_key_pem(POLICY_SEED),
+           "firstSeenAt": "2026-10-30T00:00:00Z"}
+    return {"keys": [key]}
+
+
+def signed_policy(repo):
+    """`GET /api/v1/gates/catalog/signed?repo=`: the catalogue signed for [repo], valid for 10 minutes."""
+    now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+    stamp = lambda moment: moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+    payload = json.dumps({"repo": repo, "issuedAt": stamp(now),
+                          "expiresAt": stamp(now + datetime.timedelta(minutes=10)), **CATALOGUE})
+    signature = base64.b64encode(ed25519.sign(POLICY_SEED, payload.encode())).decode()
+    return {"format": "ostrom.gates/1", "alg": "ed25519", "kid": POLICY_KID, "signature": signature,
+            "payload": payload}
 
 
 def make_handler(state):
@@ -60,9 +86,9 @@ def make_handler(state):
                                                "token": token, "body": raw}) + "\n")
                 state["log"].flush()
             body = json.loads(raw) if raw else {}
-            self._route(method, url.path, token, body)
+            self._route(method, url.path, token, body, parse_qs(url.query))
 
-        def _route(self, method, path, token, body):
+        def _route(self, method, path, token, body, query):
             device = token == DEVICE_TOKEN
             agent = token == AGENT_TOKEN
             if (method, path) == ("GET", "/api/v1/policy/agents") and device:
@@ -74,6 +100,8 @@ def make_handler(state):
                 if state["package"] is None:
                     return self._error(404, "not_found", "no package for this repository")
                 return self._answer(200, state["package"]["envelope"])
+            if (method, path) == ("GET", "/api/v1/instance/keys"):
+                return self._answer(200, instance_keys())
             if (method, path) == ("GET", "/api/v1/receipts/keys"):
                 return self._answer(200, state["package"]["keys"])
             if (method, path) == ("GET", "/api/v1/mcp/servers") and device:
@@ -82,6 +110,8 @@ def make_handler(state):
                 return self._error(404, "not_found", "no gateway")
             if not agent:
                 return self._error(401, "unauthorized", "the launch's agent token only")
+            if (method, path) == ("GET", "/api/v1/gates/catalog/signed"):
+                return self._answer(200, signed_policy(query.get("repo", [""])[0]))
             if (method, path) == ("GET", "/api/v1/gates/catalog"):
                 return self._answer(200, CATALOGUE)
             if (method, path) == ("POST", "/api/v1/sessions"):

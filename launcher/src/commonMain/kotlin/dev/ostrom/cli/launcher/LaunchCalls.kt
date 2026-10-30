@@ -67,6 +67,18 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
                 stop(SIGNATURE_REFUSED, "session package refused: ${outcome.reason}. The agent is not started.")
         }
 
+    /**
+     * The instance's signing keys, the body of `GET /api/v1/instance/keys`, which the hooks check the gate policy
+     * with (S2-20): read before the agent starts, never pinned on first use. Unreadable, the launch stops: no gate
+     * policy of the session could be trusted, and every action would be held.
+     */
+    suspend fun instanceKeys(): String =
+        when (val answer = dependencies.server.get(Routes.INSTANCE_KEYS, null, KEYS_MILLIS)) {
+            is ServerAnswer.Ok -> answer.body.toString()
+            is ServerAnswer.Failed ->
+                stop(UNREACHABLE, "the instance's keys could not be read (${answer.message}): the agent is not started")
+        }
+
     /** The organisation's MCP servers the relay serves, by name. */
     suspend fun mcpServers(site: LaunchSite): List<String> =
         when (val answer = dependencies.server.get(Routes.MCP_SERVERS, site.credentials.token, MCP_MILLIS)) {
@@ -90,6 +102,7 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
         private const val POLICY_MILLIS = 5_000L
         private const val LAUNCH_MILLIS = 10_000L
         private const val MCP_MILLIS = 5_000L
+        private const val KEYS_MILLIS = 5_000L
         private val MCP_NAME = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
     }
 }
