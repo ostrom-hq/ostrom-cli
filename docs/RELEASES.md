@@ -73,7 +73,6 @@ newest non-draft, non-pre-release one):
 ```json
 {
   "version": "1.0.0",
-  "floor": "0.1.0",
   "date": "2026-10-30T10:00:00Z",
   "assets": {
     "linux-x64":   { "url": "https://github.com/ostrom-hq/ostrom-cli/releases/download/1.0.0/ostrom-1.0.0-linux-x64.tar.gz",   "sha256": "<hex>", "size": 1234567 },
@@ -84,9 +83,7 @@ newest non-draft, non-pre-release one):
 }
 ```
 
-`floor` is the lowest version `ostrom update --rollback` and `ostrom update --version` may go back to (security audit
-S2-39): `scripts/release/floor`, or `RELEASE_FLOOR` for one release. Raise it when a release has a known hole; a
-manifest without a floor lets nobody go back. `sha256` is lowercase hex, `size` is in bytes. The archive holds `ostrom` (`ostrom.exe` on Windows) at its root.
+`sha256` is lowercase hex, `size` is in bytes. The archive holds `ostrom` (`ostrom.exe` on Windows) at its root.
 
 `latest.json.sig` is the **base64 (one line) of the raw 64-byte Ed25519 signature of the exact bytes of `latest.json`**
 (no hashing first, no canonicalisation: verify the bytes as downloaded). `ostrom update` must:
