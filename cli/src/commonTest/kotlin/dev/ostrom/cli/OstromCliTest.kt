@@ -231,8 +231,8 @@ class OstromCliTest {
 
     @Test
     fun aDeclaredCommandNotBuiltYetExitsWith70() {
-        assertEquals(70, cli().run(arrayOf("status", "--json")))
-        assertEquals("ostrom status: not implemented yet.\n", console.err.toString())
+        assertEquals(70, cli().run(arrayOf("logs", "--follow")))
+        assertEquals("ostrom logs --follow: not implemented yet.\n", console.err.toString())
         assertEquals(70, cli().run(arrayOf("harness", "add", "git-safety", "--set", "a=b", "--yes")))
         assertEquals(70, cli().run(arrayOf("receipts")))
         assertEquals(70, cli().run(arrayOf("claude", "--cloud", "-p", "hello")))
@@ -608,5 +608,109 @@ class OstromCliTest {
             }
             assertEquals(target, releaseTarget(environment))
         }
+    }
+
+    private fun pinKey(kid: String = "a1b2c3d4") {
+        fileSystem.createDirectories("/home/maya/.config/ostrom".toPath())
+        fileSystem.write("/home/maya/.config/ostrom/server-keys.json".toPath()) {
+            writeUtf8("""{"https://ostrom.example":{"kid":"$kid","publicKeyPem":"x"}}""")
+        }
+    }
+
+    private val me = "GET /api/v1/auth/me" to
+        (200 to """{"dev":{"login":"maya-k"},"organization":{"name":"acme"},"member":{"role":"member"}}""")
+    private val inbox = "GET /api/v1/approvals?mine=true&status=pending"
+
+    @Test
+    fun statusSaysWhoTheRepositorysHarnessTheYesesAndTheDevice() {
+        signIn("/home/maya/.config/ostrom")
+        pinKey()
+        fileSystem.createDirectories("/work/acme/.git".toPath())
+        val routes = mapOf(
+            me,
+            "GET /api/v1/packages/current?repo=acme" to (200 to """{"version":"p2026-3"}"""),
+            inbox to (200 to """{"items":[{"id":"g1"},{"id":"g2"}]}"""),
+        )
+        assertEquals(0, serving(routes).run(arrayOf("status")))
+        assertEquals(
+            "Signed in   @maya-k · acme (ostrom.example) · member\n" +
+                "Repository  acme · harness p2026-3\n" +
+                "Waiting     2 requests need your yes (ostrom inbox)\n" +
+                "This device ostrom ${BuildInfo.VERSION} · key a1b2c3d4 pinned\n",
+            console.out.toString(),
+        )
+        console.out.clear()
+        assertEquals(0, serving(routes).run(arrayOf("status", "--json")))
+        assertEquals(
+            """{"login":"maya-k","organization":"acme","role":"member","server":"https://ostrom.example",""" +
+                """"repository":"acme","harness":"p2026-3","waiting":2,"version":"${BuildInfo.VERSION}",""" +
+                """"pinnedKey":"a1b2c3d4"}""" + "\n",
+            console.out.toString(),
+        )
+    }
+
+    @Test
+    fun statusSaysWhatItCouldNotLearn() {
+        signIn("/home/maya/.config/ostrom")
+        val bare = mapOf("GET /api/v1/auth/me" to (200 to "{}"), inbox to (500 to "{}"))
+        assertEquals(0, serving(bare).run(arrayOf("status")))
+        assertEquals(
+            "Signed in   @maya · ostrom.example\nRepository  not in a git repository\nWaiting     unknown\n" +
+                "This device ostrom ${BuildInfo.VERSION} · no key pinned yet\n",
+            console.out.toString(),
+        )
+        fileSystem.createDirectories("/work/.git".toPath())
+        for ((items, line) in listOf("[]" to "nothing waits for your yes", "[{}]" to "1 request needs your yes")) {
+            console.out.clear()
+            assertEquals(0, serving(mapOf(me, inbox to (200 to """{"items":$items}"""))).run(arrayOf("status")))
+            assertOut("Repository  work · no harness yet\n")
+            assertOut("Waiting     $line")
+        }
+    }
+
+    @Test
+    fun statusOfflineShowsTheDeviceOnlyAndSignedOutIs65() {
+        signIn("/home/maya/.config/ostrom")
+        pinKey()
+        val down: (String) -> OstromApi = { url ->
+            object : OstromApi {
+                override suspend fun get(path: String) = throw ServerUnreachableException(url, Exception("refused"))
+                override suspend fun send(request: ServerRequest) = get(request.path)
+            }
+        }
+        assertEquals(69, cli(environment = withServer, api = down).run(arrayOf("status")))
+        assertEquals("This device ostrom ${BuildInfo.VERSION} · key a1b2c3d4 pinned\n", console.out.toString())
+        assertTrue(console.err.endsWith("! Ostrom is unreachable: server lines not shown.\n"))
+        assertEquals(65, serving(mapOf("GET /api/v1/auth/me" to (401 to "{}"))).run(arrayOf("status")))
+        assertEquals(65, cli(environment = withServer).run(arrayOf("status", "--server", "https://other.example")))
+    }
+
+    @Test
+    fun doctorSaysWhoIsSignedInAndWhichKeyIsPinned() {
+        signIn("/home/maya/.config/ostrom")
+        pinKey()
+        assertEquals(0, cli(environment = withServer, api = serverAnswering(200, 5)).run(arrayOf("doctor")))
+        assertOut("  ✓ Signed in as @maya on ostrom.example\n")
+        assertOut("  ✓ Signing key a1b2c3d4 pinned for ostrom.example\n")
+        console.out.clear()
+        fileSystem.delete("/home/maya/.config/ostrom/server-keys.json".toPath())
+        fileSystem.delete("/home/maya/.config/ostrom/credentials.json".toPath())
+        assertEquals(0, cli(environment = withServer, api = serverAnswering(200, 5)).run(arrayOf("doctor")))
+        assertOut("  ! Not signed in. Run ostrom login.\n")
+        assertOut("  ! No signing key pinned for ostrom.example yet: the first session pins it.\n")
+        console.out.clear()
+        val homeless = mapOf("OSTROM_URL" to "https://ostrom.example")
+        assertEquals(1, cli(environment = homeless, api = serverAnswering(200, 5)).run(arrayOf("doctor")))
+        assertOut("  ! Not signed in. Run ostrom login.\n")
+    }
+
+    @Test
+    fun theHomeScreenSaysWhoIsSignedIn() {
+        signIn("/home/maya/.config/ostrom")
+        assertEquals(0, cli(environment = withServer).run(emptyArray()))
+        assertOut("Ostrom ${BuildInfo.VERSION}\nSigned in as @maya\n")
+        console.out.clear()
+        assertEquals(0, cli(environment = emptyMap()).run(emptyArray()))
+        assertOut("Not signed in. Next: ostrom login\n")
     }
 }

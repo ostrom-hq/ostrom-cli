@@ -90,12 +90,19 @@ private const val DEFAULT_SERVER = "https://api.ostrom.run"
 /**
  * The signed-in device for a command that reads or writes on the server.
  *
+ * @property directory The CLI folder.
  * @property serverUrl The server, without a trailing slash.
  * @property token The device token.
  * @property login The developer's GitHub login.
  * @property server The server's JSON API.
  */
-internal class SignedIn(val serverUrl: String, val token: String, val login: String, val server: ServerJson)
+internal class SignedIn(
+    val directory: String,
+    val serverUrl: String,
+    val token: String,
+    val login: String,
+    val server: ServerJson,
+)
 
 /** The device signed in to the server of [option], or exit 65 with `ostrom login` to run. */
 internal fun CliDependencies.signedIn(option: String?): SignedIn {
@@ -106,5 +113,6 @@ internal fun CliDependencies.signedIn(option: String?): SignedIn {
         ExitCode.SIGN_IN_REQUIRED.code,
         printError = true,
     )
-    return SignedIn(serverUrl, credentials.token, credentials.login, ServerJson(ApiServerTransport(api(serverUrl))))
+    val server = ServerJson(ApiServerTransport(api(serverUrl)))
+    return SignedIn(directory, serverUrl, credentials.token, credentials.login, server)
 }

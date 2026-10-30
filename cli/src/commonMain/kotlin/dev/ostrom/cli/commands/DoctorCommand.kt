@@ -23,6 +23,7 @@ class DoctorCommand(private val dependencies: CliDependencies) : CliktCommand(na
     override fun help(context: Context) = "Check everything and say what to do"
 
     override fun run() {
+        val directory = dependencies.environment.configDirectory
         val doctor = RunDoctorUseCaseImpl(
             version = BuildInfo.VERSION,
             environment = dependencies.environment,
@@ -31,6 +32,8 @@ class DoctorCommand(private val dependencies: CliDependencies) : CliktCommand(na
             configDirectory = dependencies.environment.configDirectory,
             config = dependencies.config,
             api = dependencies.api,
+            signedInAs = { url -> directory?.let { dependencies.credentials(it).load(url)?.login } },
+            pinnedKey = { url -> directory?.let { pinnedKid(dependencies, it, url) } },
         )
         val checks = runBlocking { doctor() }
         val problems = checks.count { it.status == CheckStatus.PROBLEM }

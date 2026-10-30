@@ -27,10 +27,14 @@ class RootCommand(private val dependencies: CliDependencies) : CliktCommand(name
     override fun run() {
         if (currentContext.invokedSubcommand != null) return
         val others = Agent.entries.drop(1).joinToString(", ") { it.command }
+        val login = dependencies.environment.configDirectory?.let { directory ->
+            dependencies.credentials(directory).load(dependencies.serverOf(null, directory))?.login
+        }
+        val account = if (login == null) "Not signed in. Next: ostrom login" else "Signed in as @$login"
         dependencies.console.out(
             """
             |Ostrom ${BuildInfo.VERSION}
-            |Not signed in. Next: ostrom login
+            |$account
             |
             |Start an agent   ostrom ${Agent.CLAUDE.command}   (also: $others)
             |See everything   ostrom status

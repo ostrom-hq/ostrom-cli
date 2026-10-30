@@ -17,6 +17,7 @@ import dev.ostrom.cli.commands.LoginCommand
 import dev.ostrom.cli.commands.LogoutCommand
 import dev.ostrom.cli.commands.McpCommand
 import dev.ostrom.cli.commands.RootCommand
+import dev.ostrom.cli.commands.StatusCommand
 import dev.ostrom.cli.commands.UpdateCommand
 import dev.ostrom.cli.commands.VersionCommand
 import dev.ostrom.cli.commands.pendingCommands
@@ -55,6 +56,7 @@ class OstromCli(private val dependencies: CliDependencies) {
         val root = RootCommand(dependencies)
         val agents = Agent.entries.map { AgentCommand(it, dependencies) }
         val implemented = listOf(
+            StatusCommand(dependencies),
             InboxCommand(dependencies),
             ApproveCommand(dependencies),
             DenyCommand(dependencies),

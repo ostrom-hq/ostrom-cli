@@ -20,11 +20,6 @@ private fun CliktCommand.jsonOption() = option("--json", help = "Machine-readabl
 
 private fun CliktCommand.yesOption() = option("--yes", help = "Do not ask for confirmation").flag()
 
-internal class StatusCommand : PendingCommand("status", "Everything about you, this repository and this device") {
-    val json by jsonOption()
-    val server by serverOption()
-}
-
 internal class ReceiptsCommand :
     GroupCommand("receipts", "Receipts of your sessions and of your yeses", defaultSubcommand = "list")
 
@@ -139,7 +134,7 @@ internal class CheckCommand : PendingCommand("check", "Run a workflow check (use
 fun pendingCommands(implemented: List<CliktCommand>): List<CliktCommand> {
     fun named(name: String) = implemented.first { it.commandName == name }
     return listOf(
-        StatusCommand(),
+        named("status"),
         named("inbox"),
         named("approve"),
         named("deny"),

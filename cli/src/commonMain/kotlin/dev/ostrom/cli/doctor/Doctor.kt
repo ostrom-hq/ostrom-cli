@@ -35,6 +35,8 @@ interface RunDoctorUseCase {
  * @param configDirectory The CLI folder, or null when no home folder is known.
  * @param config The device configuration, or null with no CLI folder.
  * @param api Builds the client of a server URL.
+ * @param signedInAs The GitHub login this device is signed in with on a server URL, or null.
+ * @param pinnedKey The kid of the signing key this device pinned for a server URL, or null.
  */
 @Suppress("LongParameterList") // Each check reads one dependency; grouping them would only hide which.
 class RunDoctorUseCaseImpl(
@@ -45,18 +47,42 @@ class RunDoctorUseCaseImpl(
     private val configDirectory: String?,
     private val config: ConfigStore?,
     private val api: (String) -> OstromApi,
+    private val signedInAs: (String) -> String?,
+    private val pinnedKey: (String) -> String?,
 ) : RunDoctorUseCase {
-    override suspend fun invoke(): List<DoctorCheck> = listOf(
-        DoctorCheck(
-            CheckStatus.OK,
-            "ostrom $version · ${environment.operatingSystem.displayName} ${environment.architecture}",
-        ),
-        configFolder(),
-        DoctorCheck(CheckStatus.WARNING, "Not signed in. Run ostrom login."),
-        server(),
-        git(),
-        agents(),
-    )
+    override suspend fun invoke(): List<DoctorCheck> {
+        val url = environment["OSTROM_URL"] ?: config?.get(ConfigKey.SERVER)
+        return listOfNotNull(
+            DoctorCheck(
+                CheckStatus.OK,
+                "ostrom $version · ${environment.operatingSystem.displayName} ${environment.architecture}",
+            ),
+            configFolder(),
+            signIn(url),
+            server(url),
+            url?.let { key(it) },
+            git(),
+            agents(),
+        )
+    }
+
+    private fun signIn(url: String?): DoctorCheck {
+        val login = url?.let(signedInAs)
+        return if (login == null) {
+            DoctorCheck(CheckStatus.WARNING, "Not signed in. Run ostrom login.")
+        } else {
+            DoctorCheck(CheckStatus.OK, "Signed in as @$login on ${hostOf(url)}")
+        }
+    }
+
+    private fun key(url: String): DoctorCheck {
+        val kid = pinnedKey(url)
+        return if (kid == null) {
+            DoctorCheck(CheckStatus.WARNING, "No signing key pinned for ${hostOf(url)} yet: the first session pins it.")
+        } else {
+            DoctorCheck(CheckStatus.OK, "Signing key $kid pinned for ${hostOf(url)}")
+        }
+    }
 
     private fun configFolder(): DoctorCheck {
         val directory = configDirectory ?: return DoctorCheck(CheckStatus.PROBLEM, NO_HOME)
@@ -70,10 +96,9 @@ class RunDoctorUseCaseImpl(
         }
     }
 
-    private suspend fun server(): DoctorCheck {
-        val url = environment["OSTROM_URL"] ?: config?.get(ConfigKey.SERVER)
-            ?: return DoctorCheck(CheckStatus.WARNING, "No server yet: ostrom login sets it.")
-        val host = url.substringAfter("://").substringBefore('/')
+    private suspend fun server(url: String?): DoctorCheck {
+        if (url == null) return DoctorCheck(CheckStatus.WARNING, "No server yet: ostrom login sets it.")
+        val host = hostOf(url)
         return try {
             val response = api(url).get("/api/health")
             if (response.status < SERVER_ERROR) {
@@ -107,6 +132,9 @@ class RunDoctorUseCaseImpl(
         return DoctorCheck(CheckStatus.OK, "Agents found: ${found.joinToString(", ") { it.command }}")
     }
 }
+
+/** The host of a server URL, as shown to people. */
+private fun hostOf(url: String): String = url.substringAfter("://").substringBefore('/')
 
 /** The first HTTP status that means the server itself failed. */
 private const val SERVER_ERROR = 500
