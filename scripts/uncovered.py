@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """Lists the lines and branches Kover did not cover, from every module's XML report (CI log, on failure)."""
 import pathlib
 import xml.etree.ElementTree as ElementTree
