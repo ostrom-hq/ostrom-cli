@@ -582,6 +582,8 @@ class OstromCliTest {
             assertTrue(console.err.endsWith(refusal), console.err.toString())
         }
         assertEquals(emptyList(), requests, "nothing reaches the server")
-        assertEquals(0, cli(environment = withServer + ("OSTROM_LAUNCH_ID" to "")).run(arrayOf("logout")))
+        // an empty variable is no session
+        val logout = serverOf(mapOf("POST /api/v1/auth/logout" to (200 to "{}")))
+        assertEquals(0, cli(environment = withServer + ("OSTROM_LAUNCH_ID" to ""), api = logout).run(arrayOf("logout")))
     }
 }
