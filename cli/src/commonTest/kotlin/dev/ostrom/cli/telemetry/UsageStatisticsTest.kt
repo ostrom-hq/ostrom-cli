@@ -125,7 +125,9 @@ class UsageStatisticsTest {
         usage().enable(store)
         usage().commandRun("https://secret.example/repo", known, 64, 1.milliseconds)
         usage().commandRun(null, known, 0, 1.milliseconds)
-        for (plumbing in listOf("hook", "mcp", "wait", "check")) usage().commandRun(plumbing, known, 0, 1.milliseconds)
+        for (never in listOf("hook", "mcp", "wait", "check", "telemetry")) {
+            usage().commandRun(never, known, 0, 1.milliseconds)
+        }
 
         val commands = sent.map { (_, body) ->
             val event = Json.parseToJsonElement(body).jsonObject.getValue("batch").jsonArray.single().jsonObject
@@ -141,6 +143,7 @@ class UsageStatisticsTest {
         usage().commandRun("doctor", known, 0, 1.milliseconds)
 
         assertTrue(sent.isEmpty())
+        assertEquals(UsageState.OFF, usage().state())
     }
 
     @Test

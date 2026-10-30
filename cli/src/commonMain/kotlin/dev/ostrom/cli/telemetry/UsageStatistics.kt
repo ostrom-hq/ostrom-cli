@@ -51,25 +51,34 @@ class UsageStatistics(
         environment["OSTROM_TELEMETRY"]?.lowercase() in DISABLING_VALUES -> UsageState.OFF_BY_ENVIRONMENT
         environment["DO_NOT_TRACK"].let { it != null && it != "0" } -> UsageState.OFF_BY_ENVIRONMENT
         projectKey.isBlank() -> UsageState.NOT_IN_THIS_BUILD
-        config?.get(ConfigKey.TELEMETRY) == ON -> UsageState.ON
+        installId() != null -> UsageState.ON
         else -> UsageState.OFF
     }
 
-    /** Turns statistics on and makes the install id if there is none. @throws FileWriteException */
+    /**
+     * Turns statistics on: the install id first, then the setting, so that a failed write never leaves the setting
+     * on without an id. @throws FileWriteException
+     */
     fun enable(store: ConfigStore) {
-        store.set(ConfigKey.TELEMETRY, ON)
         if (store.get(ConfigKey.TELEMETRY_ID) == null) store.set(ConfigKey.TELEMETRY_ID, newId())
-    }
-
-    /** Turns statistics off and deletes the install id. @throws FileWriteException */
-    fun disable(store: ConfigStore) {
-        store.set(ConfigKey.TELEMETRY, OFF)
-        store.unset(ConfigKey.TELEMETRY_ID)
+        store.set(ConfigKey.TELEMETRY, ON)
     }
 
     /**
-     * Sends one `cli_command_run` when statistics are on; plumbing commands (called by agents, on their hot path) are
-     * never measured.
+     * Turns statistics off: the install id is deleted first, so that once it is gone nothing can be sent, even if
+     * writing the setting then fails. @throws FileWriteException
+     */
+    fun disable(store: ConfigStore) {
+        store.unset(ConfigKey.TELEMETRY_ID)
+        store.set(ConfigKey.TELEMETRY, OFF)
+    }
+
+    /** The install id when the setting is on: on means both, and one without the other sends nothing. */
+    private fun installId(): String? = config?.takeIf { it.get(ConfigKey.TELEMETRY) == ON }?.get(ConfigKey.TELEMETRY_ID)
+
+    /**
+     * Sends one `cli_command_run` when statistics are on. Plumbing commands (called by agents, on their hot path) are
+     * never measured, and neither is `ostrom telemetry`: turning statistics on sends nothing in the same breath.
      *
      * @param command The first word of the command line, kept only if it is one of [knownCommands].
      * @param knownCommands The top-level command names of the CLI.
@@ -103,17 +112,11 @@ class UsageStatistics(
     }
 
     /**
-     * The install id to send under, or null when nothing is sent: no settings, a plumbing command, statistics off, or
-     * no id yet. The common case (off) costs one read of the settings and no network: checked before anything else.
+     * The install id to send under, or null when nothing is sent: a command that is never measured, or statistics
+     * off. The common case (off) costs one read of the settings and no network: checked before anything else.
      */
-    private fun measuredInstallId(command: String?): String? {
-        val store = config
-        return if (store != null && command !in PLUMBING && state() == UsageState.ON) {
-            store.get(ConfigKey.TELEMETRY_ID)
-        } else {
-            null
-        }
-    }
+    private fun measuredInstallId(command: String?): String? =
+        if (command !in NOT_MEASURED && state() == UsageState.ON) installId() else null
 
     private fun properties(command: String, exitCode: Int, duration: Duration) = buildJsonObject {
         put("command", command)
@@ -138,7 +141,7 @@ class UsageStatistics(
         private const val ON = "on"
         private const val OFF = "off"
         private val DISABLING_VALUES = setOf("0", "false", "off", "no")
-        private val PLUMBING = setOf("hook", "mcp", "wait", "check")
+        private val NOT_MEASURED = setOf("hook", "mcp", "wait", "check", "telemetry")
         private const val USAGE = 64
         private val BUCKETS = listOf(10L, 30L, 100L, 300L, 1_000L, 3_000L, 10_000L)
 

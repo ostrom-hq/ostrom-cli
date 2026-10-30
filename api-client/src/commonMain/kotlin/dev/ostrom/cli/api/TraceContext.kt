@@ -5,20 +5,17 @@ import kotlin.random.Random
 
 /**
  * The W3C trace context of one CLI command, sent as `traceparent` on every call to the server: the server continues
- * the trace, so a slow or failing `ostrom` call is found in the traces by its id (`--debug` prints it). The ids are
- * random and say nothing about the user or the machine.
+ * the trace, so all the calls of one `ostrom` command are found under one trace id. Each call gets its own parent
+ * id, as W3C asks. The ids are random and say nothing about the user or the machine.
  *
  * @param random The source of the ids; tests inject a seeded one.
  */
-class TraceContext(random: Random = Random.Default) {
-    /** 32 lower-case hex digits. */
+class TraceContext(private val random: Random = Random.Default) {
+    /** 32 lower-case hex digits, shared by every call of the command. */
     val traceId: String = random.hex(TRACE_ID_BYTES)
 
-    /** 16 lower-case hex digits, the id of the CLI's side of the call. */
-    val spanId: String = random.hex(SPAN_ID_BYTES)
-
-    /** The `traceparent` header, sampled. */
-    val traceparent: String = "00-$traceId-$spanId-01"
+    /** A `traceparent` header for one outgoing call, sampled, with a new 16-hex-digit parent id. */
+    fun traceparent(): String = "00-$traceId-${random.hex(SPAN_ID_BYTES)}-01"
 
     private companion object {
         const val TRACE_ID_BYTES = 16

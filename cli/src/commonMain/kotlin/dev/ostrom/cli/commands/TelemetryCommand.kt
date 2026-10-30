@@ -63,11 +63,20 @@ private class TelemetryEnable(dependencies: CliDependencies) : TelemetryChange("
     override fun help(context: Context) = "Send anonymous usage statistics"
 
     override fun run() {
-        change { dependencies.usage.enable(it) }
-        val state = dependencies.usage.state()
-        val note = if (state == UsageState.ON) "" else " Right now they are ${state.summary}."
-        val done = "✓ Usage statistics turned on, thank you. ostrom telemetry disable stops them."
-        dependencies.console.out("$done$note\n")
+        val usage = dependencies.usage
+        if (usage.state() == UsageState.NOT_IN_THIS_BUILD) {
+            // Nothing is written: no setting and no install id for a destination this build does not have.
+            dependencies.console.out(NO_DESTINATION)
+            return
+        }
+        change { usage.enable(it) }
+        val state = usage.state()
+        val message = if (state == UsageState.ON) {
+            "✓ Usage statistics turned on, thank you. ostrom telemetry disable stops them."
+        } else {
+            "Usage statistics are set to on, but nothing is sent: right now they are ${state.summary}."
+        }
+        dependencies.console.out("$message\n")
     }
 }
 
@@ -79,3 +88,5 @@ private class TelemetryDisable(dependencies: CliDependencies) : TelemetryChange(
         dependencies.console.out("✓ Usage statistics turned off; the install id is deleted.\n")
     }
 }
+
+private const val NO_DESTINATION = "This build of ostrom has no statistics destination: there is nothing to turn on.\n"

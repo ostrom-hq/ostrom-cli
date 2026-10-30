@@ -4,6 +4,7 @@ package dev.ostrom.cli
 import dev.ostrom.cli.api.OstromApi
 import dev.ostrom.cli.api.OstromApiImpl
 import dev.ostrom.cli.api.StatisticsSender
+import dev.ostrom.cli.api.TraceContext
 import dev.ostrom.cli.hooks.HookProcessorImpl
 import dev.ostrom.cli.hooks.HookRunner
 import dev.ostrom.cli.hooks.HookRunnerImpl
@@ -65,16 +66,20 @@ class CliDependencies(
         fun create(): CliDependencies {
             val console = ConsoleImpl()
             val environment = EnvironmentImpl()
+            // One trace for the whole command, whatever the number of servers or calls it makes.
+            val trace = TraceContext()
+            // Built on first send only: with statistics off (the default) no HTTP client is made.
+            val statistics by lazy { StatisticsSender() }
             return CliDependencies(
                 console = console,
                 environment = environment,
                 files = FileStoreImpl(),
                 finder = ExecutableFinderImpl(environment),
-                api = { url -> OstromApiImpl(url, "ostrom/${BuildInfo.VERSION}") },
+                api = { url -> OstromApiImpl(url, "ostrom/${BuildInfo.VERSION}", trace = trace) },
                 hookRunner = hookRunner(console, environment),
                 mcpServer = { McpServerImpl(McpDispatcher(BuildInfo.VERSION), console) },
                 postHogKey = BuildInfo.POSTHOG_KEY,
-                sendStatistics = StatisticsSender()::send,
+                sendStatistics = { url, body -> statistics.send(url, body) },
             )
         }
 

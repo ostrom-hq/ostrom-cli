@@ -51,7 +51,7 @@ class OstromApiImpl(
         try {
             val response = client.get(url) {
                 header(HttpHeaders.UserAgent, userAgent)
-                header(TRACEPARENT_HEADER, trace.traceparent)
+                header(TRACEPARENT_HEADER, trace.traceparent())
             }
             return ServerResponse(response.status.value, response.bodyAsText(), start.elapsedNow().inWholeMilliseconds)
         } catch (e: CancellationException) {

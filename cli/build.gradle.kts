@@ -15,6 +15,8 @@ val generateBuildInfo by tasks.registering {
     // The PostHog project key of the official builds (a public, write-only key): blank in local builds, which then
     // never send usage statistics, even when turned on.
     val postHogKey = providers.gradleProperty("ostromPosthogKey").orElse("").get()
+    // Written into a Kotlin string literal: only the characters a PostHog key has, so nothing can break or inject.
+    require(Regex("[A-Za-z0-9_-]*").matches(postHogKey)) { "ostromPosthogKey has characters a PostHog key never has" }
     val output = generatedBuildInfo
     inputs.property("version", version)
     inputs.property("postHogKey", postHogKey)

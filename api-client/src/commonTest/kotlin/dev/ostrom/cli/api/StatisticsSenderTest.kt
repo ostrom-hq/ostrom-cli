@@ -41,7 +41,8 @@ class StatisticsSenderTest {
     }
 
     @Test
-    fun theDefaultClientIsTheCliOne() {
+    fun theDefaultClientGivesUpQuickly() {
         StatisticsSender()
+        assertEquals(400L, STATISTICS_TIMEOUT_MILLIS)
     }
 }
