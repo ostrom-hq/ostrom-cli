@@ -230,6 +230,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         return mapOf(
             LaunchVariables.RELAY_URL to relay.url,
             LaunchVariables.RELAY_TOKEN to relay.clientToken,
+            LaunchVariables.RELAY_CLIENT to relay.clientToken,
             LaunchVariables.RELAY_TOKEN_FILE to run.relayTokenFile,
             LaunchVariables.INSTANCE_KEYS to run.keys,
             LaunchVariables.REPO to run.repo,

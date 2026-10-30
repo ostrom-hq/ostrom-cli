@@ -10,7 +10,7 @@ all Ostrom repositories are in `ostrom-core/docs/CONVENTIONS.md`; this page only
 | Module | Package | Holds | Depends on |
 | --- | --- | --- | --- |
 | `platform` | `dev.ostrom.cli.platform` | everything that touches the OS: processes sharing the terminal, stdin with a deadline, unbuffered stdout/stderr, environment, files, `config.toml`, PATH lookup | okio |
-| `hooks` | `dev.ostrom.cli.hooks` | `ostrom hook gate\|session`: event parsing (all agents' dialects), the gate, the reply | `platform` |
+| `hooks` | `dev.ostrom.cli.hooks` | `ostrom hook gate\|session`: event parsing (all agents' dialects), the gate, the reply; `ostrom wait` (`GateWait`) | `platform` |
 | `api-client` | `dev.ostrom.cli.api` | the server over HTTPS (Ktor, platform engine) | ostrom-core `api` |
 | `launcher` | `dev.ostrom.cli.launcher` | the agents (`Agent`) and starting one in this terminal | `platform` |
 | `mcp` | `dev.ostrom.cli.mcp` | the local MCP server on stdio (`ostrom mcp`) | `platform` |
@@ -47,6 +47,17 @@ agent's environment (audit A12/A13). The hooks' capability (`LocalRelay.token`) 
 (`OSTROM_RELAY_TOKEN_FILE`) and opens the hook routes; the agent's own (`LocalRelay.clientToken`, `OSTROM_RELAY_TOKEN`)
 opens its MCP servers, its inference and the read of a gate (`GET /api/v1/gates/{id}`, for `ostrom wait`), no other
 hook route: 403 otherwise (S2-25).
+
+`ostrom wait GATE_ID`, which a gate's refusal tells the agent to run as its own command, reaches Ostrom the same way
+(`GET /api/v1/gates/{id}?wait=`, 55 s at most per read, the relay's 70 s bound): the agent's shell inherits the
+relay's URL and capability, never a token of Ostrom.
+
+Security decision (30/10/2026 09:45): the agent's capability is exported a second time as `OSTROM_RELAY_CLIENT`,
+because Codex's default shell policy drops every variable named like a token, key or secret, and `ostrom wait` runs in
+that shell. Every command of the agent can therefore read it. This is accepted: it is the agent's own capability, for
+this session only, on the loopback; it opens the agent's MCP servers, its inference and the read of a gate, never a
+hook route (the hooks' capability stays in its private file, S2-25), and it never reaches Ostrom's server. Refused
+alternative: a second private file for `ostrom wait`, which a command of the agent could read just the same.
 
 - Every request needs a capability (`Authorization: Bearer`, `x-api-key` or `x-ostrom-local-token`, compared in
   constant time): 401 otherwise. An `Origin` header or a `Host` that is not the loopback: 403.
