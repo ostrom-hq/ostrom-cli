@@ -82,23 +82,24 @@ class GateWait(
         "still waiting after $seconds s: no answer yet. Run `ostrom wait $id` again, or tell the user.",
     )
 
-    private companion object {
-        val ID = Regex("[A-Za-z0-9_-]{1,128}")
-        val ANY_GATE = Gate(enforce = true, label = null, approvers = emptyList())
-        const val MILLIS = 1_000L
-        const val POLL_MILLIS = 1_000L
-        const val MAX_WAIT_SECONDS = 55L // Ostrom holds a gate read 60 s at most
-        const val MARGIN = 15L // the relay's own bound is 70 s
-        const val SHOWN = 40
-        const val REJECTED = 2
-        const val USAGE = 64
-        const val NOT_FOUND = 66
-        const val STILL_WAITING = 75
+    /** The limits and answers of a wait. */
+    companion object {
+        private val ID = Regex("[A-Za-z0-9_-]{1,128}")
+        private val ANY_GATE = Gate(enforce = true, label = null, approvers = emptyList())
+        private const val MILLIS = 1_000L
+        private const val POLL_MILLIS = 1_000L
+        private const val MAX_WAIT_SECONDS = 55L // Ostrom holds a gate read 60 s at most
+        private const val MARGIN = 15L // the relay's own bound is 70 s
+        private const val SHOWN = 40
+        private const val REJECTED = 2
+        private const val USAGE = 64
+        private const val NOT_FOUND = 66
+        private const val STILL_WAITING = 75
 
         /** The contract answers `{"gate": <request>, …}`; the prototype answered the request itself. */
-        fun requestOf(body: JsonObject): JsonObject =
+        private fun requestOf(body: JsonObject): JsonObject =
             if ("status" in body) body else body["gate"] as? JsonObject ?: body
 
-        fun answerOf(request: JsonObject): GateAnswer = GateAnswer.of(request, "", ANY_GATE)
+        private fun answerOf(request: JsonObject): GateAnswer = GateAnswer.of(request, "", ANY_GATE)
     }
 }
