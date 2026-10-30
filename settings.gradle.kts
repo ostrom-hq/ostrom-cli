@@ -31,4 +31,4 @@ listOf("../ostrom-core", "../../ostrom-core")
     .firstOrNull { it.resolve("settings.gradle.kts").exists() }
     ?.let { includeBuild(it) }
 
-include(":platform", ":api-client", ":hooks", ":launcher", ":mcp", ":cli")
+include(":platform", ":api-client", ":hooks", ":launcher", ":mcp", ":relay", ":cli")
