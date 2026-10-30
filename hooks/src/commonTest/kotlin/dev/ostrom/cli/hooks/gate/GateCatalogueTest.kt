@@ -46,20 +46,85 @@ class GateCatalogueTest {
     }
 
     @Test
-    fun theCatalogueReadsAndWritesItself() {
+    fun theCatalogueIsReadFieldByField() {
         assertEquals("closed", catalogue.failMode)
-        assertEquals(listOf("lena", "omar"), catalogue.actions[2].gate?.approvers)
-        val copy = GateCatalogue.parse(GateCatalogue.write(catalogue))
-        assertEquals(catalogue, copy)
-        assertNull(GateCatalogue.parse("not json"))
-        assertNull(GateCatalogue.parse("""{"actions":3}"""))
-        assertEquals(GateCatalogue(), GateCatalogue.parse("{}"))
+        val main = catalogue.actions[2]
+        assertEquals(Gate(enforce = true, label = "Main", approvers = listOf("lena", "omar")), main.gate)
+        assertEquals("Push to main", main.label)
+        assertEquals(Gate(enforce = false, label = "Main?", approvers = emptyList()), catalogue.actions[1].gate)
+        assertEquals(null, catalogue.actions[0].gate)
+        val nulls = """{"failMode":null,"actions":[{"class":3,"label":null,"tools":null,"gate":null},{}]}"""
+        val read = GateCatalogue.parse(nulls)
+        assertEquals(GateAction("3", null, emptyList(), emptyList(), null), read?.actions?.first())
+        assertEquals(GateAction("", null, emptyList(), emptyList(), null), read?.actions?.last())
+        assertEquals(null, read?.failMode)
+        val loose = GateCatalogue.parse("""{"actions":[{"gate":{"enforce":"yes","approvers":null}}]}""")
+        assertEquals(Gate(enforce = false, label = null, approvers = emptyList()), loose?.actions?.single()?.gate)
+        assertEquals(GateCatalogue(emptyList(), null), GateCatalogue.parse("{}"))
+    }
+
+    @Test
+    fun aCatalogueWithAFieldOfTheWrongTypeIsNoCatalogue() {
+        for (text in listOf("not json", "[]", """{"actions":3}""", """{"actions":[3]}""", """{"failMode":{}}""",
+            """{"actions":[{"tools":"Bash"}]}""", """{"actions":[{"gate":[]}]}""")) {
+            assertNull(GateCatalogue.parse(text), text)
+        }
     }
 
     @Test
     fun approversReadAsOnePhrase() {
-        assertEquals("lena or omar", Gate(approvers = listOf("lena", "omar")).approversPhrase)
-        assertEquals("the gate owner", Gate().approversPhrase)
+        assertEquals("lena or omar", Gate(false, null, listOf("lena", "omar")).approversPhrase)
+        assertEquals("the gate owner", Gate(false, null, emptyList()).approversPhrase)
+    }
+
+    @Test
+    fun theShellsWordsAreMatchedAsWellAsTheText() {
+        // S2-26: quotes and backslashes split nothing for the shell
+        assertEquals("push-main", match(ToolKind.BASH, "Bash", "git pu''sh origin main"))
+        assertEquals("push-main", match(ToolKind.BASH, "Bash", "g\\it \"push\" origin ma'i'n"))
+        assertEquals("merge", match(ToolKind.MCP, "mcp", "mcp__github__merge {}"))
+        assertNull(match(ToolKind.WRITE, "Write", "/w/'.env'"), "a path is matched as written")
+    }
+
+    @Test
+    fun enforcedGatesAreFoundByToolAndBySubject() {
+        assertEquals("push-main", catalogue.enforcedOn("Bash")?.first?.actionClass)
+        assertEquals("secrets", catalogue.enforcedOn("Edit")?.first?.actionClass)
+        assertNull(catalogue.enforcedOn("Read"))
+        val push = ToolSubject(ToolKind.BASH, "Bash", "git push origin main")
+        assertEquals("Main", catalogue.enforcedFor(push, patterns)?.second?.label)
+        assertNull(catalogue.enforcedFor(ToolSubject(ToolKind.BASH, "Bash", "git push x"), patterns), "observed only")
+        assertNull(catalogue.enforcedFor(ToolSubject(ToolKind.BASH, "Bash", "ls"), patterns))
+    }
+
+    @Test
+    fun anAddedCatalogueAddsAndClosesNeverOpens() {
+        val open = GateCatalogue(catalogue.actions.take(1), "open")
+        val added = GateCatalogue(catalogue.actions.drop(1).take(1), null)
+        assertEquals(catalogue.actions.take(2), open.with(added).actions)
+        assertEquals("open", open.with(added).failMode)
+        assertEquals("closed", open.with(GateCatalogue(emptyList(), "closed")).failMode)
+        assertEquals(null, GateCatalogue(emptyList(), null).with(GateCatalogue(emptyList(), "open")).failMode)
+    }
+
+    @Test
+    fun theBuiltInCatalogueGuardsTheBoundaryAndFailsClosed() {
+        val closed = GateCatalogue.CLOSED
+        assertEquals("closed", closed.failMode)
+        fun gated(command: String) = closed.match(ToolSubject(ToolKind.BASH, "Bash", command), patterns)?.actionClass
+        assertEquals("push", gated("git push origin topic"))
+        assertEquals("deploy", gated("kubectl -n prod apply -f x.yaml"))
+        assertEquals("deploy", gated("helm upgrade api ./chart"))
+        assertEquals("deploy", gated("terraform apply"))
+        assertEquals("deploy", gated("pulumi up"))
+        assertEquals("merge", gated("gh pr merge 12"))
+        assertEquals("merge", gated("gh release create v1"))
+        assertEquals("publish", gated("npm publish"))
+        assertEquals("publish", gated("docker push ghcr.io/acme/api"))
+        assertEquals("publish", gated("twine upload dist/*"))
+        assertNull(gated("kubectl get pods"))
+        assertNull(gated("git status; echo push"))
+        assertTrue(closed.actions.all { it.gate?.enforce == true && it.tools == listOf("Bash") })
     }
 
     @Test

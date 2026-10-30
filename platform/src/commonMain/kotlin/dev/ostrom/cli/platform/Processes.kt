@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.platform
 
 /** What became of a child process started by [ProcessLauncher.run]. */

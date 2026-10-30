@@ -40,5 +40,8 @@ class CredentialsTest {
         assertEquals(Credentials("env", "ci-bot"), store("OSTROM_TOKEN" to "env", "OSTROM_DEV" to "ci-bot").load("x"))
         assertEquals(Credentials("env", "unknown"), store("OSTROM_TOKEN" to "env").load("x"))
         assertEquals("saved", store("OSTROM_TOKEN" to "").load("https://a.example")?.token)
+        // S2-32: inside an agent's session the environment's token is never the developer's
+        val inSession = store("OSTROM_TOKEN" to "env", "OSTROM_LAUNCH_ID" to "L1")
+        assertEquals("saved", inSession.load("https://a.example")?.token)
     }
 }

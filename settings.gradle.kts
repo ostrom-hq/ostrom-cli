@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 rootProject.name = "ostrom-cli"
 enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 

@@ -37,6 +37,8 @@ class UnreadablePushException(message: String) : IllegalArgumentException(messag
  * in `git commit -am x && git push`, the commit the push sends does not exist yet when the hook runs.
  */
 class PushReader(private val git: GitRunner, private val home: String) {
+    private val invocationsOf = PushInvocations(git, home)
+
     /**
      * @param directory Where the command runs (leading `cd` and `git -C` already applied by [CommandLocation]).
      * @param text The command.
@@ -44,27 +46,27 @@ class PushReader(private val git: GitRunner, private val home: String) {
      * @throws UnreadablePushException When Ostrom cannot tell which commits the push sends.
      */
     fun read(directory: String, text: String): Push? {
-        if (!mentions(text)) return null
-        val segments = ShellWords.segments(text)
-        val pushes = segments.indices.filter { pushOf(segments[it]) != null }
+        val segments = if (mentions(text)) ShellWords.segments(text) else emptyList()
+        val invocations = segments.map { invocationsOf.pushIn(directory, it) }
+        val pushes = segments.indices.filter { invocations[it] != null }
+        if (pushes.isEmpty() && MENTION.containsMatchIn(text)) throw UnreadablePushException(NOT_PLAIN)
         val other = pushes.lastOrNull()?.let { last ->
-            segments.subList(0, last).firstOrNull { pushOf(it) == null && it.first() != "cd" }
+            (0 until last).firstOrNull { invocations[it] == null && segments[it].first() != "cd" }?.let(segments::get)
         }
-        val refusal = when {
-            pushes.isEmpty() -> NOT_PLAIN
-            other != null ->
+        if (other != null) {
+            throw UnreadablePushException(
                 "run the push as its own command, after `${other.joinToString(" ").take(SHOWN)}` has run: Ostrom " +
                     "checks and asks a yes for the commits a push sends, and they must exist before the command " +
-                    "starts. Run `git push …` alone."
-            else -> null
+                    "starts. Run `git push …` alone.",
+            )
         }
-        if (refusal != null) throw UnreadablePushException(refusal)
+        if (pushes.isEmpty()) return null
         var remote = ""
         val refs = mutableListOf<PushRef>()
         var force = false
         for (index in pushes) {
-            val invocation = checkNotNull(pushOf(segments[index]))
-            val one = onePush(directoryOf(directory, invocation), invocation.arguments, lenient = false)
+            val invocation = checkNotNull(invocations[index])
+            val one = onePush(invocation.directoryIn(directory, home), invocation.arguments, lenient = false)
             if (remote.isNotEmpty() && remote != one.remote) {
                 throw UnreadablePushException(
                     "this command pushes to two remotes: push to one at a time, each as its own command.",
@@ -86,17 +88,13 @@ class PushReader(private val git: GitRunner, private val home: String) {
      * @throws UnreadablePushException When Ostrom cannot tell where it lands (`--all`, a push driven by the config…).
      */
     fun destinations(directory: String, text: String): List<String> {
-        if (!mentions(text)) return emptyList()
-        val segments = ShellWords.segments(text)
-        val pushes = segments.mapNotNull { pushOf(it) }
-        if (pushes.isEmpty()) throw UnreadablePushException(NOT_PLAIN)
+        val segments = if (mentions(text)) ShellWords.segments(text) else emptyList()
+        val pushes = segments.mapNotNull { invocationsOf.pushIn(directory, it) }
+        if (pushes.isEmpty() && MENTION.containsMatchIn(text)) throw UnreadablePushException(NOT_PLAIN)
         return pushes.flatMap { push ->
-            onePush(directoryOf(directory, push), push.arguments, lenient = true).refs.map(PushRef::destination)
+            onePush(push.directoryIn(directory, home), push.arguments, lenient = true).refs.map(PushRef::destination)
         }.distinct()
     }
-
-    private fun directoryOf(directory: String, invocation: GitInvocation): String =
-        invocation.directories.fold(directory) { base, d -> ShellPaths.join(base, d, home) }
 
     /** Where the push really goes: `pushurl` and `pushInsteadOf` included (audit A9), else the fetch URL. */
     private fun repositoryOf(directory: String, remote: String): String {
@@ -108,42 +106,37 @@ class PushReader(private val git: GitRunner, private val home: String) {
     private class OnePush(val remote: String, val refs: List<PushRef>, val force: Boolean)
 
     private fun onePush(directory: String, arguments: List<String>, lenient: Boolean): OnePush {
-        val positional = mutableListOf<String>()
-        var delete = false
-        var force = false
-        var i = 0
-        while (i < arguments.size) {
-            val a = arguments[i]
-            when {
-                a in EVERYTHING -> throw UnreadablePushException(
-                    "`git push $a` sends refs Ostrom cannot list before it runs: push each branch or tag by name " +
-                        "(`git push origin main`), as its own command.",
-                )
-                a == "-d" || a == "--delete" -> delete = true
-                a in OPTIONS_WITH_VALUE -> i++
-                a.startsWith("--repo=") -> positional += a.removePrefix("--repo=")
-                isForce(a) -> force = true
-                a.startsWith("-") || REDIRECTION.containsMatchIn(a) -> Unit
-                else -> positional += a
-            }
-            i++
-        }
+        val read = PushArguments.of(arguments)
+        val positional = read.positional.toMutableList()
         val branch = git.run(directory, listOf("symbolic-ref", "--quiet", "--short", "HEAD"))
-        val remote = if (positional.isEmpty()) defaultRemote(directory, branch) else positional.removeAt(0)
+        val remote = when {
+            read.repository != null -> read.repository
+            positional.isEmpty() -> defaultRemote(directory, branch)
+            else -> positional.removeAt(0)
+        }
+        var force = read.force
         val refs = if (positional.isEmpty()) {
             listOf(barePush(directory, remote, branch))
         } else {
             positional.map { spec ->
                 force = force || spec.startsWith("+")
-                refOf(directory, spec.trimStart('+'), branch, delete, lenient)
+                refOf(directory, spec.trimStart('+'), branch, read.delete, lenient)
             }
         }
         return OnePush(remote, refs, force)
     }
 
-    private fun defaultRemote(directory: String, branch: String): String =
-        branch.takeIf { it.isNotEmpty() }?.let { git.run(directory, listOf("config", "branch.$it.remote")) }
-            ?.takeIf { it.isNotEmpty() } ?: "origin"
+    /** Where a push without a remote goes, as git decides it (S2-27): pushRemote, pushDefault, the upstream, origin. */
+    private fun defaultRemote(directory: String, branch: String): String {
+        val settings = if (branch.isEmpty()) {
+            listOf("remote.pushDefault")
+        } else {
+            listOf("branch.$branch.pushRemote", "remote.pushDefault", "branch.$branch.remote")
+        }
+        return settings.firstNotNullOfOrNull { key ->
+            git.run(directory, listOf("config", key)).takeIf { it.isNotEmpty() }
+        } ?: "origin"
+    }
 
     /**
      * A push without a refspec: git may follow the configuration, not the current branch (`remote.<r>.push`,
@@ -199,24 +192,22 @@ class PushReader(private val git: GitRunner, private val home: String) {
 
     /** Reads push commands without git. */
     companion object {
-        /** Whether a shell command contains a `git push` anywhere (it must then be readable). */
-        fun mentions(text: String): Boolean = MENTION.containsMatchIn(text)
-
-        /** The push of one simple command, or null when it is not a `git push`. */
-        fun pushOf(words: List<String>): GitInvocation? = GitInvocation.parse(words)?.takeIf { it.verb == "push" }
+        /**
+         * Whether a shell command may push (it must then be readable): `git push` written anywhere, also quoted or
+         * escaped (`git pu''sh`), and a git command that is not one of git's own, which may be an alias (S2-26).
+         */
+        fun mentions(text: String): Boolean = MENTION.containsMatchIn(text) ||
+            ShellWords.segments(text).any { words ->
+                val verb = GitInvocation.parse(words)?.verb
+                verb != null && verb !in NOT_PUSHING
+            }
 
         /** `refs/heads/main` and `refs/tags/v1` as `main` and `v1`. */
         fun shortRef(ref: String): String = ref.removePrefix("refs/heads/").removePrefix("refs/tags/")
 
-        private fun isForce(option: String): Boolean =
-            option == "--force" || option.startsWith("--force-with-lease") || option == "--force-if-includes" ||
-                SHORT_FORCE.matches(option)
-
         private val MENTION = Regex("\\bgit\\b[^\\n;&|]*\\bpush\\b")
-        private val SHORT_FORCE = Regex("-[A-Za-z]*f[A-Za-z]*")
-        private val REDIRECTION = Regex("^(>|2>|1>|<|&>)")
-        private val EVERYTHING = setOf("--all", "--mirror", "--branches", "--tags")
-        private val OPTIONS_WITH_VALUE = setOf("-o", "--push-option", "--repo", "--receive-pack", "--exec")
+
+        private val NOT_PUSHING = PushInvocations.GIT_COMMANDS - "push"
         private const val SHOWN = 80 // characters of the command quoted in a refusal
         private const val NOT_PLAIN =
             "Ostrom cannot read which commits this push sends (the push is not a plain `git push` command). Run " +

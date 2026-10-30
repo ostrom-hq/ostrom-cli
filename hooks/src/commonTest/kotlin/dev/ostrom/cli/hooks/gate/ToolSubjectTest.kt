@@ -18,6 +18,9 @@ class ToolSubjectTest {
         assertEquals(ToolSubject(ToolKind.BASH, "Bash", ""), of("run_shell_command", """{"command":{"x":1}}"""))
         assertEquals(ToolSubject(ToolKind.BASH, "Bash", ""), of("terminal", """{"command":3}"""))
         assertEquals(ToolSubject(ToolKind.BASH, "Bash", ""), of("BASH", null))
+        // S2-26: Claude Code's PowerShell and Monitor tools run shell commands too
+        assertEquals(ToolSubject(ToolKind.BASH, "Bash", "git push"), of("PowerShell", """{"command":"git push"}"""))
+        assertEquals(ToolSubject(ToolKind.BASH, "Bash", "tail -f x"), of("Monitor", """{"command":"tail -f x"}"""))
     }
 
     @Test

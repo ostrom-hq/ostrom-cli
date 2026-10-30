@@ -17,9 +17,6 @@ object Routes {
     /** `GET`: the public keys of the instance. */
     const val KEYS = "/api/v1/receipts/keys"
 
-    /** `GET ?repo=`: the gate catalogue. */
-    const val CATALOG = "/api/v1/gates/catalog"
-
     /** `GET`: the MCP servers of the organisation, relayed by Ostrom. */
     const val MCP_SERVERS = "/api/v1/mcp/servers"
 

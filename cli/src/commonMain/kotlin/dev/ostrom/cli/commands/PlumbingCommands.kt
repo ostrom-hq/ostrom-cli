@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.commands
 
 import com.github.ajalt.clikt.core.CliktCommand
@@ -13,11 +14,11 @@ import dev.ostrom.cli.ExitCode
 import dev.ostrom.cli.mcp.BridgeTarget
 
 /**
- * `ostrom hook gate|session|gates-refresh`, called by the agents' hooks. `main` answers it before the command tree
+ * `ostrom hook gate|session`, called by the agents' hooks. `main` answers it before the command tree
  * is built; this declaration gives it a place in `ostrom help plumbing` and the same behaviour if reached here.
  */
 class HookCommand(private val dependencies: CliDependencies) : CliktCommand(name = "hook") {
-    private val arguments by argument("kind", help = "gate, session or gates-refresh").multiple()
+    private val arguments by argument("kind", help = "gate or session").multiple()
 
     override val hiddenFromHelp = true
 
@@ -86,7 +87,7 @@ class HelpCommand(
 private val PLUMBING = """
     |Used by agents and their hooks (hidden from ostrom --help):
     |  ostrom wait <id> [--timeout S]           wait for a yes; exit 0 yes, 2 no, 75 still waiting
-    |  ostrom hook gate|session|gates-refresh   answer an agent hook (stdin: the hook event)
+    |  ostrom hook gate|session                 answer an agent hook (stdin: the hook event)
     |  ostrom mcp [workflow]                    the local MCP server, on stdio
     |  ostrom check <node>                      run a workflow check
     |""".trimMargin()
