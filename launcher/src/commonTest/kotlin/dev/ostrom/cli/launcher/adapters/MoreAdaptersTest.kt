@@ -80,6 +80,7 @@ class MoreAdaptersTest {
         )
         for ((theirs, merged) in cases) {
             files.texts[join("/elsewhere", "config.toml")] = theirs
+            files.deleteRecursively(join("/tmp/run", "grok-home")) // each launch lays its own folder down
             GrokAdapter().prepare(layout(variables = mapOf("GROK_HOME" to "/elsewhere")), files)
             val config = checkNotNull(files.texts[join("/tmp/run", "grok-home", "config.toml")])
             assertTrue(config.startsWith(merged + "\n# --- Ostrom"), config)
@@ -132,6 +133,7 @@ class MoreAdaptersTest {
         val variables = mapOf("GEMINI_CLI_HOME" to "/g")
         assertEquals(emptyList(), GeminiAdapter().prepare(layout(rules = "R", variables = variables), files).notes)
         files.texts[join("/g", ".gemini", "settings.json")] = "{\"theme\":\"dark\",}"
+        files.deleteRecursively(join("/tmp/run", "gemini-home")) // each launch lays its own folder down
         val launch = GeminiAdapter().prepare(layout(rules = "R", variables = variables), files)
         val note = launch.notes.single()
         assertTrue(note.startsWith("gemini: your settings.json is not plain JSON"), note)
@@ -140,6 +142,7 @@ class MoreAdaptersTest {
         assertEquals(setOf("hooks", "mcpServers"), settings.keys)
         assertEquals("\nR", files.texts[join(directory, "GEMINI.md")])
         files.texts[join("/g", ".gemini", "settings.json")] = "  "
+        files.deleteRecursively(join("/tmp/run", "gemini-home"))
         assertEquals(emptyList(), GeminiAdapter().prepare(layout(variables = variables), files).notes, "blank")
     }
 
