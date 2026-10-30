@@ -8,6 +8,8 @@ import kotlinx.serialization.json.JsonObject
 class FakeFiles(val texts: MutableMap<String, String> = mutableMapOf()) : HookFiles {
     override fun read(path: String): String? = texts[path]
 
+    override fun readStart(path: String, maxBytes: Int): String? = texts[path]?.take(maxBytes)
+
     override fun write(path: String, text: String): Boolean {
         texts[path] = text
         return true

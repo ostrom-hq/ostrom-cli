@@ -46,6 +46,11 @@ class LaunchFilesTest {
         files.deleteRecursively("/tmp/ostrom-run-1")
         files.deleteRecursively("/tmp/ostrom-run-1")
         assertFalse(files.exists("/tmp/ostrom-run-1"))
+        files.createPrivateDirectory("/tmp/ostrom-run-2")
+        assertFailsWith<IOException>("a folder made first by someone else is never used") {
+            files.createPrivateDirectory("/tmp/ostrom-run-2")
+        }
+        assertFailsWith<IOException> { files.createPrivateDirectory("/") }
     }
 
     @Test
