@@ -187,9 +187,10 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
     ),
     "completion" to guide(
         "install",
-        "ostrom completion zsh > \"\${fpath[1]}/_ostrom\"" to "tab completion in zsh",
-        "ostrom completion bash > ~/.local/share/bash-completion/completions/ostrom" to "in bash",
-        "ostrom completion fish > ~/.config/fish/completions/ostrom.fish" to "in fish",
-        "ostrom completion powershell >> \$PROFILE" to "in PowerShell",
+        "ostrom completion zsh" to "print the script; to load it in each new shell:",
+        "echo 'source <(ostrom completion zsh)' >> ~/.zshrc" to "zsh",
+        "echo 'source <(ostrom completion bash)' >> ~/.bashrc" to "bash",
+        "echo 'ostrom completion fish | source' >> ~/.config/fish/config.fish" to "fish",
+        "Add-Content \$PROFILE 'ostrom completion powershell | Out-String | Invoke-Expression'" to "PowerShell",
     ),
 )
