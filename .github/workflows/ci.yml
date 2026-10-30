@@ -131,6 +131,21 @@ jobs:
           path: '*/build/bin/mingwX64/debugTest/test.exe'
           retention-days: 2
 
+  e2e:
+    needs: native-tests
+    timeout-minutes: 15
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ostrom-binaries
+          path: bin
+      - name: The real binary, fake Claude Code and Codex, the contract's server; hook and start-up budgets
+        run: |
+          chmod +x bin/linuxX64/releaseExecutable/ostrom.kexe
+          python3 e2e/run.py --binary bin/linuxX64/releaseExecutable/ostrom.kexe
+
   linux-arm64:
     needs: native-tests
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.full_validation)
