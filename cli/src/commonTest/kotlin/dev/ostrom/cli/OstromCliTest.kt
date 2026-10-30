@@ -578,6 +578,21 @@ class OstromCliTest {
     }
 
     @Test
+    fun aFolderThatCannotBeWrittenAfterTheSignInIsExit73() {
+        val home = mapOf("HOME" to "/home/maya")
+        // config.toml is a folder with something in it: the token is kept, the server cannot be
+        fileSystem.createDirectories("/home/maya/.config/ostrom/config.toml/x".toPath())
+        assertEquals(73, cli(environment = home, api = serverOf(deviceFlow)).run(arrayOf("login")))
+        val path = "/home/maya/.config/ostrom/config.toml"
+        assertTrue(console.err.endsWith("ostrom: signed in, but could not write $path\n"), console.err.toString())
+        // credentials.json is a folder too: the login cannot be kept
+        fileSystem.delete("/home/maya/.config/ostrom/credentials.json".toPath())
+        fileSystem.createDirectories("/home/maya/.config/ostrom/credentials.json/x".toPath())
+        assertEquals(73, cli(environment = home, api = serverOf(deviceFlow)).run(arrayOf("login")))
+        assertTrue(console.err.contains("ostrom: signed in, but could not write /home/maya/.config/ostrom ("))
+    }
+
+    @Test
     fun theSignInPageMustBeOnTheGitHubConfigured() {
         // S2-35: OSTROM_GITHUB_WEB_URL names the GitHub of a GitHub Enterprise; github.com's page is then refused
         val enterprise = withServer + ("OSTROM_GITHUB_WEB_URL" to "https://ghe.acme.example/")
