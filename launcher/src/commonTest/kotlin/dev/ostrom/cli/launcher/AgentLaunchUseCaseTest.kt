@@ -218,6 +218,8 @@ class AgentLaunchUseCaseTest {
             (500 to """{"error":{"type":"internal","message":"boom"}}""") to 69,
             (201 to """{"launchId":"L1"}""") to 69,
             (201 to """{"agentToken":"t","launchId":""}""") to 69,
+            (201 to """{"agentToken":"t"}""") to 69,
+            (201 to """{"agentToken":"","launchId":"L1"}""") to 69,
         )
         for ((answer, code) in cases) {
             server[route] = answer
@@ -230,6 +232,8 @@ class AgentLaunchUseCaseTest {
                 "ostrom: not signed in to https://ostrom.example: run `ostrom login`",
                 "ostrom: launch refused: seat limit",
                 "ostrom: launch not created: boom",
+                "ostrom: Ostrom gave no launch for this session",
+                "ostrom: Ostrom gave no launch for this session",
                 "ostrom: Ostrom gave no launch for this session",
                 "ostrom: Ostrom gave no launch for this session",
                 "ostrom: Ostrom is unreachable at https://ostrom.example (connection refused)",
@@ -339,6 +343,18 @@ class AgentLaunchUseCaseTest {
         start()
         assertFalse(relaySettings.last().inference, "no gateway")
         assertEquals(2, server.sent("GET ${Routes.INFERENCE_MODELS}").size)
+    }
+
+    @Test
+    fun withoutAPathTheAgentGetsOstromsFolderAndNeverTheWorkingOne() = runTest {
+        serveALaunch()
+        variables["PATH"] = ""
+        start()
+        assertEquals("/opt/bin", environments.last()["PATH"], "no empty entry")
+        variables.remove("PATH")
+        start(executable = "ostrom")
+        val last = environments.last()
+        assertTrue(last.containsKey("PATH") && last["PATH"] == null, "nothing to put on it: removed")
     }
 
     @Test

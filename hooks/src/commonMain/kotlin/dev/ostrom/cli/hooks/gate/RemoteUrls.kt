@@ -47,7 +47,7 @@ class CommandLocation(private val git: GitRunner, private val home: String) {
         val first = segments.firstOrNull()
         if (first != null && first.size >= 2 && first[0] == "cd") directory = ShellPaths.join(directory, first[1], home)
         val invocation = segments.firstNotNullOfOrNull { GitInvocation.parse(it) }
-        return invocation?.directories?.fold(directory) { base, d -> ShellPaths.join(base, d, home) } ?: directory
+        return invocation?.directories.orEmpty().fold(directory) { base, d -> ShellPaths.join(base, d, home) }
     }
 
     /** The top of the git repository [directory] is in (empty outside one), asked of git once per folder. */

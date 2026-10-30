@@ -55,6 +55,7 @@ class PushReaderTest {
         assertEquals(listOf(PushRef("T", "v1")), refs("git push origin refs/tags/v1"))
         assertEquals(listOf(PushRef("", "old")), refs("git push origin :old"))
         assertEquals(listOf(PushRef("", "old")), refs("git push --delete origin old"))
+        assertEquals(listOf("M"), reader().read("/r", "git push origin main :old")?.shas, "a deletion sends no commit")
         assertEquals(listOf(PushRef("", "old")), refs("git push -d origin refs/heads/old:"))
         assertNull(reader().read("/r", "git status"))
     }

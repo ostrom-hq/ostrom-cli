@@ -63,9 +63,10 @@ class AgentRunnerImpl(
         return AgentLaunchUseCase(dependencies, ADAPTERS).launch(request, site)
     }
 
-    private companion object {
+    /** The agents this build can launch. */
+    companion object {
         /** The agents `ostrom <agent>` launches in this version. */
-        val ADAPTERS: List<AgentAdapter> = listOf(
+        private val ADAPTERS: List<AgentAdapter> = listOf(
             ClaudeAdapter(),
             CodexAdapter(),
             OpenCodeAdapter(),
