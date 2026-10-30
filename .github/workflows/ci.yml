@@ -22,6 +22,9 @@ env:
   # Main and full_validation build every target; a pull request only jvm and linuxX64.
   FULL: ${{ github.event_name == 'push' || inputs.full_validation == true }}
   ORG_GRADLE_PROJECT_ostromVersion: ${{ github.ref_type == 'tag' && github.ref_name || '0.1.0-SNAPSHOT' }}
+  # The usage statistics destination, compiled into release builds only (a public, write-only PostHog project key,
+  # kept in the repository variable OSTROM_POSTHOG_KEY). Unset, or any other build: no destination, nothing sent.
+  ORG_GRADLE_PROJECT_ostromPosthogKey: ${{ github.ref_type == 'tag' && vars.OSTROM_POSTHOG_KEY || '' }}
   KOTLIN_VERSION: '2.4.21'
   GRADLE_OPTS: -Dorg.gradle.daemon=false
 
@@ -165,7 +168,8 @@ jobs:
         run: |
           test "$(uname -m)" = aarch64
           find tests -name test.kexe -print0 | sort -z | while IFS= read -r -d '' t; do
-            echo "::group::$t"; chmod 755 "$t"; "$t"; echo "::endgroup::"
+            # stdin is the list being read: a test that reads its stdin must never eat the next binaries' names
+            echo "::group::$t"; chmod 755 "$t"; "$t" < /dev/null; echo "::endgroup::"
           done
       - name: Hook start-up budget
         run: >-

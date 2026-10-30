@@ -43,8 +43,12 @@ jobs:
     if: github.event_name != 'pull_request'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: brew install jq
-      - run: sh scripts/release/tests/run.sh && sh install/tests/install.test.sh
+      # macOS ships LibreSSL, without Ed25519 raw signing: the release signs on Linux with OpenSSL 3, test with it too.
+      - run: brew install jq openssl@3
+      - run: |
+          PATH="$(brew --prefix openssl@3)/bin:$PATH"
+          openssl version
+          sh scripts/release/tests/run.sh && sh install/tests/install.test.sh
 
   installer-windows:
     name: install.ps1 (Pester)

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.commands
 
+import dev.ostrom.cli.platform.ConfigKey
 import kotlin.test.Test
+import kotlin.test.assertNull
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -30,5 +32,11 @@ class ConfigValuesTest {
             "http://[::ffff:a.b.c.d]",
         )
         for (url in refused) assertFalse(isServerUrl(url), url)
+    }
+
+    @Test
+    fun theTelemetryKeysAreLeftToTheirCommand() {
+        assertNull(configValueProblem(ConfigKey.TELEMETRY, "on"))
+        assertNull(configValueProblem(ConfigKey.TELEMETRY_ID, "any"))
     }
 }

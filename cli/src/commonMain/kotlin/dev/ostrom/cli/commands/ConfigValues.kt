@@ -22,6 +22,8 @@ internal fun configValueProblem(key: ConfigKey, value: String): String? = when (
     }
     ConfigKey.COLOR -> if (value in COLOR_VALUES) null else "color must be auto, always or never."
     ConfigKey.EDITOR -> if (value.isNotBlank()) null else "editor cannot be empty."
+    // Written by ostrom telemetry, never by config set (editableKey refuses them first).
+    ConfigKey.TELEMETRY, ConfigKey.TELEMETRY_ID -> null
 }
 
 /**

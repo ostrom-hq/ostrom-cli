@@ -14,12 +14,12 @@ import kotlinx.cinterop.usePinned
 import kotlinx.cinterop.value
 import kotlinx.cinterop.wcstr
 import platform.posix.getenv
-import dev.ostrom.cli.platform.interop.ostrom_credential_delete
-import dev.ostrom.cli.platform.interop.ostrom_credential_read
-import dev.ostrom.cli.platform.interop.ostrom_credential_write
+import dev.ostrom.cli.platform.interop.ostrom_capture_w
 import dev.ostrom.cli.platform.interop.ostrom_is_terminal
 import dev.ostrom.cli.platform.interop.ostrom_read_stdin
+import dev.ostrom.cli.platform.interop.ostrom_spawn_detached_w
 import dev.ostrom.cli.platform.interop.ostrom_spawn_wait_w
+import dev.ostrom.cli.platform.interop.ostrom_tcp_exchange
 import dev.ostrom.cli.platform.interop.ostrom_write
 
 internal actual fun spawnAndWait(command: List<String>): ProcessResult = memScoped {
@@ -48,29 +48,59 @@ internal actual fun environmentVariable(name: String): String? = getenv(name)?.t
 
 internal actual fun restrictToOwner(path: String) = Unit
 
-internal actual fun systemVault(): Vault? = CredentialManagerVault
-
-// Credential Manager is always there: Windows never falls back to the encrypted file, whose key alone needs a user id.
-internal actual fun currentUserId(): String = ""
-
-/** Windows Credential Manager: one generic credential `dev.ostrom.cli:<name>` per secret, for this user. */
-internal object CredentialManagerVault : Vault {
-    override val backend = SecretBackend.CREDENTIAL_MANAGER
-
-    override fun isAvailable() = true
-
-    override fun read(service: String, account: String) = memScoped {
-        val target = "$service:$account".wcstr.ptr
-        vaultRead { buffer, capacity, length, code -> ostrom_credential_read(target, buffer, capacity, length, code) }
+/**
+ * [command] with its program resolved on the PATH alone. CreateProcessW given a bare name looks in the application's
+ * folder and the current one first: a `git.exe` checked into the repository an agent works in would run instead of
+ * git. A program with a folder in its name is kept as given; null when the PATH has none.
+ */
+private fun onThePath(command: List<String>): List<String>? {
+    val program = command.first()
+    val found = if ('\\' in program || '/' in program) {
+        program
+    } else {
+        ExecutableFinderImpl(EnvironmentImpl()).find(program)
     }
+    return found?.let { listOf(it) + command.drop(1) }
+}
 
-    override fun write(service: String, account: String, secret: ByteArray) = memScoped {
-        val target = "$service:$account".wcstr.ptr
-        vaultWrite(secret) { bytes, size, code -> ostrom_credential_write(target, bytes, size, code) }
+internal actual fun captureOutput(
+    command: List<String>,
+    capacity: Int,
+    timeoutMillis: Int,
+): CaptureResult = memScoped {
+    val resolved = onThePath(command) ?: return CaptureResult.NotFound
+    val exitCode = alloc<IntVar>()
+    val output = ByteArray(capacity)
+    val line = windowsCommandLine(resolved).wcstr
+    val count = output.usePinned {
+        ostrom_capture_w(line, it.addressOf(0).reinterpret(), capacity, timeoutMillis, exitCode.ptr)
     }
+    captureResultOf(count, exitCode.value, output)
+}
 
-    override fun delete(service: String, account: String) = memScoped {
-        val target = "$service:$account".wcstr.ptr
-        vaultCall { code -> ostrom_credential_delete(target, code) }
+internal actual fun spawnDetached(command: List<String>): Boolean = memScoped {
+    val resolved = onThePath(command)
+    resolved != null && ostrom_spawn_detached_w(windowsCommandLine(resolved).wcstr) == 0
+}
+
+internal actual fun tcpExchange(
+    port: Int,
+    request: ByteArray,
+    capacity: Int,
+    timeoutMillis: Int,
+): Pair<Int, ByteArray> {
+    val response = ByteArray(capacity)
+    val count = request.usePinned { sent ->
+        response.usePinned { received ->
+            ostrom_tcp_exchange(
+                port,
+                sent.addressOf(0).reinterpret(),
+                request.size,
+                received.addressOf(0).reinterpret(),
+                capacity,
+                timeoutMillis,
+            )
+        }
     }
+    return count to response
 }

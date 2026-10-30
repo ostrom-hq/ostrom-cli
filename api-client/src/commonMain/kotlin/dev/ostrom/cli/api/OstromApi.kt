@@ -57,17 +57,22 @@ interface OstromApi : AutoCloseable {
  *
  * @param baseUrl The server, e.g. `https://ostrom.run`, without a trailing slash.
  * @param userAgent Sent with every call, e.g. `ostrom/0.1.0`.
+ * @param trace The trace of this command, sent as `traceparent` so that the server continues it.
  */
 class OstromApiImpl(
     private val baseUrl: String,
     private val userAgent: String,
     private val client: HttpClient = defaultHttpClient(),
+    private val trace: TraceContext = TraceContext(),
 ) : OstromApi {
     override suspend fun get(path: String): ServerResponse {
         val url = baseUrl.trimEnd('/') + path
         val start = TimeSource.Monotonic.markNow()
         try {
-            val response = client.get(url) { header(HttpHeaders.UserAgent, userAgent) }
+            val response = client.get(url) {
+                header(HttpHeaders.UserAgent, userAgent)
+                header(TRACEPARENT_HEADER, trace.traceparent())
+            }
             return ServerResponse(response.status.value, response.bodyAsText(), start.elapsedNow().inWholeMilliseconds)
         } catch (e: CancellationException) {
             throw e
