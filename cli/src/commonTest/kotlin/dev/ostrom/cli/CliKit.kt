@@ -1,0 +1,131 @@
+// SPDX-License-Identifier: Apache-2.0
+package dev.ostrom.cli
+
+import dev.ostrom.cli.api.OstromApi
+import dev.ostrom.cli.api.ServerRequest
+import dev.ostrom.cli.api.ServerResponse
+import dev.ostrom.cli.hooks.HookRunner
+import dev.ostrom.cli.launch.AgentRunner
+import dev.ostrom.cli.launcher.FileCredentialStore
+import dev.ostrom.cli.launcher.LaunchFilesImpl
+import dev.ostrom.cli.launcher.LaunchRequest
+import dev.ostrom.cli.launcher.LaunchSite
+import dev.ostrom.cli.mcp.McpServer
+import dev.ostrom.cli.platform.Console
+import dev.ostrom.cli.platform.Environment
+import dev.ostrom.cli.platform.ExecutableFinder
+import dev.ostrom.cli.platform.FileStoreImpl
+import dev.ostrom.cli.platform.OperatingSystem
+import dev.ostrom.cli.platform.StandardInput
+import okio.Path.Companion.toPath
+import okio.fakefilesystem.FakeFileSystem
+import kotlin.test.assertTrue
+
+/**
+ * The command line with every dependency replaced by a fake: what the command tests share. A test class extends it
+ * and runs `cli().run(…)`; what a command says is in [console], what it asked the server in [requests].
+ */
+open class CliKit {
+    protected class FakeConsole : Console {
+        val out = StringBuilder()
+        val err = StringBuilder()
+        override fun out(text: String) {
+            out.append(text)
+        }
+
+        override fun err(text: String) {
+            err.append(text)
+        }
+
+        override var isInteractive = false
+        override fun readStandardInput(maxBytes: Int, timeoutMillis: Int): StandardInput = error("not used")
+    }
+
+    protected class FakeEnvironment(private val values: Map<String, String>) : Environment {
+        override fun get(name: String) = values[name]
+        override val operatingSystem = OperatingSystem.LINUX
+        override val architecture = "x64"
+    }
+
+    protected val console = FakeConsole()
+    protected val fileSystem = FakeFileSystem()
+    protected val hookCalls = mutableListOf<List<String>>()
+    protected val statistics = mutableListOf<String>()
+    protected val withServer = mapOf("HOME" to "/home/maya", "OSTROM_URL" to "https://ostrom.example")
+    protected val launches = mutableListOf<Pair<LaunchRequest, LaunchSite>>()
+    protected val waits = mutableListOf<Long>()
+    protected val typed = ArrayDeque<String>()
+    protected val opened = mutableListOf<String>()
+    protected var browser = true
+    protected val requests = mutableListOf<Pair<String, ServerRequest>>()
+
+    /** A server that answers `METHOD path` from [routes] (404 otherwise), recording each request with its server. */
+    protected fun serverOf(routes: Map<String, Pair<Int, String>>): (String) -> OstromApi = { url ->
+        object : OstromApi {
+            override suspend fun get(path: String) = send(ServerRequest("GET", path))
+            override suspend fun send(request: ServerRequest): ServerResponse {
+                requests += url to request
+                val (status, body) = routes["${request.method} ${request.path}"] ?: (404 to "{}")
+                return ServerResponse(status, body, 1)
+            }
+        }
+    }
+
+    protected val deviceFlow = mapOf(
+        "POST /api/v1/auth/device" to (200 to """{"deviceCode":"dc","userCode":"4F2C-9B1D","interval":1}"""),
+        "POST /api/v1/auth/device/token" to (200 to """{"token":"ost_new","login":"maya-k"}"""),
+    )
+
+    /** A server that answers every request with [status] after [millis]. */
+    protected fun serverAnswering(status: Int, millis: Long): (String) -> OstromApi = {
+        object : OstromApi {
+            override suspend fun get(path: String) = ServerResponse(status, "", millis)
+            override suspend fun send(request: ServerRequest) = get(request.path)
+        }
+    }
+
+    /** Asserts that stdout contains [text], showing all of it otherwise. */
+    protected fun assertOut(text: String) = assertTrue(console.out.contains(text), console.out.toString())
+
+    protected fun cli(
+        environment: Map<String, String> = mapOf("HOME" to "/home/maya"),
+        installed: Set<String> = setOf("git", "claude"),
+        api: (String) -> OstromApi = { error("no server in this test") },
+        executable: String? = "/opt/ostrom",
+        postHogKey: String = "",
+    ) = OstromCli(
+        CliDependencies(
+            console = console,
+            environment = FakeEnvironment(environment),
+            files = FileStoreImpl(fileSystem),
+            finder = object : ExecutableFinder {
+                override fun find(name: String) = if (name in installed) "/usr/bin/$name" else null
+            },
+            api = api,
+            hookRunner = object : HookRunner {
+                override fun run(arguments: List<String>): Int = 0.also { hookCalls += arguments }
+            },
+            mcpServer = { object : McpServer { override fun serve() = 0 } },
+            credentials = { directory ->
+                val path = (directory.toPath() / "credentials.json").toString()
+                FileCredentialStore(LaunchFilesImpl(fileSystem) { _, _ -> }, path) { environment[it] }
+            },
+            workingDirectory = { "/work/acme" },
+            executable = executable,
+            temporaryDirectory = "/tmp",
+            agents = AgentRunner { request, site -> 7.also { launches += request to site } },
+            sleep = { waits += it },
+            readLine = { typed.removeFirstOrNull() },
+            openUrl = { url -> browser.also { opened += url } },
+            postHogKey = postHogKey,
+            sendStatistics = { _, body -> statistics += body },
+        ),
+    )
+
+    protected fun signIn(directory: String, server: String = "https://ostrom.example") {
+        fileSystem.createDirectories(directory.toPath())
+        fileSystem.write(directory.toPath() / "credentials.json") {
+            writeUtf8("""{"$server":{"token":"ost_1","login":"maya"}}""")
+        }
+    }
+}
