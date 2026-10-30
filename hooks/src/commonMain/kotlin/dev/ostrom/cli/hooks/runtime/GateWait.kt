@@ -76,7 +76,7 @@ class GateWait(
             )
             else -> WaitOutcome(
                 UNAVAILABLE,
-                "Ostrom answered gate request $id with ${status?.let { "status \"$it\"" } ?: "no status"}, " +
+                "Ostrom answered gate request $id with ${if (status == null) "no status" else "status \"$status\""}, " +
                     "which this ostrom cannot read. Do not run the command; tell the user (`ostrom update` may help).",
             )
         }
