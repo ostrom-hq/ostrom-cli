@@ -662,6 +662,17 @@ class OstromCliTest {
         assertEquals(0, cli(environment = withServer, api = serverOf(emptyMap())).run(arrayOf("logout")))
         assertTrue(console.err.contains("! The server could not be told"), console.err.toString())
         assertOut("✓ Signed out @maya.")
+        // a server that cannot be reached at all: the same, the token forgotten
+        signIn("/home/maya/.config/ostrom")
+        val down: (String) -> OstromApi = { url ->
+            object : OstromApi {
+                override suspend fun get(path: String): ServerResponse =
+                    throw ServerUnreachableException(url + path, Exception("refused"))
+                override suspend fun send(request: ServerRequest) = get(request.path)
+            }
+        }
+        assertEquals(0, cli(environment = withServer, api = down).run(arrayOf("logout")))
+        assertTrue(secretsKept.isEmpty(), secretsKept.toString())
     }
 
     @Test
