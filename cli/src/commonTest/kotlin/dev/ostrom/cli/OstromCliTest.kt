@@ -91,6 +91,7 @@ class OstromCliTest {
     /** Asserts that stdout contains [text], showing all of it otherwise. */
     private fun assertOut(text: String) = assertTrue(console.out.contains(text), console.out.toString())
 
+    @Suppress("LongParameterList") // one default per dependency a test replaces
     private fun cli(
         environment: Map<String, String> = mapOf("HOME" to "/home/maya"),
         installed: Set<String> = setOf("git", "claude"),
