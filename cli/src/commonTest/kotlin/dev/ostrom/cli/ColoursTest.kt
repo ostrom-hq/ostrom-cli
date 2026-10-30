@@ -11,8 +11,12 @@ import kotlin.test.assertTrue
 
 /** Colours only on a terminal, and never against `--no-color`, `NO_COLOR` or `color never`. */
 class ColoursTest : CliKit() {
-    private fun level(args: List<String>, env: Map<String, String> = emptyMap(), setting: String? = null, tty: Boolean) =
-        colourLevel(args, FakeEnvironment(env), setting, tty)
+    private fun level(
+        args: List<String>,
+        env: Map<String, String> = emptyMap(),
+        setting: String? = null,
+        tty: Boolean,
+    ) = colourLevel(args, FakeEnvironment(env), setting, tty)
 
     private fun help(vararg first: String, environment: Map<String, String> = mapOf("HOME" to "/home/maya")): String {
         console.out.clear()

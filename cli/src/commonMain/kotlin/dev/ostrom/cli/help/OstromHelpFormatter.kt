@@ -12,7 +12,7 @@ import com.github.ajalt.mordant.widgets.Text
  * The help of every command, as gh and stripe write theirs: Clikt's help, ended by the command's [Guide] (examples
  * and its page of the docs); a usage error ends with the command that shows how to use it.
  */
-internal class OstromHelpFormatter(private val context: Context) : MordantHelpFormatter(context) {
+internal class OstromHelpFormatter(context: Context) : MordantHelpFormatter(context) {
     override fun formatHelp(
         error: UsageError?,
         prolog: String,

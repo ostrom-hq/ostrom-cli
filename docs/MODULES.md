@@ -105,7 +105,7 @@ usage error instead: 64 (`USAGE`).
 ## What every command does the same way
 
 - **Help**: `ostrom <command> --help` ends with examples and the page of the docs (`cli/.../help/CommandGuide.kt`,
-  one entry per command: `CommandGuideTest` fails for a command without one). A usage error ends with the
+  one entry per command: `HelpTest` fails for a command without one). A usage error ends with the
   `--help` to run.
 - **Colours**: only on a terminal. `--no-color`, `NO_COLOR` (any value) or `ostrom config set color never` turn them
   off, `TERM=dumb` too; `color always` forces them (`cli/.../help/Colours.kt`).
