@@ -42,6 +42,7 @@ class RelayStarter(private val starter: LocalRelayStarter) : SessionRelayStarter
         return object : SessionRelay {
             override val url = relay.url
             override val token = relay.token
+            override val clientToken = relay.clientToken
 
             override fun close() = relay.close()
         }

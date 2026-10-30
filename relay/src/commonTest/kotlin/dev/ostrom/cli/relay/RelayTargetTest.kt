@@ -21,6 +21,9 @@ class RelayTargetTest {
             assertEquals(RelayTarget.Hook(longPoll = false), resolveTarget(HttpMethod.Post, path, config), path)
         }
         assertEquals(RelayTarget.Hook(longPoll = false), resolveTarget(HttpMethod.Get, "/api/v1/gates/catalog", config))
+        val signed = resolveTarget(HttpMethod.Get, "/api/v1/gates/catalog/signed", config)
+        assertEquals(RelayTarget.SignedCatalog, signed)
+        assertEquals(RelayTarget.NotFound, resolveTarget(HttpMethod.Post, "/api/v1/gates/catalog/signed", config))
         assertEquals(RelayTarget.Hook(longPoll = true), resolveTarget(HttpMethod.Get, "/api/v1/gates/g-1", config))
     }
 
@@ -92,5 +95,25 @@ class RelayTargetTest {
         for ((method, path) in listOf(HttpMethod.Post to "/v1/messages", HttpMethod.Get to "/v1/models")) {
             assertEquals(RelayTarget.NotFound, resolveTarget(method, path, off), path)
         }
+    }
+
+    @Test
+    fun eachCapabilityOpensItsOwnRoutes() {
+        // S2-25: the agent's capability opens its MCP servers, its inference and the read of a gate, nothing else
+        val routes = listOf(
+            RelayTarget.Hook(longPoll = false) to (true to false),
+            RelayTarget.Hook(longPoll = true) to (true to true),
+            RelayTarget.Catalog("{}") to (true to false),
+            RelayTarget.SignedCatalog to (true to false),
+            RelayTarget.Mcp("github") to (false to true),
+            RelayTarget.McpMethodNotAllowed to (false to true),
+            RelayTarget.Inference("/api/v1/inference/v1/models") to (false to true),
+            RelayTarget.NotFound to (true to true),
+        )
+        for ((target, opened) in routes) {
+            assertEquals(opened.first, opens(target, hooks = true, client = false), "hooks: $target")
+            assertEquals(opened.second, opens(target, hooks = false, client = true), "client: $target")
+        }
+        assertEquals(false, opens(RelayTarget.Hook(longPoll = true), hooks = false, client = false))
     }
 }
