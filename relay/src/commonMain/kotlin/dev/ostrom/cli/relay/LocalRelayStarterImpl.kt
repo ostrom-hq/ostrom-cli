@@ -24,6 +24,7 @@ class LocalRelayStarterImpl(
 ) : LocalRelayStarter {
     override fun start(config: RelayConfig): LocalRelay {
         val token = secureRandomBytes(TOKEN_BYTES).toHexString()
+        val clientToken = secureRandomBytes(TOKEN_BYTES).toHexString()
         val notices = FailureNotices(report)
         val server = embeddedServer(
             CIO,
@@ -32,10 +33,10 @@ class LocalRelayStarterImpl(
             configure = {
                 connectors.add(EngineConnectorBuilder().apply { host = LOOPBACK; port = 0 })
             },
-        ) { relayModule(config, token, upstream, notices) }
+        ) { relayModule(config, token, upstream, notices, clientToken = clientToken) }
         server.start(wait = false)
         val port = runBlocking { server.engine.resolvedConnectors().single().port }
-        return RunningRelay("http://$LOOPBACK:$port", token, server)
+        return RunningRelay("http://$LOOPBACK:$port", token, clientToken, server)
     }
 
     private companion object {
@@ -49,6 +50,7 @@ class LocalRelayStarterImpl(
 private class RunningRelay(
     override val url: String,
     override val token: String,
+    override val clientToken: String,
     private val server: EmbeddedServer<*, *>,
 ) : LocalRelay {
     override fun close() = server.stop(GRACE_MILLIS, TIMEOUT_MILLIS)

@@ -107,19 +107,30 @@ def scenario_claude(binary, work):
         start = hooks[("SessionStart", None)]
         check(start["code"] == 0 and "e2e rules" in start["stdout"], "the session hook adds the rules")
         check(hooks[("PreToolUse", "ls -la")]["code"] == 0, "a harmless tool runs")
-        observed = hooks[("PreToolUse", "kubectl apply -f prod.yaml")]
-        # S2-20: the signed package's catalogue is the session's; there a deployment is observed, not gated
-        check(observed["code"] == 0,
-              f"the package's catalogue holds (exit {observed['code']}: {observed['stderr'][:200]})")
+        gated = hooks[("PreToolUse", "kubectl apply -f prod.yaml")]
+        # S2-20: Ostrom's signed policy gates a deployment; the package's copy, which observes it, only adds
+        check(gated["code"] == 2,
+              f"the package never removes what Ostrom's signed policy gates (exit {gated['code']}: "
+              f"{gated['stderr'][:200]})")
+        tampered = hooks[("PreToolUse", "echo after-tampering")]
+        check(tampered["code"] == 2 and "not the one Ostrom signed and laid down" in tampered["stderr"],
+              f"a package rewritten by the agent holds every action (exit {tampered['code']}: "
+              f"{tampered['stderr'][:200]})")
+        check(environment.get("OSTROM_RELAY_TOKEN_FILE", "").endswith("relay-token"),
+              "the hooks' capability is in a private file (S2-25)")
+        check(environment.get("OSTROM_INSTANCE_KEYS", "").startswith('{"keys"'), "the instance's keys are given")
+        check(len(environment.get("OSTROM_PACKAGE_SEAL", "")) == 64, "the package's seal is given (S2-33)")
         seen = requests(log)
-        check(not any(r["path"] == "/api/v1/gates/catalog" for r in seen),
-              "the relay answers the package's catalogue from memory, Ostrom is not asked")
+        signed = [r for r in seen if r["path"] == "/api/v1/gates/catalog/signed"]
+        check(bool(signed) and all(r["query"] == "repo=acme-api" and r["token"] == "agt_e2e_launch" for r in signed),
+              "the hooks read Ostrom's signed policy for the repository through the relay")
+        check(any(r["path"] == "/api/v1/instance/keys" for r in seen), "the launcher read the instance's keys")
         device = {(r["method"], r["path"]) for r in seen if r["token"] == "ost_e2e_device"}
         agent = {(r["method"], r["path"]) for r in seen if r["token"] == "agt_e2e_launch"}
         check(("POST", "/api/v1/launches") in device, "the launch is created with the device token")
         check(("POST", "/api/v1/sessions") in agent, "the session hook reaches Ostrom with the launch's token")
         check(("POST", "/api/v1/gates") in agent, "the gate request goes through the relay")
-        check(not any(r["path"].startswith(("/api/v1/sessions", "/api/v1/gates/")) and r["token"] == "ost_e2e_device"
+        check(not any(r["path"].startswith(("/api/v1/sessions", "/api/v1/gates")) and r["token"] == "ost_e2e_device"
                       for r in seen), "no hook call carries the device token")
         ends = [r for r in seen if r["path"].endswith("/end")]
         check(len(ends) == 1 and json.loads(ends[0]["body"]).get("exitCode") == 3, "the end of the session says 3")
@@ -152,7 +163,8 @@ def scenario_codex(binary, work):
         check(end["code"] == 0, "the end hook answers")
         seen = requests(log)
         check(any(r["path"].endswith("/end") for r in seen), "the session is ended")
-        check(any(r["path"] == "/api/v1/gates/catalog" for r in seen), "the relay asks Ostrom for its catalogue")
+        check(any(r["path"] == "/api/v1/gates/catalog/signed" for r in seen),
+              "the relay asks Ostrom for its signed policy")
     finally:
         server_process.kill()
 
