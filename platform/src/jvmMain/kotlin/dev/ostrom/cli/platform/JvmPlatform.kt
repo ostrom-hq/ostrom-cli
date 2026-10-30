@@ -96,22 +96,51 @@ internal actual fun captureOutput(
     capacity: Int,
     timeoutMillis: Int,
 ): CaptureResult = try {
-    val process = ProcessBuilder(command).redirectErrorStream(false).start()
-    val output = process.inputStream.readBytes()
+    val process = quiet(ProcessBuilder(command)).start()
+    val output = java.io.ByteArrayOutputStream()
+    // read beside the wait, so the deadline holds while the child keeps its stdout open
+    val reader = Thread {
+        process.inputStream.use { input ->
+            val buffer = ByteArray(BUFFER_BYTES)
+            var count = input.read(buffer)
+            while (count >= 0) {
+                synchronized(output) { output.write(buffer, 0, minOf(count, capacity - output.size())) }
+                count = input.read(buffer)
+            }
+        }
+    }.apply {
+        isDaemon = true
+        start()
+    }
     if (!process.waitFor(timeoutMillis.toLong(), java.util.concurrent.TimeUnit.MILLISECONDS)) {
         process.destroyForcibly()
         CaptureResult.TimedOut
     } else {
-        CaptureResult.Exited(process.exitValue(), output.decodeToString(0, minOf(output.size, capacity)))
+        reader.join(timeoutMillis.toLong())
+        val bytes = synchronized(output) { output.toByteArray() }
+        CaptureResult.Exited(process.exitValue(), bytes.decodeToString())
     }
-} catch (_: IOException) {
-    CaptureResult.NotFound
+} catch (e: IOException) {
+    // "Cannot run program …: error=2" (ENOENT, and ERROR_FILE_NOT_FOUND on Windows) is the only "not found"
+    if (e.message.orEmpty().contains("error=2,")) CaptureResult.NotFound else CaptureResult.Failed
 }
+
+/** stdin from the null device, stderr dropped: what the native shims do. */
+// coverage: test-only JVM target, see captureOutput.
+@ExcludeFromCoverage
+private fun quiet(builder: ProcessBuilder): ProcessBuilder {
+    val windows = System.getProperty("os.name").orEmpty().startsWith("Windows")
+    return builder
+        .redirectInput(ProcessBuilder.Redirect.from(java.io.File(if (windows) "NUL" else "/dev/null")))
+        .redirectError(ProcessBuilder.Redirect.DISCARD)
+}
+
+private const val BUFFER_BYTES = 8_192
 
 // coverage: test-only JVM target; the shipped native actual is tested in posixTest and mingwTest.
 @ExcludeFromCoverage
 internal actual fun spawnDetached(command: List<String>): Boolean = try {
-    ProcessBuilder(command).start()
+    quiet(ProcessBuilder(command)).redirectOutput(ProcessBuilder.Redirect.DISCARD).start()
     true
 } catch (_: IOException) {
     false
