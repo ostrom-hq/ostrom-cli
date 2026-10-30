@@ -2,10 +2,9 @@ package dev.ostrom.cli
 
 import dev.ostrom.cli.api.OstromApi
 import dev.ostrom.cli.api.OstromApiImpl
-import dev.ostrom.cli.hooks.HookProcessorImpl
 import dev.ostrom.cli.hooks.HookRunner
 import dev.ostrom.cli.hooks.HookRunnerImpl
-import dev.ostrom.cli.hooks.PassThroughGateHandler
+import dev.ostrom.cli.hooks.runtime.SessionHooks
 import dev.ostrom.cli.mcp.McpDispatcher
 import dev.ostrom.cli.mcp.McpServer
 import dev.ostrom.cli.mcp.McpServerImpl
@@ -19,6 +18,9 @@ import dev.ostrom.cli.platform.ExecutableFinder
 import dev.ostrom.cli.platform.ExecutableFinderImpl
 import dev.ostrom.cli.platform.FileStore
 import dev.ostrom.cli.platform.FileStoreImpl
+import dev.ostrom.cli.platform.LoopbackHttpImpl
+import dev.ostrom.cli.platform.ProcessCaptureImpl
+import okio.FileSystem
 import okio.Path.Companion.toPath
 
 /**
@@ -65,7 +67,15 @@ class CliDependencies(
         }
 
         /** The hook runner alone, for the fast path of `main` (nothing else is built). */
-        fun hookRunner(console: Console, environment: Environment): HookRunner =
-            HookRunnerImpl(console, environment, HookProcessorImpl(PassThroughGateHandler()))
+        fun hookRunner(console: Console, environment: Environment): HookRunner {
+            val processor = SessionHooks.processor(
+                environment,
+                FileSystem.SYSTEM,
+                ProcessCaptureImpl(),
+                LoopbackHttpImpl(),
+                SessionHooks::epochMillis,
+            )
+            return HookRunnerImpl(console, environment, processor)
+        }
     }
 }

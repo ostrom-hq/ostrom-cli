@@ -1,14 +1,15 @@
 package dev.ostrom.cli.hooks.runtime
 
+import dev.ostrom.cli.hooks.HookReply
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
 class HookRepliesTest {
     @Test
     fun aNoteIsReadWhereEachAgentLooksForIt() {
-        assertEquals(Reply(), HookReplies("claude").allow())
-        assertEquals(Reply(stderr = "hi\n"), HookReplies("hermes").say("hi"))
-        assertEquals(Reply(stderr = "hi\n"), HookReplies("grok").say("hi"))
+        assertEquals(HookReply(), HookReplies("claude").allow())
+        assertEquals(HookReply(stderr = "hi\n"), HookReplies("hermes").say("hi"))
+        assertEquals(HookReply(stderr = "hi\n"), HookReplies("grok").say("hi"))
         assertEquals(
             """{"systemMessage":"hi","hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"hi"}}""" + "\n",
             HookReplies("claude").say("hi").stdout,
@@ -21,11 +22,11 @@ class HookRepliesTest {
 
     @Test
     fun aRefusalExitsTwoAndSaysWhyInEachDialect() {
-        assertEquals(Reply("", "no\n", 2), HookReplies("codex").deny("no"))
+        assertEquals(HookReply("", "no\n", 2), HookReplies("codex").deny("no"))
         val block = """{"decision":"block","reason":"no"}""" + "\n"
         val deny = """{"decision":"deny","reason":"no"}""" + "\n"
-        assertEquals(Reply(block, "no\n", 2), HookReplies("hermes").deny("no"))
-        assertEquals(Reply(deny, "no\n", 2), HookReplies("grok").deny("no"))
-        assertEquals(Reply(deny, "no\n", 2), HookReplies("gemini").deny("no"))
+        assertEquals(HookReply(block, "no\n", 2), HookReplies("hermes").deny("no"))
+        assertEquals(HookReply(deny, "no\n", 2), HookReplies("grok").deny("no"))
+        assertEquals(HookReply(deny, "no\n", 2), HookReplies("gemini").deny("no"))
     }
 }

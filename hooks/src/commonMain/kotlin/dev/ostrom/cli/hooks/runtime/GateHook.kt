@@ -1,5 +1,6 @@
 package dev.ostrom.cli.hooks.runtime
 
+import dev.ostrom.cli.hooks.HookReply
 import dev.ostrom.cli.hooks.gate.CommandLocation
 import dev.ostrom.cli.hooks.gate.GateAction
 import dev.ostrom.cli.hooks.gate.GateCatalogue
@@ -43,7 +44,7 @@ class GateHook(
     private val patterns = PatternCache()
 
     /** Answers one event (normalised to the Claude Code shape). */
-    fun handle(event: JsonObject): Reply {
+    fun handle(event: JsonObject): HookReply {
         val after = event.string("hook_event_name") == "PostToolUse"
         val cwd = event.string("cwd") ?: workingDirectory
         val subject = ToolSubject.of(event.string("tool_name").orEmpty(), event["tool_input"])
@@ -62,7 +63,7 @@ class GateHook(
         return reply
     }
 
-    private fun beforeTool(event: JsonObject, raw: ToolSubject, cwd: String): Reply {
+    private fun beforeTool(event: JsonObject, raw: ToolSubject, cwd: String): HookReply {
         val catalogue = catalogues.current()
         val (subject, landing) = withPushTargets(raw, cwd)
         val action = catalogue.match(subject, patterns)
@@ -79,7 +80,7 @@ class GateHook(
         return if (worst?.gate?.enforce == true) replies.deny(unknownLanding(worst, landing)) else replies.allow()
     }
 
-    private fun afterTool(event: JsonObject, raw: ToolSubject, cwd: String): Reply {
+    private fun afterTool(event: JsonObject, raw: ToolSubject, cwd: String): HookReply {
         val catalogue = catalogues.current()
         val subject = withPushTargets(raw, cwd).first
         checks.afterTool(event, subject)
@@ -105,7 +106,7 @@ class GateHook(
         cwd: String,
         action: GateAction,
         catalogue: GateCatalogue,
-    ): Reply {
+    ): HookReply {
         val gate = checkNotNull(action.gate)
         val label = action.label ?: action.actionClass
         val gateLabel = gate.label ?: "gate"
@@ -147,7 +148,7 @@ class GateHook(
         return answerOf(answer, label, action, catalogue)
     }
 
-    private fun answerOf(answer: CallResult, label: String, action: GateAction, catalogue: GateCatalogue): Reply {
+    private fun answerOf(answer: CallResult, label: String, action: GateAction, catalogue: GateCatalogue): HookReply {
         val gate = checkNotNull(action.gate)
         if (answer is CallResult.Failed) {
             return when {

@@ -1,5 +1,6 @@
 package dev.ostrom.cli.hooks.runtime
 
+import dev.ostrom.cli.hooks.HookReply
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -19,33 +20,33 @@ class SessionHook(
     private val writes = SessionWrites(calls, ids)
 
     /** Answers one event (normalised to the Claude Code shape). */
-    fun handle(event: JsonObject): Reply {
+    fun handle(event: JsonObject): HookReply {
         val agentSession = event.string("session_id").orEmpty()
         return when (event.string("hook_event_name")) {
             "SessionStart" -> start(event, agentSession).fold(
                 onSuccess = { text ->
                     // Grok and Hermes take the rules elsewhere (--rules, pre_llm_call): nothing on stdout for them
                     val quiet = context.dialect == "grok" || context.dialect == "hermes"
-                    if (quiet) Reply() else Reply(stdout = startOutput(text))
+                    if (quiet) HookReply() else HookReply(stdout = startOutput(text))
                 },
-                onFailure = { Reply(stderr = "Ostrom unreachable (${it.message}): session not recorded.\n") },
+                onFailure = { HookReply(stderr = "Ostrom unreachable (${it.message}): session not recorded.\n") },
             )
             // Hermes: its session events cannot add context, so the rules go in on the first model call
             "PreLLMCall" -> firstModelCall(event, agentSession)
             "SessionEnd" -> end(event)
-            else -> Reply()
+            else -> HookReply()
         }
     }
 
-    private fun firstModelCall(event: JsonObject, agentSession: String): Reply {
-        val mark = context.sessionFile?.let { "$it.context-$agentSession" } ?: return Reply()
-        if (files.read(mark) != null) return Reply()
+    private fun firstModelCall(event: JsonObject, agentSession: String): HookReply {
+        val mark = context.sessionFile?.let { "$it.context-$agentSession" } ?: return HookReply()
+        if (files.read(mark) != null) return HookReply()
         return start(event, agentSession).fold(
             onSuccess = { text ->
                 files.write(mark, "1")
-                Reply(stdout = JsonObject(mapOf("context" to JsonPrimitive(text))).toString() + "\n")
+                HookReply(stdout = JsonObject(mapOf("context" to JsonPrimitive(text))).toString() + "\n")
             },
-            onFailure = { Reply(stderr = "Ostrom unreachable (${it.message}): session not recorded.\n") },
+            onFailure = { HookReply(stderr = "Ostrom unreachable (${it.message}): session not recorded.\n") },
         )
     }
 
@@ -74,19 +75,19 @@ class SessionHook(
         return Result.success(text)
     }
 
-    private fun end(event: JsonObject): Reply {
+    private fun end(event: JsonObject): HookReply {
         val session = ids.of(event.string("session_id"))
         val body = jsonOf("source" to (event.string("reason") ?: "SessionEnd"))
         val path = "/api/bridge/sessions/${Urls.encode(session)}/end"
         return when (val answer = calls.call(path, body, context.sessionEndMillis)) {
             is CallResult.Failed ->
-                Reply(stderr = "Ostrom unreachable (${answer.message}): session receipt not signed.\n")
+                HookReply(stderr = "Ostrom unreachable (${answer.message}): session receipt not signed.\n")
             is CallResult.Ok -> {
                 val receipt = (answer.body["session"] as? JsonObject)?.string("receiptId") ?: "?"
                 val verification = answer.body["verification"] as? JsonObject
                 val valid = (verification?.get("ok") as? JsonPrimitive)?.content == "true"
                 val state = if (valid) "signature valid" else "not verified"
-                Reply(stderr = "Ostrom: session receipt $receipt ($state)\n")
+                HookReply(stderr = "Ostrom: session receipt $receipt ($state)\n")
             }
         }
     }

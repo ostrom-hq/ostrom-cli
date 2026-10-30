@@ -1,5 +1,6 @@
 package dev.ostrom.cli.hooks.runtime
 
+import dev.ostrom.cli.hooks.HookReply
 import dev.ostrom.cli.hooks.gate.ToolSubject
 import kotlinx.serialization.json.JsonObject
 
@@ -22,7 +23,7 @@ interface WorkflowChecks {
      *
      * @return A refusal to answer now, or null to go on to the gate.
      */
-    fun beforeTool(event: JsonObject, subject: ToolSubject, cwd: String): Reply?
+    fun beforeTool(event: JsonObject, subject: ToolSubject, cwd: String): HookReply?
 
     /** Sends the notifications that follow the action, after it ran. */
     fun afterTool(event: JsonObject, subject: ToolSubject)
@@ -35,7 +36,7 @@ object NoWorkflowChecks : WorkflowChecks {
 
     override fun guards(subject: ToolSubject): Boolean = false
 
-    override fun beforeTool(event: JsonObject, subject: ToolSubject, cwd: String): Reply? = null
+    override fun beforeTool(event: JsonObject, subject: ToolSubject, cwd: String): HookReply? = null
 
     override fun afterTool(event: JsonObject, subject: ToolSubject) = Unit
 }

@@ -1,5 +1,6 @@
 package dev.ostrom.cli.hooks.runtime
 
+import dev.ostrom.cli.hooks.HookReply
 import dev.ostrom.cli.hooks.gate.FakeGit
 import dev.ostrom.cli.hooks.gate.ToolSubject
 import kotlinx.serialization.json.Json
@@ -44,7 +45,7 @@ class GateHookTest {
         "/o|remote get-url origin" to "https://github.com/acme/other",
     )
 
-    private class Checks(private val refusal: Reply? = null, private val guarded: Boolean = false) : WorkflowChecks {
+    private class Checks(private val refusal: HookReply? = null, private val guarded: Boolean = false) : WorkflowChecks {
         val after = mutableListOf<String>()
         override val digest: String? = null
         override val context: String? = null
@@ -90,9 +91,9 @@ class GateHookTest {
 
     @Test
     fun aToolWithNothingToMatchOrNoGateRuns() {
-        assertEquals(Reply(), hook().handle(event("Read", """{"file_path":"/w/a"}""")))
-        assertEquals(Reply(), hook().handle(bash("npm run lint")))
-        assertEquals(Reply(), hook().handle(bash("git status")))
+        assertEquals(HookReply(), hook().handle(event("Read", """{"file_path":"/w/a"}""")))
+        assertEquals(HookReply(), hook().handle(bash("npm run lint")))
+        assertEquals(HookReply(), hook().handle(bash("git status")))
         assertTrue(calls.calls.isEmpty())
         assertFalse("/s/session.refused.json" in files.texts)
     }
@@ -114,7 +115,7 @@ class GateHookTest {
         )
         assertEquals(3_000, calls.calls.single().timeoutMillis)
         // the agent runs nothing; its after-tool hook (Hermes) is ignored and clears the mark
-        assertEquals(Reply(), hook().handle(bash("git push origin main", after = true)))
+        assertEquals(HookReply(), hook().handle(bash("git push origin main", after = true)))
         assertEquals(listOf("/api/bridge/gates/request"), calls.paths())
         assertEquals("{}", files.texts["/s/session.refused.json"])
     }
@@ -153,7 +154,7 @@ class GateHookTest {
         assertContains(hook().handle(bash("./deploy.sh")).stdout, "(the gate owner)")
         for (status in listOf("ungated", "consumed")) {
             answer("""{"status":"$status"}""")
-            assertEquals(Reply(), hook().handle(bash("./deploy.sh")))
+            assertEquals(HookReply(), hook().handle(bash("./deploy.sh")))
         }
     }
 
@@ -201,14 +202,14 @@ class GateHookTest {
         assertContains(named.stderr, "opened for the repository app (acme/app, /w)")
         val bare = hook(git = repository - "/w|remote get-url origin").handle(bash("git -C /o push origin main"))
         assertContains(bare.stderr, "opened for the repository acme/app (/w)")
-        assertEquals(Reply(), hook().handle(bash("cd /o && npm run lint")), "an unguarded action runs anywhere")
+        assertEquals(HookReply(), hook().handle(bash("cd /o && npm run lint")), "an unguarded action runs anywhere")
         val guarded = hook(checks = Checks(guarded = true)).handle(bash("cd /o && npm test"))
         assertContains(guarded.stderr, "runs in the repository acme/other")
     }
 
     @Test
     fun theWorkflowChecksRefuseFirst() {
-        val refusal = Reply(stderr = "check failed\n", exitCode = 2)
+        val refusal = HookReply(stderr = "check failed\n", exitCode = 2)
         assertEquals(refusal, hook(checks = Checks(refusal)).handle(bash("git push origin main")))
         assertTrue(calls.calls.isEmpty())
         assertTrue(files.texts.getValue("/s/session.refused.json").length > 2)
@@ -235,10 +236,10 @@ class GateHookTest {
         assertEquals(2, hook(catalogueText = soft).handle(bash("git push origin main && git push up main")).exitCode)
         assertFalse("push" in calls.bodyOf("/api/bridge/gates/request"), "an unread push is asked without its commits")
         val unread = bash("git push --all origin")
-        assertEquals(Reply(), hook(catalogueText = soft).handle(unread), "no enforced gate on main")
+        assertEquals(HookReply(), hook(catalogueText = soft).handle(unread), "no enforced gate on main")
         val observed = """{"actions":[{"class":"push-seen","tools":["Bash"],"patterns":["push"]}]}"""
-        assertEquals(Reply(), hook(catalogueText = observed).handle(bash("git push --all origin")))
-        assertEquals(Reply(), hook(catalogueText = "{}").handle(bash("git push --all origin")))
+        assertEquals(HookReply(), hook(catalogueText = observed).handle(bash("git push --all origin")))
+        assertEquals(HookReply(), hook(catalogueText = "{}").handle(bash("git push --all origin")))
         val nameless = """{"actions":[{"class":"push-x","tools":["Bash"],"patterns":["main"],"gate":{"enforce":true}}]}"""
         val refusal = hook(catalogueText = nameless).handle(unread).stderr
         assertContains(refusal, "\"push-x\" needs a yes from the gate owner (gate \"gate\")")
@@ -258,7 +259,7 @@ class GateHookTest {
     fun anActionThatRanUsesUpItsYes() {
         calls = FakeCalls().on("/api/bridge/gates/consume", ok())
         val checks = Checks()
-        assertEquals(Reply(), hook(checks = checks).handle(bash("git push origin main", after = true)))
+        assertEquals(HookReply(), hook(checks = checks).handle(bash("git push origin main", after = true)))
         assertEquals(listOf("git push origin main\n# ostrom: git push to: main"), checks.after)
         assertEquals(
             """{"sessionId":"a1","repo":"acme/app","class":"push-main","command":"git push origin main\n# ostrom: """ +
@@ -272,7 +273,7 @@ class GateHookTest {
         hook().handle(bash("git push origin main && git push up main", after = true))
         assertFalse("push" in calls.bodyOf("/api/bridge/gates/consume"), "an unread push is consumed by its text")
         val before = calls.calls.size
-        assertEquals(Reply(), hook().handle(bash("npm run lint", after = true)))
+        assertEquals(HookReply(), hook().handle(bash("npm run lint", after = true)))
         assertEquals(before, calls.calls.size, "an ungated action has no yes to use up")
     }
 

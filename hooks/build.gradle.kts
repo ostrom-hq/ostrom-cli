@@ -8,5 +8,8 @@ kotlin {
             api(projects.platform)
             implementation(libs.serialization.json)
         }
+        commonTest.dependencies {
+            implementation(libs.okio.fakefilesystem)
+        }
     }
 }

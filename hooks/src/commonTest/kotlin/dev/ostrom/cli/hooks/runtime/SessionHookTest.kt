@@ -1,5 +1,6 @@
 package dev.ostrom.cli.hooks.runtime
 
+import dev.ostrom.cli.hooks.HookReply
 import dev.ostrom.cli.hooks.gate.ToolSubject
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -13,7 +14,7 @@ class SessionHookTest {
     private class Package(override val digest: String?, override val context: String?) : WorkflowChecks {
         override fun guards(subject: ToolSubject) = false
 
-        override fun beforeTool(event: JsonObject, subject: ToolSubject, cwd: String): Reply? = null
+        override fun beforeTool(event: JsonObject, subject: ToolSubject, cwd: String): HookReply? = null
 
         override fun afterTool(event: JsonObject, subject: ToolSubject) = Unit
     }
@@ -64,14 +65,14 @@ class SessionHookTest {
             val calls = FakeCalls().on("/api/bridge/sessions", ok("""{"context":"Rules."}"""))
             val start = event("""{"hook_event_name":"SessionStart"}""")
             val reply = hook(calls, contextOf("OSTROM_HOOK_DIALECT" to dialect)).handle(start)
-            assertEquals(Reply(), reply)
+            assertEquals(HookReply(), reply)
         }
     }
 
     @Test
     fun anUnreachableStartIsSaidAndTheAgentGoesOn() {
         val reply = hook(FakeCalls()).handle(event("""{"hook_event_name":"SessionStart","session_id":"a1"}"""))
-        assertEquals(Reply(stderr = "Ostrom unreachable (HTTP 404): session not recorded.\n"), reply)
+        assertEquals(HookReply(stderr = "Ostrom unreachable (HTTP 404): session not recorded.\n"), reply)
     }
 
     @Test
@@ -79,14 +80,14 @@ class SessionHookTest {
         val calls = FakeCalls().on("/api/bridge/sessions", ok("""{"context":"Rules."}"""))
         val hermes = hook(calls, contextOf("OSTROM_HOOK_DIALECT" to "hermes"))
         val call = event("""{"hook_event_name":"PreLLMCall","session_id":"h1"}""")
-        assertEquals(Reply(stdout = """{"context":"Rules."}""" + "\n"), hermes.handle(call))
-        assertEquals(Reply(), hermes.handle(call))
+        assertEquals(HookReply(stdout = """{"context":"Rules."}""" + "\n"), hermes.handle(call))
+        assertEquals(HookReply(), hermes.handle(call))
         assertEquals(1, calls.calls.size)
         val down = hook(FakeCalls(), contextOf("OSTROM_HOOK_DIALECT" to "hermes"))
         val other = event("""{"hook_event_name":"PreLLMCall","session_id":"h2"}""")
         assertEquals("Ostrom unreachable (HTTP 404): session not recorded.\n", down.handle(other).stderr)
         assertTrue("/s/session.context-h2" !in files.texts, "asked again on the next call")
-        assertEquals(Reply(), hook(calls, contextOf("OSTROM_SESSION_FILE" to "")).handle(call), "outside a launch")
+        assertEquals(HookReply(), hook(calls, contextOf("OSTROM_SESSION_FILE" to "")).handle(call), "outside a launch")
     }
 
     @Test
@@ -96,7 +97,7 @@ class SessionHookTest {
         val calls = FakeCalls().on("/api/bridge/sessions/a1~2/end", signed)
         val reply = hook(calls, contextOf("OSTROM_SESSION_END_MS" to "2500"))
             .handle(event("""{"hook_event_name":"SessionEnd","session_id":"a1","reason":"exit"}"""))
-        assertEquals(Reply(stderr = "Ostrom: session receipt R9 (signature valid)\n"), reply)
+        assertEquals(HookReply(stderr = "Ostrom: session receipt R9 (signature valid)\n"), reply)
         assertEquals("""{"source":"exit"}""", calls.calls.single().body.toString())
         assertEquals(2_500, calls.calls.single().timeoutMillis)
         val unverified = FakeCalls().on("/api/bridge/sessions/", ok("""{"verification":{"ok":false}}"""))
@@ -112,8 +113,8 @@ class SessionHookTest {
     @Test
     fun otherEventsAreIgnored() {
         val calls = FakeCalls()
-        assertEquals(Reply(), hook(calls).handle(event("""{"hook_event_name":"Stop"}""")))
-        assertEquals(Reply(), hook(calls).handle(event("{}")))
+        assertEquals(HookReply(), hook(calls).handle(event("""{"hook_event_name":"Stop"}""")))
+        assertEquals(HookReply(), hook(calls).handle(event("{}")))
         assertTrue(calls.calls.isEmpty())
     }
 
