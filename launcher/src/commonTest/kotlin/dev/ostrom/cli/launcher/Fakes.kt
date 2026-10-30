@@ -2,6 +2,7 @@
 package dev.ostrom.cli.launcher
 
 import okio.IOException
+import okio.Path
 
 /** A server answering by `METHOD path` (query included); anything else is a 404. Records every request. */
 class FakeServer(private val routes: MutableMap<String, ServerReply> = mutableMapOf()) : ServerTransport {
@@ -53,7 +54,8 @@ class MemoryFiles : LaunchFiles {
 
     override fun list(path: String): List<String> =
         (texts.keys + directories + links.keys).mapNotNull { below(path, it) }
-            .map { it.substringBefore('/').substringBefore('\\') }.distinct().sorted()
+            .map { rest -> SEPARATORS.fold(rest) { name, separator -> name.substringBefore(separator) } }
+            .distinct().sorted()
 
     override fun exists(path: String) = path in texts || path in directories
 
@@ -72,12 +74,15 @@ class MemoryFiles : LaunchFiles {
 
     /**
      * What follows [path] in [entry], or null when [entry] is not under it. Okio keeps the separator a path was written
-     * with (on Windows, `"/tmp".toPath() / "a"` is `/tmp/a`), and a real file system takes both: so does this one.
+     * with (on Windows, `"/tmp".toPath() / "a"` is `/tmp/a`), and Windows takes both: so does this double there. On
+     * POSIX a `\` is part of a name, as for the real file system.
      */
-    private fun below(path: String, entry: String): String? =
-        SEPARATORS.map { path + it }.firstOrNull { entry.startsWith(it) }?.let { entry.removePrefix(it) }
+    private fun below(path: String, entry: String): String? {
+        val separator = SEPARATORS.firstOrNull { entry.startsWith(path + it) } ?: return null
+        return entry.removePrefix(path + separator)
+    }
 
     private companion object {
-        val SEPARATORS = listOf("/", "\\")
+        val SEPARATORS = listOf("/", Path.DIRECTORY_SEPARATOR).distinct()
     }
 }
