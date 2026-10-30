@@ -7,7 +7,8 @@ import kotlinx.serialization.json.JsonObject
 /**
  * How `ostrom wait` ends.
  *
- * @property exitCode 0 approved, 2 rejected, 64 not an id, 66 no such request, 75 still waiting (CLI.md § 2.3).
+ * @property exitCode 0 approved, 2 rejected, 64 not an id, 66 no such request or its yes already used, 69 Ostrom
+ * refused the wait or answered what this ostrom cannot read, 75 still waiting (CLI.md § 2.3).
  * @property line The line for stdout: the model reads it, so the instruction comes first.
  */
 data class WaitOutcome(val exitCode: Int, val line: String)
@@ -35,11 +36,14 @@ class GateWait(
         var outcome: WaitOutcome? = null
         var said = ""
         while (outcome == null) {
-            val seconds = ((end - clock()) / MILLIS).coerceIn(0, MAX_WAIT_SECONDS)
-            val answer = calls.call("${Routes.GATES}/$id?wait=$seconds", null, ((seconds + MARGIN) * MILLIS).toInt())
+            val left = (end - clock()).coerceAtLeast(0)
+            val seconds = (left / MILLIS).coerceAtMost(MAX_WAIT_SECONDS)
+            // a slow relay never keeps the command past its end: the agent's shell tool would kill it unanswered
+            val timeout = minOf((seconds + MARGIN) * MILLIS, left + GRACE_MILLIS).toInt()
+            val answer = calls.call("${Routes.GATES}/$id?wait=$seconds", null, timeout)
             outcome = when (answer) {
-                is CallResult.Ok -> decided(requestOf(answer.body))
-                is CallResult.Failed -> if (answer.type?.endsWith("not_found") == true) gone(id) else null
+                is CallResult.Ok -> decided(id, answer.body)
+                is CallResult.Failed -> failed(id, answer)
             }
             val news = news(answer)
             if (outcome == null && news != said) say("$news\n").also { said = news }
@@ -49,10 +53,12 @@ class GateWait(
         return outcome
     }
 
-    private fun decided(request: JsonObject): WaitOutcome? {
+    private fun decided(id: String, body: JsonObject): WaitOutcome? {
+        val request = requestOf(body)
         val answer = answerOf(request)
-        return when (request.string("status")) {
-            "approved", "consumed" -> WaitOutcome(
+        return when (val status = request.string("status")) {
+            "pending" -> null
+            "approved" -> WaitOutcome(
                 0,
                 "approved by ${answer.by} (receipt ${answer.receiptId ?: "pending"}). Run the same command again now.",
             )
@@ -62,8 +68,31 @@ class GateWait(
                 REJECTED,
                 "rejected by ${answer.by} (receipt ${answer.receiptId ?: "-"}). Do not run the command; tell the user.",
             )
-            else -> null
+            // a yes Ostrom has already used (its push landed) is no yes for a new run of the command
+            "consumed" -> WaitOutcome(
+                NOT_FOUND,
+                "the yes on gate request $id was already used. Run the command again to ask for a yes anew.",
+            )
+            else -> WaitOutcome(
+                UNAVAILABLE,
+                "Ostrom answered gate request $id with ${status?.let { "status \"$it\"" } ?: "no status"}, " +
+                    "which this ostrom cannot read. Do not run the command; tell the user (`ostrom update` may help).",
+            )
         }
+    }
+
+    /**
+     * A failed ask: Ostrom unreachable or its session closed for a while is waited for, anything else (no relay in
+     * this session, a refused capability, an error of Ostrom) will not change by asking again.
+     */
+    private fun failed(id: String, failure: CallResult.Failed): WaitOutcome? = when {
+        failure.type?.endsWith("not_found") == true -> gone(id)
+        failure.unreachable || failure.sessionClosed -> null
+        else -> WaitOutcome(
+            UNAVAILABLE,
+            "Ostrom refused to say whether gate request $id has a yes (${failure.message}). Do not run the " +
+                "command; tell the user.",
+        )
     }
 
     /** What to tell the developer about an answer that does not end the wait. */
@@ -90,15 +119,23 @@ class GateWait(
         private const val POLL_MILLIS = 1_000L
         private const val MAX_WAIT_SECONDS = 55L // Ostrom holds a gate read 60 s at most
         private const val MARGIN = 15L // the relay's own bound is 70 s
+        private const val GRACE_MILLIS = 2_000L
         private const val SHOWN = 40
         private const val REJECTED = 2
         private const val USAGE = 64
         private const val NOT_FOUND = 66
+        private const val UNAVAILABLE = 69
         private const val STILL_WAITING = 75
 
-        /** The contract answers `{"gate": <request>, …}`; the prototype answered the request itself. */
-        private fun requestOf(body: JsonObject): JsonObject =
-            if ("status" in body) body else body["gate"] as? JsonObject ?: body
+        /** The contract answers `{"gate": <request>, …}`; anything else holds no request. */
+        private fun requestOf(body: JsonObject): JsonObject = body["gate"] as? JsonObject ?: JsonObject(emptyMap())
+
+        /**
+         * The agent's capability on the relay: `OSTROM_RELAY_TOKEN`, else `OSTROM_RELAY_CLIENT`, the same value under a
+         * name Codex's shell keeps (its default policy drops every variable named like a token, key or secret).
+         */
+        fun tokenOf(variable: (String) -> String?): String? =
+            variable("OSTROM_RELAY_TOKEN")?.takeIf { it.isNotEmpty() } ?: variable("OSTROM_RELAY_CLIENT")
 
         private fun answerOf(request: JsonObject): GateAnswer = GateAnswer.of(request, "", ANY_GATE)
     }

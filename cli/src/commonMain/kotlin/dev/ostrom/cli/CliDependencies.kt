@@ -130,7 +130,7 @@ class CliDependencies(
                 gateWait = {
                     val relay = RelayCalls(
                         environment["OSTROM_RELAY_URL"],
-                        environment["OSTROM_RELAY_TOKEN"],
+                        GateWait.tokenOf { environment[it] },
                         LoopbackHttpImpl(),
                     )
                     GateWait(relay, SessionHooks::epochMillis, ::pause, console::err)
