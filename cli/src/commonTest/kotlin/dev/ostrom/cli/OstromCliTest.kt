@@ -491,6 +491,25 @@ class OstromCliTest : CliKit() {
     }
 
     @Test
+    fun logoutForgetsTheServerEvenWhenNoTokenIsRead() {
+        // S2-32: a token left only in the other store (the encrypted file of an SSH session) is forgotten too
+        val deleted = mutableListOf<String>()
+        val elsewhere: () -> SecretStore = {
+            object : SecretStore {
+                override val backend = SecretBackend.SECRET_SERVICE
+                override fun read(name: String): String? = null
+                override fun write(name: String, secret: String) = Unit
+                override fun delete(name: String) {
+                    deleted += name
+                }
+            }
+        }
+        assertEquals(0, cli(environment = withServer, secrets = elsewhere).run(arrayOf("logout")))
+        assertOut("Not signed in. Nothing to do.\n")
+        assertEquals(listOf("https://ostrom.example"), deleted)
+    }
+
+    @Test
     fun aSecretStoreThatDoesNotAnswerStopsTheCommandWithItsReason() {
         signIn("/home/maya/.config/ostrom")
         val locked: () -> SecretStore = { throw SecretStoreException("the Keychain is locked") }
