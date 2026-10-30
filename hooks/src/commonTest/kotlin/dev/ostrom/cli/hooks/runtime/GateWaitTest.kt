@@ -36,6 +36,13 @@ class GateWaitTest {
     private fun request(fields: String) = ok("""{"gate":{$fields}}""")
 
     @Test
+    fun aYesWhoseReceiptIsNotWrittenYetSaysSo() {
+        val yes = request(""""status":"approved","decidedBy":"@lena"""")
+        val line = "approved by @lena (receipt pending). Run the same command again now."
+        assertEquals(WaitOutcome(0, line), await(FakeCalls().on("/api/v1/gates/g1", yes)))
+    }
+
+    @Test
     fun aGateThatDoesNotHoldEndsTheWaitAndAYesUsedUpIsNoYes() {
         val free = "no yes needed (the gate does not hold it). Run the same command again now."
         for (status in listOf("shadow", "ungated")) {

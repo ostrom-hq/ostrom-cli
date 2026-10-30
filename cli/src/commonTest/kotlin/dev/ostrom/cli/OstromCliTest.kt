@@ -423,7 +423,8 @@ class OstromCliTest {
         val calls = object : OstromCalls {
             override fun call(path: String, body: JsonElement?, timeoutMillis: Int): CallResult {
                 paths += path
-                return CallResult.Ok(JsonObject(mapOf("status" to JsonPrimitive("rejected"))))
+                val request = JsonObject(mapOf("status" to JsonPrimitive("rejected")))
+                return CallResult.Ok(JsonObject(mapOf("gate" to request)))
             }
         }
         val wait = { GateWait(calls, { 0L }, {}, {}) }
