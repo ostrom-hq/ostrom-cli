@@ -352,13 +352,15 @@ static inline int ostrom_terminal_read(unsigned char *buffer, int capacity, int 
         DWORD waited = WaitForSingleObject(input, (DWORD)timeout_ms);
         if (waited == WAIT_TIMEOUT) return 0;
         if (waited != WAIT_OBJECT_0) return -1;
-        /* focus, mouse and resize events also wake the wait: ReadFile would then block until a key, so drop them */
+        /* focus, mouse and resize events also wake the wait, and so does a key that types nothing (Shift, Ctrl, Alt,
+           CapsLock alone, a key release): ReadFile would then block until a character, so drop them */
         INPUT_RECORD records[64];
         DWORD pending = 0;
         if (!PeekConsoleInputW(input, records, 64, &pending)) return -1;
         int key = 0;
         for (DWORD i = 0; i < pending; i++) {
-            if (records[i].EventType == KEY_EVENT && records[i].Event.KeyEvent.bKeyDown) key = 1;
+            KEY_EVENT_RECORD *event = &records[i].Event.KeyEvent;
+            if (records[i].EventType == KEY_EVENT && event->bKeyDown && event->uChar.UnicodeChar != 0) key = 1;
         }
         if (!key) {
             ReadConsoleInputW(input, records, pending, &pending);

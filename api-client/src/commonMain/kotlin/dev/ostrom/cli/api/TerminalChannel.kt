@@ -12,6 +12,10 @@ import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
 import io.ktor.websocket.close
 import io.ktor.websocket.readText
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.channels.ClosedSendChannelException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.io.IOException
 import kotlin.coroutines.cancellation.CancellationException
 
@@ -83,7 +87,7 @@ private class KtorTerminalChannel(private val session: DefaultClientWebSocketSes
         while (open && message == null) {
             val frame = session.incoming.receiveCatching().getOrNull()
             if (frame == null) {
-                closeCode = codeOf(session.closeReason.await())
+                closeCode = closeCodeOf(session.closeReason)
                 open = false
             } else {
                 message = messageOf(frame)
@@ -92,9 +96,9 @@ private class KtorTerminalChannel(private val session: DefaultClientWebSocketSes
         return message
     }
 
-    override suspend fun send(bytes: ByteArray) = session.send(Frame.Binary(true, bytes))
+    override suspend fun send(bytes: ByteArray) = sendOrDrop { session.send(Frame.Binary(true, bytes)) }
 
-    override suspend fun sendText(text: String) = session.send(Frame.Text(text))
+    override suspend fun sendText(text: String) = sendOrDrop { session.send(Frame.Text(text)) }
 
     override suspend fun close() = session.close(CloseReason(CloseReason.Codes.NORMAL, "detached"))
 }
@@ -109,12 +113,40 @@ internal fun messageOf(frame: Frame): TerminalMessage? = when (frame) {
 /** The close code of [reason]; null when the socket ended without a close frame. */
 internal fun codeOf(reason: CloseReason?): Int? = reason?.let { it.code.toInt() }
 
+/**
+ * The close code of a session's end; null when it ended without a close frame, also when it failed (network cut, TLS
+ * reset): Ktor then fails [reason] with that failure, which is the end of the socket, not an error of the caller.
+ */
+internal suspend fun closeCodeOf(reason: Deferred<CloseReason?>): Int? = try {
+    codeOf(reason.await())
+} catch (_: CancellationException) {
+    // the caller's own cancellation goes on; the session's is only its end
+    currentCoroutineContext().ensureActive()
+    null
+} catch (_: IOException) {
+    null
+} catch (_: IllegalStateException) {
+    // the Curl and WinHttp engines fail a socket with IllegalStateException, as they fail its opening
+    null
+}
+
+/** Sends with [send]; a socket already closed (the session ended while a key was typed) takes nothing. */
+internal suspend fun sendOrDrop(send: suspend () -> Unit) {
+    try {
+        send()
+    } catch (_: ClosedSendChannelException) {
+        // nothing to send to: the session's end is said by receive
+    }
+}
+
 /** A client for long-lived WebSockets: a connection limit, no limit on the session's length, no redirect followed. */
 fun webSocketClient(): HttpClient = HttpClient {
     expectSuccess = false
     followRedirects = false
-    install(WebSockets)
+    // a ping every 30 s: an idle session behind a NAT or a proxy is kept alive, and a dead one is seen
+    install(WebSockets) { pingIntervalMillis = WS_PING_MILLIS }
     install(HttpTimeout) { connectTimeoutMillis = WS_CONNECT_TIMEOUT_MILLIS }
 }
 
 private const val WS_CONNECT_TIMEOUT_MILLIS = 10_000L
+private const val WS_PING_MILLIS = 30_000L

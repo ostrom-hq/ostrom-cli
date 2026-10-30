@@ -6,6 +6,7 @@ import dev.ostrom.cli.launcher.ServerAnswer
 import dev.ostrom.cli.launcher.ServerJson
 import dev.ostrom.cli.launcher.child
 import dev.ostrom.cli.launcher.objectOf
+import dev.ostrom.cli.launcher.parseObject
 import dev.ostrom.cli.launcher.text
 import dev.ostrom.cli.platform.RawTerminal
 import kotlinx.coroutines.CompletableDeferred
@@ -13,7 +14,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import okio.IOException
 import kotlin.coroutines.CoroutineContext
 
@@ -51,6 +54,10 @@ class CloudSessionUseCase(
             return USAGE
         }
         val repo = start.repo?.let(::gitHubUrl)
+        if (start.repo != null && repo == null) {
+            say("ostrom: the repository to clone must be on GitHub: --repo owner/name or https://github.com/owner/name")
+            return USAGE
+        }
         val body = objectOf("agent" to start.agent.command, "model" to start.model, "repo" to repo)
         return when (val created = server.post(SESSIONS, body, token)) {
             is ServerAnswer.Failed -> refused(created)
@@ -91,7 +98,8 @@ class CloudSessionUseCase(
         var outcome = WAITING
         while (outcome == WAITING) {
             outcome = when (val answer = server.get("$SESSIONS/$id", token)) {
-                is ServerAnswer.Failed -> refused(answer)
+                // a look that fails for a moment (network, 5xx, 429) is looked again, within the budget
+                is ServerAnswer.Failed -> if (passing(answer) && waited < BUDGET_MILLIS) WAITING else refused(answer)
                 is ServerAnswer.Ok -> {
                     val now = answer.body.text("phase")
                     if (now != null && now != phase) say("  $now…")
@@ -134,22 +142,27 @@ class CloudSessionUseCase(
         val input = launch(keys) { pump(socket, detached) }
         terminal.size()?.let { socket.sendText(resize(it.columns, it.rows)) }
         var output = socket.receive()
+        var lost = false
         while (output != null) {
-            show(output)
+            lost = show(output, lost)
             output = socket.receive()
         }
         input.cancel()
         detached.isCompleted
     }
 
-    /** Sends the keys typed until the input ends; Ctrl-] closes the socket and detaches. */
+    /**
+     * Sends the keys typed until the input ends; Ctrl-] closes the socket and detaches. Each turn yields: with an idle
+     * keyboard the read only times out, and the session's end must still stop the pump.
+     */
     private suspend fun pump(socket: TerminalSocket, detached: CompletableDeferred<Boolean>) {
         val buffer = ByteArray(KEY_BUFFER)
         var size = terminal.size()
         var count = 0
         while (count >= 0 && !detached.isCompleted) {
+            yield()
             count = terminal.read(buffer, KEY_WAIT_MILLIS)
-            val escape = buffer.take(maxOf(count, 0)).indexOf(DETACH)
+            val escape = indexOfDetach(buffer, count)
             if (escape >= 0) {
                 if (escape > 0) socket.send(buffer.copyOf(escape))
                 detached.complete(true)
@@ -163,13 +176,25 @@ class CloudSessionUseCase(
         }
     }
 
-    private fun show(output: TerminalOutput) {
-        when (output) {
-            is TerminalOutput.Bytes -> terminal.write(output.bytes)
-            is TerminalOutput.Control -> if (output.text.contains(RUNNER_LOST)) {
-                terminal.write("\r\n[ostrom] the session's machine is reconnecting…\r\n".encodeToByteArray())
+    /** The session's bytes; a control message saying the session's machine left (`connected: false`) or came back. */
+    private fun show(output: TerminalOutput, lost: Boolean): Boolean = when (output) {
+        is TerminalOutput.Bytes -> {
+            terminal.write(output.bytes)
+            lost
+        }
+        is TerminalOutput.Control -> {
+            val connected = parseObject(output.text)?.get("connected")
+            when {
+                connected == JsonPrimitive(false) && !lost -> notice("the session's machine is reconnecting…", true)
+                connected == JsonPrimitive(true) && lost -> notice("the session's machine is back.", false)
+                else -> lost
             }
         }
+    }
+
+    private fun notice(text: String, lost: Boolean): Boolean {
+        terminal.write("\r\n[ostrom] $text\r\n".encodeToByteArray())
+        return lost
     }
 
     /** The exit code once the terminal is given back, said in plain words. */
@@ -184,6 +209,12 @@ class CloudSessionUseCase(
         }
         say(if (outcome.second == OK) outcome.first else "ostrom: ${outcome.first}")
         return outcome.second
+    }
+
+    /** A failure that may pass: Ostrom unreachable for a moment, failing (5xx) or asking to slow down (429). */
+    private fun passing(answer: ServerAnswer.Failed): Boolean {
+        val status = answer.status
+        return status == null || status == TOO_MANY || status >= SERVER_ERROR
     }
 
     /** The exit code of a refused or failed call, said. */
@@ -204,17 +235,39 @@ class CloudSessionUseCase(
         /** Agents with a cloud image (contract `CloudSession.agent`). */
         val CLOUD_AGENTS = listOf("claude", "codex", "opencode", "gemini")
 
-        /** `owner/name` as the URL the contract asks for; a URL (or `git@github.com:o/n.git`) as https. */
-        fun gitHubUrl(repo: String): String = when {
-            repo.startsWith("git@github.com:") -> "https://github.com/" + repo.removePrefix("git@github.com:")
-            repo.contains("://") -> repo
-            else -> "https://github.com/$repo"
-        }.removeSuffix(".git")
+        /**
+         * The `https://github.com/<owner>/<name>` the contract asks for, from `owner/name`, a GitHub URL (https or ssh,
+         * its credentials and port dropped: a token in a remote never leaves this machine) or `git@github.com:o/n`;
+         * null for anything else (another host, a path that is not `owner/name`).
+         */
+        fun gitHubUrl(repo: String): String? {
+            val path = when {
+                repo.startsWith("git@github.com:") -> repo.removePrefix("git@github.com:")
+                repo.contains("://") -> pathOnGitHub(repo.substringAfter("://"))
+                else -> repo
+            }
+            val name = path?.let { it.trimEnd('/').removeSuffix(".git") }
+            return if (name != null && OWNER_NAME.matches(name)) "https://github.com/$name" else null
+        }
+
+        /** The path of `[user[:token]@]host[:port]/path` when its host is github.com, else null. */
+        private fun pathOnGitHub(location: String): String? {
+            val host = location.substringBefore('/').substringAfterLast('@').substringBefore(':')
+            return if (host.equals("github.com", ignoreCase = true)) location.substringAfter('/', "") else null
+        }
+
+        /** The index of Ctrl-] among the [count] bytes read, or -1. */
+        private fun indexOfDetach(buffer: ByteArray, count: Int): Int {
+            var index = 0
+            while (index < count && buffer[index] != DETACH) index++
+            return if (index < count) index else -1
+        }
+
+        private val OWNER_NAME = Regex("[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 
         private fun resize(columns: Int, rows: Int) = """{"type":"resize","columns":$columns,"rows":$rows}"""
 
         private const val SESSIONS = "/api/v1/cloud/sessions"
-        private const val RUNNER_LOST = "\"connected\":false"
         private const val DETACH: Byte = 0x1d
         private const val KEY_BUFFER = 4_096
         private const val KEY_WAIT_MILLIS = 100
@@ -228,6 +281,8 @@ class CloudSessionUseCase(
         private const val UNAUTHORIZED = 401
         private const val FORBIDDEN = 403
         private const val NOT_FOUND = 404
+        private const val TOO_MANY = 429
+        private const val SERVER_ERROR = 500
         private const val OK = 0
         private const val FAILED = 1
         private const val USAGE = 64

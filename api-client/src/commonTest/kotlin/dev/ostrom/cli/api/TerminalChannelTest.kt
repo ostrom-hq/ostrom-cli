@@ -17,12 +17,19 @@ import io.ktor.websocket.readText
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.ClosedSendChannelException
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
+import kotlinx.io.IOException
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /** A cloud session's terminal over a real WebSocket, against an in-process server. */
 class TerminalChannelTest {
@@ -89,5 +96,30 @@ class TerminalChannelTest {
         assertEquals(TerminalMessage.Control("x"), messageOf(Frame.Text("x")))
         assertNull(codeOf(null), "a socket cut without a close frame")
         assertEquals(1000, codeOf(CloseReason(CloseReason.Codes.NORMAL, "")))
+    }
+
+    @Test
+    fun aSocketThatFailsHasEndedWithoutACode() = runTest {
+        val cut = CompletableDeferred<CloseReason?>().apply { completeExceptionally(IOException("connection reset")) }
+        assertNull(closeCodeOf(cut))
+        val engine = CompletableDeferred<CloseReason?>().apply { completeExceptionally(IllegalStateException("curl")) }
+        assertNull(closeCodeOf(engine))
+        val cancelled = CompletableDeferred<CloseReason?>().apply { cancel() }
+        assertNull(closeCodeOf(cancelled), "the session's cancellation is its end")
+        val closed = CompletableDeferred<CloseReason?>(CloseReason(CloseReason.Codes.NORMAL, ""))
+        assertEquals(1000, closeCodeOf(closed))
+        val waiting = CompletableDeferred<CloseReason?>()
+        val caller = launch { closeCodeOf(waiting) }
+        yield()
+        caller.cancelAndJoin()
+        assertTrue(caller.isCancelled, "the caller's own cancellation goes on")
+    }
+
+    @Test
+    fun aKeyTypedAfterTheEndIsDropped() = runTest {
+        var sent = false
+        sendOrDrop { sent = true }
+        assertTrue(sent)
+        sendOrDrop { throw ClosedSendChannelException("closed") }
     }
 }

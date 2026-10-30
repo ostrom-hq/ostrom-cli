@@ -64,6 +64,7 @@ class CloudSessionUseCaseTest {
     private class Terminal(private val keys: ArrayDeque<String>, private val sizes: ArrayDeque<TerminalSize?>) :
         RawTerminal {
         var raw = true
+        var idle = false
         var restored = 0
         val shown = StringBuilder()
 
@@ -76,7 +77,7 @@ class CloudSessionUseCaseTest {
         override fun size(): TerminalSize? = if (sizes.size > 1) sizes.removeFirst() else sizes.firstOrNull()
 
         override fun read(buffer: ByteArray, timeoutMillis: Int): Int {
-            val next = keys.removeFirstOrNull() ?: return -1
+            val next = keys.removeFirstOrNull() ?: return if (idle) 0 else -1
             val bytes = next.encodeToByteArray()
             bytes.copyInto(buffer)
             return bytes.size
@@ -166,12 +167,41 @@ class CloudSessionUseCaseTest {
             listOf(
                 TerminalOutput.Control("""{"type":"runner","connected":true}"""),
                 TerminalOutput.Control("""{"type":"runner","connected":false}"""),
+                TerminalOutput.Control("""{"type":"runner","connected":false}"""),
+                TerminalOutput.Control("not json"),
+                TerminalOutput.Control("""{"type":"note","text":"\"connected\":false"}"""),
+                TerminalOutput.Control("""{"type":"runner","connected":true}"""),
             ),
             endsOnItsOwn = true,
         )
         assertEquals(0, useCase().attach("cs1", "device"))
-        assertEquals("\r\n[ostrom] the session's machine is reconnecting…\r\n", terminal.shown.toString())
+        val shown = "\r\n[ostrom] the session's machine is reconnecting…\r\n" +
+            "\r\n[ostrom] the session's machine is back.\r\n"
+        assertEquals(shown, terminal.shown.toString(), "said once each way, and only for connected itself")
         assertEquals("Session cs1 ended.", said.last(), "no close code: an end")
+    }
+
+    @Test
+    fun theSessionsEndStopsAnIdleKeyboard() = runTest {
+        on("GET /api/v1/cloud/sessions/cs1", 200 to """{"status":"running"}""")
+        terminal.idle = true
+        assertEquals(0, useCase().attach("cs1", "device"), "the pump ends without a key")
+        assertEquals("Session cs1 ended.", said.last())
+        assertEquals(1, terminal.restored)
+    }
+
+    @Test
+    fun aLookThatFailsForAMomentIsLookedAgain() = runTest {
+        on(
+            "GET /api/v1/cloud/sessions/cs1",
+            503 to """{"error":{"type":"unavailable","message":"busy"}}""",
+            null to "refused",
+            429 to """{"error":{"type":"rate_limited","message":"slow down"}}""",
+            200 to """{"status":"running"}""",
+        )
+        assertEquals(0, useCase().attach("cs1", "device"))
+        assertEquals(3, slept.size)
+        assertEquals("Session cs1 ended.", said.last())
     }
 
     @Test
@@ -250,5 +280,29 @@ class CloudSessionUseCaseTest {
         assertEquals("https://github.com/acme/api", CloudSessionUseCase.gitHubUrl("acme/api"))
         assertEquals("https://github.com/acme/api", CloudSessionUseCase.gitHubUrl("git@github.com:acme/api.git"))
         assertEquals("https://github.com/acme/api", CloudSessionUseCase.gitHubUrl("https://github.com/acme/api.git"))
+        val same = listOf(
+            "ssh://git@github.com/acme/api.git",
+            "ssh://git@github.com:22/acme/api",
+            "https://maya:ghp_secret@github.com/acme/api.git",
+            "https://GitHub.com/acme/api/",
+        )
+        for (remote in same) assertEquals("https://github.com/acme/api", CloudSessionUseCase.gitHubUrl(remote), remote)
+        val others = listOf(
+            "git@gitlab.com:acme/api.git",
+            "https://gitlab.com/acme/api",
+            "https://github.com",
+            "https://github.com/acme/api/tree/main",
+            "acme",
+        )
+        for (remote in others) assertEquals(null, CloudSessionUseCase.gitHubUrl(remote), remote)
+    }
+
+    @Test
+    fun aRepositoryOffGitHubIsRefusedBeforeAnythingIsAsked() = runTest {
+        assertEquals(64, useCase().start(CloudStart(Agent.CLAUDE, null, "https://gitlab.com/acme/api"), "device"))
+        val refusal = "ostrom: the repository to clone must be on GitHub: --repo owner/name or " +
+            "https://github.com/owner/name"
+        assertEquals(refusal, said.last())
+        assertTrue(calls.isEmpty())
     }
 }
