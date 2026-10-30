@@ -65,8 +65,8 @@ class AdaptersTest {
         assertEquals(join("/plugin", "skills", "ship"), files.links[join("/skills", "ship")])
         assertEquals(join("/mine", "pdf"), files.links[join("/skills", "pdf")])
         files.links.clear()
-        assertEquals(listOf("ship"), skillsInto(files, "/plugin", "/skills", null))
-        assertEquals(setOf(join("/skills", "ship")), files.links.keys)
+        assertEquals(listOf("ship"), skillsInto(files, "/plugin", "/other", null))
+        assertEquals(setOf(join("/other", "ship")), files.links.keys)
     }
 
     @Test

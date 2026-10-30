@@ -16,6 +16,9 @@ interface CredentialStore {
     /** The credentials for [server], or null when this device is not signed in there. */
     fun load(server: String): Credentials?
 
+    /** The credentials `ostrom login` saved for [server], never the environment's: what `ostrom logout` revokes. */
+    fun saved(server: String): Credentials? = load(server)
+
     /** Keeps [credentials] for [server]. */
     fun save(server: String, credentials: Credentials)
 
@@ -35,13 +38,13 @@ class FileCredentialStore(
     private val variable: (String) -> String?,
 ) : CredentialStore {
     override fun load(server: String): Credentials? {
-        val inSession = variable(LaunchVariables.LAUNCH_ID) != null
+        val inSession = !variable(LaunchVariables.LAUNCH_ID).isNullOrEmpty()
         val token = if (inSession) null else variable(LaunchVariables.DEVICE_TOKEN)
         val login = variable(LaunchVariables.DEV) ?: UNKNOWN
         return if (token.isNullOrEmpty()) saved(server) else Credentials(token, login)
     }
 
-    private fun saved(server: String): Credentials? {
+    override fun saved(server: String): Credentials? {
         val entry = all().child(server) ?: return null
         val token = entry.text("token")
         return if (token.isNullOrEmpty()) null else Credentials(token, entry.text("login") ?: UNKNOWN)
