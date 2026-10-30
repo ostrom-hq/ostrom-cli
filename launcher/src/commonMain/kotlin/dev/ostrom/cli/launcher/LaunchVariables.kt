@@ -64,6 +64,9 @@ object LaunchVariables {
     /** The hook protocol of the agent family (`claude`, `grok`, `gemini`, `hermes`). */
     const val HOOK_DIALECT = "OSTROM_HOOK_DIALECT"
 
+    /** How long a gate hook may run before the agent gives up on it, in milliseconds (Grok lets the action through). */
+    const val HOOK_BUDGET_MS = "OSTROM_HOOK_BUDGET_MS"
+
     /** The session's settings, for an MCP server started with a filtered environment. */
     const val SESSION_SETTINGS = "OSTROM_SESSION_SETTINGS"
 
