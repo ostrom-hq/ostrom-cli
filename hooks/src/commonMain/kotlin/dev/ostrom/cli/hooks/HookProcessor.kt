@@ -11,9 +11,6 @@ enum class HookKind(val command: String) {
 
     /** At the start and the end of a session. */
     SESSION("session"),
-
-    /** The background refresh of the gate catalogue, started by the gate, never awaited by the agent. */
-    GATES_REFRESH("gates-refresh"),
     ;
 
     /** Lookup by command name. */
@@ -71,7 +68,7 @@ class HookProcessorImpl(private val gate: GateHandler) : HookProcessor {
             GateDecision.Allow -> HookReply()
             is GateDecision.Deny -> deny(decision.reason, dialect)
         }
-        HookKind.SESSION, HookKind.GATES_REFRESH -> HookReply()
+        HookKind.SESSION -> HookReply()
     }
 
     /**

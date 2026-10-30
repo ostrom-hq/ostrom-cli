@@ -20,7 +20,9 @@ class HookRunnerTest {
         override fun out(text: String) { out.append(text) }
         override fun err(text: String) { err.append(text) }
         override val isInteractive = false
-        override fun readStandardInput(maxBytes: Int, timeoutMillis: Int) = input
+        var asked: Pair<Int, Int>? = null
+        override fun readStandardInput(maxBytes: Int, timeoutMillis: Int) =
+            input.also { asked = maxBytes to timeoutMillis }
     }
 
     private class FakeEnvironment(private val values: Map<String, String> = emptyMap()) : Environment {
@@ -59,14 +61,15 @@ class HookRunnerTest {
     }
 
     @Test
-    fun theRefreshHookReadsNoInput() {
-        val console = FakeConsole(StandardInput.Read("must not be read".encodeToByteArray()))
+    fun anEventLargerThanTheBoundOrLateReachesTheProcessorAsNothing() {
+        val console = FakeConsole(StandardInput.Unavailable(StandardInputFailure.TOO_LARGE))
         var seen: ByteArray? = byteArrayOf(1)
         val recording = object : HookProcessor {
             override fun process(kind: HookKind, input: ByteArray?, dialect: String) = HookReply().also { seen = input }
         }
-        assertEquals(0, HookRunnerImpl(console, FakeEnvironment(), recording).run(listOf("gates-refresh")))
+        assertEquals(0, HookRunnerImpl(console, FakeEnvironment(), recording).run(listOf("gate")))
         assertEquals(null, seen)
+        assertEquals(16 shl 20 to 1_000, console.asked, "a Write of a large file is read whole")
     }
 
     @Test

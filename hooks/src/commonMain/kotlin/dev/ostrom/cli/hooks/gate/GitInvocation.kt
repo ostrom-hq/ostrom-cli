@@ -52,20 +52,28 @@ data class GitInvocation(
          * such as `bash -c`).
          */
         fun parse(words: List<String>): GitInvocation? {
+            val i = programIndex(words)
+            if (i >= words.size || !isGit(words[i])) return null
             val environment = linkedMapOf<String, String>()
+            for (word in words.subList(0, i)) {
+                if (isAssignment(word)) environment[word.substringBefore('=')] = word.substringAfter('=')
+            }
+            return readOptions(words, i + 1, environment)
+        }
+
+        /**
+         * Where the program of a simple command is: after the `NAME=value` assignments and the programs that run the
+         * command after them unchanged (`env`, `command`, `sudo`…); `words.size` when there is none.
+         */
+        fun programIndex(words: List<String>): Int {
             var i = 0
             while (i < words.size) {
                 val word = words[i]
-                when {
-                    isAssignment(word) -> environment[word.substringBefore('=')] = word.substringAfter('=')
-                    word in TRANSPARENT_PREFIXES -> Unit
-                    word.startsWith("-") && i > 0 && words[i - 1] == "env" -> Unit
-                    else -> break
-                }
+                val transparent = isAssignment(word) || word in TRANSPARENT_PREFIXES
+                if (!transparent && !(word.startsWith("-") && i > 0 && words[i - 1] in TRANSPARENT_PREFIXES)) break
                 i++
             }
-            if (i >= words.size || !isGit(words[i])) return null
-            return readOptions(words, i + 1, environment)
+            return i
         }
 
         private fun readOptions(words: List<String>, from: Int, environment: Map<String, String>): GitInvocation {
@@ -108,7 +116,7 @@ data class GitInvocation(
         private val NAME = Regex("[A-Za-z_][A-Za-z0-9_]*")
 
         /** Programs that run the command after them unchanged. */
-        private val TRANSPARENT_PREFIXES = setOf("env", "command", "exec", "nohup", "time", "builtin")
+        private val TRANSPARENT_PREFIXES = setOf("env", "command", "exec", "nohup", "time", "builtin", "sudo", "doas")
 
         /** git's global options that take the next word as their value. */
         private val OPTIONS_WITH_VALUE =
@@ -130,6 +138,7 @@ data class GitInvocation(
             Regex("(?i)remote\\.pushdefault"),
             Regex("(?i)include(if\\..+)?\\.path"),
             Regex("(?i)core\\.worktree"),
+            Regex("(?i)alias\\..+"),
         )
     }
 }

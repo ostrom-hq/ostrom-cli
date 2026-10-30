@@ -35,6 +35,17 @@ class GitInvocationTest {
         assertEquals(mapOf("FOO" to "1", "GIT_DIR" to "/x"), invocation?.environment)
         assertEquals("push", invocation?.verb)
         assertEquals("status", parse("git.exe status")?.verb)
+        assertEquals("push", parse("sudo -E git push")?.verb, "sudo and its options run git unchanged")
+        assertEquals("push", parse("doas git push")?.verb)
+        assertNull(parse("FOO=1 -x git push"), "an option after an assignment is a program")
+    }
+
+    @Test
+    fun theProgramOfACommandIsFoundAfterItsPrefixes() {
+        fun index(text: String) = GitInvocation.programIndex(ShellWords.segments(text).single())
+        assertEquals(0, index("ls -la"))
+        assertEquals(3, index("A=1 env -i \$G push"))
+        assertEquals(2, index("sudo -u"), "nothing after the prefixes")
     }
 
     @Test
@@ -61,5 +72,6 @@ class GitInvocationTest {
         assertEquals("-c url.x.pushInsteadOf", parse("git -c url.x.pushInsteadOf=y push")?.redirection())
         assertEquals("-c push.default", parse("git -c push.default=matching push")?.redirection())
         assertEquals("-c branch.main.merge", parse("git -c branch.main.merge=refs/heads/x push")?.redirection())
+        assertEquals("-c alias.ship", parse("git -c alias.ship=push ship")?.redirection(), "S2-26: an inline alias")
     }
 }

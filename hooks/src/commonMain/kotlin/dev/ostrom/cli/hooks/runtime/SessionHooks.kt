@@ -24,16 +24,15 @@ object SessionHooks {
         clock: () -> Long,
     ): HookProcessor {
         val files = FileSystemHookFiles(fileSystem, clock)
-        val ostrom = environment["OSTROM_BIN"] ?: "ostrom"
+        val context = HookContext.read { environment[it] }
         val ports = HookPorts(
             calls = RelayCalls(environment["OSTROM_RELAY_URL"], environment["OSTROM_RELAY_TOKEN"], http),
             files = files,
-            git = CapturedGit(capture),
-            background = { capture.detach(listOf(ostrom, "hook", "gates-refresh")) },
+            git = CapturedGit(capture, context.git),
             canonical = files::canonical,
             workingDirectory = files.canonical(".".toPath().toString()),
         )
-        return SessionHookProcessor(HookContext.read { environment[it] }, ports)
+        return SessionHookProcessor(context, ports)
     }
 
     /** The wall clock, in milliseconds since the epoch. */

@@ -143,6 +143,67 @@ class PushReaderTest {
     }
 
     @Test
+    fun shortOptionsClusteredWithADeletionAreRead() {
+        // S2-30: `-ud` and `-fd` were read as a plain push
+        assertEquals(listOf(PushRef("", "old")), refs("git push -ud origin old"))
+        val forced = reader().read("/r", "git push -fd origin old")
+        assertEquals(Push("origin", "o/core", listOf(PushRef("", "old")), force = true), forced)
+        assertFalse(reader().read("/r", "git push -ud origin old")?.force == true)
+    }
+
+    @Test
+    fun theRemoteIsReadAsGitReadsIt() {
+        // S2-27: --repo, branch.<b>.pushRemote and remote.pushDefault decide where a push goes
+        val up = mapOf("/r|remote get-url up" to "https://github.com/u/core")
+        assertEquals("u/core", reader(up).read("/r", "git push --repo up main")?.remoteRepository)
+        assertEquals("u/core", reader(up).read("/r", "git push --repo=up main")?.remoteRepository)
+        val pushRemote = reader(up + ("/r|config branch.main.pushRemote" to "up"))
+        assertEquals(Push("up", "u/core", listOf(PushRef("M", "main")), false), pushRemote.read("/r", "git push"))
+        val pushDefault = reader(up + ("/r|config remote.pushDefault" to "up"))
+        assertEquals("up", pushDefault.read("/r", "git push")?.remote)
+    }
+
+    @Test
+    fun aShellExpansionInAPushCannotBeRead() {
+        // S2-26: `B=main; git push origin $B` named no branch Ostrom could read
+        assertContains(refusal(reader(), "git push origin \$B"), "`\$B` is a shell variable or substitution")
+        assertContains(refusal(reader(), "git push origin `echo main`"), "shell variable or substitution")
+        assertContains(refusal(reader(), "git \$V origin main"), "which git command `\$V` is")
+        assertFailsWith<UnreadablePushException> { reader().destinations("/r", "git push \$(printf m%sn ai)") }
+    }
+
+    @Test
+    fun aGitAliasIsReadAsWhatItStandsFor() {
+        val aliases = reader(
+            mapOf(
+                "/r|config --get alias.ship" to "push origin",
+                "/r|config --get alias.lg" to "log --oneline",
+                "/r|config --get alias.yolo" to "!git push -f",
+                "/r|config --get alias.two" to "push; ls",
+            ),
+        )
+        assertEquals(listOf(PushRef("M", "main")), aliases.read("/r", "git ship main")?.refs)
+        assertEquals(listOf("main"), aliases.destinations("/r", "git ship main"))
+        assertEquals(listOf(PushRef("M", "main")), aliases.read("/r", "git -c alias.up=push up origin main")?.refs)
+        assertNull(aliases.read("/r", "git lg"))
+        assertEquals(emptyList(), aliases.destinations("/r", "git lg"))
+        assertNull(aliases.read("/r", "git two"), "an alias of several commands is not a push alias")
+        assertNull(aliases.read("/r", "git unknown"))
+        assertContains(refusal(aliases, "git yolo"), "runs the shell alias `!git push -f`")
+    }
+
+    @Test
+    fun aPushIsSeenUnderQuotesAndBackslashes() {
+        assertEquals(listOf(PushRef("M", "main")), refs("git pu''sh origin main"))
+        assertEquals(listOf(PushRef("M", "main")), refs("g\\it push origin main"))
+        assertTrue(PushReader.mentions("git pu''sh origin main"))
+        assertTrue(PushReader.mentions("git ship"), "a command that is not git's own may be an alias")
+        assertFalse(PushReader.mentions("git status && ls"))
+        assertFalse(PushReader.mentions("git"))
+        assertContains(refusal(reader(), "git --version && git push origin main"), "own command")
+    }
+
+    @Test
     fun shortRefDropsTheNamespaces() {
         assertEquals("main", PushReader.shortRef("refs/heads/main"))
         assertEquals("v1", PushReader.shortRef("refs/tags/v1"))

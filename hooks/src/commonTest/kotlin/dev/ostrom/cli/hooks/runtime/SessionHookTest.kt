@@ -96,29 +96,12 @@ class SessionHookTest {
     }
 
     @Test
-    fun theEndSignsTheReceiptOfTheLaunchSegment() {
-        files.texts["/s/session.map.json"] = """{"a1":"a1~2"}"""
-        val signed = ok("""{"session":{"receiptId":"R9"},"verification":{"ok":true}}""")
-        val calls = FakeCalls().on("/api/v1/sessions/a1~2/end", signed)
-        val reply = hook(calls, contextOf("OSTROM_SESSION_END_MS" to "2500"))
-            .handle(event("""{"hook_event_name":"SessionEnd","session_id":"a1","reason":"exit"}"""))
-        assertEquals(HookReply(stderr = "Ostrom: session receipt R9 (signature valid)\n"), reply)
-        assertEquals("""{"source":"exit"}""", calls.calls.single().body.toString())
-        assertEquals(2_500, calls.calls.single().timeoutMillis)
-        val unverified = FakeCalls().on("/api/v1/sessions/", ok("""{"verification":{"ok":false}}"""))
-        val plain = hook(unverified).handle(event("""{"hook_event_name":"SessionEnd"}"""))
-        assertEquals("Ostrom: session receipt ? (not verified)\n", plain.stderr)
-        assertEquals("""{"source":"SessionEnd"}""", unverified.calls.single().body.toString())
-        fun ended(answer: String) =
-            hook(FakeCalls().on("/api/v1/sessions/", ok(answer))).handle(event("""{"hook_event_name":"SessionEnd"}"""))
-        val signedOnly = ended("""{"receipt":{"id":"R3","signature":"s"}}""").stderr
-        assertEquals("Ostrom: session receipt R3 (signed)\n", signedOnly)
-        val unsigned = ended("""{"session":{},"receipt":{"id":"R4"}}""").stderr
-        assertEquals("Ostrom: session receipt R4 (not verified)\n", unsigned)
-        assertEquals(
-            "Ostrom unreachable (HTTP 404): session receipt not signed.\n",
-            hook(FakeCalls()).handle(event("""{"hook_event_name":"SessionEnd","session_id":"a1"}""")).stderr,
-        )
+    fun theEndIsTheLaunchersTheHookCallsNothing() {
+        // S2-25: the relay no longer forwards an end, and the agent cannot end the session it is watched in
+        val calls = FakeCalls()
+        val reply = hook(calls).handle(event("""{"hook_event_name":"SessionEnd","session_id":"a1","reason":"exit"}"""))
+        assertEquals(HookReply(), reply)
+        assertTrue(calls.calls.isEmpty())
     }
 
     @Test

@@ -30,15 +30,11 @@ class HookRunnerImpl(
         val start = TimeSource.Monotonic.markNow()
         val kind = arguments.singleOrNull()?.let { HookKind.of(it) }
         if (kind == null) {
-            console.err("usage: ostrom hook gate|session|gates-refresh (stdin: the hook event)\n")
+            console.err("usage: ostrom hook gate|session (stdin: the hook event)\n")
             return USAGE
         }
-        // gates-refresh is started detached by a hook, with nothing piped in: it never reads stdin.
-        val input = if (kind == HookKind.GATES_REFRESH) {
-            null
-        } else {
-            (console.readStandardInput(MAX_EVENT_BYTES, READ_TIMEOUT_MILLIS) as? StandardInput.Read)?.bytes
-        }
+        // an event that is too large, late or unreadable is passed on as null: the gate then refuses (S2-30)
+        val input = (console.readStandardInput(MAX_EVENT_BYTES, READ_TIMEOUT_MILLIS) as? StandardInput.Read)?.bytes
         val reply = processor.process(kind, input, environment["OSTROM_HOOK_DIALECT"] ?: "claude")
         console.out(reply.stdout)
         console.err(reply.stderr)
@@ -56,10 +52,13 @@ class HookRunnerImpl(
         const val MICROS_PER_MILLI = 1_000
         const val MICRO_DIGITS = 3
 
-        /** Same bound as the prototype (`take(1 << 20)`). */
-        const val MAX_EVENT_BYTES = 1 shl 20
+        /**
+         * The largest event read: a Write of a large file is a legitimate event, and past the bound the gate refuses
+         * rather than reads nothing and allows (S2-30), so the bound is generous.
+         */
+        const val MAX_EVENT_BYTES = 16 shl 20
 
-        /** An agent pipes its event at once; past this, the hook answers without it rather than hold the agent. */
+        /** An agent pipes its event at once; past this, the hook answers without it (the gate then refuses). */
         const val READ_TIMEOUT_MILLIS = 1_000
 
         /** sysexits EX_USAGE, as in the CLI's exit code table. */

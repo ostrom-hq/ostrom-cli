@@ -33,7 +33,7 @@ data class ToolSubject(val kind: ToolKind, val name: String, val text: String) {
     companion object {
         private val SHELLS = setOf(
             "bash", "shell", "exec_command", "local_shell", "container.exec", "run_terminal_command",
-            "run_shell_command", "terminal",
+            "run_shell_command", "terminal", "powershell", "monitor",
         )
         private val WRITES = setOf(
             "write", "edit", "multiedit", "apply_patch", "write_file", "replace", "edit_file", "search_replace",
