@@ -42,7 +42,11 @@ kotlin {
     if ("mingwX64" in nativeTargets) mingwX64()
 
     compilerOptions {
-        optIn.addAll("kotlin.uuid.ExperimentalUuidApi", "kotlin.time.ExperimentalTime")
+        optIn.addAll(
+            "kotlin.uuid.ExperimentalUuidApi",
+            "kotlin.time.ExperimentalTime",
+            "kotlin.io.encoding.ExperimentalEncodingApi",
+        )
         freeCompilerArgs.add("-Xexpect-actual-classes")
     }
 

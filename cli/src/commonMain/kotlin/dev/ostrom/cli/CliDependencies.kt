@@ -20,6 +20,8 @@ import dev.ostrom.cli.platform.ExecutableFinder
 import dev.ostrom.cli.platform.ExecutableFinderImpl
 import dev.ostrom.cli.platform.FileStore
 import dev.ostrom.cli.platform.FileStoreImpl
+import dev.ostrom.cli.platform.SecretStore
+import dev.ostrom.cli.platform.systemSecretStore
 import okio.Path.Companion.toPath
 
 /**
@@ -29,6 +31,8 @@ import okio.Path.Companion.toPath
  * @property api Builds the client of the server at the given URL.
  * @property hookRunner Runs `ostrom hook <kind>`.
  * @property mcpServer Builds the local MCP server.
+ * @property secrets Opens the secret store of this device (system store, or encrypted file); built on first use,
+ * never on the hook's fast path.
  */
 @Suppress("LongParameterList") // The composition root: one parameter per dependency, each replaced in tests.
 class CliDependencies(
@@ -39,6 +43,7 @@ class CliDependencies(
     val api: (String) -> OstromApi,
     val hookRunner: HookRunner,
     val mcpServer: () -> McpServer,
+    val secrets: () -> SecretStore = { systemSecretStore(environment, files) },
 ) {
     /** The device configuration, or null when no home folder is known. */
     val config: ConfigStore? by lazy {

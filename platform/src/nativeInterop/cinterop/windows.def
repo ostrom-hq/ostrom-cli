@@ -1,7 +1,8 @@
 package = dev.ostrom.cli.platform.interop
-linkerOpts = -lkernel32
+linkerOpts = -lkernel32 -ladvapi32
 ---
 #include <windows.h>
+#include <wincred.h>
 #include <string.h>
 
 static BOOL WINAPI ostrom_ignore_console_event(DWORD event) { (void)event; return TRUE; }
@@ -91,4 +92,52 @@ static inline int ostrom_write(int fd, const unsigned char *bytes, int length) {
 static inline int ostrom_is_terminal(int fd) {
     DWORD which = fd == 0 ? STD_INPUT_HANDLE : (fd == 2 ? STD_ERROR_HANDLE : STD_OUTPUT_HANDLE);
     return GetFileType(GetStdHandle(which)) == FILE_TYPE_CHAR;
+}
+
+/*
+ * Windows Credential Manager, generic credentials of the user (`target` is "<service>:<account>"). Statuses: 0 done,
+ * 1 not found, 2 larger than the buffer, 3 any other failure (GetLastError in *code).
+ */
+static inline int ostrom_credential_write(const unsigned short *target, const unsigned char *secret, int length,
+                                          int *code) {
+    CREDENTIALW credential;
+    ZeroMemory(&credential, sizeof credential);
+    credential.Type = CRED_TYPE_GENERIC;
+    credential.TargetName = (LPWSTR)target;
+    credential.CredentialBlobSize = (DWORD)length;
+    credential.CredentialBlob = (LPBYTE)secret;
+    credential.Persist = CRED_PERSIST_LOCAL_MACHINE;
+    credential.UserName = L"ostrom";
+    *code = 0;
+    if (CredWriteW(&credential, 0)) return 0;
+    *code = (int)GetLastError();
+    return 3;
+}
+
+static inline int ostrom_credential_read(const unsigned short *target, unsigned char *buffer, int capacity,
+                                         int *length, int *code) {
+    *length = 0;
+    *code = 0;
+    PCREDENTIALW credential = NULL;
+    if (!CredReadW((LPCWSTR)target, CRED_TYPE_GENERIC, 0, &credential)) {
+        DWORD error = GetLastError();
+        *code = (int)error;
+        return error == ERROR_NOT_FOUND ? 1 : 3;
+    }
+    int answer = 0;
+    if (credential->CredentialBlobSize > (DWORD)capacity) answer = 2;
+    else {
+        memcpy(buffer, credential->CredentialBlob, credential->CredentialBlobSize);
+        *length = (int)credential->CredentialBlobSize;
+    }
+    CredFree(credential);
+    return answer;
+}
+
+static inline int ostrom_credential_delete(const unsigned short *target, int *code) {
+    *code = 0;
+    if (CredDeleteW((LPCWSTR)target, CRED_TYPE_GENERIC, 0)) return 0;
+    DWORD error = GetLastError();
+    *code = (int)error;
+    return error == ERROR_NOT_FOUND ? 1 : 3;
 }

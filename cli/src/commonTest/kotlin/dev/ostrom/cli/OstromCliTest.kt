@@ -12,11 +12,15 @@ import dev.ostrom.cli.platform.Environment
 import dev.ostrom.cli.platform.ExecutableFinder
 import dev.ostrom.cli.platform.FileStoreImpl
 import dev.ostrom.cli.platform.OperatingSystem
+import dev.ostrom.cli.platform.SecretBackend
+import dev.ostrom.cli.platform.SecretStore
+import dev.ostrom.cli.platform.SecretStoreException
 import dev.ostrom.cli.platform.StandardInput
 import okio.Path.Companion.toPath
 import okio.fakefilesystem.FakeFileSystem
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class OstromCliTest {
@@ -53,6 +57,16 @@ class OstromCliTest {
         }
     }
 
+    /** A secret store in [backend] that keeps nothing (doctor only reads where it is). */
+    private fun storeIn(backend: SecretBackend): () -> SecretStore = {
+        object : SecretStore {
+            override val backend = backend
+            override fun read(name: String): String? = null
+            override fun write(name: String, secret: String) = Unit
+            override fun delete(name: String) = Unit
+        }
+    }
+
     /** Asserts that stdout contains [text], showing all of it otherwise. */
     private fun assertOut(text: String) = assertTrue(console.out.contains(text), console.out.toString())
 
@@ -60,6 +74,7 @@ class OstromCliTest {
         environment: Map<String, String> = mapOf("HOME" to "/home/maya"),
         installed: Set<String> = setOf("git", "claude"),
         api: (String) -> OstromApi = { error("no server in this test") },
+        secrets: () -> SecretStore = storeIn(SecretBackend.KEYCHAIN),
     ) = OstromCli(
         CliDependencies(
             console = console,
@@ -73,6 +88,7 @@ class OstromCliTest {
                 override fun run(arguments: List<String>): Int = 0.also { hookCalls += arguments }
             },
             mcpServer = { object : McpServer { override fun serve() = 0 } },
+            secrets = secrets,
         ),
     )
 
@@ -168,6 +184,7 @@ class OstromCliTest {
         assertEquals(0, cli().run(arrayOf("doctor")))
         val report = console.out.toString()
         assertTrue(report.contains("  ✓ Config folder /home/maya/.config/ostrom is writable\n"), report)
+        assertTrue(report.contains("  ✓ Secrets kept in macOS Keychain\n"), report)
         assertTrue(report.contains("  ! Not signed in. Run ostrom login.\n"), report)
         assertTrue(report.contains("  ✓ Agents found: claude\n"), report)
         assertTrue(report.endsWith("0 problems, 2 warnings.\n"), report)
@@ -281,5 +298,36 @@ class OstromCliTest {
         val cli = cli()
         cli.report(cli.tree(), Abort())
         assertEquals("", console.out.toString() + console.err.toString())
+    }
+
+    @Test
+    fun doctorWarnsAboutTheEncryptedFileAndFailsWithoutAnyStore() {
+        assertEquals(0, cli(secrets = storeIn(SecretBackend.ENCRYPTED_FILE)).run(arrayOf("doctor")))
+        assertOut("  ! No Secret Service on this device: secrets are kept in an encrypted file only you can read.")
+        console.out.clear()
+        val none: () -> SecretStore = { throw SecretStoreException("No secret store on this device.") }
+        assertEquals(1, cli(secrets = none).run(arrayOf("doctor")))
+        assertOut("  ✗ No secret store on this device.\n")
+    }
+
+    @Test
+    fun theDefaultSecretStoreIsThisPlatformsOwn() {
+        fileSystem.createDirectories("/etc".toPath())
+        fileSystem.write("/etc/machine-id".toPath()) { writeUtf8("4c4c4544004d3510804bb4c04f4d3832\n") }
+        val dependencies = CliDependencies(
+            console = console,
+            environment = FakeEnvironment(mapOf("HOME" to "/home/maya")),
+            files = FileStoreImpl(fileSystem),
+            finder = object : ExecutableFinder {
+                override fun find(name: String): String? = null
+            },
+            api = { error("no server in this test") },
+            hookRunner = object : HookRunner {
+                override fun run(arguments: List<String>) = 0
+            },
+            mcpServer = { object : McpServer { override fun serve() = 0 } },
+        )
+        // The JVM test target has no system store: the encrypted file. Native targets get their system's.
+        assertIs<SecretBackend>(dependencies.secrets().backend)
     }
 }

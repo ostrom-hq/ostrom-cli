@@ -14,6 +14,9 @@ import kotlinx.cinterop.usePinned
 import kotlinx.cinterop.value
 import kotlinx.cinterop.wcstr
 import platform.posix.getenv
+import dev.ostrom.cli.platform.interop.ostrom_credential_delete
+import dev.ostrom.cli.platform.interop.ostrom_credential_read
+import dev.ostrom.cli.platform.interop.ostrom_credential_write
 import dev.ostrom.cli.platform.interop.ostrom_is_terminal
 import dev.ostrom.cli.platform.interop.ostrom_read_stdin
 import dev.ostrom.cli.platform.interop.ostrom_spawn_wait_w
@@ -42,3 +45,27 @@ internal actual fun readStdin(buffer: ByteArray, timeoutMillis: Int): Int =
 internal actual fun environmentVariable(name: String): String? = getenv(name)?.toKString()
 
 internal actual fun restrictToOwner(path: String) = Unit
+
+internal actual fun systemVault(): Vault? = CredentialManagerVault
+
+/** Windows Credential Manager: one generic credential `dev.ostrom.cli:<name>` per secret, for this user. */
+internal object CredentialManagerVault : Vault {
+    override val backend = SecretBackend.CREDENTIAL_MANAGER
+
+    override fun isAvailable() = true
+
+    override fun read(service: String, account: String) = memScoped {
+        val target = "$service:$account".wcstr.ptr
+        vaultRead { buffer, capacity, length, code -> ostrom_credential_read(target, buffer, capacity, length, code) }
+    }
+
+    override fun write(service: String, account: String, secret: ByteArray) = memScoped {
+        val target = "$service:$account".wcstr.ptr
+        vaultWrite(secret) { bytes, size, code -> ostrom_credential_write(target, bytes, size, code) }
+    }
+
+    override fun delete(service: String, account: String) = memScoped {
+        val target = "$service:$account".wcstr.ptr
+        vaultCall { code -> ostrom_credential_delete(target, code) }
+    }
+}

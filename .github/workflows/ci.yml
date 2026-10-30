@@ -50,8 +50,9 @@ jobs:
           path: ~/.konan
           key: konan-${{ runner.os }}-${{ runner.arch }}-${{ env.KOTLIN_VERSION }}-${{ hashFiles('gradle/libs.versions.toml') }}
           restore-keys: konan-${{ runner.os }}-${{ runner.arch }}-${{ env.KOTLIN_VERSION }}-
-      - name: Install native link dependencies
-        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+      # libcurl for Ktor's Linux engine; GNOME Keyring for the Secret Service test of the secret store.
+      - name: Install native link and test dependencies
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev gnome-keyring dbus libsecret-1-0
       - name: Never serve a test task from the cache (ENG-032)
         run: |
           mkdir -p ~/.gradle/init.d
@@ -64,15 +65,20 @@ jobs:
           }
           KTS
       - run: python3 scripts/check-conventions.py --self-test && python3 scripts/check-conventions.py
+      # On a private session bus with an unlocked GNOME Keyring, the linuxX64 tests use the real Secret Service.
       - name: detekt, JVM tests and coverage (100 % lines and branches); linuxX64 tests; other targets linked
         env:
           OSTROM_NETWORK_TESTS: '1'
-        run: >-
-          ./gradlew --continue
-          detekt jvmTest koverXmlReport koverVerify
-          linuxX64Test
-          linkDebugTestLinuxArm64 linkDebugTestMingwX64
-          :cli:linkReleaseExecutableLinuxX64 :cli:linkReleaseExecutableLinuxArm64 :cli:linkReleaseExecutableMingwX64
+          OSTROM_SECRET_SERVICE_TESTS: '1'
+        run: |
+          dbus-run-session -- bash -ec '
+            printf ci-keyring | gnome-keyring-daemon --unlock --components=secrets > /dev/null
+            ./gradlew --continue \
+              detekt jvmTest koverXmlReport koverVerify \
+              linuxX64Test \
+              linkDebugTestLinuxArm64 linkDebugTestMingwX64 \
+              :cli:linkReleaseExecutableLinuxX64 :cli:linkReleaseExecutableLinuxArm64 :cli:linkReleaseExecutableMingwX64
+          '
       - name: Lines and branches not covered
         if: failure()
         run: python3 scripts/uncovered.py
