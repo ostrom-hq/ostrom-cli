@@ -119,6 +119,12 @@ class DeviceLoginTest {
         assertEquals(LoginOutcome.SignedIn(Credentials("t", "l")), signIn(), "fields of the wrong kind are defaults")
         assertEquals("  Open https://github.com/login/device and enter it.", said.last(), "GitHub's page by default")
         assertEquals(listOf(5_000L), waits)
+        // numbers that are not numbers are defaults too
+        start = ServerReply(200, """{"deviceCode":"dc","userCode":"AB","interval":"soon","expiresIn":"later"}""")
+        polls += ServerReply(200, """{"token":"t","login":"l"}""")
+        assertEquals(LoginOutcome.SignedIn(Credentials("t", "l")), signIn())
+        assertEquals(listOf(5_000L), waits.drop(1))
+        waits.removeAt(1)
         // an interval of 0 would ask in a tight loop; one past a minute, or an expiry past 30 minutes, is cut
         start = ServerReply(200, """{"deviceCode":"dc","userCode":"AB","interval":0,"expiresIn":2}""")
         polls += pending()
