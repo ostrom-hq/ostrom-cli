@@ -689,6 +689,7 @@ class OstromCliTest {
             temporaryDirectory = "/tmp",
             agents = AgentRunner { _, _ -> 0 },
             sleep = {},
+            mcpBridge = { object : McpServer { override fun serve() = 0 } },
             postHogKey = "",
             sendStatistics = { _, _ -> },
         )
