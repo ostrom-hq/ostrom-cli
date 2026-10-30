@@ -15,12 +15,15 @@ import dev.ostrom.cli.commands.ConfigCommand
 import dev.ostrom.cli.commands.DoctorCommand
 import dev.ostrom.cli.commands.HelpCommand
 import dev.ostrom.cli.commands.HookCommand
+import dev.ostrom.cli.commands.LoginCommand
+import dev.ostrom.cli.commands.LogoutCommand
 import dev.ostrom.cli.commands.McpCommand
 import dev.ostrom.cli.commands.RootCommand
 import dev.ostrom.cli.commands.TelemetryCommand
 import dev.ostrom.cli.commands.VersionCommand
 import dev.ostrom.cli.commands.pendingCommands
 import dev.ostrom.cli.launcher.Agent
+import dev.ostrom.cli.platform.SecretStoreException
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.time.Duration.Companion.milliseconds
@@ -64,6 +67,10 @@ class OstromCli(private val dependencies: CliDependencies) {
             failed(e)
             report(root, e)
             e.statusCode
+        } catch (e: SecretStoreException) {
+            // the device token's store, locked or gone (no Secret Service, a Keychain that refuses)
+            dependencies.console.err("ostrom: the secret store did not answer: ${e.message}\n")
+            ExitCode.UNREACHABLE.code
         }
     }
 
@@ -95,6 +102,8 @@ class OstromCli(private val dependencies: CliDependencies) {
         val root = RootCommand(dependencies)
         val agents = Agent.entries.map { AgentCommand(it, dependencies) }
         val implemented = listOf(
+            LoginCommand(dependencies),
+            LogoutCommand(dependencies),
             ConfigCommand(dependencies),
             DoctorCommand(dependencies),
             TelemetryCommand(dependencies),

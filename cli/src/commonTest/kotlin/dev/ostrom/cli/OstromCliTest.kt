@@ -28,6 +28,7 @@ import dev.ostrom.cli.platform.SecretStore
 import dev.ostrom.cli.platform.SecretStoreException
 import dev.ostrom.cli.platform.StandardInput
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runTest
 import okio.Path.Companion.toPath
 import okio.fakefilesystem.FakeFileSystem
 import kotlin.test.Test
@@ -63,6 +64,25 @@ class OstromCliTest {
     private val statistics = mutableListOf<String>()
     private val withServer = mapOf("HOME" to "/home/maya", "OSTROM_URL" to "https://ostrom.example")
     private val launches = mutableListOf<Pair<LaunchRequest, LaunchSite>>()
+    private val waits = mutableListOf<Long>()
+    private val requests = mutableListOf<Pair<String, ServerRequest>>()
+
+    /** A server that answers `METHOD path` from [routes] (404 otherwise), recording each request with its server. */
+    private fun serverOf(routes: Map<String, Pair<Int, String>>): (String) -> OstromApi = { url ->
+        object : OstromApi {
+            override suspend fun get(path: String) = send(ServerRequest("GET", path))
+            override suspend fun send(request: ServerRequest): ServerResponse {
+                requests += url to request
+                val (status, body) = routes["${request.method} ${request.path}"] ?: (404 to "{}")
+                return ServerResponse(status, body, 1)
+            }
+        }
+    }
+
+    private val deviceFlow = mapOf(
+        "POST /api/v1/auth/device" to (200 to """{"deviceCode":"dc","userCode":"4F2C-9B1D","interval":1}"""),
+        "POST /api/v1/auth/device/token" to (200 to """{"token":"ost_new","login":"maya-k"}"""),
+    )
 
     /** A server that answers every request with [status] after [millis]. */
     private fun serverAnswering(status: Int, millis: Long): (String) -> OstromApi = {
@@ -72,13 +92,21 @@ class OstromCliTest {
         }
     }
 
-    /** A secret store in [backend] that keeps nothing (doctor only reads where it is). */
+    /** What the test's secret store keeps, by name. */
+    private val secretsKept = mutableMapOf<String, String>()
+
+    /** A secret store in [backend], in memory ([secretsKept]). */
     private fun storeIn(backend: SecretBackend): () -> SecretStore = {
         object : SecretStore {
             override val backend = backend
-            override fun read(name: String): String? = null
-            override fun write(name: String, secret: String) = Unit
-            override fun delete(name: String) = Unit
+            override fun read(name: String): String? = secretsKept[name]
+            override fun write(name: String, secret: String) {
+                secretsKept[name] = secret
+            }
+
+            override fun delete(name: String) {
+                secretsKept -= name
+            }
         }
     }
 
@@ -108,23 +136,27 @@ class OstromCliTest {
             mcpServer = { object : McpServer { override fun serve() = 0 } },
             credentials = { directory ->
                 val path = (directory.toPath() / "credentials.json").toString()
-                FileCredentialStore(LaunchFilesImpl(fileSystem) { _, _ -> }, path) { environment[it] }
+                val files = LaunchFilesImpl(fileSystem) { _, _ -> }
+                FileCredentialStore(files, path, secrets, { console.err("$it\n") }) { environment[it] }
             },
             workingDirectory = { "/work/acme" },
             executable = executable,
             temporaryDirectory = "/tmp",
             agents = AgentRunner { request, site -> 7.also { launches += request to site } },
+            sleep = { waits += it },
             secrets = secrets,
             postHogKey = postHogKey,
             sendStatistics = { _, body -> statistics += body },
         ),
     )
 
+    /** Signs this device in as `ost_1`, @maya: the token in the secret store, the login in `credentials.json`. */
     private fun signIn(directory: String, server: String = "https://ostrom.example") {
         fileSystem.createDirectories(directory.toPath())
         fileSystem.write(directory.toPath() / "credentials.json") {
-            writeUtf8("""{"$server":{"token":"ost_1","login":"maya"}}""")
+            writeUtf8("""{"$server":{"login":"maya"}}""")
         }
+        secretsKept[server] = "ost_1"
     }
 
     @Test
@@ -417,6 +449,12 @@ class OstromCliTest {
     }
 
     @Test
+    fun theRealWaitOfLoginIsTheCoroutinesDelay() = runTest {
+        // a delay: virtual time in a test, so this returns at once
+        CliDependencies.create().sleep(1_000)
+    }
+
+    @Test
     fun telemetryIsOffByDefaultAndSaysWhatItWouldSend() {
         assertEquals(0, cli().run(arrayOf("telemetry")))
         assertOut("Usage statistics: off (this build has no statistics destination)")
@@ -526,6 +564,156 @@ class OstromCliTest {
     }
 
     @Test
+    fun loginKeepsTheTokenAndTheServerOfThisDevice() {
+        val home = mapOf("HOME" to "/home/maya")
+        assertEquals(0, cli(environment = home, api = serverOf(deviceFlow)).run(arrayOf("login")))
+        assertEquals("https://api.ostrom.run", requests.first().first, "Ostrom's server by default")
+        assertTrue(console.err.contains("! Copy your one-time code: 4F2C-9B1D"), console.err.toString())
+        assertOut("✓ Signed in as @maya-k on https://api.ostrom.run\n")
+        assertOut("Next: cd into a repository and run ostrom claude\n")
+        assertEquals(listOf(1_000L), waits)
+        val credentials = fileSystem.read("/home/maya/.config/ostrom/credentials.json".toPath()) { readUtf8() }
+        assertTrue("ost_new" !in credentials && "maya-k" in credentials, credentials)
+        assertEquals(mapOf("https://api.ostrom.run" to "ost_new"), secretsKept, "the token in the secret store")
+        val config = fileSystem.read("/home/maya/.config/ostrom/config.toml".toPath()) { readUtf8() }
+        assertTrue("https://api.ostrom.run" in config, config)
+        // the next login goes to the same server, and the option wins over both
+        assertEquals(0, cli(environment = home, api = serverOf(deviceFlow)).run(arrayOf("login")))
+        assertEquals("https://api.ostrom.run", requests.last().first)
+        val option = arrayOf("login", "--server", "https://self.example/")
+        assertEquals(0, cli(environment = withServer, api = serverOf(deviceFlow)).run(option))
+        assertEquals("https://self.example", requests.last().first)
+    }
+
+    @Test
+    fun aFolderThatCannotBeWrittenAfterTheSignInIsExit73() {
+        val home = mapOf("HOME" to "/home/maya")
+        // config.toml is a folder with something in it: the token is kept, the server cannot be
+        fileSystem.createDirectories("/home/maya/.config/ostrom/config.toml/x".toPath())
+        assertEquals(73, cli(environment = home, api = serverOf(deviceFlow)).run(arrayOf("login")))
+        val path = "/home/maya/.config/ostrom/config.toml"
+        assertTrue(console.err.endsWith("ostrom: signed in, but could not write $path\n"), console.err.toString())
+        // credentials.json is a folder too: the login cannot be kept
+        fileSystem.delete("/home/maya/.config/ostrom/credentials.json".toPath())
+        fileSystem.createDirectories("/home/maya/.config/ostrom/credentials.json/x".toPath())
+        assertEquals(73, cli(environment = home, api = serverOf(deviceFlow)).run(arrayOf("login")))
+        assertTrue(console.err.contains("ostrom: signed in, but could not write /home/maya/.config/ostrom ("))
+    }
+
+    @Test
+    fun theSignInPageMustBeOnTheGitHubConfigured() {
+        // S2-35: OSTROM_GITHUB_WEB_URL names the GitHub of a GitHub Enterprise; github.com's page is then refused
+        val enterprise = withServer + ("OSTROM_GITHUB_WEB_URL" to "https://ghe.acme.example/")
+        val page = """{"deviceCode":"dc","userCode":"X","verificationUri":"https://ghe.acme.example/login/device"}"""
+        val flow = deviceFlow + ("POST /api/v1/auth/device" to (200 to page))
+        assertEquals(0, cli(environment = enterprise, api = serverOf(flow)).run(arrayOf("login")))
+        assertTrue(console.err.contains("Open https://ghe.acme.example/login/device"), console.err.toString())
+        val github = """{"deviceCode":"dc","verificationUri":"https://github.com/login/device"}"""
+        val elsewhere = deviceFlow + ("POST /api/v1/auth/device" to (200 to github))
+        assertEquals(69, cli(environment = enterprise, api = serverOf(elsewhere)).run(arrayOf("login")))
+        assertTrue(console.err.contains("a sign-in page that is not GitHub's"), console.err.toString())
+    }
+
+    @Test
+    fun aLoginThatStopsSaysWhyWithTheSpecsCode() {
+        val noAccess = 403 to """{"error":{"message":"no access"}}"""
+        val refused = deviceFlow + ("POST /api/v1/auth/device/token" to noAccess)
+        assertEquals(77, cli(environment = withServer, api = serverOf(refused)).run(arrayOf("login")))
+        assertTrue(console.err.endsWith("no access\n"), console.err.toString())
+        assertEquals(73, cli(environment = emptyMap()).run(arrayOf("login")))
+        assertTrue(console.err.endsWith("ostrom: no folder for ostrom's files: set OSTROM_HOME\n"))
+    }
+
+    @Test
+    fun logoutTellsTheServerForgetsTheTokenAndKeepsTheReceipts() {
+        signIn("/home/maya/.config/ostrom")
+        val logout = mapOf("POST /api/v1/auth/logout" to (204 to ""))
+        assertEquals(0, cli(environment = withServer, api = serverOf(logout)).run(arrayOf("logout")))
+        assertEquals("ost_1", requests.single().second.token)
+        assertOut("✓ Signed out @maya. Receipts kept in /home/maya/.config/ostrom/receipts.\n")
+        val credentials = fileSystem.read("/home/maya/.config/ostrom/credentials.json".toPath()) { readUtf8() }
+        assertTrue("ost_1" !in credentials, credentials)
+        assertEquals(0, cli(environment = withServer, api = serverOf(logout)).run(arrayOf("logout")))
+        assertOut("Not signed in. Nothing to do.\n")
+    }
+
+    @Test
+    fun logoutForgetsTheServerEvenWhenNoTokenIsRead() {
+        // S2-32: a token left only in the other store (the encrypted file of an SSH session) is forgotten too
+        val deleted = mutableListOf<String>()
+        val elsewhere: () -> SecretStore = {
+            object : SecretStore {
+                override val backend = SecretBackend.SECRET_SERVICE
+                override fun read(name: String): String? = null
+                override fun write(name: String, secret: String) = Unit
+                override fun delete(name: String) {
+                    deleted += name
+                }
+            }
+        }
+        assertEquals(0, cli(environment = withServer, secrets = elsewhere).run(arrayOf("logout")))
+        assertOut("Not signed in. Nothing to do.\n")
+        assertEquals(listOf("https://ostrom.example"), deleted)
+    }
+
+    @Test
+    fun aSecretStoreThatDoesNotAnswerStopsTheCommandWithItsReason() {
+        signIn("/home/maya/.config/ostrom")
+        val locked: () -> SecretStore = { throw SecretStoreException("the Keychain is locked") }
+        assertEquals(69, cli(environment = withServer, secrets = locked).run(arrayOf("logout")))
+        assertEquals("ostrom: the secret store did not answer: the Keychain is locked\n", console.err.toString())
+    }
+
+    @Test
+    fun logoutStillForgetsTheTokenWhenTheServerCannotBeTold() {
+        signIn("/home/maya/.config/ostrom")
+        assertEquals(0, cli(environment = withServer, api = serverOf(emptyMap())).run(arrayOf("logout")))
+        assertTrue(console.err.contains("! The server could not be told"), console.err.toString())
+        assertOut("✓ Signed out @maya.")
+        // a server that cannot be reached at all: the same, the token forgotten
+        signIn("/home/maya/.config/ostrom")
+        val down: (String) -> OstromApi = { url ->
+            object : OstromApi {
+                override suspend fun get(path: String): ServerResponse =
+                    throw ServerUnreachableException(url + path, Exception("refused"))
+                override suspend fun send(request: ServerRequest) = get(request.path)
+            }
+        }
+        assertEquals(0, cli(environment = withServer, api = down).run(arrayOf("logout")))
+        assertTrue(secretsKept.isEmpty(), secretsKept.toString())
+    }
+
+    @Test
+    fun logoutRevokesTheSavedSessionNeverTheEnvironmentsToken() {
+        signIn("/home/maya/.config/ostrom")
+        val ci = withServer + ("OSTROM_TOKEN" to "ost_ci") + ("OSTROM_DEV" to "bot")
+        // an expired session (401) had nothing left to revoke: no warning
+        val logout = mapOf("POST /api/v1/auth/logout" to (401 to """{"error":{"message":"expired"}}"""))
+        assertEquals(0, cli(environment = ci, api = serverOf(logout)).run(arrayOf("logout")))
+        assertEquals("ost_1", requests.single().second.token, "the device's own session")
+        assertOut("✓ Signed out @maya.")
+        assertTrue("could not be told" !in console.err.toString(), console.err.toString())
+        assertEquals(0, cli(environment = ci, api = serverOf(logout)).run(arrayOf("logout")))
+        assertOut("Not signed in. Nothing to do.\n")
+    }
+
+    @Test
+    fun anAgentsSessionCannotSignTheDeviceInOrOut() {
+        // S2-32: the agent's shell could sign the developer out, or point the device at another server
+        signIn("/home/maya/.config/ostrom")
+        val session = withServer + ("OSTROM_LAUNCH_ID" to "L1")
+        for (command in listOf("login", "logout")) {
+            assertEquals(64, cli(environment = session).run(arrayOf(command)))
+            val refusal = "ostrom $command does not run inside an agent's session: run it in your own terminal\n"
+            assertTrue(console.err.endsWith(refusal), console.err.toString())
+        }
+        assertEquals(emptyList(), requests, "nothing reaches the server")
+        // an empty variable is no session
+        val logout = serverOf(mapOf("POST /api/v1/auth/logout" to (200 to "{}")))
+        assertEquals(0, cli(environment = withServer + ("OSTROM_LAUNCH_ID" to ""), api = logout).run(arrayOf("logout")))
+    }
+
+    @Test
     fun doctorWarnsAboutTheEncryptedFileAndFailsWithoutAnyStore() {
         assertEquals(0, cli(secrets = storeIn(SecretBackend.ENCRYPTED_FILE)).run(arrayOf("doctor")))
         assertOut("  ! No Secret Service on this device: secrets are kept in an encrypted file only you can read.")
@@ -556,6 +744,7 @@ class OstromCliTest {
             executable = null,
             temporaryDirectory = "/tmp",
             agents = AgentRunner { _, _ -> 0 },
+            sleep = {},
             postHogKey = "",
             sendStatistics = { _, _ -> },
         )
