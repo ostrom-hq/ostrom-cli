@@ -10,6 +10,7 @@ import dev.ostrom.cli.platform.ExecutableFinder
 import dev.ostrom.cli.platform.ProcessCapture
 import dev.ostrom.cli.platform.ProcessLauncher
 import dev.ostrom.cli.platform.ProcessResult
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
@@ -20,6 +21,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** `ostrom <agent>` end to end against fakes: what reaches the server, the agent and the developer. */
+@OptIn(ExperimentalCoroutinesApi::class)
 class AgentLaunchUseCaseTest {
     private val server = FakeServer()
     private val files = MemoryFiles()
@@ -30,8 +32,10 @@ class AgentLaunchUseCaseTest {
     private var agentResult: ProcessResult = ProcessResult.Exited(3)
     private val commands = mutableListOf<List<String>>()
     private val environments = mutableListOf<Map<String, String?>>()
+    private val filesWhileRunning = mutableMapOf<String, String>()
     private val relaySettings = mutableListOf<RelaySettings>()
     private var relayClosed = false
+    private var adapters: List<AgentAdapter> = listOf(ClaudeAdapter(), CodexAdapter())
 
     private val processes = object : ProcessLauncher {
         override fun run(command: List<String>, environment: Map<String, String?>): ProcessResult {
@@ -39,6 +43,8 @@ class AgentLaunchUseCaseTest {
             environments += environment
             // The agent's session hook records its session, as the real one does.
             environment[LaunchVariables.SESSION_FILE]?.let { files.texts[it] = "s1" }
+            // the session's folder is removed once the agent ends: what it saw is kept here
+            filesWhileRunning += files.texts
             return agentResult
         }
     }
@@ -98,11 +104,11 @@ class AgentLaunchUseCaseTest {
         assertEquals("""{"repo":"acme-api","agent":"claude-code"}""", created.body)
         assertEquals("dev-token", created.token)
         assertEquals("agent-token", server.sent("POST /api/v1/sessions/s1/end").single().token)
-        val settings = checkNotNull(parseObject(files.texts[join(temporary, "session-env.json")]))
+        val settings = checkNotNull(parseObject(filesWhileRunning[join(temporary, "session-env.json")]))
         assertEquals(FileAccess.PRIVATE, files.access[join(temporary, "session-env.json")])
         assertEquals("relay-token", settings.text(LaunchVariables.RELAY_TOKEN))
         assertFalse(settings.containsKey("PATH") || settings.containsKey(LaunchVariables.DEVICE_TOKEN))
-        assertEquals("""{"gates":[]}""", files.texts[join(temporary, "plugin", "ostrom", "gates.json")])
+        assertEquals("""{"gates":[]}""", filesWhileRunning[join(temporary, "plugin", "ostrom", "gates.json")])
         assertEquals(
             listOf(
                 "ostrom: no session package for acme-api; your organisation's gates apply",
@@ -216,7 +222,7 @@ class AgentLaunchUseCaseTest {
     @Test
     fun aRefusedPackageOrNoPrivateFolderStopsTheLaunch() = runTest {
         serveALaunch()
-        server["GET ${Routes.PACKAGE}?repo=acme-api"] = 200 to """{"format":"x"}"""
+        server["GET ${Routes.PACKAGE}?repo=acme-api"] = 200 to """{"format":"x","payload":"e30="}"""
         assertEquals(78, start())
         assertEquals(
             "ostrom: session package refused: not an ostrom.package/1 envelope. The agent is not started.",
@@ -249,7 +255,8 @@ class AgentLaunchUseCaseTest {
             override fun prepare(layout: dev.ostrom.cli.launcher.adapters.SessionLayout, files: LaunchFiles) =
                 throw AdapterException("the embedded plugin changed shape")
         }
-        assertEquals(70, start(adapters = listOf(broken)))
+        adapters = listOf(broken)
+        assertEquals(70, start())
         assertEquals("ostrom: the embedded plugin changed shape", said.last())
         assertTrue(relayClosed, "the relay is closed")
         assertEquals(listOf(temporary), files.deleted)
@@ -304,7 +311,7 @@ class AgentLaunchUseCaseTest {
         server.unreachable = setOf("GET ${Routes.MCP_SERVERS}", "GET ${Routes.CATALOG}?repo=acme-api")
         assertEquals(3, start(executable = "ostrom"))
         assertTrue("ostrom: your organisation's MCP servers are not listed (connection refused)" in said)
-        assertNull(files.texts[join(temporary, "plugin", "ostrom", "gates.json")])
+        assertNull(filesWhileRunning[join(temporary, "plugin", "ostrom", "gates.json")])
         assertEquals("/usr/bin", environments.single()["PATH"], "a bare executable name adds no folder")
         assertEquals(emptySet(), relaySettings.single().mcpServers)
     }
@@ -327,7 +334,6 @@ class AgentLaunchUseCaseTest {
         repo: String? = null,
         model: String? = null,
         executable: String = join("/opt/bin", "ostrom"),
-        adapters: List<AgentAdapter> = listOf(ClaudeAdapter(), CodexAdapter()),
     ): Int {
         val dependencies = LaunchDependencies(
             server = ServerJson(server),
