@@ -10,7 +10,7 @@ All repository content (code, comments, docs, commits, pull requests) is in Engl
 
 ## Specific to this repository
 
-Never depend on server modules: only ostrom-core's `api`, `client` and protocol modules. Processes and PTY go through thin cinterop headers (`src/nativeInterop/cinterop`), as teamcode's `process.h`. End-to-end tests run the real binary against the real server, with a fake agent that plays the hooks; the hook start-up time has a tested budget.
+Never depend on server modules: only ostrom-core's `api`, `client` and protocol modules. Processes and PTY go through thin cinterop headers (`src/nativeInterop/cinterop`), as teamcode's `process.h`. End-to-end tests run the real binary against the real server, with a fake agent that plays the hooks; the hook start-up time has a tested budget. Budgets tested in CI on the release binary: hook < 15 ms, `ostrom --version` < 30 ms (CONVENTIONS.md section 16.3).
 
 ## The 15 rules that matter most
 
