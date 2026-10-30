@@ -103,13 +103,14 @@ class OstromApiTest {
 
     /**
      * A real HTTPS call with the platform's engine and certificate store, on each of the four targets. It needs the
-     * network, so it runs only with OSTROM_NETWORK_TESTS=1 (set by CI).
+     * network, so it runs only with OSTROM_NETWORK_TESTS=1 (set by CI). Any HTTP answer proves the TLS handshake and
+     * the certificate check: a shared runner is often over GitHub's anonymous rate limit and gets 403 or 429.
      */
     @Test
     fun aRealHttpsCallSucceeds() {
         if (EnvironmentImpl()["OSTROM_NETWORK_TESTS"] != "1") return
         val response = runBlocking { OstromApiImpl("https://api.github.com", "ostrom-cli-tests").get("/zen") }
-        assertEquals(200, response.status, response.body)
+        assertTrue(response.status in HTTP_ANSWERS, "status ${response.status}")
         assertTrue(response.body.isNotBlank())
     }
 
@@ -118,5 +119,9 @@ class OstromApiTest {
         assertEquals("connection refused", ServerUnreachableException("u", IOException("connection refused")).reason)
         val bare = ServerUnreachableException("u", IOException())
         assertTrue(bare.reason.endsWith("IOException"), "no message: its type")
+    }
+
+    private companion object {
+        val HTTP_ANSWERS = 200..599
     }
 }
