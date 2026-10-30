@@ -31,6 +31,7 @@ import dev.ostrom.cli.platform.ProcessCaptureImpl
 import dev.ostrom.cli.platform.ProcessLauncherImpl
 import dev.ostrom.cli.platform.currentExecutable
 import dev.ostrom.cli.relay.LocalRelayStarterImpl
+import dev.ostrom.cli.update.AgentSessionsImpl
 import dev.ostrom.cli.update.SelfUpdate
 import dev.ostrom.cli.update.TarUnpacker
 import kotlinx.coroutines.Dispatchers
@@ -92,6 +93,7 @@ class CliDependencies(
             val finder = ExecutableFinderImpl(environment)
             val api = { url: String -> OstromApiImpl(url, USER_AGENT) }
             val launchFiles = LaunchFilesImpl()
+            val temporary = FileSystem.SYSTEM_TEMPORARY_DIRECTORY.toString()
             return CliDependencies(
                 console = console,
                 environment = environment,
@@ -105,7 +107,7 @@ class CliDependencies(
                 },
                 workingDirectory = { FileSystem.SYSTEM.canonicalize(".".toPath()).toString() },
                 executable = currentExecutable(),
-                temporaryDirectory = FileSystem.SYSTEM_TEMPORARY_DIRECTORY.toString(),
+                temporaryDirectory = temporary,
                 agents = AgentRunnerImpl(
                     console = console,
                     finder = finder,
@@ -125,6 +127,7 @@ class CliDependencies(
                     FileSystem.SYSTEM,
                     TarUnpacker(ProcessLauncherImpl()),
                     { console.out("$it\n") },
+                    AgentSessionsImpl(environment, FileSystem.SYSTEM, temporary, LoopbackHttpImpl()),
                 ),
             )
         }

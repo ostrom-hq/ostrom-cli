@@ -21,9 +21,15 @@ import dev.ostrom.cli.platform.Console
 import dev.ostrom.cli.platform.Environment
 import dev.ostrom.cli.platform.ExecutableFinder
 import dev.ostrom.cli.platform.FileStoreImpl
+import dev.ostrom.cli.platform.LoopbackHttp
+import dev.ostrom.cli.platform.LoopbackRequest
+import dev.ostrom.cli.platform.LoopbackResponse
 import dev.ostrom.cli.platform.OperatingSystem
 import dev.ostrom.cli.platform.StandardInput
+import dev.ostrom.cli.update.AgentSessionsImpl
 import dev.ostrom.cli.update.SelfUpdate
+import dev.ostrom.cli.update.UpdateRequest
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import okio.Path.Companion.toPath
 import okio.fakefilesystem.FakeFileSystem
@@ -63,6 +69,10 @@ class OstromCliTest {
     private val opened = mutableListOf<String>()
     private var browser = true
     private val releaseUrls = mutableListOf<String>()
+    private val noRelay = object : LoopbackHttp {
+        override fun exchange(port: Int, request: LoopbackRequest, timeoutMillis: Int): Result<LoopbackResponse> =
+            Result.failure(IllegalStateException("nothing listens"))
+    }
     private val requests = mutableListOf<Pair<String, ServerRequest>>()
 
     /** A server that answers `METHOD path` from [routes] (404 otherwise), recording each request with its server. */
@@ -127,6 +137,7 @@ class OstromCliTest {
                 fileSystem = fileSystem,
                 unpack = { _, _ -> false },
                 say = { console.out("$it\n") },
+                sessions = AgentSessionsImpl(FakeEnvironment(environment), fileSystem, "/tmp", noRelay),
             ),
         ),
     )
@@ -374,7 +385,8 @@ class OstromCliTest {
         val dependencies = CliDependencies.create()
         dependencies.api("https://ostrom.example")
         dependencies.mcpServer()
-        assertEquals(66, dependencies.selfUpdate.rollback("/nowhere-ostrom/ostrom"))
+        val nowhere = UpdateRequest("1.0.0", "linux-x64", "/nowhere-ostrom/ostrom", "https://releases.example")
+        assertEquals(66, runBlocking { dependencies.selfUpdate.rollback(nowhere) })
         assertTrue(dependencies.configFile("/x").endsWith("config.toml"))
         assertTrue(dependencies.workingDirectory().isNotEmpty())
         assertEquals(null, dependencies.credentials("/nowhere-ostrom").load("https://ostrom.example")?.login)
@@ -599,6 +611,16 @@ class OstromCliTest {
     fun updateRollbackNeedsAKeptBinary() {
         assertEquals(66, cli().run(arrayOf("update", "--rollback")))
         assertOut("No previous version of ostrom is kept on this device.\n")
+    }
+
+    @Test
+    fun updateNeverRunsInsideAnAgentsSession() {
+        // S2-39: the agent used to roll back or downgrade the ostrom that runs its own hooks
+        val session = mapOf("HOME" to "/home/maya", "OSTROM_LAUNCH_ID" to "L1")
+        assertEquals(77, cli(environment = session).run(arrayOf("update", "--version", "0.1.0")))
+        assertEquals(77, cli(environment = session).run(arrayOf("update", "--rollback")))
+        assertOut("✗ ostrom does not update itself inside an agent's session (OSTROM_LAUNCH_ID is set).")
+        assertEquals(emptyList(), releaseUrls, "nothing was fetched")
     }
 
     @Test

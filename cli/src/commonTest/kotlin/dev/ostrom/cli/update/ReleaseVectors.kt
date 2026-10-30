@@ -22,6 +22,20 @@ internal object ReleaseVectors {
             "0c449c72547b77ddfa22e96ad5ee677ef6c05c7b31ce43e3798bb5a3\",\"size\":27}}}" to
                 "Irv2Rjp64IA5n5S4gokB4mmcz6BBAEyiKDMjzl4jRFTLHznDCLJ5IQznFWR9lHaDC/DcpjCd1aBesU9oXsH/BQ==\n"
         ),
+        "LATEST_FLOOR" to (
+            "{\"version\":\"9.9.9\",\"floor\":\"1.0.0\",\"date\":\"2026-10-30T10:00:00Z\"," +
+            "\"assets\":{\"linux-x64\":{\"url\":\"https" +
+            "://releases.example/download/9.9.9/ostrom-9.9.9-linux-x64.tar.gz\",\"sha256\":\"9a1f0d88" +
+            "0c449c72547b77ddfa22e96ad5ee677ef6c05c7b31ce43e3798bb5a3\",\"size\":27}}}" to
+                "K4KxaKbIgU8zp+uAuHNNaC2+7oCObZc0F2WX/4O+JIgfQYPZ1X6rxrX6yKpJvbqEkQjl/LL2WOoBFXAgPceRDA==\n"
+        ),
+        "LATEST_LOW_FLOOR" to (
+            "{\"version\":\"9.9.9\",\"floor\":\"0.5.0\",\"date\":\"2026-10-30T10:00:00Z\"," +
+            "\"assets\":{\"linux-x64\":{\"url\":\"https" +
+            "://releases.example/download/9.9.9/ostrom-9.9.9-linux-x64.tar.gz\",\"sha256\":\"9a1f0d88" +
+            "0c449c72547b77ddfa22e96ad5ee677ef6c05c7b31ce43e3798bb5a3\",\"size\":27}}}" to
+                "lWUzVOCuimQPcvE4eT2fpOOfjexmoVmIl4VmY6A9ReL9Pw4nwPJLCaIwf/DWiMOKRIDXEttYY45V8EAcekABCg==\n"
+        ),
         "SAME" to (
             "{\"version\":\"1.0.0\",\"date\":\"2026-10-30T10:00:00Z\",\"assets\":{\"linux-x64\":{\"url\":\"https" +
             "://releases.example/download/9.9.9/ostrom-9.9.9-linux-x64.tar.gz\",\"sha256\":\"9a1f0d88" +
