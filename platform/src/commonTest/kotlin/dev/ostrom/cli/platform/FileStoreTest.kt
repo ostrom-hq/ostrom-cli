@@ -56,7 +56,8 @@ class FileStoreTest {
         val fake = FakeFileSystem()
         fake.write("/a".toPath()) { writeUtf8("a file, not a folder") }
         val locked = FileStoreImpl(fake)
-        assertEquals("/a/b.lock", assertFailsWith<FileWriteException> { locked.exclusive("/a/b") { } }.path)
+        // Its folder cannot be made: a file stands where a folder of its path should be.
+        assertEquals("/a/b/c.lock", assertFailsWith<FileWriteException> { locked.exclusive("/a/b/c") { } }.path)
         assertFailsWith<IllegalArgumentException> { locked.exclusive("/") { } }
         assertEquals(2, locked.exclusive("/c/d") { 2 })
     }
