@@ -168,6 +168,7 @@ fun pendingCommands(implemented: List<CliktCommand>): List<CliktCommand> {
         InviteCommand(),
         MembersCommand().subcommands(MembersListCommand(), MembersRoleCommand(), MembersRemoveCommand()),
         PolicyCommand().subcommands(PolicyShowCommand(), PolicySetCommand()),
+        ImportCommand().subcommands(named("teamcode")),
         WaitCommand(),
         CheckCommand(),
     )

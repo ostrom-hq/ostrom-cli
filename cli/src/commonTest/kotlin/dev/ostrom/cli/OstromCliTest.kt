@@ -10,6 +10,7 @@ import dev.ostrom.cli.api.ServerRequest
 import dev.ostrom.cli.api.ServerResponse
 import dev.ostrom.cli.api.ServerUnreachableException
 import dev.ostrom.cli.hooks.HookRunner
+import dev.ostrom.cli.imports.FakeMysql
 import dev.ostrom.cli.launch.AgentRunner
 import dev.ostrom.cli.launcher.Agent
 import dev.ostrom.cli.launcher.Credentials
@@ -601,6 +602,7 @@ class OstromCliTest : CliKit() {
             temporaryDirectory = "/tmp",
             agents = AgentRunner { _, _ -> 0 },
             sleep = {},
+            capture = FakeMysql(),
             readLine = { null },
             openUrl = { false },
             postHogKey = "",
