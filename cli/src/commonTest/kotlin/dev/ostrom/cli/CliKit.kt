@@ -117,7 +117,8 @@ open class CliKit {
             mcpServer = { object : McpServer { override fun serve() = 0 } },
             credentials = { directory ->
                 val path = (directory.toPath() / "credentials.json").toString()
-                FileCredentialStore(LaunchFilesImpl(fileSystem) { _, _ -> }, path, secrets) { environment[it] }
+                val files = LaunchFilesImpl(fileSystem) { _, _ -> }
+                FileCredentialStore(files, path, secrets, { console.err("$it\n") }) { environment[it] }
             },
             workingDirectory = { "/work/acme" },
             executable = executable,
@@ -155,10 +156,12 @@ open class CliKit {
         }
     }
 
+    /** Signs this device in as `ost_1`, @maya: the token in the secret store, the login in `credentials.json`. */
     protected fun signIn(directory: String, server: String = "https://ostrom.example") {
         fileSystem.createDirectories(directory.toPath())
         fileSystem.write(directory.toPath() / "credentials.json") {
-            writeUtf8("""{"$server":{"token":"ost_1","login":"maya"}}""")
+            writeUtf8("""{"$server":{"login":"maya"}}""")
         }
+        secretsKept[server] = "ost_1"
     }
 }
