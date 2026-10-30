@@ -89,3 +89,91 @@ private fun quoteWindowsArgument(argument: String): String =
  * or null when the platform does not say.
  */
 expect fun currentExecutable(): String?
+
+/**
+ * How Windows starts [command]: `CreateProcessW`'s application and command line. A `.cmd` or `.bat` script (npm's
+ * `claude.cmd`) runs in `cmd.exe`, whose parser expands `%VAR%` and splits on `&` and `|` even inside the quotes of
+ * [windowsCommandLine]: it gets the command line of [windowsBatchCommandLine] instead (the BatBadBut fix of Rust's
+ * standard library), and `cmd.exe` from [systemRoot] as its application.
+ *
+ * @return The launch, or null when an argument cannot reach a script intact (a line break, a NUL).
+ */
+internal fun windowsLaunch(command: List<String>, systemRoot: String?): WindowsLaunch? {
+    val executable = command.first()
+    if (!isBatchScript(executable)) return WindowsLaunch(null, windowsCommandLine(command))
+    return windowsBatchCommandLine(executable, command.drop(1))
+        ?.let { WindowsLaunch("${systemRoot ?: DEFAULT_SYSTEM_ROOT}\\System32\\cmd.exe", it) }
+}
+
+/** The application (null: the first word of [commandLine]) and the command line of a Windows launch. */
+internal data class WindowsLaunch(val application: String?, val commandLine: String)
+
+private const val DEFAULT_SYSTEM_ROOT = "C:\\Windows"
+
+/** True when Windows runs [executable] through `cmd.exe`: a `.bat` or `.cmd` script. */
+internal fun isBatchScript(executable: String): Boolean {
+    val name = executable.lowercase()
+    return name.endsWith(".cmd") || name.endsWith(".bat")
+}
+
+/**
+ * The `cmd.exe /c` command line that runs the script [script] with [arguments] passed as they are: each argument
+ * that is not plainly safe is quoted, its quotes doubled, and every `%` made unable to expand a variable
+ * (`%%cd:~,` before it, an empty substring of `%cd%`). Port of `make_bat_command_line` of Rust's standard library.
+ *
+ * @return The command line, or null when the script's path holds a quote or ends with a backslash, or the path or an
+ * argument holds a line break or a NUL, which `cmd.exe` cannot receive intact.
+ */
+internal fun windowsBatchCommandLine(script: String, arguments: List<String>): String? {
+    val refused = '"' in script || script.endsWith('\\') ||
+        (arguments + script).joinToString("").any { it in BATCH_REFUSED }
+    return if (refused) null else buildString {
+        append("cmd.exe /e:ON /v:OFF /d /c \"\"").append(script).append('"')
+        for (argument in arguments) {
+            append(' ')
+            appendBatchArgument(argument)
+        }
+        append('"')
+    }
+}
+
+/** Characters neither a batch script's path nor its arguments can hold: they end the command line early. */
+private const val BATCH_REFUSED = "\r\n\u0000"
+
+/** ASCII characters other than letters and digits that need no quotes in a batch argument. */
+private const val BATCH_UNQUOTED = "#$*+-./:?@\\_"
+
+private fun StringBuilder.appendBatchArgument(argument: String) {
+    val quote = argument.isEmpty() || argument.endsWith('\\') || argument.any(::needsBatchQuotes)
+    if (quote) append('"')
+    var backslashes = 0
+    for (character in argument) {
+        when (character) {
+            '\\' -> backslashes++
+            '"' -> {
+                // Backslashes before a quote are doubled by the backslashes already written; the quote is doubled.
+                repeat(backslashes) { append('\\') }
+                append('"')
+                backslashes = 0
+            }
+            '%' -> {
+                append("%%cd:~,")
+                backslashes = 0
+            }
+            else -> backslashes = 0
+        }
+        append(character)
+    }
+    if (quote) {
+        repeat(backslashes) { append('\\') }
+        append('"')
+    }
+}
+
+private fun needsBatchQuotes(character: Char): Boolean {
+    // Every ASCII symbol is quoted unless known to be safe; on ASCII, isLetterOrDigit is exactly [A-Za-z0-9].
+    val plain = character.isLetterOrDigit() || character in BATCH_UNQUOTED
+    return (character.code < ASCII_END && !plain) || character.isISOControl()
+}
+
+private const val ASCII_END = 128
