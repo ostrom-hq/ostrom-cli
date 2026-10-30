@@ -60,7 +60,7 @@ class GrokAdapter : AgentAdapter {
             toml.append("[mcp_servers.$label]\ncommand = ${quoted(layout.executable)}\nargs = ${jsonOf(arguments)}\n\n")
         }
         val lines = theirs.lines()
-        val table = lines.indexOfFirst { it.trim() == "[skills]" }
+        val table = lines.indexOfFirst { SKILLS.matches(it) }
         if (table < 0) {
             toml.append("[skills]\npaths = [${quoted(skills)}]\n")
             return toml.toString()
@@ -83,6 +83,9 @@ class GrokAdapter : AgentAdapter {
         const val BUDGET_MILLIS = "4000"
     }
 }
+
+/** The header of the developer's `[skills]` table, spaces and a comment allowed (TOML has one table per name). */
+private val SKILLS = Regex("""\s*\[\s*skills\s*]\s*(#.*)?""")
 
 /** The `paths = [` line of the developer's `[skills]` table. */
 private val PATHS = Regex("\\s*paths\\s*=\\s*\\[.*")

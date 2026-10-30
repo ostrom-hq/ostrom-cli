@@ -19,7 +19,11 @@ internal object EmbeddedPlugins {
         |// Ostrom for OpenCode: the gate and session hooks of `ostrom`, fed a Claude-shaped hook event.
         |import { spawn } from 'node:child_process';
         |
-        |const TOOL = { bash: 'Bash', write: 'Write', edit: 'Edit', patch: 'Edit', multiedit: 'MultiEdit' };
+        |// OpenCode's built-in tools by the Claude names the gates know; any other name is an MCP server's tool
+        |const TOOL = {
+        |  bash: 'Bash', write: 'Write', edit: 'Edit', patch: 'Edit', apply_patch: 'Edit', multiedit: 'MultiEdit',
+        |  read: 'Read', grep: 'Grep', glob: 'Glob', list: 'LS', webfetch: 'WebFetch', task: 'Task', todowrite: 'TodoWrite',
+        |};
         |
         |function run(kind, event, timeoutMs) {
         |  return new Promise((resolve) => {
@@ -34,8 +38,17 @@ internal object EmbeddedPlugins {
         |  });
         |}
         |
+        |// the files a patch touches (`*** Add|Update|Delete File: <path>`, and `*** Move to: <path>`)
+        |function patchedFiles(text = '') {
+        |  return [...String(text).matchAll(/^\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+)$/gm)].map((m) => m[1].trim());
+        |}
+        |
         |function toolInput(tool, args = {}) {
         |  if (tool === 'bash') return { command: args.command ?? '' };
+        |  if (tool === 'apply_patch' || tool === 'patch') {
+        |    const files = patchedFiles(args.patchText ?? args.patch);
+        |    return { file_path: files[0] ?? '', file_paths: files, patch: args.patchText ?? args.patch };
+        |  }
         |  if (args.filePath) return { file_path: args.filePath, content: args.content, new_string: args.newString };
         |  return args;
         |}
@@ -45,7 +58,8 @@ internal object EmbeddedPlugins {
         |const argsOf = new Map();
         |
         |const server = async ({ directory, worktree }) => {
-        |  const cwd = worktree || directory || process.cwd();
+        |  // the folder OpenCode runs in; its worktree is the repository's root, or "/" outside a repository
+        |  const cwd = directory || worktree || process.cwd();
         |  const startOnce = async (sessionID) => {
         |    if (!sessionID || started.has(sessionID)) return;
         |    started.add(sessionID);

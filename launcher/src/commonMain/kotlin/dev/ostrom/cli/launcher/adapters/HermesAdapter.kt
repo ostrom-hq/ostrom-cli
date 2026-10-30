@@ -70,9 +70,11 @@ class HermesAdapter : AgentAdapter {
 internal fun withoutTopLevel(yaml: String, keys: Set<String>): String {
     var skipping = false
     val kept = yaml.lines().filter { line ->
-        val topLevel = line.isNotEmpty() && !line[0].isWhitespace() && !line.startsWith("-")
+        // a comment at the margin is kept, and leaves the block it sits in going on
+        val comment = line.startsWith("#")
+        val topLevel = line.isNotEmpty() && !line[0].isWhitespace() && !line.startsWith("-") && !comment
         if (topLevel) skipping = keys.any { line.startsWith("$it:") }
-        !skipping
+        comment || !skipping
     }
     return kept.joinToString("\n")
 }

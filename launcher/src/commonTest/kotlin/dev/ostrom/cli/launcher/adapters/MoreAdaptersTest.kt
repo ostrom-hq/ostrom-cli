@@ -77,6 +77,7 @@ class MoreAdaptersTest {
             "[skills]\nauto = true\n[ui]\npaths = [\"x\"]\n" to
                 "[skills]\npaths = [$ours]\nauto = true\n[ui]\npaths = [\"x\"]\n",
             "[skills]" to "[skills]\npaths = [$ours]",
+            "[skills]  # mine\npaths = [\"/mine\"]\n" to "[skills]  # mine\npaths = [$ours, \"/mine\"]\n",
         )
         for ((theirs, merged) in cases) {
             files.texts[join("/elsewhere", "config.toml")] = theirs
@@ -182,6 +183,9 @@ class MoreAdaptersTest {
         assertTrue(yaml.startsWith("model: x\n# mine\ntheme: dark\n\n# --- Ostrom"), yaml)
         assertEquals(1, yaml.lines().count { it.startsWith("hooks:") }, yaml)
         assertEquals("a: 1\nhooksy: 2", withoutTopLevel("a: 1\nhooksy: 2", setOf("hooks")), "a key, not a prefix")
+        // a comment at the margin inside the block does not end it
+        val commented = "hooks:\n  a: 1\n# note\n  b: 2\ntheme: dark"
+        assertEquals("# note\ntheme: dark", withoutTopLevel(commented, setOf("hooks")))
     }
 
     @Test
