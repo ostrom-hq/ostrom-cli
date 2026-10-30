@@ -10,6 +10,8 @@ import dev.ostrom.cli.commands.ConfigCommand
 import dev.ostrom.cli.commands.DoctorCommand
 import dev.ostrom.cli.commands.HelpCommand
 import dev.ostrom.cli.commands.HookCommand
+import dev.ostrom.cli.commands.LoginCommand
+import dev.ostrom.cli.commands.LogoutCommand
 import dev.ostrom.cli.commands.McpCommand
 import dev.ostrom.cli.commands.RootCommand
 import dev.ostrom.cli.commands.VersionCommand
@@ -48,7 +50,13 @@ class OstromCli(private val dependencies: CliDependencies) {
     internal fun tree(): RootCommand {
         val root = RootCommand(dependencies)
         val agents = Agent.entries.map { AgentCommand(it, dependencies) }
-        val implemented = listOf(ConfigCommand(dependencies), DoctorCommand(dependencies), VersionCommand(dependencies))
+        val implemented = listOf(
+            LoginCommand(dependencies),
+            LogoutCommand(dependencies),
+            ConfigCommand(dependencies),
+            DoctorCommand(dependencies),
+            VersionCommand(dependencies),
+        )
         val plumbing = listOf(HookCommand(dependencies), McpCommand(dependencies))
         // The root always has a help screen: no null to handle.
         val help = HelpCommand(dependencies) { "${root.getFormattedHelp()}" }

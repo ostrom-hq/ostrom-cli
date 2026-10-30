@@ -31,6 +31,7 @@ import dev.ostrom.cli.platform.currentExecutable
 import dev.ostrom.cli.relay.LocalRelayStarterImpl
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
+import kotlinx.coroutines.delay
 import okio.FileSystem
 import okio.Path.Companion.toPath
 
@@ -46,6 +47,7 @@ import okio.Path.Companion.toPath
  * @property executable This binary, or null when the system does not say.
  * @property temporaryDirectory Where a launch makes its private folder.
  * @property agents Runs `ostrom <agent>`.
+ * @property sleep Waits the given milliseconds (the device flow of login; virtual in tests).
  */
 @Suppress("LongParameterList") // The composition root: one parameter per dependency, each replaced in tests.
 class CliDependencies(
@@ -61,6 +63,7 @@ class CliDependencies(
     val executable: String?,
     val temporaryDirectory: String,
     val agents: AgentRunner,
+    val sleep: suspend (Long) -> Unit,
 ) {
     /** The device configuration, or null when no home folder is known. */
     val config: ConfigStore? by lazy {
@@ -104,6 +107,7 @@ class CliDependencies(
                     blocking = Dispatchers.IO,
                     userAgent = USER_AGENT,
                 ),
+                sleep = { delay(it) },
             )
         }
 

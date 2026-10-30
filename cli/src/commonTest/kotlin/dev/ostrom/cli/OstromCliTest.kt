@@ -53,6 +53,25 @@ class OstromCliTest {
     private val hookCalls = mutableListOf<List<String>>()
     private val withServer = mapOf("HOME" to "/home/maya", "OSTROM_URL" to "https://ostrom.example")
     private val launches = mutableListOf<Pair<LaunchRequest, LaunchSite>>()
+    private val waits = mutableListOf<Long>()
+    private val requests = mutableListOf<Pair<String, ServerRequest>>()
+
+    /** A server that answers `METHOD path` from [routes] (404 otherwise), recording each request with its server. */
+    private fun serverOf(routes: Map<String, Pair<Int, String>>): (String) -> OstromApi = { url ->
+        object : OstromApi {
+            override suspend fun get(path: String) = send(ServerRequest("GET", path))
+            override suspend fun send(request: ServerRequest): ServerResponse {
+                requests += url to request
+                val (status, body) = routes["${request.method} ${request.path}"] ?: (404 to "{}")
+                return ServerResponse(status, body, 1)
+            }
+        }
+    }
+
+    private val deviceFlow = mapOf(
+        "POST /api/v1/auth/device" to (200 to """{"deviceCode":"dc","userCode":"4F2C-9B1D","interval":1}"""),
+        "POST /api/v1/auth/device/token" to (200 to """{"token":"ost_new","login":"maya-k"}"""),
+    )
 
     /** A server that answers every request with [status] after [millis]. */
     private fun serverAnswering(status: Int, millis: Long): (String) -> OstromApi = {
@@ -91,6 +110,7 @@ class OstromCliTest {
             executable = executable,
             temporaryDirectory = "/tmp",
             agents = AgentRunner { request, site -> 7.also { launches += request to site } },
+            sleep = { waits += it },
         ),
     )
 
@@ -358,5 +378,57 @@ class OstromCliTest {
         val cli = cli()
         cli.report(cli.tree(), Abort())
         assertEquals("", console.out.toString() + console.err.toString())
+    }
+
+    @Test
+    fun loginKeepsTheTokenAndTheServerOfThisDevice() {
+        val home = mapOf("HOME" to "/home/maya")
+        assertEquals(0, cli(environment = home, api = serverOf(deviceFlow)).run(arrayOf("login")))
+        assertEquals("https://api.ostrom.run", requests.first().first, "Ostrom's server by default")
+        assertTrue(console.err.contains("! Copy your one-time code: 4F2C-9B1D"), console.err.toString())
+        assertOut("✓ Signed in as @maya-k on https://api.ostrom.run\n")
+        assertOut("Next: cd into a repository and run ostrom claude\n")
+        assertEquals(listOf(1_000L), waits)
+        val credentials = fileSystem.read("/home/maya/.config/ostrom/credentials.json".toPath()) { readUtf8() }
+        assertTrue("ost_new" in credentials && "maya-k" in credentials, credentials)
+        val config = fileSystem.read("/home/maya/.config/ostrom/config.toml".toPath()) { readUtf8() }
+        assertTrue("https://api.ostrom.run" in config, config)
+        // the next login goes to the same server, and the option wins over both
+        assertEquals(0, cli(environment = home, api = serverOf(deviceFlow)).run(arrayOf("login")))
+        assertEquals("https://api.ostrom.run", requests.last().first)
+        val option = arrayOf("login", "--server", "https://self.example/")
+        assertEquals(0, cli(environment = withServer, api = serverOf(deviceFlow)).run(option))
+        assertEquals("https://self.example", requests.last().first)
+    }
+
+    @Test
+    fun aLoginThatStopsSaysWhyWithTheSpecsCode() {
+        val noAccess = 403 to """{"error":{"message":"no access"}}"""
+        val refused = deviceFlow + ("POST /api/v1/auth/device/token" to noAccess)
+        assertEquals(77, cli(environment = withServer, api = serverOf(refused)).run(arrayOf("login")))
+        assertTrue(console.err.endsWith("no access\n"), console.err.toString())
+        assertEquals(73, cli(environment = emptyMap()).run(arrayOf("login")))
+        assertTrue(console.err.endsWith("ostrom: no folder for ostrom's files: set OSTROM_HOME\n"))
+    }
+
+    @Test
+    fun logoutTellsTheServerForgetsTheTokenAndKeepsTheReceipts() {
+        signIn("/home/maya/.config/ostrom")
+        val logout = mapOf("POST /api/v1/auth/logout" to (204 to ""))
+        assertEquals(0, cli(environment = withServer, api = serverOf(logout)).run(arrayOf("logout")))
+        assertEquals("ost_1", requests.single().second.token)
+        assertOut("✓ Signed out @maya. Receipts kept in /home/maya/.config/ostrom/receipts.\n")
+        val credentials = fileSystem.read("/home/maya/.config/ostrom/credentials.json".toPath()) { readUtf8() }
+        assertTrue("ost_1" !in credentials, credentials)
+        assertEquals(0, cli(environment = withServer, api = serverOf(logout)).run(arrayOf("logout")))
+        assertOut("Not signed in. Nothing to do.\n")
+    }
+
+    @Test
+    fun logoutStillForgetsTheTokenWhenTheServerCannotBeTold() {
+        signIn("/home/maya/.config/ostrom")
+        assertEquals(0, cli(environment = withServer, api = serverOf(emptyMap())).run(arrayOf("logout")))
+        assertTrue(console.err.contains("! The server could not be told"), console.err.toString())
+        assertOut("✓ Signed out @maya.")
     }
 }
