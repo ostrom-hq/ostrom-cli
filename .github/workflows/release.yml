@@ -12,8 +12,8 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Version label for the dry run (no leading v)
-        default: 0.0.0-dryrun
+        description: Version label for the dry run (no leading v); empty is the version floor, `<floor>-dryrun`
+        default: ''
         required: false
 
 permissions:
@@ -35,6 +35,12 @@ jobs:
       version: ${{ steps.v.outputs.version }}
       publish: ${{ steps.v.outputs.publish }}
     steps:
+      # The default dry-run label is the version floor's: a label under the floor (S2-39) stops latest-json.sh.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: release-floor.txt
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
       - id: v
         env:
           EVENT: ${{ github.event_name }}
@@ -46,7 +52,7 @@ jobs:
             version="$REF_NAME"
             publish=true
           else
-            version="${INPUT_VERSION:-0.0.0-dryrun}"
+            version="${INPUT_VERSION:-$(tr -d ' \n\r' < release-floor.txt)-dryrun}"
             publish=false
           fi
           case "$version" in
