@@ -42,15 +42,22 @@ class McpCommand(private val dependencies: CliDependencies) : CliktCommand(name 
     }
 }
 
-/** `ostrom help [plumbing]`: the help screen, or the commands agents call that the help screen hides. */
-class HelpCommand(private val dependencies: CliDependencies) : CliktCommand(name = "help") {
+/**
+ * `ostrom help [plumbing]`: the help screen, or the commands agents call that the help screen hides.
+ *
+ * @param rootHelp The help screen of `ostrom`.
+ */
+class HelpCommand(
+    private val dependencies: CliDependencies,
+    private val rootHelp: () -> String,
+) : CliktCommand(name = "help") {
     private val topic by argument("topic", help = "plumbing").optional()
 
     override fun help(context: Context) = "Show help (ostrom help plumbing: the commands agents call)"
 
     override fun run() {
         when (topic) {
-            null -> dependencies.console.out((currentContext.parent?.command?.getFormattedHelp() ?: "") + "\n")
+            null -> dependencies.console.out(rootHelp() + "\n")
             "plumbing" -> dependencies.console.out(PLUMBING)
             else -> {
                 dependencies.console.err("Unknown help topic \"$topic\". Topics: plumbing.\n")

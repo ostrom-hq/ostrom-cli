@@ -36,7 +36,7 @@ class ExecutableFinderTest {
         val fileSystem = FakeFileSystem()
         fileSystem.createDirectories("/tools".toPath())
         fileSystem.write("/tools/claude.cmd".toPath()) { writeUtf8("") }
-        val finder = ExecutableFinderImpl(windows("PATH" to "/tools", "PATHEXT" to ".EXE;.CMD"), fileSystem)
+        val finder = ExecutableFinderImpl(windows("PATH" to "/tools", "PATHEXT" to ".EXE;;.CMD"), fileSystem)
         assertEquals("/tools/claude.cmd".toPath().toString(), finder.find("claude"))
     }
 
