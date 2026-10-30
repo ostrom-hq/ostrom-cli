@@ -1,10 +1,12 @@
 package = dev.ostrom.cli.platform.interop
 ---
 #include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
 #include <spawn.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -353,4 +355,29 @@ static inline int ostrom_tcp_exchange(int port, const unsigned char *request, in
     }
     close(fd);
     return result;
+}
+
+/*
+ * Opens (creating it, owner-only) and locks the file at `path` with flock, waiting for any other process that holds
+ * it. Returns the descriptor to give back to ostrom_unlock_file, or -1 (errno says why). Closing releases the lock,
+ * also when the process dies.
+ */
+static inline int ostrom_lock_file(const char *path) {
+    int fd;
+    do { fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0600); } while (fd < 0 && errno == EINTR);
+    if (fd < 0) return -1;
+    int locked;
+    do { locked = flock(fd, LOCK_EX); } while (locked != 0 && errno == EINTR);
+    if (locked != 0) {
+        int error = errno;
+        close(fd);
+        errno = error;
+        return -1;
+    }
+    return fd;
+}
+
+static inline void ostrom_unlock_file(int fd) {
+    flock(fd, LOCK_UN);
+    close(fd);
 }
