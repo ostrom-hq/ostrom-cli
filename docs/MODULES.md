@@ -134,6 +134,15 @@ receiving Ctrl-C, stdin read through `PeekNamedPipe`, UTF-8 output on the consol
 `OSTROM_HOME` (the CLI folder, instead of `~/.config/ostrom`) and `OSTROM_HOOK_DIALECT` today; `OSTROM_TOKEN` and
 `OSTROM_CLAUDE_BIN` / `OSTROM_CODEX_BIN` arrive with `login` and the launcher.
 
+## Import from TeamCode
+
+`ostrom import teamcode` (package `dev.ostrom.cli.imports` of `cli`) reads one TeamCode team with the `mysql` client
+(`ProcessCapture`, one `START TRANSACTION READ ONLY`, the password in `MYSQL_PWD`, never on the command line), opens
+TeamCode's credential envelopes with its key file (`aesGcmOpen` of `launcher`: AES-256-GCM, `v1:` then base64url of
+nonce, ciphertext and tag, bound to `variant:<team>:<id>[:<member>]` or `<team>:<account>`), maps the members to
+Ostrom's by e-mail then login, and sends the plan to `POST /api/v1/import/teamcode?dryRun=true` (ostrom-server#28).
+It imports only with `--yes`, and prints no secret.
+
 ## ostrom-core
 
 `api-client` will depend on `dev.ostrom:ostrom-api` (the API models of ostrom-core), read from GitHub Packages

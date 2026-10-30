@@ -7,6 +7,10 @@ import dev.ostrom.cli.api.ServerRequest
 import dev.ostrom.cli.api.ServerResponse
 import dev.ostrom.cli.api.ServerUnreachableException
 import dev.ostrom.cli.hooks.HookRunner
+import dev.ostrom.cli.imports.FULL_SCHEMA
+import dev.ostrom.cli.imports.FakeMysql
+import dev.ostrom.cli.imports.Sealed
+import dev.ostrom.cli.imports.TEAM_TABLES
 import dev.ostrom.cli.launch.AgentRunner
 import dev.ostrom.cli.launcher.Agent
 import dev.ostrom.cli.launcher.Credentials
@@ -20,6 +24,7 @@ import dev.ostrom.cli.platform.Environment
 import dev.ostrom.cli.platform.ExecutableFinder
 import dev.ostrom.cli.platform.FileStoreImpl
 import dev.ostrom.cli.platform.OperatingSystem
+import dev.ostrom.cli.platform.ProcessCapture
 import dev.ostrom.cli.platform.StandardInput
 import kotlinx.coroutines.test.runTest
 import okio.Path.Companion.toPath
@@ -91,6 +96,7 @@ class OstromCliTest {
         installed: Set<String> = setOf("git", "claude"),
         api: (String) -> OstromApi = { error("no server in this test") },
         executable: String? = "/opt/ostrom",
+        capture: ProcessCapture = FakeMysql(),
     ) = OstromCli(
         CliDependencies(
             console = console,
@@ -113,6 +119,7 @@ class OstromCliTest {
             temporaryDirectory = "/tmp",
             agents = AgentRunner { request, site -> 7.also { launches += request to site } },
             sleep = { waits += it },
+            capture = capture,
         ),
     )
 
@@ -121,6 +128,28 @@ class OstromCliTest {
         fileSystem.write(directory.toPath() / "credentials.json") {
             writeUtf8("""{"$server":{"token":"ost_1","login":"maya"}}""")
         }
+    }
+
+    @Test
+    fun importTeamCodeShowsOstromsPlanWithTheTokenOfThisDevice() {
+        val arguments = arrayOf("import", "teamcode", "--db", "mysql://ro@db/teamcode", "--key-file", "/keys/tc.key")
+        assertEquals(65, cli(environment = withServer).run(arguments), "not signed in")
+        assertTrue("set OSTROM_TOKEN to an admin's console token" in console.err.toString(), console.err.toString())
+        signIn("/home/maya/.config/ostrom")
+        assertEquals(64, cli(environment = withServer, capture = FakeMysql(FULL_SCHEMA, TEAM_TABLES)).run(arguments))
+        assertOut("--key-file holds no TeamCode key")
+        fileSystem.createDirectories("/keys".toPath())
+        fileSystem.write("/keys/tc.key".toPath()) { writeUtf8(Sealed.KEY + "\n") }
+        val routes = mapOf(
+            "GET /api/v1/members" to (200 to """{"items":[]}"""),
+            "POST /api/v1/import/teamcode?dryRun=true" to (200 to """{"items":[],"created":3}"""),
+        )
+        val ready = cli(environment = withServer, api = serverOf(routes), capture = FakeMysql(FULL_SCHEMA, TEAM_TABLES))
+        assertEquals(0, ready.run(arguments))
+        assertOut("3 created, 0 updated, 0 unchanged, 0 skipped.\nRun the same command with --yes to import.\n")
+        assertEquals(listOf("ost_1", "ost_1"), requests.map { it.second.token })
+        assertEquals(0, cli().run(arrayOf("import")), "the group shows its help")
+        assertOut("teamcode")
     }
 
     @Test

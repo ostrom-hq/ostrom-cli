@@ -26,6 +26,7 @@ import dev.ostrom.cli.platform.ExecutableFinderImpl
 import dev.ostrom.cli.platform.FileStore
 import dev.ostrom.cli.platform.FileStoreImpl
 import dev.ostrom.cli.platform.LoopbackHttpImpl
+import dev.ostrom.cli.platform.ProcessCapture
 import dev.ostrom.cli.platform.ProcessCaptureImpl
 import dev.ostrom.cli.platform.ProcessLauncherImpl
 import dev.ostrom.cli.platform.currentExecutable
@@ -49,6 +50,7 @@ import okio.Path.Companion.toPath
  * @property temporaryDirectory Where a launch makes its private folder.
  * @property agents Runs `ostrom <agent>`.
  * @property sleep Waits the given milliseconds (the device flow of login; virtual in tests).
+ * @property capture Runs short child processes and reads their output (`mysql` for `ostrom import teamcode`).
  */
 @Suppress("LongParameterList") // The composition root: one parameter per dependency, each replaced in tests.
 class CliDependencies(
@@ -65,6 +67,7 @@ class CliDependencies(
     val temporaryDirectory: String,
     val agents: AgentRunner,
     val sleep: suspend (Long) -> Unit,
+    val capture: ProcessCapture,
 ) {
     /** The device configuration, or null when no home folder is known. */
     val config: ConfigStore? by lazy {
@@ -109,6 +112,7 @@ class CliDependencies(
                     userAgent = USER_AGENT,
                 ),
                 sleep = { delay(it) },
+                capture = ProcessCaptureImpl(),
             )
         }
 

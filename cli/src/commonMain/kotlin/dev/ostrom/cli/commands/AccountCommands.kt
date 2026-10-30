@@ -21,12 +21,12 @@ import dev.ostrom.cli.platform.ConfigStoreImpl
 import kotlinx.coroutines.runBlocking
 
 /** The server of an account command: `--server`, else `OSTROM_URL`, else the one of the last login, else Ostrom's. */
-private fun CliDependencies.serverOf(option: String?, directory: String): String =
+internal fun CliDependencies.serverOf(option: String?, directory: String): String =
     (option ?: environment["OSTROM_URL"] ?: ConfigStoreImpl(files, configFile(directory)).get(ConfigKey.SERVER))
         ?.trimEnd('/') ?: DEFAULT_SERVER
 
 /** The CLI folder, or exit 73. */
-private fun CliDependencies.directory(): String = environment.configDirectory
+internal fun CliDependencies.directory(): String = environment.configDirectory
     ?: throw PrintMessage("ostrom: no folder for ostrom's files: set OSTROM_HOME", ExitCode.CANNOT_WRITE.code, true)
 
 /** `ostrom login [--server URL]`: signs this device in with GitHub, through Ostrom (CLI.md § 2.2). */
