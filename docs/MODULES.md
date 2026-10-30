@@ -84,13 +84,13 @@ C function in the `.def` file and call it. Test it for real in `posixTest` / `mi
 Do not build on a shared Mac directly: CI builds everything. Locally, if unavoidable, go through
 `~/git/ostrom-hq/.coord/build-lock.sh ./gradlew …`.
 
-Every pull request runs two required checks on Linux:
+Every pull request marked ready runs one required check on Linux, `ci` (drafts use no runner):
 
-- `coverage`: `scripts/check-conventions.py` (module graph, broad catches that drop a cancellation), detekt (zero issue), `jvmTest`, and
-  `koverVerify` at 100 % of lines and branches. On failure, `scripts/uncovered.py` lists what is not covered.
-- `native-tests`: `linuxX64Test`; the linuxArm64 and mingwX64 test binaries and the release binaries of the three
-  Linux-built targets; `scripts/measure.py` measures `ostrom hook gate` and `ostrom version` start-up (fails above a
-  15 ms median) and the binary sizes; `ci/build-linux.sh` leaves `dist/ostrom` for the end-to-end bench.
+- `scripts/check-conventions.py` (module graph, broad catches that drop a cancellation), detekt (zero issue), `jvmTest`,
+  and `koverVerify` at 100 % of lines and branches. On failure, `scripts/uncovered.py` lists what is not covered.
+- `linuxX64Test`; the linuxArm64 and mingwX64 test binaries and the release binaries of the three Linux-built targets;
+  `scripts/measure.py` measures `ostrom hook gate` and `ostrom version` start-up (fails above a 15 ms median) and the
+  binary sizes; `ci/build-linux.sh` leaves `dist/ostrom` for the end-to-end bench.
 
 On `main` and on demand (`workflow_dispatch` with `full_validation`), three more jobs run: the
 cross-compiled test binaries of every module on `ubuntu-24.04-arm` and on `windows-latest` (no Gradle there; the
