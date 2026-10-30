@@ -53,14 +53,14 @@ class PushReader(private val git: GitRunner, private val home: String) {
         val segments = if (mentions(text)) ShellWords.segments(text) else emptyList()
         val invocations = segments.map { invocationsOf.pushIn(directory, it) }
         val pushes = invocations.filterNotNull()
-        val problem = if (pushes.isEmpty() && MENTION.containsMatchIn(text)) {
+        val problem = if (pushes.isEmpty() && hidden(segments, text)) {
             NOT_PLAIN
         } else {
             notAlone(segments, invocations)
         }
         if (problem != null) throw UnreadablePushException(problem)
         val ones = pushes.map { onePush(it.directoryIn(directory, home), it.arguments, lenient = false) }
-        val remote = ones.firstOrNull()?.remote ?: return null
+        val remote = (ones.firstOrNull() ?: return null).remote
         if (ones.any { it.remote != remote }) throw UnreadablePushException(TWO_REMOTES)
         return Push(remote, repositoryOf(directory, remote), ones.flatMap { it.refs }, ones.any { it.force })
     }
@@ -87,7 +87,7 @@ class PushReader(private val git: GitRunner, private val home: String) {
     fun destinations(directory: String, text: String): List<String> {
         val segments = if (mentions(text)) ShellWords.segments(text) else emptyList()
         val pushes = segments.mapNotNull { invocationsOf.pushIn(directory, it) }
-        if (pushes.isEmpty() && MENTION.containsMatchIn(text)) throw UnreadablePushException(NOT_PLAIN)
+        if (pushes.isEmpty() && hidden(segments, text)) throw UnreadablePushException(NOT_PLAIN)
         return pushes.flatMap { push ->
             onePush(push.directoryIn(directory, home), push.arguments, lenient = true).refs.map(PushRef::destination)
         }.distinct()
@@ -162,6 +162,8 @@ class PushReader(private val git: GitRunner, private val home: String) {
     }
 
     private fun refOf(directory: String, spec: String, branch: String, delete: Boolean, lenient: Boolean): PushRef {
+        // `refs/heads/*:refs/heads/*` sends every matching branch, main among them: where it lands cannot be read
+        if ('*' in spec) throw UnreadablePushException(PATTERN)
         val source = spec.substringBefore(':')
         val target = spec.substringAfter(':', "")
         if (delete || source.isEmpty()) return PushRef("", shortRef(target.ifEmpty { source }))
@@ -199,12 +201,29 @@ class PushReader(private val git: GitRunner, private val home: String) {
                 verb != null && verb !in NOT_PUSHING
             }
 
+        /**
+         * Whether `git push` written in [text] runs where no push is read: in a program that runs its arguments or
+         * its input (`bash -c '…'`, `… | sh`, `eval`, `xargs`, `python -c`). In a commit message, a search or a PR
+         * body it is only text.
+         */
+        private fun hidden(segments: List<List<String>>, text: String): Boolean =
+            MENTION.containsMatchIn(text) && segments.any { words ->
+                ShellPaths.fileName(words.getOrNull(GitInvocation.programIndex(words)).orEmpty()) in RUNNERS
+            }
+
         /** `refs/heads/main` and `refs/tags/v1` as `main` and `v1`. */
         fun shortRef(ref: String): String = ref.removePrefix("refs/heads/").removePrefix("refs/tags/")
 
         private val MENTION = Regex("\\bgit\\b[^\\n;&|]*\\bpush\\b")
 
         private val NOT_PUSHING = PushInvocations.GIT_COMMANDS - "push"
+        private val RUNNERS = setOf(
+            "sh", "bash", "zsh", "dash", "ksh", "fish", "eval", "exec", "xargs", "source", ".", "parallel", "watch",
+            "ssh", "su", "script", "busybox", "python", "python3", "node", "perl", "ruby", "php", "deno", "bun",
+        )
+        private const val PATTERN =
+            "a refspec with `*` pushes every matching branch, main among them: push each branch by name, as its " +
+                "own command."
         private const val TWO_REMOTES =
             "this command pushes to two remotes: push to one at a time, each as its own command."
         private const val SHOWN = 80 // characters of the command quoted in a refusal

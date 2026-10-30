@@ -113,6 +113,8 @@ const val REQUEST_TIMEOUT_MILLIS = 10_000L
 /** An HTTP client that never throws on a status and gives up after 10 s (connection 5 s). */
 fun defaultHttpClient(): HttpClient = HttpClient {
     expectSuccess = false
+    // a redirect would resend the device or agent token to wherever it points: a 3xx is an answer, never followed
+    followRedirects = false
     install(HttpTimeout) {
         connectTimeoutMillis = CONNECT_TIMEOUT_MILLIS
         requestTimeoutMillis = REQUEST_TIMEOUT_MILLIS

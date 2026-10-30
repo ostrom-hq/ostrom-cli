@@ -77,7 +77,9 @@ class AdaptersTest {
         assertEquals(CallResult.Failed("HTTP 404"), call(404, """{"error":{"message":3}}"""))
         val down = Http(Result.failure(LoopbackException(LoopbackFailure.TIMED_OUT)))
         val late = RelayCalls("http://127.0.0.1:1", null, down).call("/", null, 1)
-        assertEquals(CallResult.Failed("the local relay did not answer in time"), late)
+        assertEquals(CallResult.Failed("the local relay did not answer in time", CallResult.UNREACHABLE), late)
+        assertTrue((late as CallResult.Failed).unreachable, "a relay that does not answer is an outage")
+        assertFalse(CallResult.Failed("HTTP 403").unreachable, "a refusal is not")
     }
 
     @Test
@@ -125,6 +127,16 @@ class AdaptersTest {
         assertFalse(files.write("/s/file/child", "y"), "a file is in the way")
         assertFalse(files.write("/", "z"), "the root has no folder to make and is no file")
         assertNull(files.read("/s"), "a folder is not a file")
+        assertNull(files.readStart("/s", 4))
+    }
+
+    @Test
+    fun aScriptIsReadUpToItsLimitOnly() {
+        val fileSystem = FakeFileSystem()
+        val files = FileSystemHookFiles(fileSystem) { 0 }
+        files.write("/s/big", "x".repeat(100))
+        assertEquals("xxxx", files.readStart("/s/big", 4))
+        assertEquals("x".repeat(100), files.readStart("/s/big", 1_000), "a shorter file whole")
     }
 
     @Test

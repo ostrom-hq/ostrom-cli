@@ -19,14 +19,21 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
             model?.let { "&model=${Routes.encode(it)}" }.orEmpty()
         val answer = dependencies.server.get("${Routes.POLICY}?$query", site.credentials.token, POLICY_MILLIS)
         if (answer is ServerAnswer.Failed) {
-            val reason = "your organisation's policy could not be checked (${answer.message}): the agent is not started"
-            stop(UNREACHABLE, reason)
+            val (code, message) = when (answer.status) {
+                UNAUTHORIZED -> SIGN_IN_REQUIRED to "not signed in to ${site.serverUrl}: run `ostrom login`"
+                FORBIDDEN -> REFUSED to "refused by your organisation's policy: ${answer.message}"
+                else -> UNREACHABLE to
+                    "your organisation's policy could not be checked (${answer.message}): the agent is not started"
+            }
+            stop(code, message)
         }
         val body = (answer as ServerAnswer.Ok).body
-        if (body.flag("allowed") == false) {
-            stop(REFUSED, "refused by your organisation's policy: ${body.text("reason") ?: "not allowed"}")
+        // only an explicit yes lets the agent start: a page that is not the policy (a proxy, a portal) refuses
+        when (body.flag("allowed")) {
+            true -> body.text("note")?.let { dependencies.say("ostrom: $it") }
+            false -> stop(REFUSED, "refused by your organisation's policy: ${body.text("reason") ?: "not allowed"}")
+            null -> stop(UNREACHABLE, "your organisation's policy could not be read: the agent is not started")
         }
-        body.text("note")?.let { dependencies.say("ostrom: $it") }
     }
 
     /** The launch and its agent token, or the launch stops. */

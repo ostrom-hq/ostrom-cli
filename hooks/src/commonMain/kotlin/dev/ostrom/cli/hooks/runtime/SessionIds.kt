@@ -4,6 +4,7 @@ package dev.ostrom.cli.hooks.runtime
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import okio.ByteString.Companion.encodeUtf8
 
 /**
  * Which Ostrom session a hook event belongs to, and what the hooks of this launch remember about it.
@@ -44,7 +45,7 @@ class SessionIds(private val sessionFile: String?, private val files: HookFiles)
         val session = sessionFile ?: return
         val file = "$session.refused.json"
         val marks = read(file)
-        val key = Sha256.hex(text)
+        val key = text.encodeUtf8().sha256().hex()
         val updated = when {
             refused -> marks + (key to "true")
             key in marks -> marks - key
@@ -55,7 +56,7 @@ class SessionIds(private val sessionFile: String?, private val files: HookFiles)
 
     /** Whether the before-tool hook refused the action [text]. */
     fun wasRefused(text: String): Boolean =
-        sessionFile?.let { Sha256.hex(text) in read("$it.refused.json") } ?: false
+        sessionFile?.let { text.encodeUtf8().sha256().hex() in read("$it.refused.json") } ?: false
 
     private fun map(): Map<String, String> = sessionFile?.let { read("$it.map.json") }.orEmpty()
 
