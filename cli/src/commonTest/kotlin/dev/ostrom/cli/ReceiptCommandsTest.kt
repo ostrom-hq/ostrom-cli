@@ -106,6 +106,7 @@ class ReceiptCommandsTest {
                 override fun run(arguments: List<String>): Int = 0
             },
             mcpServer = { object : McpServer { override fun serve() = 0 } },
+            mcpBridge = { object : McpServer { override fun serve() = 0 } },
             credentials = { directory ->
                 val path = (directory.toPath() / "credentials.json").toString()
                 FileCredentialStore(LaunchFilesImpl(fileSystem) { _, _ -> }, path, { secrets }, {}) { withServer[it] }
