@@ -187,7 +187,8 @@ class AgentLaunchUseCaseTest {
         assertEquals(0, start(model = "opus", dryRun = true))
         assertTrue(said.any { it.startsWith("ostrom: package ") }, said.toString())
         assertTrue(said[said.size - 2].startsWith("ostrom: MCP servers: linear"), said.toString())
-        val passed = "ostrom: dry run for acme-api, model opus: every check passed; Claude Code was not started"
+        val passed = "ostrom: dry run for acme-api, model opus: the policy, the package and the instance's keys " +
+            "check out; no launch was asked of Ostrom and Claude Code was not started"
         assertEquals(passed, said.last())
         assertTrue(commands.isEmpty(), "the agent never starts")
         assertTrue(server.sent("POST ${Routes.LAUNCHES}").isEmpty(), "no launch is created")
@@ -198,7 +199,7 @@ class AgentLaunchUseCaseTest {
         server["GET ${Routes.MCP_SERVERS}"] = 200 to """{"items":[]}"""
         assertEquals(0, start(repo = "acme/web", dryRun = true))
         assertEquals("ostrom: MCP servers: none", said[said.size - 2])
-        assertEquals("ostrom: dry run for acme/web: every check passed; Claude Code was not started", said.last())
+        assertTrue(said.last().startsWith("ostrom: dry run for acme/web: the policy"), said.last())
     }
 
     @Test
@@ -212,6 +213,10 @@ class AgentLaunchUseCaseTest {
         server["GET ${Routes.PACKAGE}?repo=acme-api"] = 404 to "{}"
         server.unreachable = setOf("GET ${Routes.INSTANCE_KEYS}")
         assertEquals(69, start(dryRun = true), "the instance's keys cannot be read")
+        // the checks before the policy too: two models, an agent that is not installed
+        assertEquals(64, start(model = "a", arguments = listOf("--model=b"), dryRun = true))
+        installed.remove("claude")
+        assertEquals(127, start(dryRun = true))
         assertTrue(commands.isEmpty())
     }
 

@@ -23,7 +23,11 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
         dependencies.say("ostrom: MCP servers: " + if (mcp.isEmpty()) "none" else mcp.joinToString())
         val modelPart = if (model == null) "" else ", model $model"
         val name = agent.displayName
-        dependencies.say("ostrom: dry run for $repo$modelPart: every check passed; $name was not started")
+        // what was not tried is said too: a dry run never reads as a launch that cannot fail
+        dependencies.say(
+            "ostrom: dry run for $repo$modelPart: the policy, the package and the instance's keys check out; no " +
+                "launch was asked of Ostrom and $name was not started",
+        )
         return 0
     }
 
