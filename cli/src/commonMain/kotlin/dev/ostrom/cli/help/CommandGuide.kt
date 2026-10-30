@@ -179,4 +179,11 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
         "ostrom help exit-codes" to "what each exit code means",
         "ostrom help plumbing" to "the commands agents call",
     ),
+    "completion" to guide(
+        "install",
+        "ostrom completion zsh > \"\${fpath[1]}/_ostrom\"" to "tab completion in zsh",
+        "ostrom completion bash > ~/.local/share/bash-completion/completions/ostrom" to "in bash",
+        "ostrom completion fish > ~/.config/fish/completions/ostrom.fish" to "in fish",
+        "ostrom completion powershell >> \$PROFILE" to "in PowerShell",
+    ),
 )
