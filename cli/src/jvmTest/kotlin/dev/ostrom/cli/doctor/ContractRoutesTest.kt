@@ -5,7 +5,10 @@ import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertTrue
 
-/** The routes the CLI calls, checked against ostrom-core's API contract at the commit of `gradle/ostrom-core.ref`. */
+/**
+ * The routes the CLI calls, checked against ostrom-core's API contract: the checkout the build uses, at the commit of
+ * `gradle/ostrom-core.ref` in CI.
+ */
 class ContractRoutesTest {
     @Test
     fun theDoctorProbesAGetRouteOfTheContract() {
@@ -28,6 +31,7 @@ class ContractRoutesTest {
                 line == "    get:" -> path?.let(routes::add)
             }
         }
+        assertTrue(routes.isNotEmpty(), "no GET route read under `paths:` of $contract: has its layout changed?")
         return routes
     }
 

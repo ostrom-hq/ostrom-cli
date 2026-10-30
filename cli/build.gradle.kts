@@ -48,6 +48,8 @@ val generateBuildInfo by tasks.registering {
 val apiContract = rootDir.resolve("../ostrom-core/api/openapi.yaml").absolutePath
 tasks.withType<Test>().configureEach {
     systemProperty("ostrom.contract", apiContract)
+    // an input of the tests, so that a new contract runs them again (files() accepts a missing file: the test says so)
+    inputs.files(apiContract).withPropertyName("apiContract").withPathSensitivity(PathSensitivity.NONE)
 }
 
 kotlin {
