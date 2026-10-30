@@ -175,6 +175,27 @@ class AgentLaunchUseCaseTest {
     }
 
     @Test
+    fun aDryRunChecksThePolicyAndShowsTheHarnessButStartsNothing() = runTest {
+        serveALaunch()
+        server["GET ${Routes.POLICY}?agent=claude-code&dev=alice&model=opus"] = 200 to """{"allowed":true}"""
+        server["GET ${Routes.PACKAGE}?repo=acme-api"] = 200 to PackageVector.ENVELOPE
+        server["GET ${Routes.KEYS}"] = 200 to objectOf(
+            "keys" to listOf(mapOf("kid" to PackageVector.KID, "publicKeyPem" to PackageVector.PUBLIC_KEY_PEM)),
+        ).toString()
+        assertEquals(0, start(model = "opus", dryRun = true))
+        assertTrue(said.first().startsWith("ostrom: package "), said.toString())
+        assertEquals("ostrom: dry run for acme-api, model opus: Claude Code was not started", said.last())
+        assertTrue(commands.isEmpty(), "the agent never starts")
+        assertTrue(server.sent("POST ${Routes.LAUNCHES}").isEmpty(), "no launch is created")
+        assertTrue(files.directories.isEmpty(), "no folder is made")
+        said.clear()
+        assertEquals(0, start(repo = "acme/web", dryRun = true))
+        assertEquals("ostrom: dry run for acme/web: Claude Code was not started", said.last())
+        server["GET ${Routes.POLICY}?agent=claude-code&dev=alice"] = 200 to """{"allowed":false,"reason":"x"}"""
+        assertEquals(77, start(dryRun = true), "a refusal is the same as for a launch")
+    }
+
+    @Test
     fun anAgentWithoutAdapterOrNotInstalledIsNeverStarted() = runTest {
         assertEquals(70, start(Agent.GROK))
         installed.clear()
@@ -424,6 +445,7 @@ class AgentLaunchUseCaseTest {
         repo: String? = null,
         model: String? = null,
         executable: String = join("/opt/bin", "ostrom"),
+        dryRun: Boolean = false,
     ): Int {
         val dependencies = LaunchDependencies(
             server = ServerJson(server),
@@ -450,7 +472,7 @@ class AgentLaunchUseCaseTest {
             pathSeparator = ':',
             variable = { variables[it] },
         )
-        return AgentLaunchUseCase(dependencies, adapters).launch(LaunchRequest(agent, arguments, repo, model), site)
+        return AgentLaunchUseCase(dependencies, adapters).launch(LaunchRequest(agent, arguments, repo, model, dryRun), site)
     }
 
     /** The routes of a launch that goes well, without a package. */

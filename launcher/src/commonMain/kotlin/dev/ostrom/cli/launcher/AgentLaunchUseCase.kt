@@ -25,8 +25,16 @@ import okio.Path.Companion.toPath
  * What the developer asked: `ostrom <agent> [--repo R] [--model M] [agent arguments…]`.
  *
  * @property model The `--model` given to ostrom (passed on to the agent), or null.
+ * @property dryRun `--dry-run`: the checks of a launch and the harness that would apply, then exit 0 without starting
+ *   the agent, creating a launch or writing any file.
  */
-data class LaunchRequest(val agent: Agent, val arguments: List<String>, val repo: String?, val model: String?)
+data class LaunchRequest(
+    val agent: Agent,
+    val arguments: List<String>,
+    val repo: String?,
+    val model: String?,
+    val dryRun: Boolean = false,
+)
 
 /**
  * Where and as whom a launch runs.
@@ -111,6 +119,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         }
         val model = models.firstOrNull()
         calls.checkPolicy(agent, model, site)
+        if (request.dryRun) return dryRun(request, repo, model, site)
         val launch = calls.createLaunch(repo, agent, model, site)
         val pack = calls.packageOf(repo, site)
         val keys = calls.instanceKeys()
@@ -126,6 +135,14 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         } finally {
             cleanUp(temporary, site)
         }
+    }
+
+    /** `--dry-run`: the harness that would apply (the package, verified, says itself), and nothing started. */
+    private suspend fun dryRun(request: LaunchRequest, repo: String, model: String?, site: LaunchSite): Int {
+        calls.packageOf(repo, site)
+        val modelPart = model?.let { ", model $it" }.orEmpty()
+        dependencies.say("ostrom: dry run for $repo$modelPart: ${request.agent.displayName} was not started")
+        return 0
     }
 
     /** One launch, once the agent token and the package are there. */

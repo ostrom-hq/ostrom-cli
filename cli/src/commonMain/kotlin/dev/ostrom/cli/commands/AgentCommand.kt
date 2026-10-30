@@ -31,14 +31,13 @@ internal class AgentCommand(private val agent: Agent, private val dependencies: 
     val model by option("--model", help = "Model for the agent")
     val cloud by option("--cloud", help = "Run the session in Ostrom's cloud, attached to this terminal (coming soon)")
         .flag()
-    val dryRun by option("--dry-run", help = "Show the harness that would apply, then exit (coming soon)").flag()
+    val dryRun by option("--dry-run", help = "Check the launch and show the harness that would apply, then exit").flag()
     val server by option("--server", help = "Ostrom server URL (else OSTROM_URL, else the one of ostrom login)")
     val agentArguments by argument("agent-args", help = "Passed to the agent as they are").multiple()
 
     override fun run() {
         val path = currentContext.commandNameWithParents()
         if (cloud) throw notImplemented(path + "--cloud")
-        if (dryRun) throw notImplemented(path + "--dry-run")
         val environment = dependencies.environment
         val directory = environment.configDirectory ?: throw stop(ExitCode.CANNOT_WRITE, NO_HOME)
         val saved = ConfigStoreImpl(dependencies.files, dependencies.configFile(directory)).get(ConfigKey.SERVER)
@@ -57,7 +56,7 @@ internal class AgentCommand(private val agent: Agent, private val dependencies: 
             pathSeparator = environment.pathListSeparator,
             variable = { environment[it] },
         )
-        val request = LaunchRequest(agent, agentArguments, repo, model)
+        val request = LaunchRequest(agent, agentArguments, repo, model, dryRun)
         throw ProgramResult(runBlocking { dependencies.agents.run(request, site) })
     }
 
