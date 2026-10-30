@@ -33,8 +33,8 @@ class DoctorServerTest : CliKit() {
     }
 
     @Test
-    fun aClientErrorOrARedirectIsNotReachable() {
-        for (status in listOf(404, 401, 301)) {
+    fun aClientErrorARedirectOrAnInformationalAnswerIsNotReachable() {
+        for (status in listOf(404, 401, 301, 101)) {
             console.out.clear()
             assertEquals(1, doctor(answering(status, """{"error":{"type":"not_found","message":"no"}}""")), "$status")
             assertOut("  ✗ ostrom.example answers $status on /api/v1/health: not an Ostrom server of this version")
