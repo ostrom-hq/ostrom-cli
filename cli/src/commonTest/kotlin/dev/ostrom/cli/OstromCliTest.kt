@@ -288,6 +288,14 @@ class OstromCliTest {
     }
 
     @Test
+    fun telemetryHelpListsItsSubcommands() {
+        assertEquals(0, cli().run(arrayOf("telemetry", "--help")))
+        assertOut("Say whether statistics are sent, and what they contain")
+        assertOut("Send anonymous usage statistics")
+        assertOut("Stop usage statistics and delete the install id")
+    }
+
+    @Test
     fun telemetryEnableExplainsWhenTheEnvironmentKeepsItOff() {
         val environment = mapOf("HOME" to "/home/maya", "DO_NOT_TRACK" to "1")
         assertEquals(0, cli(environment = environment, postHogKey = "phc").run(arrayOf("telemetry", "enable")))

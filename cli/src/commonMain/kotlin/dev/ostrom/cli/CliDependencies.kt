@@ -42,8 +42,8 @@ class CliDependencies(
     val api: (String) -> OstromApi,
     val hookRunner: HookRunner,
     val mcpServer: () -> McpServer,
-    val postHogKey: String = "",
-    val sendStatistics: suspend (url: String, body: String) -> Unit = { _, _ -> },
+    val postHogKey: String,
+    val sendStatistics: suspend (url: String, body: String) -> Unit,
 ) {
     /** The opt-in usage statistics. */
     val usage: UsageStatistics by lazy {

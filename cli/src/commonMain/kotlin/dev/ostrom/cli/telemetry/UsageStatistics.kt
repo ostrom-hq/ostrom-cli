@@ -76,8 +76,9 @@ class UsageStatistics(
      */
     suspend fun commandRun(command: String?, knownCommands: Set<String>, exitCode: Int, duration: Duration) {
         // The common case (off) costs one read of the settings and no network: checked before anything else.
+        val store = config ?: return
         if (command in PLUMBING || state() != UsageState.ON) return
-        val installId = config?.get(ConfigKey.TELEMETRY_ID) ?: return
+        val installId = store.get(ConfigKey.TELEMETRY_ID) ?: return
         val name = when (command) {
             null -> "home"
             in knownCommands -> command

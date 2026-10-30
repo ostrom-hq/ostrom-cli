@@ -80,8 +80,16 @@ class UsageStatisticsTest {
         assertEquals(UsageState.OFF_BY_ENVIRONMENT, usage(mapOf("DO_NOT_TRACK" to "1")).state())
         assertEquals(UsageState.ON, usage(mapOf("DO_NOT_TRACK" to "0")).state())
         assertEquals(UsageState.NOT_IN_THIS_BUILD, usage(key = " ").state())
-        val noHome = UsageStatistics(FakeEnvironment(emptyMap()), null, "phc", "0.2.0", { _, _ -> })
+        val noHome = UsageStatistics(FakeEnvironment(emptyMap()), null, "phc", "0.2.0", { _, _ -> sent += "" to "" })
         assertEquals(UsageState.OFF, noHome.state())
+    }
+
+    @Test
+    fun withoutAHomeFolderNothingIsSent() = runTest {
+        val noHome = UsageStatistics(FakeEnvironment(emptyMap()), null, "phc", "0.2.0", { _, _ -> sent += "" to "" })
+        noHome.commandRun("doctor", known, 0, 1.milliseconds)
+
+        assertTrue(sent.isEmpty())
     }
 
     @Test
