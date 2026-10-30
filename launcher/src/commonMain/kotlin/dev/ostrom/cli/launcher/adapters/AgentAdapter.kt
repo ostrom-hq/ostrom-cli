@@ -116,8 +116,9 @@ fun skillsInto(files: LaunchFiles, plugin: String, directory: String, real: Stri
  */
 fun mcpLabel(server: String): String {
     val label = if (server.startsWith("ostrom")) server else "ostrom-$server"
-    return label.map { if (it.isLetterOrDigit() && it.code < ASCII_END || it == '-' || it == '_') it else '_' }
-        .joinToString("")
+    return label.map { if (bareKeyCharacter(it)) it else '_' }.joinToString("")
 }
+
+private fun bareKeyCharacter(c: Char): Boolean = c in "-_" || c.isLetterOrDigit() && c.code < ASCII_END
 
 private const val ASCII_END = 0x80
