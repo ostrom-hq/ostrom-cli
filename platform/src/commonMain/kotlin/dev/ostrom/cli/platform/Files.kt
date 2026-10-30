@@ -1,5 +1,6 @@
 package dev.ostrom.cli.platform
 
+import kotlin.random.Random
 import okio.FileSystem
 import okio.IOException
 import okio.Path
@@ -44,14 +45,17 @@ class FileStoreImpl(private val fileSystem: FileSystem = FileSystem.SYSTEM) : Fi
     override fun write(path: String, text: String) {
         val file = path.toPath()
         val parent = requireNotNull(file.parent) { "$path is a root, not a file." }
-        val temporary = "$path.tmp".toPath()
+        // One temporary name per write, so two concurrent writers never share it.
+        val temporary = "$path.${Random.nextLong().toULong().toString(RADIX)}.tmp".toPath()
         try {
             fileSystem.createDirectories(parent)
-            fileSystem.write(temporary) { writeUtf8(text) }
+            // Owner-only before the text goes in: the content is never readable by others, even for an instant.
+            fileSystem.write(temporary) { }
             restrictToOwner(temporary.toString())
+            fileSystem.write(temporary) { writeUtf8(text) }
             fileSystem.atomicMove(temporary, file)
         } catch (e: IOException) {
-            // A temporary file left behind is overwritten by the next write; nothing reads it.
+            // A temporary file left behind is never read; it only costs its few bytes.
             throw FileWriteException(path, e)
         }
     }
@@ -79,8 +83,11 @@ class ExecutableFinderImpl(
 ) : ExecutableFinder {
     override fun find(name: String): String? {
         val extensions = if (environment.operatingSystem == OperatingSystem.WINDOWS) {
+            // Like cmd.exe: the bare name only when it already has an extension, so npm's extensionless sh shim
+            // (which CreateProcess cannot run) loses to the claude.cmd beside it.
             val pathExt = environment["PATHEXT"] ?: DEFAULT_PATHEXT
-            listOf("") + pathExt.split(';').filter { it.isNotEmpty() }.map { it.lowercase() }
+            val bare = if ('.' in name) listOf("") else emptyList()
+            bare + pathExt.split(';').filter { it.isNotEmpty() }.map { it.lowercase() }
         } else {
             listOf("")
         }
@@ -117,3 +124,6 @@ internal expect fun restrictToOwner(path: String)
 
 /** Makes [path] readable, writable and executable by its owner only (0700); a no-op on Windows. */
 internal expect fun restrictToOwnerExecutable(path: String)
+
+/** Base of the random part of a temporary file name. */
+private const val RADIX = 36

@@ -74,4 +74,16 @@ class ConfigStoreTest {
     fun aRootCannotBeWritten() {
         assertFailsWith<IllegalArgumentException> { FileStoreImpl(fileSystem).write("/", "x") }
     }
+
+    @Test
+    fun keysAreFoundByName() {
+        assertEquals(ConfigKey.DEFAULT_AGENT, ConfigKey.of("default_agent"))
+        assertNull(ConfigKey.of("colour"))
+    }
+
+    @Test
+    fun unsetWithoutAFileWritesAnEmptyOne() {
+        store.unset(ConfigKey.COLOR)
+        assertEquals(emptyMap(), store.list())
+    }
 }
