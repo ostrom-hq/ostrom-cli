@@ -332,8 +332,6 @@ fun modelsOf(arguments: List<String>): List<String> = arguments.indices.mapNotNu
 
 private const val MODEL_EQUALS = "--model="
 private const val CONFIG_MODEL = "model="
-    return if (index < 0) null else arguments.getOrNull(index + 1)
-}
 
 /** [arguments] with [extra] after the developer's options and before a literal `--`. */
 fun beforeSeparator(arguments: List<String>, extra: List<String>): List<String> {
