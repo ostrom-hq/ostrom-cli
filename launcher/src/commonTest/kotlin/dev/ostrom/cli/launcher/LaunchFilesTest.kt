@@ -26,7 +26,11 @@ class LaunchFilesTest {
         files.write("/run/scripts/check.sh", "#!/bin/sh", FileAccess.EXECUTABLE)
         assertEquals("shared", files.read("/run/a/b.txt"))
         assertNull(files.read("/run/missing"))
-        assertEquals(listOf("/run/key.json" to false, "/run/scripts/check.sh" to true), modes)
+        // S2-36: the mode is set on the new file while it is still empty, then the file is renamed into place
+        assertEquals(listOf("/run/.key.json.ostrom-new" to false, "/run/scripts/.check.sh.ostrom-new" to true), modes)
+        assertFalse(files.exists("/run/.key.json.ostrom-new"))
+        files.write("/run/key.json", "again", FileAccess.PRIVATE)
+        assertEquals("again", files.read("/run/key.json"))
         assertEquals(listOf("a", "key.json", "scripts"), files.list("/run"))
         assertEquals(emptyList(), files.list("/nowhere"))
         assertTrue(files.exists("/run/a"))

@@ -78,6 +78,7 @@ class AgentLaunchUseCaseTest {
     @Test
     fun theAgentRunsWithTheRelayAndNeverWithTheDeviceToken() = runTest {
         serveALaunch()
+        installed["git"] = "/usr/local/bin/git"
         assertEquals(3, start(), "the agent's exit code is the CLI's")
         assertEquals(listOf("/usr/bin/claude", "--plugin-dir", join(temporary, "plugin")), commands.single())
         val environment = environments.single()
@@ -95,6 +96,7 @@ class AgentLaunchUseCaseTest {
         assertEquals("L1", environment[LaunchVariables.LAUNCH_ID])
         assertEquals("", environment[LaunchVariables.HARNESS_VERSION])
         assertNull(environment[LaunchVariables.PACKAGE])
+        assertEquals("/usr/local/bin/git", environment[LaunchVariables.GIT], "S2-28: the hooks run the git found here")
         assertEquals(
             RelaySettings("https://ostrom.example", "agent-token", "ostrom/test", "L1", emptySet(), false),
             relaySettings.single(),
@@ -108,7 +110,9 @@ class AgentLaunchUseCaseTest {
         assertEquals(FileAccess.PRIVATE, files.access[join(temporary, "session-env.json")])
         assertEquals("relay-token", settings.text(LaunchVariables.RELAY_TOKEN))
         assertFalse(settings.containsKey("PATH") || settings.containsKey(LaunchVariables.DEVICE_TOKEN))
-        assertEquals("""{"gates":[]}""", filesWhileRunning[join(temporary, "plugin", "ostrom", "gates.json")])
+        // S2-20: no catalogue is written where the agent could empty it; without a package the relay asks Ostrom
+        assertNull(filesWhileRunning[join(temporary, "plugin", "ostrom", "gates.json")])
+        assertNull(relaySettings.single().gateCatalog)
         assertEquals(
             listOf(
                 "ostrom: no session package for acme-api; your organisation's gates apply",
@@ -143,6 +147,8 @@ class AgentLaunchUseCaseTest {
         assertEquals("opus", environment[LaunchVariables.MODEL])
         assertEquals(setOf("github", "ostrom", "ostrom-workflow"), relaySettings.single().mcpServers)
         assertTrue(relaySettings.single().inference)
+        // S2-20: the relay holds the catalogue the package was signed with
+        assertTrue(relaySettings.single().gateCatalog.orEmpty().contains("slack_post"))
         assertTrue(said.any { it.startsWith("ostrom: package p202610300845-a216a112 (1 workflow(s)") }, "$said")
         assertTrue("ostrom: metered by your organisation" in said)
         assertTrue("ostrom: session files kept in $temporary" in said)
@@ -169,23 +175,31 @@ class AgentLaunchUseCaseTest {
     }
 
     @Test
-    fun thePolicyRefusesOrSaysNothingWhenItCannotBeRead() = runTest {
+    fun thePolicyRefusesAndAPolicyThatCannotBeReadStopsTheLaunch() = runTest {
         serveALaunch()
         val policy = "GET ${Routes.POLICY}?agent=claude-code&dev=alice"
         server[policy] = 200 to """{"allowed":false,"reason":"over budget"}"""
         assertEquals(77, start())
         server[policy] = 200 to """{"allowed":false}"""
         assertEquals(77, start())
+        // S2-34: an error of Ostrom never lets the agent start
         server.unreachable = setOf(policy)
-        assertEquals(3, start())
+        assertEquals(69, start())
+        server.unreachable = emptySet()
+        server[policy] = 500 to """{"error":{"type":"internal","message":"boom"}}"""
+        assertEquals(69, start())
         assertEquals(
             listOf(
                 "ostrom: refused by your organisation's policy: over budget",
                 "ostrom: refused by your organisation's policy: not allowed",
-                "ostrom: policy not checked (connection refused)",
+                "ostrom: your organisation's policy could not be checked (connection refused): the agent is not " +
+                    "started",
+                "ostrom: your organisation's policy could not be checked (boom): the agent is not started",
             ),
-            said.take(3),
+            said,
         )
+        assertEquals(0, server.sent("POST ${Routes.LAUNCHES}").size, "no launch is created")
+        assertTrue(commands.isEmpty())
     }
 
     @Test
@@ -198,6 +212,8 @@ class AgentLaunchUseCaseTest {
             (500 to """{"error":{"type":"internal","message":"boom"}}""") to 69,
             (201 to """{"launchId":"L1"}""") to 69,
             (201 to """{"agentToken":"t","launchId":""}""") to 69,
+            (201 to """{"agentToken":"t"}""") to 69,
+            (201 to """{"agentToken":"","launchId":"L1"}""") to 69,
         )
         for ((answer, code) in cases) {
             server[route] = answer
@@ -210,6 +226,8 @@ class AgentLaunchUseCaseTest {
                 "ostrom: not signed in to https://ostrom.example: run `ostrom login`",
                 "ostrom: launch refused: seat limit",
                 "ostrom: launch not created: boom",
+                "ostrom: Ostrom gave no launch for this session",
+                "ostrom: Ostrom gave no launch for this session",
                 "ostrom: Ostrom gave no launch for this session",
                 "ostrom: Ostrom gave no launch for this session",
                 "ostrom: Ostrom is unreachable at https://ostrom.example (connection refused)",
@@ -264,19 +282,19 @@ class AgentLaunchUseCaseTest {
 
     @Test
     fun theRepositoryIsAskedOrTheEnvironmentsOrTheFolders() = runTest {
-        serveALaunch("given")
+        serveALaunch()
         start(repo = "given")
         assertEquals("given", environments.last()[LaunchVariables.REPO])
-        serveALaunch("from-env")
+        serveALaunch()
         variables["OSTROM_REPO"] = "from-env"
         start()
         assertEquals("from-env", environments.last()[LaunchVariables.REPO])
         variables["OSTROM_REPO"] = ""
-        serveALaunch("acme")
+        serveALaunch()
         gitAnswer = CaptureResult.Exited(0, "C:\\work\\acme\\\n")
         start()
         assertEquals("acme", environments.last()[LaunchVariables.REPO])
-        serveALaunch("src")
+        serveALaunch()
         val failures = listOf(CaptureResult.Exited(128, "fatal"), CaptureResult.Exited(0, " "), CaptureResult.NotFound)
         for (answer in failures) {
             gitAnswer = answer
@@ -306,9 +324,21 @@ class AgentLaunchUseCaseTest {
     }
 
     @Test
+    fun withoutAPathTheAgentGetsOstromsFolderAndNeverTheWorkingOne() = runTest {
+        serveALaunch()
+        variables["PATH"] = ""
+        start()
+        assertEquals("/opt/bin", environments.last()["PATH"], "no empty entry")
+        variables.remove("PATH")
+        start(executable = "ostrom")
+        val last = environments.last()
+        assertTrue(last.containsKey("PATH") && last["PATH"] == null, "nothing to put on it: removed")
+    }
+
+    @Test
     fun whatTheServerCannotListIsSaidAndTheLaunchGoesOn() = runTest {
         serveALaunch()
-        server.unreachable = setOf("GET ${Routes.MCP_SERVERS}", "GET ${Routes.CATALOG}?repo=acme-api")
+        server.unreachable = setOf("GET ${Routes.MCP_SERVERS}")
         assertEquals(3, start(executable = "ostrom"))
         assertTrue("ostrom: your organisation's MCP servers are not listed (connection refused)" in said)
         assertNull(filesWhileRunning[join(temporary, "plugin", "ostrom", "gates.json")])
@@ -364,10 +394,9 @@ class AgentLaunchUseCaseTest {
     }
 
     /** The routes of a launch that goes well, without a package. */
-    private fun serveALaunch(repo: String = "acme-api") {
+    private fun serveALaunch() {
         server["GET ${Routes.POLICY}?agent=claude-code&dev=alice"] = 200 to """{"allowed":true}"""
         server["POST ${Routes.LAUNCHES}"] = 201 to """{"launchId":"L1","agentToken":"agent-token"}"""
-        server["GET ${Routes.CATALOG}?repo=$repo"] = 200 to """{"gates":[]}"""
         server["GET ${Routes.MCP_SERVERS}"] = 200 to """{"items":[]}"""
         server["GET ${Routes.INFERENCE_MODELS}"] = 200 to """{"data":[]}"""
         server["POST /api/v1/sessions/s1/end"] = 200 to """{"session":{"receiptId":"R1"},"verification":{"ok":true}}"""

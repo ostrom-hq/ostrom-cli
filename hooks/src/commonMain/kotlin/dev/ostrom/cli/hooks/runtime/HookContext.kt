@@ -11,14 +11,13 @@ import dev.ostrom.cli.hooks.gate.ShellPaths
  * @property harnessVersion The version of the harness laid down (`OSTROM_HARNESS_VERSION`).
  * @property agent The agent (`OSTROM_AGENT`: `claude-code`, `codex`…).
  * @property model The model asked at launch (`OSTROM_MODEL`), or null.
- * @property gatesFile The copy of the gate catalogue (`OSTROM_GATES`), or null outside a session.
+ * @property gatesFile The gate catalogue of the session's signed package (`OSTROM_GATES`), or null: it may only add
+ * gated actions to Ostrom's (S2-20).
  * @property sessionFile Where the launch keeps its Ostrom session id (`OSTROM_SESSION_FILE`), or null.
  * @property launchTop The top of the repository the session was launched in (`OSTROM_LAUNCH_TOP`).
  * @property launchId The id of this launch (`OSTROM_LAUNCH_ID`), or null.
  * @property dialect The agent family whose hook protocol is spoken (`OSTROM_HOOK_DIALECT`, default `claude`).
- * @property gatesTtlMillis How old the catalogue copy may be when an action is matched (`OSTROM_GATES_TTL`, 30 s).
- * @property sessionEndMillis How long the SessionEnd hook waits for Ostrom (`OSTROM_SESSION_END_MS`, 15 s; Codex
- * cuts that hook at 3 s, so the launcher sets 2.5 s for it).
+ * @property git The `git` the launcher resolved (`OSTROM_GIT`), else `git`.
  * @property home The user's home folder, for `cd ~`.
  */
 data class HookContext(
@@ -32,16 +31,11 @@ data class HookContext(
     val launchTop: String,
     val launchId: String?,
     val dialect: String,
-    val gatesTtlMillis: Long,
-    val sessionEndMillis: Int,
+    val git: String,
     val home: String,
 ) {
     /** Reads the session from the environment. */
     companion object {
-        private const val DEFAULT_TTL_SECONDS = 30L
-        private const val DEFAULT_SESSION_END_MILLIS = 15_000
-        private const val MILLIS = 1_000L
-
         /**
          * @param variable Reads one environment variable (null when unset or empty).
          */
@@ -58,8 +52,7 @@ data class HookContext(
                 launchTop = launchTop,
                 launchId = variable("OSTROM_LAUNCH_ID"),
                 dialect = variable("OSTROM_HOOK_DIALECT") ?: "claude",
-                gatesTtlMillis = (variable("OSTROM_GATES_TTL")?.toLongOrNull() ?: DEFAULT_TTL_SECONDS) * MILLIS,
-                sessionEndMillis = variable("OSTROM_SESSION_END_MS")?.toIntOrNull() ?: DEFAULT_SESSION_END_MILLIS,
+                git = variable("OSTROM_GIT") ?: "git",
                 home = variable("HOME") ?: variable("USERPROFILE").orEmpty(),
             )
         }

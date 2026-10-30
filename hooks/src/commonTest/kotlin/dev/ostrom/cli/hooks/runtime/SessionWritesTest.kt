@@ -15,12 +15,12 @@ class SessionWritesTest {
     private val files = FakeFiles()
     private val ids = SessionIds("/s/session", files)
     private fun json(text: String) = Json.parseToJsonElement(text) as JsonObject
-    private fun runs(session: String) = Routes.CHECKS to json("""{"sessionId":"$session","check":"lint"}""")
+    private fun runs(session: String) = Routes.GATES to json("""{"sessionId":"$session","check":"lint"}""")
 
     @Test
     fun aWriteToAClosedSessionGoesToItsNewSegmentOnce() {
         val calls = FakeCalls()
-            .on(Routes.CHECKS, CallResult.Failed("session closed", "session_closed"), ok("""{"ok":true}"""))
+            .on(Routes.GATES, CallResult.Failed("session closed", "session_closed"), ok("""{"ok":true}"""))
             .on("/api/v1/sessions/s1/reopen", ok("""{"session":{"id":"s1~2"}}"""))
         assertEquals(ok("""{"ok":true}"""), SessionWrites(calls, ids, "L1").send("s1", null, 900, ::runs))
         assertEquals("""{"launchId":"L1"}""", calls.calls[1].body.toString(), "the reopening names the launch")
@@ -32,7 +32,7 @@ class SessionWritesTest {
 
     @Test
     fun withoutAnAgentIdTheReopenedSegmentNamesIt() {
-        val calls = FakeCalls().on(Routes.CHECKS, CallResult.Failed("gone", "session_closed"), ok())
+        val calls = FakeCalls().on(Routes.GATES, CallResult.Failed("gone", "session_closed"), ok())
             .on("/api/v1/sessions/s1/reopen", ok("""{"session":{"id":"s1~2","agentSessionId":"ag"}}"""))
         assertEquals(ok(), SessionWrites(calls, ids, null).send("s1", "", 1, ::runs))
         assertEquals("s1~2", ids.of("ag"))
@@ -41,13 +41,13 @@ class SessionWritesTest {
     @Test
     fun otherFailuresAndUnreopenableSessionsAreReturnedAsIs() {
         val unreachable = CallResult.Failed("HTTP 502")
-        val writes = SessionWrites(FakeCalls().on(Routes.CHECKS, unreachable), ids, null)
+        val writes = SessionWrites(FakeCalls().on(Routes.GATES, unreachable), ids, null)
         assertEquals(unreachable, writes.send("s1", "a1", 1, ::runs))
         val closed = CallResult.Failed("session closed: s1")
-        val noId = FakeCalls().on(Routes.CHECKS, closed)
+        val noId = FakeCalls().on(Routes.GATES, closed)
         assertEquals(closed, SessionWrites(noId, ids, null).send("", "a1", 1, ::runs))
-        assertEquals(listOf(Routes.CHECKS), noId.paths(), "nothing says which session to reopen")
-        val refused = FakeCalls().on(Routes.CHECKS, closed)
+        assertEquals(listOf(Routes.GATES), noId.paths(), "nothing says which session to reopen")
+        val refused = FakeCalls().on(Routes.GATES, closed)
             .on("/api/v1/sessions/s1/reopen", ok("""{"session":{"id":""}}"""))
         assertEquals(closed, SessionWrites(refused, ids, null).send("s1", "a1", 1, ::runs))
         assertEquals("{}", refused.calls[1].body.toString(), "no launch, no launchId")

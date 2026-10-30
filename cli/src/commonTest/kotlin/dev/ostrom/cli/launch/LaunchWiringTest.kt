@@ -25,7 +25,6 @@ import dev.ostrom.cli.relay.LocalRelayStarter
 import dev.ostrom.cli.relay.RelayConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
-import kotlinx.io.IOException
 import okio.fakefilesystem.FakeFileSystem
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -38,7 +37,8 @@ class LaunchWiringTest {
 
         override suspend fun send(request: ServerRequest): ServerResponse {
             sent += request
-            if (request.path == "/down") throw ServerUnreachableException("u", IOException("connection refused"))
+            val refused = IllegalStateException("connection refused")
+            if (request.path == "/down") throw ServerUnreachableException("u", refused)
             return ServerResponse(201, """{"ok":true}""", 3)
         }
     }
@@ -67,9 +67,9 @@ class LaunchWiringTest {
                 }
             }
         }
-        val settings = RelaySettings("https://o.example", "agt", "ua", "L1", setOf("gh"), true)
+        val settings = RelaySettings("https://o.example", "agt", "ua", "L1", setOf("gh"), true, "{}")
         val relay = RelayStarter(starter).start(settings)
-        assertEquals(RelayConfig("https://o.example", "agt", "ua", "L1", setOf("gh"), true), config)
+        assertEquals(RelayConfig("https://o.example", "agt", "ua", "L1", setOf("gh"), true, "{}"), config)
         assertEquals("http://127.0.0.1:4100", relay.url)
         assertEquals("capability", relay.token)
         relay.close()

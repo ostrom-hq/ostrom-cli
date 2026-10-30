@@ -34,17 +34,13 @@ class AdaptersTest {
 
     private class Capture(private val result: CaptureResult = CaptureResult.Exited(0, "")) : ProcessCapture {
         val captured = mutableListOf<List<String>>()
-        val detached = mutableListOf<List<String>>()
 
         override fun capture(command: List<String>, timeoutMillis: Int): CaptureResult {
             captured += command
             return result
         }
 
-        override fun detach(command: List<String>): Boolean {
-            detached += command
-            return true
-        }
+        override fun detach(command: List<String>): Boolean = error("the hooks start nothing in the background")
     }
 
     private class Variables(private val values: Map<String, String>) : Environment {
@@ -74,6 +70,7 @@ class AdaptersTest {
         assertEquals(ok(), call(200, "[1]"))
         assertEquals(CallResult.Failed("session closed: s1"), call(409, """{"error":"session closed: s1"}"""))
         assertEquals(CallResult.Failed("HTTP 502"), call(502, "bad gateway"))
+        assertEquals(CallResult.Failed("HTTP 101"), call(101, ""), "below 200 is no answer either")
         assertEquals(CallResult.Failed("HTTP 403"), call(403, """{"error":3}"""))
         val contract = call(409, """{"error":{"type":"session_closed","message":"session s1 is closed"}}""")
         assertEquals(CallResult.Failed("session s1 is closed", "session_closed"), contract)
@@ -97,29 +94,25 @@ class AdaptersTest {
     @Test
     fun gitIsAskedInTheFolderAndItsOutputTrimmed() {
         val capture = Capture(CaptureResult.Exited(0, " main\n"))
-        assertEquals("main", CapturedGit(capture).run("/w", listOf("symbolic-ref", "HEAD")))
-        CapturedGit(capture).run("", listOf("status"))
-        val expected = listOf(listOf("git", "-C", "/w", "symbolic-ref", "HEAD"), listOf("git", "-C", ".", "status"))
+        assertEquals("main", CapturedGit(capture, "/usr/bin/git").run("/w", listOf("symbolic-ref", "HEAD")))
+        CapturedGit(capture, "git").run("", listOf("status"))
+        val expected = listOf(
+            listOf("/usr/bin/git", "-C", "/w", "symbolic-ref", "HEAD"),
+            listOf("git", "-C", ".", "status"),
+        )
         assertEquals(expected, capture.captured)
-        assertEquals("", CapturedGit(Capture(CaptureResult.Exited(128, "fatal"))).run("/w", listOf("x")))
-        assertEquals("", CapturedGit(Capture(CaptureResult.TimedOut)).run("/w", listOf("x")))
+        assertEquals("", CapturedGit(Capture(CaptureResult.Exited(128, "fatal")), "git").run("/w", listOf("x")))
+        assertEquals("", CapturedGit(Capture(CaptureResult.TimedOut), "git").run("/w", listOf("x")))
     }
 
     @Test
     fun theSessionFilesLiveOnTheFileSystem() {
         val fileSystem = FakeFileSystem()
-        var now = 0L
-        val files = FileSystemHookFiles(fileSystem) { now }
-        assertNull(files.read("/s/gates.json"))
-        assertNull(files.ageMillis("/s/gates.json"))
-        assertTrue(files.write("/s/gates.json", "{}"))
-        assertEquals("{}", files.read("/s/gates.json"))
-        now = checkNotNull(fileSystem.metadata("/s/gates.json".toPath()).lastModifiedAtMillis) + 42
-        assertEquals(42, files.ageMillis("/s/gates.json"))
-        assertEquals(listOf("/s/gates.json".toPath()), fileSystem.list("/s".toPath()), "no temporary file left")
-        files.delete("/s/gates.json")
-        files.delete("/s/gates.json")
-        assertNull(files.read("/s/gates.json"))
+        val files = FileSystemHookFiles(fileSystem) { 0 }
+        assertNull(files.read("/s/session"))
+        assertTrue(files.write("/s/session", "s1"))
+        assertEquals("s1", files.read("/s/session"))
+        assertEquals(listOf("/s/session".toPath()), fileSystem.list("/s".toPath()), "no temporary file left")
         assertEquals(fileSystem.canonicalize("/s".toPath()).toString(), files.canonical("/s"))
         assertEquals("/nowhere/x", files.canonical("/nowhere/x"))
     }
@@ -130,33 +123,23 @@ class AdaptersTest {
         val files = FileSystemHookFiles(fileSystem) { 0 }
         files.write("/s/file", "x")
         assertFalse(files.write("/s/file/child", "y"), "a file is in the way")
+        assertFalse(files.write("/", "z"), "the root has no folder to make and is no file")
         assertNull(files.read("/s"), "a folder is not a file")
-        files.write("/d/inner", "z")
-        files.delete("/d")
-        assertEquals("z", files.read("/d/inner"), "a folder with files is not deleted")
     }
 
     @Test
-    fun theRealWiringReachesTheRelayGitAndTheBackgroundRefresh() {
+    fun theRealWiringReachesTheRelayAndTheResolvedGit() {
         val fileSystem = FakeFileSystem()
-        fileSystem.createDirectories("/s".toPath())
-        fileSystem.write("/s/gates.json".toPath()) { writeUtf8("""{"actions":[]}""") }
-        val written = checkNotNull(fileSystem.metadata("/s/gates.json".toPath()).lastModifiedAtMillis)
         val capture = Capture()
         val http = answer(200, """{"actions":[{"class":"x"}]}""")
         val environment = Variables(
-            mapOf(
-                "OSTROM_GATES" to "/s/gates.json",
-                "OSTROM_RELAY_URL" to "http://127.0.0.1:4100",
-                "OSTROM_BIN" to "/opt/ostrom",
-            ),
+            mapOf("OSTROM_RELAY_URL" to "http://127.0.0.1:4100", "OSTROM_GIT" to "/usr/bin/git", "OSTROM_REPO" to "r"),
         )
-        val processor = SessionHooks.processor(environment, fileSystem, capture, http, { written + 6_000 })
-        val gate = """{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}"""
-        assertEquals(HookReply(), processor.process(HookKind.GATE, gate.encodeToByteArray(), "claude"))
-        assertEquals(listOf(listOf("/opt/ostrom", "hook", "gates-refresh")), capture.detached)
-        assertEquals(HookReply(), processor.process(HookKind.GATES_REFRESH, null, "claude"))
-        assertEquals("/api/v1/gates/catalog?repo=", http.sent.single().second.path)
+        val processor = SessionHooks.processor(environment, fileSystem, capture, http, SessionHooks::epochMillis)
+        val push = """{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push"}}"""
+        assertEquals(HookReply(), processor.process(HookKind.GATE, push.encodeToByteArray(), "claude"))
+        assertEquals("/api/v1/gates/catalog?repo=r", http.sent.first().second.path)
+        assertEquals("/usr/bin/git", capture.captured.first().first(), "never the git of the agent's PATH (S2-30)")
         val plain = SessionHooks.processor(Variables(emptyMap()), fileSystem, capture, http, SessionHooks::epochMillis)
         assertEquals(HookReply(), plain.process(HookKind.SESSION, null, "claude"))
         assertTrue(SessionHooks.epochMillis() > 1_700_000_000_000)
@@ -166,7 +149,7 @@ class AdaptersTest {
     fun theProcessorSpeaksTheDialectItIsGiven() {
         val catalogue = """{"actions":[{"class":"x","tools":["Bash"],"patterns":["rm"],"gate":{"enforce":true}}]}"""
         val files = FakeFiles(mutableMapOf("/s/gates.json" to catalogue))
-        val ports = HookPorts(FakeCalls(), files, { _, _ -> "" }, { true }, { it }, "/w")
+        val ports = HookPorts(FakeCalls(), files, { _, _ -> "" }, { it }, "/w")
         val processor = SessionHookProcessor(contextOf(), ports)
         val event = """{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm x"}}"""
         val reply = processor.process(HookKind.GATE, event.encodeToByteArray(), "grok")
@@ -175,5 +158,19 @@ class AdaptersTest {
         val start = """{"hook_event_name":"SessionStart","session_id":"a1"}"""
         val unrecorded = processor.process(HookKind.SESSION, start.encodeToByteArray(), "claude").stderr
         assertEquals("Ostrom unreachable (HTTP 404): session not recorded.\n", unrecorded)
+    }
+
+    @Test
+    fun aGateEventThatCouldNotBeReadIsRefused() {
+        // S2-30: too large, late or broken used to read as an empty event, and the action ran
+        val ports = HookPorts(FakeCalls(), FakeFiles(), { _, _ -> "" }, { it }, "/w")
+        val processor = SessionHookProcessor(contextOf(), ports)
+        for (input in listOf(null, "not json".encodeToByteArray(), """{"tool_name":"Bash"}""".encodeToByteArray())) {
+            val reply = processor.process(HookKind.GATE, input, "hermes")
+            assertEquals(2, reply.exitCode)
+            assertTrue(reply.stdout.startsWith("""{"decision":"block""""))
+            assertEquals(GateTexts.UNREAD_EVENT + "\n", reply.stderr)
+        }
+        assertEquals(HookReply(), processor.process(HookKind.SESSION, null, "claude"), "a session event is not a gate")
     }
 }

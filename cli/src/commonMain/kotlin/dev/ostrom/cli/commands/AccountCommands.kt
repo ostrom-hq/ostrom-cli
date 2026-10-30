@@ -40,6 +40,7 @@ internal class LoginCommand(private val dependencies: CliDependencies) : CliktCo
         val serverUrl = dependencies.serverOf(server, directory)
         val login = DeviceLogin(
             ServerJson(ApiServerTransport(dependencies.api(serverUrl))),
+            dependencies.environment["OSTROM_GITHUB_WEB_URL"]?.trimEnd('/') ?: "https://github.com",
             dependencies.sleep,
         ) { dependencies.console.err("$it\n") }
         when (val outcome = runBlocking { login.signIn(serverUrl) }) {

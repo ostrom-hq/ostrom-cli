@@ -11,6 +11,9 @@ internal sealed interface RelayTarget {
     /** `POST /mcp/{server}`, forwarded to `/api/v1/mcp/{server}`. */
     data class Mcp(val server: String) : RelayTarget
 
+    /** `GET /api/v1/gates/catalog`, answered with the package's verified [catalog] without leaving the machine. */
+    data class Catalog(val catalog: String) : RelayTarget
+
     /** An inference route, forwarded to [upstreamPath]. */
     data class Inference(val upstreamPath: String) : RelayTarget
 
@@ -27,12 +30,12 @@ private const val API_PREFIX = "/api/v1/"
 private const val MCP_PREFIX = "/mcp/"
 private const val GATE_CATALOG = "/api/v1/gates/catalog"
 
-/** The hook routes the relay forwards (CLI-AGENTS, `api/openapi.yaml` of ostrom-core), by method. */
-private val HOOK_POST = Regex(
-    "/api/v1/(sessions|gates|checks|notifications)" +
-        "|/api/v1/sessions/$ID/(end|alive|reopen|seen|workflow-receipt)" +
-        "|/api/v1/gates/$ID/(consume|reserve|release)",
-)
+/**
+ * The hook routes the relay forwards (CLI-AGENTS, `api/openapi.yaml` of ostrom-core), by method. Ending a session,
+ * its sign of life, the use of a yes and the check runs are the launcher's and Ostrom's, never the agent's: the agent
+ * holds the relay's capability, so none of them is on this list (security audit S2-25, S2-29).
+ */
+private val HOOK_POST = Regex("/api/v1/(sessions|gates|notifications)|/api/v1/sessions/$ID/(reopen|seen)")
 private val HOOK_GET = Regex("/api/v1/gates/$ID")
 
 /** An MCP server name, as the server accepts it. */
@@ -46,15 +49,16 @@ private val INFERENCE_ROUTES = mapOf(
 
 /** Resolves a request of the agent against the allow-list of [config]. */
 internal fun resolveTarget(method: HttpMethod, path: String, config: RelayConfig): RelayTarget = when {
-    path.startsWith(API_PREFIX) -> hookTarget(method, path)
+    path.startsWith(API_PREFIX) -> hookTarget(method, path, config.gateCatalog)
     path.startsWith(MCP_PREFIX) -> mcpTarget(method, path.removePrefix(MCP_PREFIX), config.mcpServers)
     config.inference -> inferenceTarget(method, path)
     else -> RelayTarget.NotFound
 }
 
-private fun hookTarget(method: HttpMethod, path: String): RelayTarget = when {
+private fun hookTarget(method: HttpMethod, path: String, catalog: String?): RelayTarget = when {
     method == HttpMethod.Post && HOOK_POST.matches(path) -> RelayTarget.Hook(longPoll = false)
-    method == HttpMethod.Get && path == GATE_CATALOG -> RelayTarget.Hook(longPoll = false)
+    method == HttpMethod.Get && path == GATE_CATALOG ->
+        if (catalog == null) RelayTarget.Hook(longPoll = false) else RelayTarget.Catalog(catalog)
     method == HttpMethod.Get && HOOK_GET.matches(path) -> RelayTarget.Hook(longPoll = true)
     else -> RelayTarget.NotFound
 }

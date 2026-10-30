@@ -37,11 +37,12 @@ class SessionIds(private val sessionFile: String?, private val files: HookFiles)
 
     /**
      * Marks the action [text] as refused by the before-tool hook (or clears the mark): some agents (Hermes) still run
-     * their after-tool hook for a refused call, and a notification or a used-up yes must follow only an action that
-     * ran.
+     * their after-tool hook for a refused call, and a notification must follow only an action that ran. The mark only
+     * quiets the after-tool hook: nothing is let through on its word.
      */
     fun markRefused(text: String, refused: Boolean) {
-        val file = sessionFile?.let { "$it.refused.json" } ?: return
+        val session = sessionFile ?: return
+        val file = "$session.refused.json"
         val marks = read(file)
         val key = Sha256.hex(text)
         val updated = when {
@@ -50,28 +51,6 @@ class SessionIds(private val sessionFile: String?, private val files: HookFiles)
             else -> return
         }
         files.write(file, JsonObject(updated.mapValues { JsonPrimitive(true) }).toString())
-    }
-
-    /**
-     * Remembers that the yes of gate request [gateId] lets the action [text] run now, so that the after-tool hook
-     * uses it up (`POST /gates/{id}/consume`: one yes, one action).
-     */
-    fun rememberYes(text: String, gateId: String) {
-        val file = sessionFile?.let { "$it.yes.json" } ?: return
-        val yeses = read(file) + (Sha256.hex(text) to gateId)
-        files.write(file, JsonObject(yeses.mapValues { JsonPrimitive(it.value) }).toString())
-    }
-
-    /** The gate request whose yes the action [text] ran under, forgotten once read; null when it ran without one. */
-    fun takeYes(text: String): String? {
-        val file = sessionFile?.let { "$it.yes.json" }
-        val yeses = file?.let { read(it) }.orEmpty()
-        val key = Sha256.hex(text)
-        val gateId = yeses[key]
-        if (file != null && gateId != null) {
-            files.write(file, JsonObject((yeses - key).mapValues { JsonPrimitive(it.value) }).toString())
-        }
-        return gateId
     }
 
     /** Whether the before-tool hook refused the action [text]. */
@@ -87,7 +66,7 @@ class SessionIds(private val sessionFile: String?, private val files: HookFiles)
         } catch (_: IllegalArgumentException) {
             null
         }
-        return parsed?.entries?.mapNotNull { (key, value) -> (value as? JsonPrimitive)?.let { key to it.content } }
-            ?.toMap().orEmpty()
+        return parsed.orEmpty().mapNotNull { (key, value) -> (value as? JsonPrimitive)?.let { key to it.content } }
+            .toMap()
     }
 }

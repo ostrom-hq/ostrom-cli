@@ -9,6 +9,11 @@ import dev.ostrom.cli.hooks.gate.RealRepository
 object GateTexts {
     private val Gate.name: String get() = label ?: "gate"
 
+    /** An event the gate could not read (too large, late or not JSON): refused, never let through (S2-30). */
+    const val UNREAD_EVENT =
+        "Ostrom: denied. The gate could not read this tool call (too large, too slow or not JSON), so it was not " +
+            "run. Split the command or the file, then try again."
+
     /** A guarded action run in another repository than the session's. */
     fun foreign(context: HookContext, mine: RealRepository, real: RealRepository): String {
         val launchTop = context.launchTop
@@ -37,6 +42,16 @@ object GateTexts {
     /** An enforced push whose commits Ostrom cannot read. */
     fun unreadable(action: String, gate: Gate, reason: String): String =
         "Ostrom: denied. \"$action\" needs a yes from ${gate.approversPhrase} (gate \"${gate.name}\"), and $reason"
+
+    /** A command whose program is a shell variable or a substitution, while a gate is enforced (S2-26). */
+    fun dynamicCommand(action: String, gate: Gate, word: String): String =
+        "Ostrom: denied. \"$action\" needs a yes from ${gate.approversPhrase} (gate \"${gate.name}\"), and Ostrom " +
+            "cannot read which program `$word` runs. Write the command out in full, as its own command."
+
+    /** A change to git's remotes, aliases or push settings while a gate on pushes is enforced (S2-26, S2-27). */
+    fun gitSetting(action: String, gate: Gate, setting: String): String =
+        "Ostrom: denied. \"$action\" needs a yes from ${gate.approversPhrase} (gate \"${gate.name}\"), and this " +
+            "command changes $setting, which decides where a push goes. Ask the user to change it themselves."
 
     /** The session is closed and could not be reopened. */
     fun closed(action: String, message: String): String =

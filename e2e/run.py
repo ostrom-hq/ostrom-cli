@@ -107,9 +107,13 @@ def scenario_claude(binary, work):
         start = hooks[("SessionStart", None)]
         check(start["code"] == 0 and "e2e rules" in start["stdout"], "the session hook adds the rules")
         check(hooks[("PreToolUse", "ls -la")]["code"] == 0, "a harmless tool runs")
-        gated = hooks[("PreToolUse", "kubectl apply -f prod.yaml")]
-        check(gated["code"] == 2, f"a gated deployment waits for a yes (exit {gated['code']}: {gated['stderr'][:200]})")
+        observed = hooks[("PreToolUse", "kubectl apply -f prod.yaml")]
+        # S2-20: the signed package's catalogue is the session's; there a deployment is observed, not gated
+        check(observed["code"] == 0,
+              f"the package's catalogue holds (exit {observed['code']}: {observed['stderr'][:200]})")
         seen = requests(log)
+        check(not any(r["path"] == "/api/v1/gates/catalog" for r in seen),
+              "the relay answers the package's catalogue from memory, Ostrom is not asked")
         device = {(r["method"], r["path"]) for r in seen if r["token"] == "ost_e2e_device"}
         agent = {(r["method"], r["path"]) for r in seen if r["token"] == "agt_e2e_launch"}
         check(("POST", "/api/v1/launches") in device, "the launch is created with the device token")
@@ -166,12 +170,18 @@ def scenario_codex(binary, work):
         check(done.returncode == 0, f"codex ends with 0 (got {done.returncode})")
         check(report["arguments"][0] == "exec", "the subcommand comes first")
         check(report["arguments"][-1] == "fix it", "the prompt comes last")
-        check(report["environment"].get("OSTROM_SESSION_END_MS") == "2500", "the end hook fits Codex's 3 s")
+        check("OSTROM_SESSION_END_MS" not in report["environment"], "the end is the launcher's, not the hook's")
+        check(os.path.isabs(report["environment"].get("OSTROM_GIT", "")), "the hooks run the git the launcher found")
+        hooks = {(hook["event"], hook["tool"]): hook for hook in report["hooks"]}
+        gated = hooks[("PreToolUse", "kubectl apply -f prod.yaml")]
+        check(gated["code"] == 2,
+              f"without a package Ostrom's catalogue gates (exit {gated['code']}: {gated['stderr'][:200]})")
         check("--dangerously-bypass-hook-trust" not in report["arguments"], "no package: no hook trust asked")
         end = [hook for hook in report["hooks"] if hook["event"] == "SessionEnd"][0]
         check(end["code"] == 0, "the end hook answers")
         seen = requests(log)
         check(any(r["path"].endswith("/end") for r in seen), "the session is ended")
+        check(any(r["path"] == "/api/v1/gates/catalog" for r in seen), "the relay asks Ostrom for its catalogue")
     finally:
         server_process.kill()
 
