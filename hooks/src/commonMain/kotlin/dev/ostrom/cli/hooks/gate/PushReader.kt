@@ -46,9 +46,11 @@ class PushReader(private val git: GitRunner, private val home: String) {
     fun read(directory: String, text: String): Push? {
         if (!mentions(text)) return null
         val segments = ShellWords.segments(text)
-        val pushes = segments.indices.filter { pushOf(segments[it]) != null }
+        val invocations = segments.map { pushIn(directory, it) }
+        val pushes = segments.indices.filter { invocations[it] != null }
+        if (pushes.isEmpty() && !MENTION.containsMatchIn(text)) return null
         val other = pushes.lastOrNull()?.let { last ->
-            segments.subList(0, last).firstOrNull { pushOf(it) == null && it.first() != "cd" }
+            (0 until last).firstOrNull { invocations[it] == null && segments[it].first() != "cd" }?.let(segments::get)
         }
         val refusal = when {
             pushes.isEmpty() -> NOT_PLAIN
@@ -63,7 +65,7 @@ class PushReader(private val git: GitRunner, private val home: String) {
         val refs = mutableListOf<PushRef>()
         var force = false
         for (index in pushes) {
-            val invocation = checkNotNull(pushOf(segments[index]))
+            val invocation = checkNotNull(invocations[index])
             val one = onePush(directoryOf(directory, invocation), invocation.arguments, lenient = false)
             if (remote.isNotEmpty() && remote != one.remote) {
                 throw UnreadablePushException(
@@ -87,12 +89,45 @@ class PushReader(private val git: GitRunner, private val home: String) {
      */
     fun destinations(directory: String, text: String): List<String> {
         if (!mentions(text)) return emptyList()
-        val segments = ShellWords.segments(text)
-        val pushes = segments.mapNotNull { pushOf(it) }
+        val pushes = ShellWords.segments(text).mapNotNull { pushIn(directory, it) }
+        if (pushes.isEmpty() && !MENTION.containsMatchIn(text)) return emptyList()
         if (pushes.isEmpty()) throw UnreadablePushException(NOT_PLAIN)
         return pushes.flatMap { push ->
             onePush(directoryOf(directory, push), push.arguments, lenient = true).refs.map(PushRef::destination)
         }.distinct()
+    }
+
+    /**
+     * The push one simple command runs, or null: `git push`, and a git alias that pushes (`git ship` with
+     * `alias.ship=push`, read from `-c` or the configuration), read as the push it stands for (S2-26).
+     *
+     * @throws UnreadablePushException When the git command is a variable or a shell alias (`!…`).
+     */
+    fun pushIn(directory: String, words: List<String>): GitInvocation? {
+        val invocation = GitInvocation.parse(words)
+        val verb = invocation?.verb
+        return when {
+            invocation == null || verb == null || verb in GIT_COMMANDS -> invocation?.takeIf { verb == "push" }
+            CommandChecks.isDynamic(verb) -> throw UnreadablePushException(
+                "Ostrom cannot read which git command `$verb` is. Write the command out, as its own command.",
+            )
+            else -> aliasedPush(directoryOf(directory, invocation), invocation, verb)
+        }
+    }
+
+    private fun aliasedPush(directory: String, invocation: GitInvocation, verb: String): GitInvocation? {
+        val inline = invocation.configs.lastOrNull { it.substringBefore('=').equals("alias.$verb", ignoreCase = true) }
+        val alias = inline?.substringAfter('=', "") ?: git.run(directory, listOf("config", "--get", "alias.$verb"))
+        val words = ShellWords.segments(alias).singleOrNull().orEmpty()
+        return when {
+            alias.startsWith("!") -> throw UnreadablePushException(
+                "`git $verb` runs the shell alias `${alias.take(SHOWN)}`, which Ostrom cannot read. Run the git " +
+                    "commands it stands for, each as its own command.",
+            )
+            words.firstOrNull() == "push" ->
+                invocation.copy(verb = "push", arguments = words.drop(1) + invocation.arguments)
+            else -> null
+        }
     }
 
     private fun directoryOf(directory: String, invocation: GitInvocation): String =
@@ -108,7 +143,15 @@ class PushReader(private val git: GitRunner, private val home: String) {
     private class OnePush(val remote: String, val refs: List<PushRef>, val force: Boolean)
 
     private fun onePush(directory: String, arguments: List<String>, lenient: Boolean): OnePush {
+        val dynamic = arguments.firstOrNull(CommandChecks::isDynamic)
+        if (dynamic != null) {
+            throw UnreadablePushException(
+                "`$dynamic` is a shell variable or substitution: Ostrom cannot tell what this push sends. Write the " +
+                    "remote and the branch out (`git push origin main`), as its own command.",
+            )
+        }
         val positional = mutableListOf<String>()
+        var repository: String? = null
         var delete = false
         var force = false
         var i = 0
@@ -119,17 +162,24 @@ class PushReader(private val git: GitRunner, private val home: String) {
                     "`git push $a` sends refs Ostrom cannot list before it runs: push each branch or tag by name " +
                         "(`git push origin main`), as its own command.",
                 )
-                a == "-d" || a == "--delete" -> delete = true
+                a == "--delete" || SHORT_DELETE.matches(a) -> delete = true
+                a == "--repo" -> repository = arguments.getOrNull(++i)
+                a.startsWith("--repo=") -> repository = a.removePrefix("--repo=")
                 a in OPTIONS_WITH_VALUE -> i++
-                a.startsWith("--repo=") -> positional += a.removePrefix("--repo=")
                 isForce(a) -> force = true
                 a.startsWith("-") || REDIRECTION.containsMatchIn(a) -> Unit
                 else -> positional += a
             }
             i++
         }
+        // short options cluster: `-fd` both forces and deletes
+        force = force || arguments.any { SHORT_DELETE.matches(it) && 'f' in it }
         val branch = git.run(directory, listOf("symbolic-ref", "--quiet", "--short", "HEAD"))
-        val remote = if (positional.isEmpty()) defaultRemote(directory, branch) else positional.removeAt(0)
+        val remote = when {
+            repository != null -> repository
+            positional.isEmpty() -> defaultRemote(directory, branch)
+            else -> positional.removeAt(0)
+        }
         val refs = if (positional.isEmpty()) {
             listOf(barePush(directory, remote, branch))
         } else {
@@ -141,9 +191,17 @@ class PushReader(private val git: GitRunner, private val home: String) {
         return OnePush(remote, refs, force)
     }
 
-    private fun defaultRemote(directory: String, branch: String): String =
-        branch.takeIf { it.isNotEmpty() }?.let { git.run(directory, listOf("config", "branch.$it.remote")) }
-            ?.takeIf { it.isNotEmpty() } ?: "origin"
+    /** Where a push without a remote goes, as git decides it (S2-27): pushRemote, pushDefault, the upstream, origin. */
+    private fun defaultRemote(directory: String, branch: String): String {
+        val settings = if (branch.isEmpty()) {
+            listOf("remote.pushDefault")
+        } else {
+            listOf("branch.$branch.pushRemote", "remote.pushDefault", "branch.$branch.remote")
+        }
+        return settings.firstNotNullOfOrNull { key ->
+            git.run(directory, listOf("config", key)).takeIf { it.isNotEmpty() }
+        } ?: "origin"
+    }
 
     /**
      * A push without a refspec: git may follow the configuration, not the current branch (`remote.<r>.push`,
@@ -199,11 +257,15 @@ class PushReader(private val git: GitRunner, private val home: String) {
 
     /** Reads push commands without git. */
     companion object {
-        /** Whether a shell command contains a `git push` anywhere (it must then be readable). */
-        fun mentions(text: String): Boolean = MENTION.containsMatchIn(text)
-
-        /** The push of one simple command, or null when it is not a `git push`. */
-        fun pushOf(words: List<String>): GitInvocation? = GitInvocation.parse(words)?.takeIf { it.verb == "push" }
+        /**
+         * Whether a shell command may push (it must then be readable): `git push` written anywhere, also quoted or
+         * escaped (`git pu''sh`), and a git command that is not one of git's own, which may be an alias (S2-26).
+         */
+        fun mentions(text: String): Boolean = MENTION.containsMatchIn(text) ||
+            ShellWords.segments(text).any { words ->
+                val verb = GitInvocation.parse(words)?.verb
+                verb != null && verb !in NOT_PUSHING
+            }
 
         /** `refs/heads/main` and `refs/tags/v1` as `main` and `v1`. */
         fun shortRef(ref: String): String = ref.removePrefix("refs/heads/").removePrefix("refs/tags/")
@@ -214,6 +276,19 @@ class PushReader(private val git: GitRunner, private val home: String) {
 
         private val MENTION = Regex("\\bgit\\b[^\\n;&|]*\\bpush\\b")
         private val SHORT_FORCE = Regex("-[A-Za-z]*f[A-Za-z]*")
+        private val SHORT_DELETE = Regex("-[A-Za-z]*d[A-Za-z]*")
+
+        /** git's own commands: an alias cannot replace them, so they are never looked up. */
+        private val GIT_COMMANDS = setOf(
+            "add", "am", "apply", "archive", "bisect", "blame", "branch", "bundle", "cat-file", "checkout",
+            "cherry-pick", "clean", "clone", "commit", "config", "describe", "diff", "fetch", "for-each-ref",
+            "format-patch", "fsck", "gc", "grep", "help", "init", "log", "ls-files", "ls-remote", "ls-tree", "merge",
+            "merge-base", "mv", "notes", "pull", "push", "range-diff", "rebase", "reflog", "remote", "reset",
+            "restore", "rev-list", "rev-parse", "revert", "rm", "shortlog", "show", "show-ref", "sparse-checkout",
+            "stash", "status", "submodule", "switch", "symbolic-ref", "tag", "update-ref", "var", "version",
+            "worktree",
+        )
+        private val NOT_PUSHING = GIT_COMMANDS - "push"
         private val REDIRECTION = Regex("^(>|2>|1>|<|&>)")
         private val EVERYTHING = setOf("--all", "--mirror", "--branches", "--tags")
         private val OPTIONS_WITH_VALUE = setOf("-o", "--push-option", "--repo", "--receive-pack", "--exec")

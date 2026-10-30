@@ -5,9 +5,10 @@ import dev.ostrom.cli.hooks.gate.GitRunner
 import dev.ostrom.cli.hooks.gate.Push
 
 /**
- * What a push would send, shown to the approver before the yes (prototype `outgoing_diff`, `pushed_diff`). It is for
- * reading only: the server computes the diff it signs from GitHub, never from a local ref the agent can move (audit
- * A7b).
+ * What a push would send, as the agent's machine sees it (prototype `outgoing_diff`, `pushed_diff`). The agent can
+ * move the local refs it is read against, so it is a preview only: what the yes binds is the head SHA and the
+ * destination the server reads on GitHub (security audit S2-28). git's external diff drivers and text conversions are
+ * turned off: a repository setting must not write the diff the approver reads.
  */
 class Diffs(private val git: GitRunner) {
     /** The commits a push of the current branch would send (upstream..HEAD, else the last commit) and their diff. */
@@ -29,9 +30,9 @@ class Diffs(private val git: GitRunner) {
     )
 
     private fun diffOf(directory: String, range: String): String {
-        val log = git.run(directory, listOf("log", "--no-color", "--format=%h %s (%an)", range))
+        val log = git.run(directory, listOf("log") + PLAIN + listOf("--format=%h %s (%an)", range))
         if (log.isEmpty()) return ""
-        val diff = git.run(directory, listOf("diff", "--no-color", "--stat", "--patch", range))
+        val diff = git.run(directory, listOf("diff") + PLAIN + listOf("--stat", "--patch", range))
         return cut("$log\n\n$diff")
     }
 
@@ -40,6 +41,7 @@ class Diffs(private val git: GitRunner) {
         /** The most a diff may weigh in a gate request. */
         const val MAX_BYTES = 8_000
         private const val SHORT_SHA = 12
+        private val PLAIN = listOf("--no-color", "--no-ext-diff", "--no-textconv")
         private const val CONTINUATION_MASK = 0xC0
         private const val CONTINUATION = 0x80
 

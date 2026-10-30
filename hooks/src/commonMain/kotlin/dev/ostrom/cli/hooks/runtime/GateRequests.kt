@@ -20,7 +20,7 @@ import kotlinx.serialization.json.JsonPrimitive
 /**
  * A gated action the before-tool hook asks a yes for.
  *
- * @property written The command as the agent wrote it: the after-tool hook finds the yes under it.
+ * @property written The command as the agent wrote it.
  * @property subject The command with where its pushes land appended, which the gate patterns read.
  * @property gate The action's gate.
  * @property failMode The organisation's fail mode (`open` lets the action through when Ostrom is unreachable).
@@ -105,12 +105,9 @@ class GateRequests(
         val request = if ("status" in body) body else body["gate"] as? JsonObject ?: body
         val answer = GateAnswer.of(request, ask.action.name, ask.gate)
         return when (request.string("status")) {
-            "approved" -> {
-                request.string("id")?.let { ids.rememberYes(ask.written, it) }
-                replies.say(GateTexts.approved(answer))
-            }
+            "approved" -> replies.say(GateTexts.approved(answer))
             "shadow" -> replies.say(GateTexts.shadow(answer))
-            "ungated", "consumed" -> replies.allow()
+            "ungated" -> replies.allow()
             "rejected" -> replies.deny(GateTexts.rejected(answer))
             else -> replies.deny(GateTexts.waiting(answer))
         }
@@ -125,9 +122,8 @@ class GateRequests(
     private fun redirection(subject: ToolSubject): String? = if (subject.kind != ToolKind.BASH) {
         null
     } else {
-        ShellWords.segments(subject.text).firstNotNullOfOrNull { words ->
-            GitInvocation.parse(words)?.takeIf { it.verb == "push" }?.redirection()
-        }
+        // any git call of a gated command, not only its push: `git -c alias.x=push x` redirects too (S2-27)
+        ShellWords.segments(subject.text).firstNotNullOfOrNull { words -> GitInvocation.parse(words)?.redirection() }
     }
 
     /** The note the hooks append to a push for the gate patterns, and how they read it. */

@@ -6,8 +6,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
- * `ostrom hook session`: records the session with Ostrom at its start (and hands the agent the session's context),
- * signs its receipt at its end (prototype `hook_session`).
+ * `ostrom hook session`: records the session with Ostrom at its start and hands the agent the session's context
+ * (prototype `hook_session`). Its end is the launcher's: the agent cannot end the session it is watched in (S2-25).
  */
 @Suppress("LongParameterList") // the hook's collaborators, each a port tested on its own
 class SessionHook(
@@ -34,7 +34,6 @@ class SessionHook(
             )
             // Hermes: its session events cannot add context, so the rules go in on the first model call
             "PreLLMCall" -> firstModelCall(event, agentSession)
-            "SessionEnd" -> end(event)
             else -> HookReply()
         }
     }
@@ -75,27 +74,6 @@ class SessionHook(
         if (!segment.isNullOrEmpty()) writes.adopt(agentSession, segment)
         val text = listOfNotNull(reply.string("context").orEmpty(), checks.context).joinToString("\n")
         return Result.success(text)
-    }
-
-    private fun end(event: JsonObject): HookReply {
-        val session = ids.of(event.string("session_id"))
-        val body = jsonOf("source" to (event.string("reason") ?: "SessionEnd"))
-        return when (val answer = calls.call(Routes.end(session), body, context.sessionEndMillis)) {
-            is CallResult.Failed ->
-                HookReply(stderr = "Ostrom unreachable (${answer.message}): session receipt not signed.\n")
-            is CallResult.Ok -> {
-                val signed = answer.body["receipt"] as? JsonObject
-                val session = answer.body["session"] as? JsonObject
-                val receipt = session?.string("receiptId") ?: signed?.string("id") ?: "?"
-                val verification = answer.body["verification"] as? JsonObject
-                val state = when {
-                    (verification?.get("ok") as? JsonPrimitive)?.content == "true" -> "signature valid"
-                    signed?.string("signature") != null -> "signed"
-                    else -> "not verified"
-                }
-                HookReply(stderr = "Ostrom: session receipt $receipt ($state)\n")
-            }
-        }
     }
 
     private fun startOutput(text: String): String {
