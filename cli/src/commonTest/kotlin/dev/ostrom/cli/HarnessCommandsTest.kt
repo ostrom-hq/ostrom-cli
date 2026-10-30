@@ -154,6 +154,9 @@ class HarnessCommandsTest : SetupKit() {
         assertEquals(2, run(routes, "harness", "update", "w1", "deploy.json"))
         assertErr("Nothing was changed.\n")
         assertEquals(2, sent().count { it == put })
+        typed += "y"
+        assertEquals(0, run(routes, "harness", "update", "w1", "deploy.json"))
+        assertEquals(3, sent().count { it == put })
     }
 
     @Test

@@ -29,6 +29,13 @@ private const val AGENTS = "/api/v1/policy/agents"
 /** The values of the self-approval policy (`setGatePolicy`). */
 private val SELF_APPROVAL = listOf("sole-approver", "never")
 
+private const val MODELS_KEY = "models"
+private const val DEFAULT = "default-model"
+private const val SELF = "self-approval"
+
+/** The keys of `ostrom policy set`. */
+private val KEYS = listOf(MODELS_KEY, DEFAULT, SELF)
+
 private fun JsonObject.texts(key: String) = list(key).filterIsInstance<JsonPrimitive>().map { it.content }
 
 /** `ostrom policy`: models, self-approval, rules; and whether a developer may start an agent. The policy by default. */
@@ -107,13 +114,6 @@ internal class PolicySetCommand(private val dependencies: CliDependencies) : Cli
         val default = wanted?.takeIf { it in allowed } ?: allowed.first()
         return objectOf("allowed" to allowed, "default" to default, "byMember" to current.child("byMember"))
     }
-
-    private companion object {
-        const val MODELS_KEY = "models"
-        const val DEFAULT = "default-model"
-        const val SELF = "self-approval"
-        val KEYS = listOf(MODELS_KEY, DEFAULT, SELF)
-    }
 }
 
 /** `ostrom policy check <agent> [--model M] [--dev LOGIN]`: what `ostrom <agent>` would be told before it starts. */
@@ -133,7 +133,7 @@ internal class PolicyCheckCommand(private val dependencies: CliDependencies) : C
             "Unknown agent \"$agent\". Agents: ${Agent.entries.joinToString(", ") { it.command }}.",
         )
         val access = dependencies.orgAccess(server, org)
-        val who = dev?.removePrefix("@") ?: access.signed.login
+        val who = dev.let { if (it == null) access.signed.login else it.removePrefix("@") }
         val query = "agent=${segment(ostromName(known))}&dev=${segment(who)}" +
             model?.let { "&model=${segment(it)}" }.orEmpty()
         val body = access.read("$AGENTS?$query", "No agent policy in ${access.org.slug}.")

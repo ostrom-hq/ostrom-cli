@@ -163,8 +163,8 @@ internal fun CliDependencies.currentRepo(): String? =
 
 private fun CliDependencies.gitTopName(): String? {
     val top = capture.capture(listOf("git", "-C", workingDirectory(), "rev-parse", "--show-toplevel"), GIT_MILLIS)
-    val path = (top as? CaptureResult.Exited)?.takeIf { it.code == 0 }?.output?.trim()?.trimEnd('/', '\\')
-    return path?.substringAfterLast('/')?.substringAfterLast('\\')?.ifEmpty { null }
+    if (top !is CaptureResult.Exited || top.code != 0) return null
+    return top.output.trim().trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\').ifEmpty { null }
 }
 
 /** The longest `git rev-parse` may take. */

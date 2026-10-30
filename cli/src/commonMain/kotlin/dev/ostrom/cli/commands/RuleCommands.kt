@@ -64,7 +64,7 @@ internal fun OrgAccess.decideRules(ids: List<String>, status: String): Int {
         return 1
     }
     val body = write("POST", "$RULES/bulk", objectOf("ids" to ids, "status" to status), "No such rules.")
-    return (body["updated"] as? JsonPrimitive)?.content?.toIntOrNull() ?: ids.size
+    return (body["updated"] as? JsonPrimitive)?.let { it.content.toIntOrNull() } ?: ids.size
 }
 
 /** `ostrom policy rules`: the rules learned from the repositories or written by the team. */
@@ -196,7 +196,7 @@ internal class RulesEditCommand(private val dependencies: CliDependencies) : Cli
         val changes = objectOf(
             "statement" to statement,
             "strength" to strength,
-            "scope" to scope?.split(',')?.map(String::trim)?.filter(String::isNotEmpty),
+            "scope" to scope?.let { listed -> listed.split(',').map(String::trim).filter(String::isNotEmpty) },
             "reviewBy" to reviewBy,
         )
         if (changes.isEmpty()) throw stopWith(ExitCode.USAGE, "Nothing to change: add --statement, --strength, …")
@@ -204,8 +204,7 @@ internal class RulesEditCommand(private val dependencies: CliDependencies) : Cli
         val body = access.write("PATCH", rule(id), changes, "No rule $id in ${access.org.slug}.")
         dependencies.console.out("✓ ${ruleLine(body)}\n")
     }
-
-    private companion object {
-        val STRENGTHS = setOf("required", "recommended")
-    }
 }
+
+/** The strengths of a rule (`RuleStrength` of the contract). */
+private val STRENGTHS = setOf("required", "recommended")

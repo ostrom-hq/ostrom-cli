@@ -117,4 +117,20 @@ class PolicyCommandsTest : SetupKit() {
         assertErr("Unknown agent \"cursor\". Agents: claude, codex, opencode, gemini, grok, hermes, pi.\n")
         assertTrue(sent().none { it.contains("cursor") })
     }
+
+    @Test
+    fun eachPolicyCommandHasItsHelp() {
+        val helps = mapOf(
+            listOf("policy") to "Models, self-approval and rules of your organisation",
+            listOf("policy", "show") to "Show the policy",
+            listOf("policy", "set") to "Set models, default-model or self-approval",
+            listOf("policy", "check") to "May a developer start this agent (and model)",
+        )
+        for ((command, help) in helps) {
+            console.out.clear()
+            assertEquals(0, run(emptyMap(), *command.toTypedArray(), "--help"), "$command")
+            assertTrue(console.out.contains(help), console.out.toString())
+        }
+        assertTrue(sent().isEmpty(), "help asks the server nothing")
+    }
 }

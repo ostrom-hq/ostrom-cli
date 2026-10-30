@@ -30,7 +30,7 @@ private val SERVED_FIELDS = setOf("version", "updatedBy", "updatedAt")
 
 private fun JsonObject.nodes() = list("nodes").filterIsInstance<JsonObject>()
 
-private fun JsonObject.version(): Int? = (this["version"] as? JsonPrimitive)?.content?.toIntOrNull()
+private fun JsonObject.version(): Int? = (this["version"] as? JsonPrimitive)?.let { it.content.toIntOrNull() }
 
 /** The statuses of a workflow that blocks (`WorkflowStatus` of the contract). */
 private val ENFORCED = setOf("accepted", "edited")
@@ -95,7 +95,7 @@ internal class HarnessListCommand(private val dependencies: CliDependencies) : C
     override fun run() {
         val access = dependencies.orgAccess(server, org)
         val target = if (all) null else repo ?: dependencies.currentRepo()
-        val path = target?.let { "$WORKFLOWS?repo=${segment(it)}" } ?: WORKFLOWS
+        val path = if (target == null) WORKFLOWS else "$WORKFLOWS?repo=${segment(target)}"
         val body = access.read(path, "No workflows in ${access.org.slug}.")
         val workflows = body.list("items").filterIsInstance<JsonObject>()
         val console = dependencies.console

@@ -84,4 +84,21 @@ class MemberCommandsTest : SetupKit() {
         assertEquals(0, run(routes, "members", "remove", "tom", "--yes"))
         assertEquals(listOf(delete, delete), sent())
     }
+
+    @Test
+    fun eachMembersCommandHasItsHelp() {
+        val helps = mapOf(
+            listOf("members") to "Members of your organisation and their roles",
+            listOf("members", "list") to "List the members",
+            listOf("members", "role") to "Change a member's role",
+            listOf("members", "remove") to "Remove a member (asks to type their login)",
+        )
+        for ((command, help) in helps) {
+            console.out.clear()
+            assertEquals(0, run(emptyMap(), *command.toTypedArray(), "--help"), "$command")
+            assertTrue(console.out.contains(help), console.out.toString())
+            assertTrue(!console.out.contains("(coming soon)"), console.out.toString())
+        }
+        assertTrue(sent().isEmpty(), "help asks the server nothing")
+    }
 }

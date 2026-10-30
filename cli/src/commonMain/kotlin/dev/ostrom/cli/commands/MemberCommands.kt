@@ -104,7 +104,7 @@ private fun CliDependencies.listMembers(org: String?, server: String?, json: Boo
     }
     console.out("${access.org.name} · ${if (members.size == 1) "1 member" else "${members.size} members"}\n")
     members.forEach { member ->
-        val joined = member.text("joinedAt")?.take(DATE)?.let { "joined $it" }
+        val joined = member.text("joinedAt")?.let { "joined ${it.take(DATE)}" }
         val parts = listOfNotNull("@${member.text("login")}", member.text("name"), member.text("role"), joined)
         console.out("  ${parts.joinToString("  ")}\n")
     }

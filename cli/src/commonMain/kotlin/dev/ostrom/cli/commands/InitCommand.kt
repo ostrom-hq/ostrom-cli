@@ -91,8 +91,8 @@ internal class InitCommand(private val dependencies: CliDependencies) : CliktCom
         // Beyond the first page (100), a repository not found is not known to be missing: no warning.
         val covered = access.readIfServed("/api/v1/repos?limit=$REPOS_PAGE")?.let { coverage(it, name) }
         summary["covered"] = covered
-        val workflows = access.readIfServed("/api/v1/workflows?repo=${segment(name)}")?.list("items")
-            ?.filterIsInstance<JsonObject>()
+        val workflows = access.readIfServed("/api/v1/workflows?repo=${segment(name)}")
+            ?.let { page -> page.list("items").filterIsInstance<JsonObject>() }
         summary["workflows"] = workflows?.size
         val harness = when {
             workflows == null -> "not on this server yet"
@@ -190,7 +190,7 @@ internal class InitCommand(private val dependencies: CliDependencies) : CliktCom
  * last page, null when more pages follow: not found there, it is not known to be missing.
  */
 private fun coverage(page: JsonObject, name: String): Boolean? {
-    val found = page.list("items").filterIsInstance<JsonObject>()
-        .any { it.text("name") == name || it.text("name")?.endsWith("/$name") == true }
+    val found = page.list("items").filterIsInstance<JsonObject>().mapNotNull { it.text("name") }
+        .any { it == name || it.endsWith("/$name") }
     return found.takeIf { it || page.text("next").isNullOrEmpty() }
 }

@@ -100,6 +100,12 @@ class OrgAccessTest : SetupKit() {
         }
         assertEquals(69, cli(environment = withServer, api = halfway).run(arrayOf("members", "list")))
         assertErr("Ostrom is unreachable at https://ostrom.example.")
+        // a route read only when served, and a change, are as unreachable
+        for (args in listOf(arrayOf("init", "--repo", "acme-api"), arrayOf("invite", "lena@acme.dev"))) {
+            console.err.clear()
+            assertEquals(69, cli(environment = withServer, api = halfway).run(args), args.joinToString(" "))
+            assertErr("Ostrom is unreachable at https://ostrom.example.")
+        }
     }
 
     @Test
