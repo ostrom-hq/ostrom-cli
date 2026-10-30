@@ -89,9 +89,11 @@ class RunDoctorUseCaseImpl(
         }
     }
 
-    private fun git(): DoctorCheck = finder.find("git")
-        ?.let { DoctorCheck(CheckStatus.OK, "git found ($it)") }
-        ?: DoctorCheck(CheckStatus.PROBLEM, "git not found: install git, agents need it.")
+    private fun git(): DoctorCheck {
+        val path = finder.find("git")
+            ?: return DoctorCheck(CheckStatus.PROBLEM, "git not found: install git, agents need it.")
+        return DoctorCheck(CheckStatus.OK, "git found ($path)")
+    }
 
     private fun agents(): DoctorCheck {
         val found = Agent.entries.filter { finder.find(it.executable) != null }

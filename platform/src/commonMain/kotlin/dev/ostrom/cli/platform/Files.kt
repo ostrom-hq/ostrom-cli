@@ -2,11 +2,12 @@ package dev.ostrom.cli.platform
 
 import okio.FileSystem
 import okio.IOException
+import okio.Path
 import okio.Path.Companion.toPath
 
 /** Small text files of the CLI (configuration, state), written atomically. */
 interface FileStore {
-    /** The text of the file at [path], or null when it does not exist. */
+    /** The text of the file at [path], or null when it does not exist or cannot be read (a file in its path). */
     fun read(path: String): String?
 
     /**
@@ -30,10 +31,11 @@ class FileWriteException(val path: String, cause: Throwable) : Exception(cause)
 
 /** [FileStore] over okio's [FileSystem.SYSTEM]. */
 class FileStoreImpl(private val fileSystem: FileSystem = FileSystem.SYSTEM) : FileStore {
-    override fun read(path: String): String? {
-        val file = path.toPath()
-        if (!fileSystem.exists(file)) return null
-        return fileSystem.read(file) { readUtf8() }
+    override fun read(path: String): String? = try {
+        fileSystem.read(path.toPath()) { readUtf8() }
+    } catch (_: IOException) {
+        // Missing, or unreadable: the next write says why, with exit code 73.
+        null
     }
 
     override fun write(path: String, text: String) {
@@ -77,8 +79,15 @@ class ExecutableFinderImpl(
         val folders = environment["PATH"].orEmpty().split(environment.pathListSeparator).filter { it.isNotEmpty() }
         return folders.asSequence()
             .flatMap { folder -> extensions.asSequence().map { folder.toPath() / "$name$it" } }
-            .firstOrNull { fileSystem.metadataOrNull(it)?.isRegularFile == true }
+            .firstOrNull(::isFile)
             ?.toString()
+    }
+
+    /** True when [path] is a file, or a link to one (npm and Homebrew install agents as links). */
+    private fun isFile(path: Path): Boolean = try {
+        fileSystem.metadata(fileSystem.canonicalize(path)).isRegularFile
+    } catch (_: IOException) {
+        false
     }
 
     private companion object {

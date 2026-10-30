@@ -11,9 +11,11 @@ import dev.ostrom.cli.doctor.NO_HOME
 import dev.ostrom.cli.platform.ConfigKey
 import dev.ostrom.cli.platform.ConfigStore
 import dev.ostrom.cli.platform.FileWriteException
+import kotlin.math.max
 
 /** `ostrom config [list | get K | set K V | unset K]`: settings of this device, never the organisation's policy. */
-class ConfigCommand(dependencies: CliDependencies) : GroupCommand("config", "Settings of this device") {
+class ConfigCommand(dependencies: CliDependencies) :
+    GroupCommand("config", "Settings of this device", comingSoon = false) {
     init {
         subcommands(
             ConfigList(dependencies),
@@ -62,7 +64,7 @@ private class ConfigList(dependencies: CliDependencies) : ConfigSubcommand("list
 
     fun print() {
         val values = store().list()
-        val width = ConfigKey.entries.maxOf { it.key.length }
+        val width = ConfigKey.entries.fold(0) { widest, key -> max(widest, key.key.length) }
         val lines = ConfigKey.entries.joinToString("") { key ->
             "${key.key.padEnd(width)}  ${values[key] ?: "(not set)"}\n"
         }

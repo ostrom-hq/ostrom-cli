@@ -29,11 +29,19 @@ interface Environment {
      */
     val configDirectory: String?
         get() {
+            val override = get("OSTROM_HOME")
+            val appData = get("APPDATA")
+            val xdg = get("XDG_CONFIG_HOME")
+            val home = homeDirectory
             val windows = operatingSystem == OperatingSystem.WINDOWS
-            return get("OSTROM_HOME") ?: if (windows) {
-                (get("APPDATA") ?: homeDirectory?.let { "$it\\AppData\\Roaming" })?.let { "$it\\ostrom" }
-            } else {
-                get("XDG_CONFIG_HOME")?.let { "$it/ostrom" } ?: homeDirectory?.let { "$it/.config/ostrom" }
+            return when {
+                override != null -> override
+                windows && appData != null -> "$appData\\ostrom"
+                windows && home != null -> "$home\\AppData\\Roaming\\ostrom"
+                windows -> null
+                xdg != null -> "$xdg/ostrom"
+                home != null -> "$home/.config/ostrom"
+                else -> null
             }
         }
 
