@@ -16,6 +16,9 @@ import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.http.headersOf
+import io.ktor.utils.io.ByteChannel
+import io.ktor.utils.io.cancel
+import io.ktor.utils.io.writeStringUtf8
 import kotlinx.coroutines.delay
 import kotlinx.io.IOException
 import kotlin.test.Test
@@ -219,6 +222,22 @@ class RelayHooksTest {
             down = true
             assertEquals(HttpStatusCode.BadGateway, client.post("/api/v1/gates") { bearerAuth(TOKEN) }.status)
             assertEquals(2, reports.size, "A new outage after a recovery is reported again")
+        }
+    }
+
+    @Test
+    fun anAnswerCutBeforeItsEndIs502ButNoOutage() {
+        val ostrom = FakeOstrom {
+            val cut = ByteChannel(autoFlush = true)
+            cut.writeStringUtf8("{\"status\":")
+            cut.cancel(IOException("cut"))
+            respond(cut, HttpStatusCode.OK, json)
+        }
+        val reports = mutableListOf<String>()
+        relayTest(ostrom, reports = reports) {
+            val response = client.post("/api/v1/gates") { bearerAuth(TOKEN) }
+            assertEquals(HttpStatusCode.BadGateway, response.status, "The agent learns its call failed")
+            assertEquals(emptyList(), reports, "Ostrom answered: the user is not told it is unreachable")
         }
     }
 

@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.hooks
 
+import dev.ostrom.cli.hooks.runtime.FakeCalls
+import dev.ostrom.cli.hooks.runtime.FakeFiles
+import dev.ostrom.cli.hooks.runtime.GateTexts
+import dev.ostrom.cli.hooks.runtime.HookPorts
+import dev.ostrom.cli.hooks.runtime.SessionHookProcessor
+import dev.ostrom.cli.hooks.runtime.contextOf
 import dev.ostrom.cli.platform.Console
 import dev.ostrom.cli.platform.Environment
 import dev.ostrom.cli.platform.OperatingSystem
@@ -58,6 +64,19 @@ class HookRunnerTest {
         val console = FakeConsole(StandardInput.Unavailable(StandardInputFailure.TIMEOUT))
         assertEquals(0, HookRunnerImpl(console, FakeEnvironment(), passThrough).run(listOf("session")))
         assertEquals("", console.out.toString())
+    }
+
+    @Test
+    fun aGateWhoseEventCannotBeReadRefusesTheActionWhateverTheFailure() {
+        // fail closed (orchestrator, 30/10 05:15): an event stdin did not give in time, whole or at all, is refused
+        val ports = HookPorts(FakeCalls(), FakeFiles(), { _, _ -> "" }, { it }, "/w")
+        for (failure in StandardInputFailure.entries) {
+            val console = FakeConsole(StandardInput.Unavailable(failure))
+            val processor = SessionHookProcessor(contextOf(), ports)
+            val code = HookRunnerImpl(console, FakeEnvironment(), processor).run(listOf("gate"))
+            assertEquals(2, code, failure.name)
+            assertEquals(GateTexts.UNREAD_EVENT + "\n", console.err.toString(), failure.name)
+        }
     }
 
     @Test
