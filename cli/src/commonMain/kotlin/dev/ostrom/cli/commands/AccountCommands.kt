@@ -22,8 +22,8 @@ import kotlinx.coroutines.runBlocking
 
 /** The server of an account command: `--server`, else `OSTROM_URL`, else the one of the last login, else Ostrom's. */
 private fun CliDependencies.serverOf(option: String?, directory: String): String =
-    (option ?: environment["OSTROM_URL"] ?: ConfigStoreImpl(files, configFile(directory)).get(ConfigKey.SERVER))
-        ?.trimEnd('/') ?: DEFAULT_SERVER
+    (option ?: environment["OSTROM_URL"] ?: ConfigStoreImpl(files, configFile(directory)).get(ConfigKey.SERVER)
+        ?: DEFAULT_SERVER).trimEnd('/')
 
 /** The CLI folder, or exit 73. */
 private fun CliDependencies.directory(): String = environment.configDirectory
