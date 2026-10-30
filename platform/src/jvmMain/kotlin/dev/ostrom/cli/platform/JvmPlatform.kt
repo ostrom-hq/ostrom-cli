@@ -99,16 +99,7 @@ internal actual fun captureOutput(
     val process = quiet(ProcessBuilder(command)).start()
     val output = java.io.ByteArrayOutputStream()
     // read beside the wait, so the deadline holds while the child keeps its stdout open
-    val reader = Thread {
-        process.inputStream.use { input ->
-            val buffer = ByteArray(BUFFER_BYTES)
-            var count = input.read(buffer)
-            while (count >= 0) {
-                synchronized(output) { output.write(buffer, 0, minOf(count, capacity - output.size())) }
-                count = input.read(buffer)
-            }
-        }
-    }.apply {
+    val reader = Thread(Drain(process.inputStream, output, capacity)).apply {
         isDaemon = true
         start()
     }
@@ -123,6 +114,24 @@ internal actual fun captureOutput(
 } catch (_: IOException) {
     // the JDK's wording of a missing program changes between versions: a child that cannot start is not found
     CaptureResult.NotFound
+}
+
+/** Copies a child's output into [output], up to [capacity] bytes; a class, so no lambda escapes the exclusion. */
+// coverage: test-only JVM target, see captureOutput.
+@ExcludeFromCoverage
+private class Drain(
+    private val input: java.io.InputStream,
+    private val output: java.io.ByteArrayOutputStream,
+    private val capacity: Int,
+) : Runnable {
+    override fun run() = input.use {
+        val buffer = ByteArray(BUFFER_BYTES)
+        var count = it.read(buffer)
+        while (count >= 0) {
+            synchronized(output) { output.write(buffer, 0, minOf(count, capacity - output.size())) }
+            count = it.read(buffer)
+        }
+    }
 }
 
 /** stdin from the null device, stderr dropped: what the native shims do. */
