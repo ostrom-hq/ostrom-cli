@@ -22,8 +22,10 @@ class HookRepliesTest {
     @Test
     fun aRefusalExitsTwoAndSaysWhyInEachDialect() {
         assertEquals(Reply("", "no\n", 2), HookReplies("codex").deny("no"))
-        assertEquals(Reply("""{"decision":"block","reason":"no"}""" + "\n", "no\n", 2), HookReplies("hermes").deny("no"))
-        assertEquals(Reply("""{"decision":"deny","reason":"no"}""" + "\n", "no\n", 2), HookReplies("grok").deny("no"))
-        assertEquals(Reply("""{"decision":"deny","reason":"no"}""" + "\n", "no\n", 2), HookReplies("gemini").deny("no"))
+        val block = """{"decision":"block","reason":"no"}""" + "\n"
+        val deny = """{"decision":"deny","reason":"no"}""" + "\n"
+        assertEquals(Reply(block, "no\n", 2), HookReplies("hermes").deny("no"))
+        assertEquals(Reply(deny, "no\n", 2), HookReplies("grok").deny("no"))
+        assertEquals(Reply(deny, "no\n", 2), HookReplies("gemini").deny("no"))
     }
 }
