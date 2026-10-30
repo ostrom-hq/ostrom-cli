@@ -67,7 +67,7 @@ class RelayPolicyTest {
         // S2-25: the capability in the agent's environment used to ask gates, open sessions and read the policy
         val ostrom = FakeOstrom { respond("{}", HttpStatusCode.OK, json) }
         relayTest(ostrom, relayConfig(inference = true), clientToken = CLIENT_TOKEN) {
-            // a check run reported by the agent itself would say the tests passed without running them
+            // nor reports a check run from its environment (the hooks' file is another matter: MODULES.md)
             for (hookPath in listOf("/api/v1/sessions", "/api/v1/gates", "/api/v1/checks")) {
                 val refused = client.post(hookPath) { bearerAuth(CLIENT_TOKEN) }
                 assertEquals(HttpStatusCode.Forbidden, refused.status, hookPath)

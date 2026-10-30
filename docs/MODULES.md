@@ -62,12 +62,14 @@ alternative: a second private file for `ostrom wait`, which a command of the age
 - Every request needs a capability (`Authorization: Bearer`, `x-api-key` or `x-ostrom-local-token`, compared in
   constant time): 401 otherwise. An `Origin` header or a `Host` that is not the loopback: 403.
 - Only an allow-list is forwarded, everything else is 404 (never an open proxy): the hook routes
-  (`POST /api/v1/sessions`, `/sessions/{id}/reopen|seen`, `/api/v1/gates`, `/api/v1/notifications`, `GET
-  /api/v1/gates/{id}` and `/gates/catalog`, as they are, 2 MiB, 15 s, 70 s for a gate wait; ending a session, its sign
-  of life and the use of a yes are the launcher's and Ostrom's, never forwarded for the agent, S2-25 and S2-29; a check
-  run's report, `POST /api/v1/checks`, is forwarded for the hooks, which run the package's checks, with their
-  capability only, and reading check runs is not forwarded), the catalogue of the verified package answered from memory when there is one, the organisation's gate
-  policy signed by the instance (`GET /api/v1/gates/catalog/signed`, kept 30 s in memory, a failure never kept; the
+  (`POST /api/v1/sessions`, `/sessions/{id}/reopen|seen`, `/api/v1/gates`, `/api/v1/notifications`,
+  `/api/v1/checks`, `GET /api/v1/gates/{id}` and `/gates/catalog`, as they are, 2 MiB, 15 s, 70 s for a gate wait;
+  ending a session, its sign of life and the use of a yes are the launcher's and Ostrom's, never forwarded, S2-25 and
+  S2-29; reading check runs is the console's, never forwarded). A check run's report is the hooks', which run the
+  package's checks, and takes their capability, not the agent's. It is the developer's machine's word: the hooks'
+  capability file is readable by the agent's own user (S2-20), so a report proves no more than the hooks that sent
+  it. The catalogue of the verified package is answered from memory when there is one. Also forwarded: the
+  organisation's gate policy signed by the instance (`GET /api/v1/gates/catalog/signed`, kept 30 s in memory, a failure never kept; the
   hooks check its signature against `OSTROM_INSTANCE_KEYS` and its expiry at every call, and hold every action without
   one, S2-20 and S2-38), `POST /mcp/{server}` for the launch's servers (to `/api/v1/mcp/{server}`, streamed, 401/403 from
   Ostrom become 502), and with inference `/v1/messages`, `/v1/chat/completions`, `/v1/models` (to

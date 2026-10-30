@@ -43,6 +43,8 @@ class RelayTargetTest {
             // reading check runs is the console's; a report is only POSTed, to the route itself
             HttpMethod.Get to "/api/v1/checks",
             HttpMethod.Post to "/api/v1/checks/c-1",
+            HttpMethod.Post to "/api/v1/checks/",
+            HttpMethod.Put to "/api/v1/checks",
             HttpMethod.Post to "/api/v1/gates/catalog",
             HttpMethod.Post to "/api/v1/gates/a.b/consume",
             HttpMethod.Post to "/api/v1/sessions/",
