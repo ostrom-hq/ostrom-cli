@@ -14,6 +14,8 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.response.respondText
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeout
 import kotlinx.io.IOException
 import kotlinx.serialization.json.buildJsonObject
@@ -61,14 +63,23 @@ internal class UpstreamExchange(private val notices: FailureNotices) {
         null
     } catch (_: TimeoutCancellationException) {
         // Our own deadline: a failure of this call, not a cancellation of the agent's request.
-        TIMED_OUT
+        stillWanted(TIMED_OUT)
     } catch (e: CancellationException) {
         throw e
     } catch (_: IOException) {
-        NO_CONNECTION
+        stillWanted(NO_CONNECTION)
     } catch (_: IllegalStateException) {
         // The Curl and WinHttp engines report a failed connection or TLS handshake as IllegalStateException.
-        NO_CONNECTION
+        stillWanted(NO_CONNECTION)
+    }
+
+    /**
+     * [cause], unless the agent's request was cancelled meanwhile: an engine may report the cancellation it caused as a
+     * failed connection, and a cancelled request is never an outage.
+     */
+    private suspend fun stillWanted(cause: String): String {
+        currentCoroutineContext().ensureActive()
+        return cause
     }
 
     private companion object {
