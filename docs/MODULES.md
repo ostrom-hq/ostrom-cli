@@ -110,6 +110,27 @@ receiving Ctrl-C, stdin read through `PeekNamedPipe`, UTF-8 output on the consol
 `OSTROM_HOME` (the CLI folder, instead of `~/.config/ostrom`) and `OSTROM_HOOK_DIALECT` today; `OSTROM_TOKEN` and
 `OSTROM_CLAUDE_BIN` / `OSTROM_CODEX_BIN` arrive with `login` and the launcher.
 
+## Usage statistics (opt-in)
+
+`ostrom telemetry enable | disable | status` (`cli/.../telemetry/UsageStatistics.kt`). **Off unless the user turns it
+on**, and `OSTROM_TELEMETRY=0` (or `false`, `off`, `no`) or `DO_NOT_TRACK=1` keep it off whatever the setting. When on,
+each top-level command sends one `cli_command_run` event to PostHog EU after its output is written, waiting at most
+400 ms (the sender's client gives up by then; a lost event is not retried): the command name (only one of the known
+commands, read from the parsed command line, else `unknown`), `ok` / `usage` / `error`, a duration range, the OS, the
+architecture and the version, with a random install id (`telemetry_id` in `config.toml`, deleted by `disable`, never
+linked to the account). Never an argument, a path, a repository, code or a token; no IP address is kept and no
+location derived from it (`$ip` null, `$geoip_disable`). Plumbing commands (`hook`, `mcp`, `wait`, `check`) and
+`ostrom telemetry` itself are never measured. Statistics are on only with both `telemetry = "on"` and an install id;
+`ostrom config set | unset` refuses these two keys and names `ostrom telemetry`, which keeps them consistent.
+
+The destination is compiled into release builds only: CI passes the repository variable `OSTROM_POSTHOG_KEY` (a public,
+write-only project key) as `-PostromPosthogKey` on tags. Any other build has none: `ostrom telemetry enable` then says
+so and writes nothing, and nothing is ever sent.
+
+Every call to the server carries a W3C `traceparent` (`api-client/.../TraceContext.kt`): one random trace id for the
+whole command, a new parent id per call. The server continues the trace; this is not usage statistics and sends
+nothing anywhere else.
+
 ## ostrom-core
 
 `api-client` will depend on `dev.ostrom:ostrom-api` (the API models of ostrom-core), read from GitHub Packages
