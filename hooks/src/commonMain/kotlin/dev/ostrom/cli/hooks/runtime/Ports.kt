@@ -14,8 +14,9 @@ sealed interface CallResult {
      * reach it.
      *
      * @property type The server's stable error key (`session_closed`), or null.
+     * @property relayDown Nothing listens on the local relay's port: the launch that served it has ended.
      */
-    data class Failed(val message: String, val type: String? = null) : CallResult {
+    data class Failed(val message: String, val type: String? = null, val relayDown: Boolean = false) : CallResult {
         /** Ostrom refused the write because its session is closed (the machine slept past Ostrom's wait). */
         val sessionClosed: Boolean get() = type == "session_closed" || message.startsWith("session closed:")
 

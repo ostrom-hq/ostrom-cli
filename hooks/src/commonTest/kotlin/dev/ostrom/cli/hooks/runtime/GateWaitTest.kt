@@ -92,10 +92,22 @@ class GateWaitTest {
         assertEquals(WaitOutcome(75, still), await(calls, timeout = 2))
         assertEquals(listOf("waiting for a yes from the gate owner on \"gate\"..."), said, "said once")
         assertEquals(listOf(1_000L, 1_000L), sleeps)
-        val asked = listOf("?wait=2", "?wait=1", "?wait=0").map { "/api/v1/gates/g1$it" }
+        // the end is checked after the pause: no ask leaves after it
+        val asked = listOf("?wait=2", "?wait=1").map { "/api/v1/gates/g1$it" }
         assertEquals(asked, calls.paths())
         // each ask ends with the wait, a little grace aside, never 15 s after it
-        assertEquals(listOf(4_000, 3_000, 2_000), calls.calls.map { it.timeoutMillis })
+        assertEquals(listOf(4_000, 3_000), calls.calls.map { it.timeoutMillis })
+        // the last pause is cut to what is left
+        sleeps.clear()
+        now = 0
+        val held = object : OstromCalls {
+            override fun call(path: String, body: JsonElement?, timeoutMillis: Int): CallResult {
+                now += 1_500
+                return request(""""status":"pending"""")
+            }
+        }
+        assertEquals(75, GateWait(held, { now }, { sleeps += it; now += it }) { }.await("g1", 2).exitCode)
+        assertEquals(listOf(500L), sleeps)
     }
 
     @Test
@@ -126,9 +138,23 @@ class GateWaitTest {
         )
         val gone = "no gate request g1 in Ostrom. Run the command again to ask for a yes anew."
         assertEquals(WaitOutcome(66, gone), await(calls))
+        val generic = FakeCalls().on("/api/v1/gates/g1", CallResult.Failed("x", "not_found"))
+        assertEquals(WaitOutcome(66, gone), await(generic))
+        // another missing thing is no missing gate request
+        val session = await(FakeCalls().on("/api/v1/gates/g1", CallResult.Failed("no session", "session_not_found")))
+        assertEquals(69, session.exitCode)
         val unreachable = listOf("connection refused", "session closed: slept")
             .map { "Ostrom unreachable ($it), still waiting" }
         assertEquals(unreachable, said)
+    }
+
+    @Test
+    fun aRelayWhoseLaunchHasEndedStopsTheWaitAtOnce() {
+        val down = CallResult.Failed("the local relay is unreachable", CallResult.UNREACHABLE, relayDown = true)
+        val line = "the session's local relay is not running (its `ostrom <agent>` has ended). Do not run the " +
+            "command; tell the user."
+        assertEquals(WaitOutcome(69, line), await(FakeCalls().on("/api/v1/gates/g1", down)))
+        assertEquals(emptyList(), sleeps)
     }
 
     @Test

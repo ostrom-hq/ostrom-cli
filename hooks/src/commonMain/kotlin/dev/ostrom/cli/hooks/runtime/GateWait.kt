@@ -19,7 +19,7 @@ data class WaitOutcome(val exitCode: Int, val line: String)
  * the session's relay like the hooks (`GET /api/v1/gates/{id}?wait=`, which Ostrom holds until an answer or the
  * wait's end), so the agent never holds a token that reaches the server.
  *
- * @param clock The current time in milliseconds.
+ * @param clock Milliseconds on a monotonic clock (a clock set back or forward never stretches or cuts the wait).
  * @param sleep Waits the given milliseconds between two asks.
  * @param say Prints text on stderr for the developer (each line ends with its line break).
  */
@@ -47,8 +47,9 @@ class GateWait(
             }
             val news = news(answer)
             if (outcome == null && news != said) say("$news\n").also { said = news }
+            // the end is checked after the pause, so no ask leaves after it
+            if (outcome == null && clock() < end) sleep(minOf(POLL_MILLIS, end - clock()))
             if (outcome == null && clock() >= end) outcome = stillWaiting(id, timeoutSeconds)
-            if (outcome == null) sleep(POLL_MILLIS)
         }
         return outcome
     }
@@ -83,10 +84,16 @@ class GateWait(
 
     /**
      * A failed ask: Ostrom unreachable or its session closed for a while is waited for, anything else (no relay in
-     * this session, a refused capability, an error of Ostrom) will not change by asking again.
+     * this session, a relay whose launch has ended, a refused capability, an error of Ostrom) will not change by
+     * asking again.
      */
     private fun failed(id: String, failure: CallResult.Failed): WaitOutcome? = when {
-        failure.type?.endsWith("not_found") == true -> gone(id)
+        failure.type in UNKNOWN_GATE -> gone(id)
+        failure.relayDown -> WaitOutcome(
+            UNAVAILABLE,
+            "the session's local relay is not running (its `ostrom <agent>` has ended). Do not run the command; " +
+                "tell the user.",
+        )
         failure.unreachable || failure.sessionClosed -> null
         else -> WaitOutcome(
             UNAVAILABLE,
@@ -126,6 +133,9 @@ class GateWait(
         private const val NOT_FOUND = 66
         private const val UNAVAILABLE = 69
         private const val STILL_WAITING = 75
+
+        /** The contract's key for a gate request Ostrom does not know, and its generic one. */
+        private val UNKNOWN_GATE = setOf("gate_not_found", "not_found")
 
         /** The contract answers `{"gate": <request>, …}`; anything else holds no request. */
         private fun requestOf(body: JsonObject): JsonObject = body["gate"] as? JsonObject ?: JsonObject(emptyMap())

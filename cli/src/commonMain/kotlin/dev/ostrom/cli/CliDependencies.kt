@@ -43,6 +43,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import okio.FileSystem
 import okio.Path.Companion.toPath
+import kotlin.time.TimeSource
 
 /**
  * Everything the commands use, built once in `main` and replaced by fakes in tests. Plain constructor wiring rather
@@ -139,7 +140,8 @@ class CliDependencies(
                         GateWait.tokenOf { environment[it] },
                         LoopbackHttpImpl(),
                     )
-                    GateWait(relay, SessionHooks::epochMillis, ::pause, console::err)
+                    val started = TimeSource.Monotonic.markNow()
+                    GateWait(relay, { started.elapsedNow().inWholeMilliseconds }, ::pause, console::err)
                 },
                 postHogKey = BuildInfo.POSTHOG_KEY,
                 sendStatistics = { url, body -> statistics.send(url, body) },
