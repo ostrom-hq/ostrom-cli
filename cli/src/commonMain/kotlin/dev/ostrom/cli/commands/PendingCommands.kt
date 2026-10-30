@@ -130,11 +130,6 @@ internal class PolicySetCommand : PendingCommand("set", "Set a policy value") {
     val value by argument("value")
 }
 
-internal class WaitCommand : PendingCommand("wait", "Wait for a yes (used by agents)", hidden = true) {
-    val id by argument("id")
-    val timeout by option("--timeout", help = "Seconds")
-}
-
 internal class CheckCommand : PendingCommand("check", "Run a workflow check (used by agents)", hidden = true) {
     val node by argument("node")
 }
@@ -169,7 +164,7 @@ fun pendingCommands(implemented: List<CliktCommand>): List<CliktCommand> {
         InviteCommand(),
         MembersCommand().subcommands(MembersListCommand(), MembersRoleCommand(), MembersRemoveCommand()),
         PolicyCommand().subcommands(PolicyShowCommand(), PolicySetCommand()),
-        WaitCommand(),
+        ImportCommand().subcommands(named("teamcode")),
         CheckCommand(),
     )
 }

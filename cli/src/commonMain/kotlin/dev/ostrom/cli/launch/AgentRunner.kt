@@ -11,6 +11,11 @@ import dev.ostrom.cli.launcher.ServerJson
 import dev.ostrom.cli.launcher.adapters.AgentAdapter
 import dev.ostrom.cli.launcher.adapters.ClaudeAdapter
 import dev.ostrom.cli.launcher.adapters.CodexAdapter
+import dev.ostrom.cli.launcher.adapters.GeminiAdapter
+import dev.ostrom.cli.launcher.adapters.GrokAdapter
+import dev.ostrom.cli.launcher.adapters.HermesAdapter
+import dev.ostrom.cli.launcher.adapters.OpenCodeAdapter
+import dev.ostrom.cli.launcher.adapters.PiAdapter
 import dev.ostrom.cli.platform.Console
 import dev.ostrom.cli.platform.ExecutableFinder
 import dev.ostrom.cli.platform.ProcessCapture
@@ -61,6 +66,14 @@ class AgentRunnerImpl(
     /** The agents this build can launch. */
     companion object {
         /** The agents `ostrom <agent>` launches in this version. */
-        private val ADAPTERS: List<AgentAdapter> = listOf(ClaudeAdapter(), CodexAdapter())
+        private val ADAPTERS: List<AgentAdapter> = listOf(
+            ClaudeAdapter(),
+            CodexAdapter(),
+            OpenCodeAdapter(),
+            GeminiAdapter(),
+            GrokAdapter(),
+            HermesAdapter(),
+            PiAdapter(),
+        )
     }
 }

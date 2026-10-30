@@ -163,7 +163,8 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         val files = dependencies.files
         files.createPrivateDirectory(run.plugin)
         val laid = run.pack?.let { PackageLayout(files).layDown(it, run.plugin, run.temporary) }
-        val mcp = (calls.mcpServers(run.site) + run.pack?.mcpServers.orEmpty()).distinct()
+        // `ostrom` (rules_for, request_approval, get_receipt) is built into every Ostrom server
+        val mcp = (listOf(BUILT_IN_MCP) + calls.mcpServers(run.site) + run.pack?.mcpServers.orEmpty()).distinct()
         val inference = inferenceRelayed(run)
         val settings = RelaySettings(
             run.site.serverUrl,
@@ -178,6 +179,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
             // S2-25: the hooks' capability goes to a private file, the agent's environment only gets its own
             files.write(run.relayTokenFile, relay.token, FileAccess.PRIVATE)
             val prepared = prepare(run, RelayView(relay.url, relay.clientToken, mcp, inference))
+            prepared.notes.forEach { dependencies.say("ostrom: $it") }
             val environment = environmentOf(run, relay, laid) + prepared.environment
             val settingsFile = join(run.temporary, SessionLayout.SESSION_SETTINGS)
             files.write(settingsFile, sessionSettings(environment).toString(), FileAccess.PRIVATE)
@@ -230,6 +232,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         return mapOf(
             LaunchVariables.RELAY_URL to relay.url,
             LaunchVariables.RELAY_TOKEN to relay.clientToken,
+            LaunchVariables.RELAY_CLIENT to relay.clientToken,
             LaunchVariables.RELAY_TOKEN_FILE to run.relayTokenFile,
             LaunchVariables.INSTANCE_KEYS to run.keys,
             LaunchVariables.REPO to run.repo,
@@ -309,6 +312,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
     companion object {
         private const val USAGE = 64
         private const val NO_ADAPTER = 70
+        private const val BUILT_IN_MCP = "ostrom"
         private const val CANNOT_WRITE = 73
         private const val AGENT_MISSING = 127
         private const val INFERENCE_MILLIS = 3_000L

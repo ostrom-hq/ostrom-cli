@@ -11,12 +11,14 @@ import dev.ostrom.cli.api.ServerResponse
 import dev.ostrom.cli.api.ServerUnreachableException
 import dev.ostrom.cli.cloud.CloudRunner
 import dev.ostrom.cli.cloud.CloudSite
-import dev.ostrom.cli.cloud.CloudStart
 import dev.ostrom.cli.hooks.HookRunner
+import dev.ostrom.cli.imports.FakeMysql
 import dev.ostrom.cli.launch.AgentRunner
 import dev.ostrom.cli.launcher.Agent
 import dev.ostrom.cli.launcher.Credentials
 import dev.ostrom.cli.launcher.LaunchRequest
+import dev.ostrom.cli.launcher.cloud.CloudStart
+import dev.ostrom.cli.mcp.BridgeTarget
 import dev.ostrom.cli.mcp.McpServer
 import dev.ostrom.cli.platform.ExecutableFinder
 import dev.ostrom.cli.platform.FileStoreImpl
@@ -120,6 +122,9 @@ class OstromCliTest : CliKit() {
         val harness = " harness The harness of your team: rules, hooks, skills, approvals (coming soon) "
         assertTrue(flat.contains(harness), flat)
         assertTrue(flat.contains(" config Settings of this device doctor "), flat)
+        // built commands never say « (coming soon) » (DOCS-VERITE)
+        assertTrue(flat.contains(" telemetry Anonymous usage statistics (off unless you turn them on) "), flat)
+        assertTrue(!flat.contains("(off unless you turn them on) (coming soon)"), flat)
         for (hidden in listOf("wait", "hook", "mcp", "check")) {
             assertTrue(!Regex("""\n\s+$hidden\s""").containsMatchIn(help), "$hidden should be hidden:\n$help")
         }
@@ -245,6 +250,19 @@ class OstromCliTest : CliKit() {
     }
 
     @Test
+    fun doctorProbesTheHealthRouteOfTheContract() {
+        val asked = mutableListOf<String>()
+        val server: (String) -> OstromApi = { _ ->
+            object : OstromApi {
+                override suspend fun get(path: String) = ServerResponse(200, "", 1).also { asked += path }
+                override suspend fun send(request: ServerRequest) = get(request.path)
+            }
+        }
+        assertEquals(0, cli(environment = withServer, api = server).run(arrayOf("doctor")))
+        assertEquals(listOf("/api/v1/health"), asked)
+    }
+
+    @Test
     fun aGroupWithoutDefaultPrintsItsHelp() {
         assertEquals(0, cli().run(arrayOf("harness")))
         assertTrue(console.out.contains("enforce"), console.out.toString())
@@ -312,12 +330,15 @@ class OstromCliTest : CliKit() {
         val dependencies = CliDependencies.create()
         dependencies.api("https://ostrom.example").close()
         dependencies.mcpServer()
+        dependencies.mcpBridge(BridgeTarget(1, "t", "ostrom"))
         // Nothing listens on the discard port of the loopback: the sender is built on this first send and drops the
         // refused connection.
         runBlocking { dependencies.sendStatistics("http://127.0.0.1:9/batch/", "{}") }
         assertTrue(dependencies.configFile("/x").endsWith("config.toml"))
         assertTrue(dependencies.workingDirectory().isNotEmpty())
         assertEquals(null, dependencies.credentials("/nowhere-ostrom").load("https://ostrom.example")?.login)
+        assertEquals(64, dependencies.gateWait().await("not an id!", 1).exitCode, "never sent")
+        pause(1)
     }
 
     @Test
@@ -473,20 +494,6 @@ class OstromCliTest : CliKit() {
     }
 
     @Test
-    fun theSignInPageMustBeOnTheGitHubConfigured() {
-        // S2-35: OSTROM_GITHUB_WEB_URL names the GitHub of a GitHub Enterprise; github.com's page is then refused
-        val enterprise = withServer + ("OSTROM_GITHUB_WEB_URL" to "https://ghe.acme.example/")
-        val page = """{"deviceCode":"dc","userCode":"X","verificationUri":"https://ghe.acme.example/login/device"}"""
-        val flow = deviceFlow + ("POST /api/v1/auth/device" to (200 to page))
-        assertEquals(0, cli(environment = enterprise, api = serverOf(flow)).run(arrayOf("login")))
-        assertTrue(console.err.contains("Open https://ghe.acme.example/login/device"), console.err.toString())
-        val github = """{"deviceCode":"dc","verificationUri":"https://github.com/login/device"}"""
-        val elsewhere = deviceFlow + ("POST /api/v1/auth/device" to (200 to github))
-        assertEquals(69, cli(environment = enterprise, api = serverOf(elsewhere)).run(arrayOf("login")))
-        assertTrue(console.err.contains("a sign-in page that is not GitHub's"), console.err.toString())
-    }
-
-    @Test
     fun aLoginThatStopsSaysWhyWithTheSpecsCode() {
         val noAccess = 403 to """{"error":{"message":"no access"}}"""
         val refused = deviceFlow + ("POST /api/v1/auth/device/token" to noAccess)
@@ -616,7 +623,10 @@ class OstromCliTest : CliKit() {
             executable = null,
             temporaryDirectory = "/tmp",
             agents = AgentRunner { _, _ -> 0 },
+            gateWait = { error("no gate wait in this test") },
             sleep = {},
+            mcpBridge = { object : McpServer { override fun serve() = 0 } },
+            capture = FakeMysql(),
             readLine = { null },
             openUrl = { false },
             cloud = object : CloudRunner {

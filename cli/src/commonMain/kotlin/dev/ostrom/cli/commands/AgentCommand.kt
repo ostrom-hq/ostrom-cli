@@ -45,6 +45,7 @@ internal class AgentCommand(private val agent: Agent, private val dependencies: 
         val saved = ConfigStoreImpl(dependencies.files, dependencies.configFile(directory)).get(ConfigKey.SERVER)
         val chosen = server ?: environment["OSTROM_URL"] ?: saved ?: throw stop(ExitCode.SIGN_IN_REQUIRED, SIGN_IN)
         val serverUrl = chosen.trimEnd('/')
+        refuseInClear(serverUrl, "the device's token")
         val credentials = dependencies.credentials(directory).load(serverUrl)
             ?: throw stop(ExitCode.SIGN_IN_REQUIRED, "not signed in to $serverUrl: run `ostrom login`")
         if (cloud) throw ProgramResult(runBlocking { inTheCloud(CloudSite(serverUrl, credentials.token, cwd())) })

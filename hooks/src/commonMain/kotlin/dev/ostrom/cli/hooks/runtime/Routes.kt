@@ -13,6 +13,9 @@ object Routes {
     /** `POST`: ask the gate of an action (PreToolUse). */
     const val GATES = "/api/v1/gates"
 
+    /** `POST`: the run of a check of the workflow package (`ReportCheckRequest`), best effort. */
+    const val CHECKS = "/api/v1/checks"
+
     /** `POST`: a notification of the workflow package, sent by Ostrom. */
     const val NOTIFICATIONS = "/api/v1/notifications"
 

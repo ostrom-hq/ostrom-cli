@@ -7,18 +7,22 @@ import dev.ostrom.cli.api.ServerResponse
 import dev.ostrom.cli.cloud.CloudRunner
 import dev.ostrom.cli.cloud.CloudSite
 import dev.ostrom.cli.hooks.HookRunner
+import dev.ostrom.cli.hooks.runtime.GateWait
+import dev.ostrom.cli.imports.FakeMysql
 import dev.ostrom.cli.launch.AgentRunner
 import dev.ostrom.cli.launcher.FileCredentialStore
 import dev.ostrom.cli.launcher.LaunchFilesImpl
 import dev.ostrom.cli.launcher.LaunchRequest
 import dev.ostrom.cli.launcher.LaunchSite
 import dev.ostrom.cli.launcher.cloud.CloudStart
+import dev.ostrom.cli.mcp.BridgeTarget
 import dev.ostrom.cli.mcp.McpServer
 import dev.ostrom.cli.platform.Console
 import dev.ostrom.cli.platform.Environment
 import dev.ostrom.cli.platform.ExecutableFinder
 import dev.ostrom.cli.platform.FileStoreImpl
 import dev.ostrom.cli.platform.OperatingSystem
+import dev.ostrom.cli.platform.ProcessCapture
 import dev.ostrom.cli.platform.SecretBackend
 import dev.ostrom.cli.platform.SecretStore
 import dev.ostrom.cli.platform.StandardInput
@@ -63,6 +67,7 @@ open class CliKit {
     protected val waits = mutableListOf<Long>()
     protected val typed = ArrayDeque<String>()
     protected val opened = mutableListOf<String>()
+    protected val bridged = mutableListOf<BridgeTarget>()
     protected var browser = true
     protected val requests = mutableListOf<Pair<String, ServerRequest>>()
 
@@ -100,6 +105,8 @@ open class CliKit {
         installed: Set<String> = setOf("git", "claude"),
         api: (String) -> OstromApi = { error("no server in this test") },
         executable: String? = "/opt/ostrom",
+        gateWait: () -> GateWait = { error("no gate wait in this test") },
+        capture: ProcessCapture = FakeMysql(),
         secrets: () -> SecretStore = storeIn(SecretBackend.KEYCHAIN),
         postHogKey: String = "",
     ) = OstromCli(
@@ -115,6 +122,7 @@ open class CliKit {
                 override fun run(arguments: List<String>): Int = 0.also { hookCalls += arguments }
             },
             mcpServer = { object : McpServer { override fun serve() = 0 } },
+            mcpBridge = { target -> object : McpServer { override fun serve() = 5.also { bridged += target } } },
             credentials = { directory ->
                 val path = (directory.toPath() / "credentials.json").toString()
                 val files = LaunchFilesImpl(fileSystem) { _, _ -> }
@@ -127,6 +135,8 @@ open class CliKit {
             sleep = { waits += it },
             readLine = { typed.removeFirstOrNull() },
             openUrl = { url -> browser.also { opened += url } },
+            gateWait = gateWait,
+            capture = capture,
             cloud = object : CloudRunner {
                 override suspend fun start(start: CloudStart, site: CloudSite) = 5.also { clouds += start to site }
 

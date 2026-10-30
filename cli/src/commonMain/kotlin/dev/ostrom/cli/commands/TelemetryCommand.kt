@@ -14,7 +14,7 @@ import dev.ostrom.cli.telemetry.UsageState
 
 /** `ostrom telemetry [status | enable | disable]`: anonymous usage statistics, off unless turned on. */
 class TelemetryCommand(dependencies: CliDependencies) :
-    GroupCommand("telemetry", "Anonymous usage statistics (off unless you turn them on)") {
+    GroupCommand("telemetry", "Anonymous usage statistics (off unless you turn them on)", comingSoon = false) {
     init {
         subcommands(TelemetryStatus(dependencies), TelemetryEnable(dependencies), TelemetryDisable(dependencies))
     }

@@ -10,6 +10,8 @@ import dev.ostrom.cli.cloud.CloudRunner
 import dev.ostrom.cli.cloud.CloudRunnerImpl
 import dev.ostrom.cli.hooks.HookRunner
 import dev.ostrom.cli.hooks.HookRunnerImpl
+import dev.ostrom.cli.hooks.runtime.GateWait
+import dev.ostrom.cli.hooks.runtime.RelayCalls
 import dev.ostrom.cli.hooks.runtime.SessionHooks
 import dev.ostrom.cli.launch.AgentRunner
 import dev.ostrom.cli.launch.AgentRunnerImpl
@@ -17,6 +19,8 @@ import dev.ostrom.cli.launcher.CredentialStore
 import dev.ostrom.cli.launcher.FileCredentialStore
 import dev.ostrom.cli.launcher.LaunchFilesImpl
 import dev.ostrom.cli.launcher.join
+import dev.ostrom.cli.mcp.BridgeTarget
+import dev.ostrom.cli.mcp.McpBridge
 import dev.ostrom.cli.mcp.McpDispatcher
 import dev.ostrom.cli.mcp.McpServer
 import dev.ostrom.cli.mcp.McpServerImpl
@@ -31,6 +35,7 @@ import dev.ostrom.cli.platform.ExecutableFinderImpl
 import dev.ostrom.cli.platform.FileStore
 import dev.ostrom.cli.platform.FileStoreImpl
 import dev.ostrom.cli.platform.LoopbackHttpImpl
+import dev.ostrom.cli.platform.ProcessCapture
 import dev.ostrom.cli.platform.ProcessCaptureImpl
 import dev.ostrom.cli.platform.ProcessLauncherImpl
 import dev.ostrom.cli.platform.RawTerminalImpl
@@ -42,8 +47,10 @@ import dev.ostrom.cli.telemetry.UsageStatistics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import okio.FileSystem
 import okio.Path.Companion.toPath
+import kotlin.time.TimeSource
 
 /**
  * Everything the commands use, built once in `main` and replaced by fakes in tests. Plain constructor wiring rather
@@ -52,12 +59,15 @@ import okio.Path.Companion.toPath
  * @property api Builds the client of the server at the given URL.
  * @property hookRunner Runs `ostrom hook <kind>`.
  * @property mcpServer Builds the local MCP server.
+ * @property mcpBridge Builds the stdio bridge to a session's local relay.
  * @property credentials The developer's credentials, kept in the CLI folder given.
  * @property workingDirectory The folder `ostrom` runs in, its links resolved.
  * @property executable This binary, or null when the system does not say.
  * @property temporaryDirectory Where a launch makes its private folder.
  * @property agents Runs `ostrom <agent>`.
+ * @property gateWait Builds `ostrom wait`, which asks through the session's relay.
  * @property sleep Waits the given milliseconds (the device flow of login; virtual in tests).
+ * @property capture Runs short child processes and reads their output (`mysql` for `ostrom import teamcode`).
  * @property readLine Reads a line the developer typed, or null at the end of the input.
  * @property openUrl Opens a page in the developer's browser; false when it could not.
  * @property cloud Runs `ostrom <agent> --cloud` and `ostrom attach`.
@@ -76,12 +86,15 @@ class CliDependencies(
     val api: (String) -> OstromApi,
     val hookRunner: HookRunner,
     val mcpServer: () -> McpServer,
+    val mcpBridge: (BridgeTarget) -> McpServer,
     val credentials: (String) -> CredentialStore,
     val workingDirectory: () -> String,
     val executable: String?,
     val temporaryDirectory: String,
     val agents: AgentRunner,
+    val gateWait: () -> GateWait,
     val sleep: suspend (Long) -> Unit,
+    val capture: ProcessCapture,
     val readLine: () -> String?,
     val openUrl: (String) -> Boolean,
     val cloud: CloudRunner,
@@ -125,6 +138,7 @@ class CliDependencies(
                 api = api,
                 hookRunner = hookRunner(console, environment),
                 mcpServer = { McpServerImpl(McpDispatcher(BuildInfo.VERSION), console) },
+                mcpBridge = { McpBridge(it, LoopbackHttpImpl(), console) },
                 credentials = { directory ->
                     val path = join(directory, "credentials.json")
                     FileCredentialStore(launchFiles, path, secrets, { console.err("$it\n") }) { environment[it] }
@@ -143,7 +157,17 @@ class CliDependencies(
                     blocking = Dispatchers.IO,
                     userAgent = USER_AGENT,
                 ),
+                gateWait = {
+                    val relay = RelayCalls(
+                        environment["OSTROM_RELAY_URL"],
+                        GateWait.tokenOf { environment[it] },
+                        LoopbackHttpImpl(),
+                    )
+                    val started = TimeSource.Monotonic.markNow()
+                    GateWait(relay, { started.elapsedNow().inWholeMilliseconds }, ::pause, console::err)
+                },
                 sleep = { delay(it) },
+                capture = ProcessCaptureImpl(),
                 readLine = ::readlnOrNull,
                 openUrl = BrowserOpener(ProcessLauncherImpl(), environment.operatingSystem)::open,
                 cloud = CloudRunnerImpl(
@@ -174,3 +198,6 @@ class CliDependencies(
         }
     }
 }
+
+/** Blocks the thread [millis] milliseconds: `ostrom wait` runs as a plain command, never inside a hook. */
+internal fun pause(millis: Long) = runBlocking { delay(millis) }
