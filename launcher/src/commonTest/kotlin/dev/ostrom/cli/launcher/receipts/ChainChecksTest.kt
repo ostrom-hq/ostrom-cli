@@ -52,8 +52,10 @@ class ChainChecksTest {
         val other = verify(bundle.with(listOf("receipt", "nodes", 1, "outcome"), "yes from someone-else"))
         val says = "gate \"Push to main\": the receipt says \"yes from someone-else\", the gate's receipt says Lyesbcb"
         assertHas(other, Mark.BAD, "node", says)
+        // a "no" over a signed approval is a node that lies about the answer
         val refused = verify(bundle.with(listOf("receipt", "nodes", 1, "outcome"), "no from Lyesbcb"))
-        assertHas(refused, Mark.OK, "node", "gate \"Push to main\": no from Lyesbcb (gate receipt")
+        val signs = "gate \"Push to main\": the receipt says \"no from Lyesbcb\", the gate's receipt signs approved"
+        assertHas(refused, Mark.BAD, "node", signs)
         val pending = verify(bundle.with(listOf("receipt", "nodes", 1, "outcome"), "pending"))
         assertHas(pending, Mark.OK, "node", "gate \"Push to main\": pending (gate receipt")
         val unsigned = gate.with(listOf("decisions"), JsonArray(emptyList()))

@@ -66,7 +66,8 @@ internal fun Verification.checkNodes() {
 
 /**
  * A gate node against the receipt it cites: that receipt is the gate's (its id, its kind), signed by a trusted key,
- * signs a yes or a no this receipt cites, and was given by the person the node names.
+ * signs a yes or a no this receipt cites, was given by the person the node names, and is the answer the node says (a
+ * "yes" is a signed approval, a "no" anything else).
  */
 private fun Verification.checkGateNode(label: String, outcome: String, ref: String) {
     val cited = input.chain.firstOrNull { it.field("id").str() == ref } ?: kept.receipt(ref)
@@ -78,7 +79,9 @@ private fun Verification.checkGateNode(label: String, outcome: String, ref: Stri
     val by = decision.field("by").strOr("?")
     val approval = decision.field("approvalId").strOr("")
     val check = checkSignature(cited, keys)
-    val says = outcome.after("yes from ") ?: outcome.after("no from ")
+    val result = decision.field("result").strOr("?")
+    val yes = outcome.after("yes from ")
+    val says = yes ?: outcome.after("no from ")
     when {
         cited.field("id").str() != ref || cited.kindOf() != "gate" ->
             report.add(Mark.BAD, "node", "$label: $outcome; the receipt found as $ref is not that gate's receipt")
@@ -96,6 +99,8 @@ private fun Verification.checkGateNode(label: String, outcome: String, ref: Stri
         )
         says != null && says != by ->
             report.add(Mark.BAD, "node", "$label: the receipt says \"$outcome\", the gate's receipt says $by")
+        misstates(says, yes != null, result) ->
+            report.add(Mark.BAD, "node", "$label: the receipt says \"$outcome\", the gate's receipt signs $result")
         else -> report.add(Mark.OK, "node", "$label: $outcome (gate receipt $ref, signed)")
     }
 }
@@ -115,3 +120,9 @@ internal fun Verification.checkSession() {
         report.add(Mark.BAD, "session", "the session receipt and this receipt do not cite the same yes")
     }
 }
+
+/** True when a node naming someone ([says]) calls the answer a yes ([yes]) or a no that the gate's [result] is not. */
+private fun misstates(says: String?, yes: Boolean, result: String) = says != null && yes != (result == APPROVED)
+
+/** The result of a gate decision that is a yes. */
+private const val APPROVED = "approved"
