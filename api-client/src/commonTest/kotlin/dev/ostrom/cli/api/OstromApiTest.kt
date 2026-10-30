@@ -69,4 +69,13 @@ class OstromApiTest {
         assertEquals(200, response.status, response.body)
         assertTrue(response.body.isNotBlank())
     }
+
+    @Test
+    fun aRefusalBodyIsReadWithTheContractsApiError() {
+        val refusal = ServerResponse(404, """{"error":{"type":"gate_not_found","message":"No such gate."},"x":1}""", 3)
+        assertEquals("gate_not_found", refusal.apiError()?.type)
+        assertEquals("No such gate.", refusal.apiError()?.message)
+        assertEquals(null, ServerResponse(502, "<html>Bad gateway</html>", 3).apiError())
+        assertEquals(null, ServerResponse(204, "", 3).apiError())
+    }
 }

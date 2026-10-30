@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.api
 
+import dev.ostrom.core.api.OstromJson
+import dev.ostrom.core.api.models.ApiError
+import dev.ostrom.core.api.models.ErrorDetail
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.get
@@ -13,6 +16,17 @@ import kotlin.time.TimeSource
 
 /** The answer of a server to a plain GET: its HTTP status, its body and how long it took. */
 data class ServerResponse(val status: Int, val body: String, val millis: Long)
+
+/**
+ * The refusal this response carries, the contract's `ApiError` body (`{"error":{"type","message"}}`), or null when the
+ * body is not one (a proxy's HTML page, an empty 204).
+ */
+fun ServerResponse.apiError(): ErrorDetail? = try {
+    OstromJson.decodeFromString(ApiError.serializer(), body).error
+} catch (_: IllegalArgumentException) {
+    // A body that is not an ApiError is a SerializationException, which is an IllegalArgumentException.
+    null
+}
 
 /** The server could not be reached (exit code 69). */
 class ServerUnreachableException(val url: String, cause: Throwable) : Exception(cause)

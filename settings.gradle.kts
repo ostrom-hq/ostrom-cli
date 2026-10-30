@@ -25,19 +25,4 @@ dependencyResolutionManagement {
     }
 }
 
-// A local clone of ostrom-core (next to this clone, or next to the worktrees folder) replaces the published package,
-// so a change to the contract is tried here before it is released.
-listOf("../ostrom-core", "../../ostrom-core")
-    .map { file(it) }
-    .firstOrNull { it.resolve("settings.gradle.kts").exists() }
-    ?.let { core ->
-        includeBuild(core) {
-            // ostrom-core publishes its projects under other names (`api` as `ostrom-api`): map them by hand.
-            dependencySubstitution {
-                substitute(module("dev.ostrom:ostrom-api")).using(project(":api"))
-                substitute(module("dev.ostrom:ostrom-receipts")).using(project(":receipts"))
-            }
-        }
-    }
-
 include(":platform", ":api-client", ":hooks", ":launcher", ":mcp", ":cli")
