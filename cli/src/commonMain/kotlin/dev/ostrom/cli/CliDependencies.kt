@@ -58,6 +58,7 @@ import kotlin.time.TimeSource
  * @property temporaryDirectory Where a launch makes its private folder.
  * @property agents Runs `ostrom <agent>`.
  * @property gateWait Builds `ostrom wait`, which asks through the session's relay.
+ * @property sleep Waits the given milliseconds (the device flow of login; virtual in tests).
  * @property secrets Opens the secret store of this device (system store, or encrypted file). Each call chooses and
  * probes the store again (up to a second on Linux): a command calls it once and keeps the store; the hook's fast
  * path never calls it.
@@ -79,6 +80,7 @@ class CliDependencies(
     val temporaryDirectory: String,
     val agents: AgentRunner,
     val gateWait: () -> GateWait,
+    val sleep: suspend (Long) -> Unit,
     val postHogKey: String,
     val sendStatistics: suspend (url: String, body: String) -> Unit,
     val secrets: () -> SecretStore = { systemSecretStore(environment, files) },
@@ -109,16 +111,19 @@ class CliDependencies(
             val finder = ExecutableFinderImpl(environment)
             val api = { url: String -> OstromApiImpl(url, USER_AGENT, trace = trace) }
             val launchFiles = LaunchFilesImpl()
+            val files = FileStoreImpl()
+            val secrets = { systemSecretStore(environment, files) }
             return CliDependencies(
                 console = console,
                 environment = environment,
-                files = FileStoreImpl(),
+                files = files,
                 finder = finder,
                 api = api,
                 hookRunner = hookRunner(console, environment),
                 mcpServer = { McpServerImpl(McpDispatcher(BuildInfo.VERSION), console) },
                 credentials = { directory ->
-                    FileCredentialStore(launchFiles, join(directory, "credentials.json")) { environment[it] }
+                    val path = join(directory, "credentials.json")
+                    FileCredentialStore(launchFiles, path, secrets, { console.err("$it\n") }) { environment[it] }
                 },
                 workingDirectory = { FileSystem.SYSTEM.canonicalize(".".toPath()).toString() },
                 executable = currentExecutable(),
@@ -143,7 +148,9 @@ class CliDependencies(
                     val started = TimeSource.Monotonic.markNow()
                     GateWait(relay, { started.elapsedNow().inWholeMilliseconds }, ::pause, console::err)
                 },
+                sleep = { delay(it) },
                 postHogKey = BuildInfo.POSTHOG_KEY,
+                secrets = secrets,
                 sendStatistics = { url, body -> statistics.send(url, body) },
             )
         }
