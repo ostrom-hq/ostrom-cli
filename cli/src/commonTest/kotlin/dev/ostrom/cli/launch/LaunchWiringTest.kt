@@ -61,6 +61,7 @@ class LaunchWiringTest {
             object : LocalRelay {
                 override val url = "http://127.0.0.1:4100"
                 override val token = "capability"
+                override val clientToken = "agent-capability"
 
                 override fun close() {
                     closed = true
@@ -72,6 +73,7 @@ class LaunchWiringTest {
         assertEquals(RelayConfig("https://o.example", "agt", "ua", "L1", setOf("gh"), true, "{}"), config)
         assertEquals("http://127.0.0.1:4100", relay.url)
         assertEquals("capability", relay.token)
+        assertEquals("agent-capability", relay.clientToken)
         relay.close()
         assertTrue(closed)
     }
