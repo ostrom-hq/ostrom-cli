@@ -116,11 +116,12 @@ class McpBridge(
         ),
     ).toString()
 
-    private companion object {
-        val SUCCESS = 200..299
-        const val UNREACHABLE = -32000
+    /** The bridge's replies and limits. */
+    companion object {
+        private val SUCCESS = 200..299
+        private const val UNREACHABLE = -32000
 
         /** A request for approval waits for a human: as long as Ostrom's own wait, and a margin. */
-        const val TIMEOUT_MILLIS = 320_000
+        private const val TIMEOUT_MILLIS = 320_000
     }
 }
