@@ -459,6 +459,7 @@ class AgentLaunchUseCaseTest {
         assertEquals("opencode", ostromName(Agent.OPENCODE))
     }
 
+    @Suppress("LongParameterList") // one default per fact of a launch a test changes
     private suspend fun TestScope.start(
         agent: Agent = Agent.CLAUDE,
         arguments: List<String> = emptyList(),

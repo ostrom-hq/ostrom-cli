@@ -119,7 +119,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         }
         val model = models.firstOrNull()
         calls.checkPolicy(agent, model, site)
-        if (request.dryRun) return dryRun(agent, repo, model, site)
+        if (request.dryRun) return calls.dryRun(agent, repo, model, site)
         val launch = calls.createLaunch(repo, agent, model, site)
         val pack = calls.packageOf(repo, site, keep = true)
         val keys = calls.instanceKeys()
@@ -135,23 +135,6 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         } finally {
             cleanUp(temporary, site)
         }
-    }
-
-    /**
-     * `--dry-run`: every read a launch makes before the agent starts, and the harness that would apply (the package,
-     * verified, says itself; then the MCP servers), with nothing written, no launch created and nothing started. A read
-     * that would stop the launch stops the dry run with the same code. Not checked: the agent's own setup, which a
-     * launch writes in a folder of its own.
-     */
-    private suspend fun dryRun(agent: Agent, repo: String, model: String?, site: LaunchSite): Int {
-        val pack = calls.packageOf(repo, site, keep = false)
-        calls.instanceKeys()
-        val mcp = (calls.mcpServers(site) + pack?.mcpServers.orEmpty()).distinct()
-        dependencies.say("ostrom: MCP servers: " + if (mcp.isEmpty()) "none" else mcp.joinToString())
-        val modelPart = if (model == null) "" else ", model $model"
-        val name = agent.displayName
-        dependencies.say("ostrom: dry run for $repo$modelPart: every check passed; $name was not started")
-        return 0
     }
 
     /** One launch, once the agent token and the package are there. */
