@@ -11,7 +11,8 @@ import dev.ostrom.cli.launcher.quoted
  * Codex: Ostrom's hooks and MCP servers by `-c` overrides, the rules and the package's context in
  * `developer_instructions` (Codex has no session context), and with a package, a `CODEX_HOME` made for the session
  * (the developer's files linked, their own `hooks.json` left out, the package's skills and agent roles beside theirs),
- * so that trusting the signed package's hooks for this run trusts nothing else.
+ * so that trusting the signed package's hooks for this run trusts nothing else. The tools of the MCP servers keep
+ * Codex's own approval: Ostrom never approves them for the developer (security audit S2-37).
  */
 class CodexAdapter : AgentAdapter {
     override val agent = Agent.CODEX
@@ -21,16 +22,16 @@ class CodexAdapter : AgentAdapter {
             "hooks.PreToolUse=[${hook(layout, "gate", layout.beforeToolSeconds)}]",
             "hooks.PostToolUse=[${hook(layout, "gate", AFTER_SECONDS)}]",
             "hooks.SessionStart=[${hook(layout, "session", START_SECONDS)}]",
-            // Codex cuts a SessionEnd hook at 3 s: asked for 3, the hook waits 2.5 s for Ostrom (OSTROM_SESSION_END_MS)
+            // The launcher ends the session, never the hook (security audit S2-25): this one only reads the event.
             "hooks.SessionEnd=[${hook(layout, "session", END_SECONDS)}]",
             "developer_instructions=${quoted(layout.rules)}",
         )
         layout.relay.mcpServers.forEach { name ->
             val url = quoted("${layout.relay.url}/mcp/$name")
             overrides += "mcp_servers.${mcpLabel(name)}={url=$url," +
-                "bearer_token_env_var=\"${LaunchVariables.RELAY_TOKEN}\",default_tools_approval_mode=\"approve\"}"
+                "bearer_token_env_var=\"${LaunchVariables.RELAY_TOKEN}\"}"
         }
-        val environment = mutableMapOf<String, String?>(LaunchVariables.SESSION_END_MS to SESSION_END_MILLIS)
+        val environment = mutableMapOf<String, String?>()
         val own = mutableListOf<String>()
         if (layout.pack != null) {
             environment["CODEX_HOME"] = codexHome(layout, files)
@@ -71,6 +72,5 @@ class CodexAdapter : AgentAdapter {
         const val AFTER_SECONDS = 10L
         const val START_SECONDS = 20L
         const val END_SECONDS = 3L
-        const val SESSION_END_MILLIS = "2500"
     }
 }

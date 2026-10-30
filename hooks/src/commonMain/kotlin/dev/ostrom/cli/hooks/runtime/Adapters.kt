@@ -55,16 +55,22 @@ class RelayCalls(
         }
     }
 
-    private companion object {
-        val PORT = Regex("http://127\\.0\\.0\\.1:(\\d{1,5})")
-        val SUCCESS = 200..299
+    /** The relay's address and answers. */
+    companion object {
+        private val PORT = Regex("http://127\\.0\\.0\\.1:(\\d{1,5})")
+        private val SUCCESS = 200..299
     }
 }
 
-/** [GitRunner] over the real `git`, its output trimmed; "" when git fails, is missing or is slow. */
-class CapturedGit(private val capture: ProcessCapture) : GitRunner {
+/**
+ * [GitRunner] over the real `git`, its output trimmed; "" when git fails, is missing or is slow.
+ *
+ * @param git The `git` the launcher resolved (`OSTROM_GIT`), not a name looked up on a PATH the agent may have
+ * changed (S2-30).
+ */
+class CapturedGit(private val capture: ProcessCapture, private val git: String) : GitRunner {
     override fun run(directory: String, arguments: List<String>): String {
-        val command = listOf("git", "-C", directory.ifEmpty { "." }) + arguments
+        val command = listOf(git, "-C", directory.ifEmpty { "." }) + arguments
         val result = capture.capture(command, TIMEOUT_MILLIS)
         return if (result is CaptureResult.Exited && result.code == 0) result.output.trim() else ""
     }
@@ -100,15 +106,6 @@ class FileSystemHookFiles(
     } catch (_: IOException) {
         false
     }
-
-    override fun delete(path: String) = try {
-        fileSystem.delete(path.toPath(), mustExist = false)
-    } catch (_: IOException) {
-        Unit
-    }
-
-    override fun ageMillis(path: String): Long? =
-        fileSystem.metadataOrNull(path.toPath())?.lastModifiedAtMillis?.let { now() - it }
 
     /** [path] with its symbolic links resolved, or as given when it cannot be. */
     fun canonical(path: String): String = try {

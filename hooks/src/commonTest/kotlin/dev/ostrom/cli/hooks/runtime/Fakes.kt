@@ -4,27 +4,14 @@ package dev.ostrom.cli.hooks.runtime
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
-/** Files in memory; [ages] says how old each file is, [readOnly] refuses writes. */
-class FakeFiles(
-    val texts: MutableMap<String, String> = mutableMapOf(),
-    val ages: MutableMap<String, Long> = mutableMapOf(),
-    var readOnly: Boolean = false,
-) : HookFiles {
+/** Files in memory. */
+class FakeFiles(val texts: MutableMap<String, String> = mutableMapOf()) : HookFiles {
     override fun read(path: String): String? = texts[path]
 
     override fun write(path: String, text: String): Boolean {
-        if (readOnly) return false
         texts[path] = text
-        ages[path] = 0
         return true
     }
-
-    override fun delete(path: String) {
-        texts.remove(path)
-        ages.remove(path)
-    }
-
-    override fun ageMillis(path: String): Long? = if (path in texts) ages[path] ?: 0 else null
 }
 
 /** One call a hook made. */

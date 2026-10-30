@@ -9,15 +9,18 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class DiffsTest {
+    private val logArgs = "log --no-color --no-ext-diff --no-textconv --format=%h %s (%an)"
+    private val diffArgs = "diff --no-color --no-ext-diff --no-textconv --stat --patch"
+
     @Test
     fun theOutgoingCommitsOfTheBranchElseTheLastOne() {
         val git = FakeGit(
             mapOf(
                 "/r|rev-parse --abbrev-ref @{u}" to "origin/main",
-                "/r|log --no-color --format=%h %s (%an) @{u}..HEAD" to "abc fix (lena)",
-                "/r|diff --no-color --stat --patch @{u}..HEAD" to "+x",
-                "/n|log --no-color --format=%h %s (%an) HEAD~1..HEAD" to "def init (lena)",
-                "/n|diff --no-color --stat --patch HEAD~1..HEAD" to "+y",
+                "/r|$logArgs @{u}..HEAD" to "abc fix (lena)",
+                "/r|$diffArgs @{u}..HEAD" to "+x",
+                "/n|$logArgs HEAD~1..HEAD" to "def init (lena)",
+                "/n|$diffArgs HEAD~1..HEAD" to "+y",
             ),
         )
         assertEquals("abc fix (lena)\n\n+x", Diffs(git).outgoing("/r"))
@@ -30,10 +33,10 @@ class DiffsTest {
         val git = FakeGit(
             mapOf(
                 "/r|rev-parse --verify --quiet refs/remotes/origin/main" to "B",
-                "/r|log --no-color --format=%h %s (%an) refs/remotes/origin/main..S1" to "s1 a (l)",
-                "/r|diff --no-color --stat --patch refs/remotes/origin/main..S1" to "+a",
-                "/r|log --no-color --format=%h %s (%an) S2~1..S2" to "s2 b (l)",
-                "/r|diff --no-color --stat --patch S2~1..S2" to "+b",
+                "/r|$logArgs refs/remotes/origin/main..S1" to "s1 a (l)",
+                "/r|$diffArgs refs/remotes/origin/main..S1" to "+a",
+                "/r|$logArgs S2~1..S2" to "s2 b (l)",
+                "/r|$diffArgs S2~1..S2" to "+b",
             ),
         )
         val push = Push(

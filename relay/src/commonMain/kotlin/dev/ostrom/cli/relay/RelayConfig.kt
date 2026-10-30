@@ -11,6 +11,9 @@ package dev.ostrom.cli.relay
  * @property launchId Sent upstream as `x-ostrom-launch` with every call.
  * @property mcpServers The MCP servers the agent may reach under `/mcp/{server}`; any other name is 404.
  * @property inference Whether the inference routes (`/v1/messages`, `/v1/chat/completions`, `/v1/models`) exist.
+ * @property gateCatalog The gate catalogue of the session's verified package (`ostrom/gates.json`, signed by the
+ * instance's key), which the relay answers to `GET /api/v1/gates/catalog` from its own memory, out of the agent's reach
+ * (security audit S2-20); null without a package, and the call then goes to Ostrom.
  */
 data class RelayConfig(
     val serverUrl: String,
@@ -19,6 +22,7 @@ data class RelayConfig(
     val launchId: String,
     val mcpServers: Set<String>,
     val inference: Boolean,
+    val gateCatalog: String? = null,
 ) {
     /** Everything but the credential, so that a configuration printed in a log or an error never carries it. */
     override fun toString(): String = "RelayConfig(serverUrl=$serverUrl, agentToken=<redacted>, " +

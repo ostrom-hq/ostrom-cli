@@ -27,11 +27,16 @@ sealed interface LoginOutcome {
  * `ostrom login`: the device flow of Ostrom's GitHub app, through the server (`POST /api/v1/auth/device`, then
  * `POST /api/v1/auth/device/token` every `interval` seconds until the developer said yes on GitHub).
  *
+ * The page the developer is sent to must be GitHub's (security audit S2-35): a server that is not Ostrom cannot send
+ * them to a look-alike page to collect their code.
+ *
+ * @param githubWeb GitHub's web address (`https://github.com`, or `OSTROM_GITHUB_WEB_URL`), without a trailing slash.
  * @param sleep Waits the given milliseconds (virtual in tests).
  * @param say Prints a line for the developer.
  */
 class DeviceLogin(
     private val server: ServerJson,
+    private val githubWeb: String,
     private val sleep: suspend (Long) -> Unit,
     private val say: (String) -> Unit,
 ) {
@@ -42,8 +47,15 @@ class DeviceLogin(
         val body = (start as ServerAnswer.Ok).body
         val deviceCode = body.text("deviceCode") ?: ""
         val userCode = body.text("userCode") ?: "?"
+        val page = body.text("verificationUri") ?: "$githubWeb/login/device"
+        if (!page.startsWith("$githubWeb/")) {
+            return LoginOutcome.Stopped(
+                UNREACHABLE,
+                "$serverUrl sent a sign-in page that is not GitHub's ($page). Check the --server URL.",
+            )
+        }
         say("! Copy your one-time code: $userCode")
-        say("  Open ${body.text("verificationUri") ?: "https://github.com/login/device"} and enter it.")
+        say("  Open $page and enter it.")
         val interval = (body["interval"] as? JsonPrimitive)?.intOrNull ?: DEFAULT_INTERVAL_SECONDS
         val expiresIn = (body["expiresIn"] as? JsonPrimitive)?.intOrNull ?: DEFAULT_EXPIRY_SECONDS
         return poll(deviceCode, interval * MILLIS, expiresIn * MILLIS, serverUrl)
@@ -98,19 +110,20 @@ class DeviceLogin(
         else -> "Ostrom could not sign you in: ${answer.message}"
     }
 
-    private companion object {
-        const val START = "/api/v1/auth/device"
-        const val TOKEN = "/api/v1/auth/device/token"
-        const val MILLIS = 1_000L
-        const val DEFAULT_INTERVAL_SECONDS = 5
-        const val DEFAULT_EXPIRY_SECONDS = 900
-        const val SLOW_DOWN_MILLIS = 5_000L
-        const val PENDING = 428
-        const val FORBIDDEN = 403
-        const val EXPIRED = 1
-        const val CANCELLED = 2
-        const val UNREACHABLE = 69
-        const val REFUSED = 77
-        val WAIT = setOf("authorization_pending", "slow_down")
+    /** The device flow's waits and limits. */
+    companion object {
+        private const val START = "/api/v1/auth/device"
+        private const val TOKEN = "/api/v1/auth/device/token"
+        private const val MILLIS = 1_000L
+        private const val DEFAULT_INTERVAL_SECONDS = 5
+        private const val DEFAULT_EXPIRY_SECONDS = 900
+        private const val SLOW_DOWN_MILLIS = 5_000L
+        private const val PENDING = 428
+        private const val FORBIDDEN = 403
+        private const val EXPIRED = 1
+        private const val CANCELLED = 2
+        private const val UNREACHABLE = 69
+        private const val REFUSED = 77
+        private val WAIT = setOf("authorization_pending", "slow_down")
     }
 }

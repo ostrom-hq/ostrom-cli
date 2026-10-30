@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli
 
 import dev.ostrom.cli.api.DownloadsImpl

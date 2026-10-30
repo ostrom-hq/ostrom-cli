@@ -44,11 +44,12 @@ class SignedPackageTest {
     fun everyFileMustMatchItsDigest() = runTest {
         val good = mapOf("path" to "a.md", "content" to "x", "sha256" to sha256Hex("x".encodeToByteArray()))
         val bad = mapOf("path" to "b.md", "content" to "y", "sha256" to "0")
-        val tampered = objectOf("files" to listOf(good, bad)).toString()
+        val tampered = objectOf("repo" to "r", "files" to listOf(good, bad)).toString()
         assertEquals(PackageOutcome.Refused("file b.md does not match its digest"), fetch(tampered))
-        val noContent = objectOf("files" to listOf(mapOf("path" to "c.md", "sha256" to sha256Hex(ByteArray(0)))))
+        val empty = mapOf("path" to "c.md", "sha256" to sha256Hex(ByteArray(0)))
+        val noContent = objectOf("repo" to "r", "files" to listOf(empty))
         assertIs<PackageOutcome.Verified>(fetch(noContent.toString()))
-        assertIs<PackageOutcome.Verified>(fetch(objectOf("files" to listOf(good)).toString()))
+        assertIs<PackageOutcome.Verified>(fetch(objectOf("repo" to "r", "files" to listOf(good)).toString()))
     }
 
     private companion object {

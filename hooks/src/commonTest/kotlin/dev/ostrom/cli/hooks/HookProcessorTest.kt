@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.hooks
 
 import kotlin.test.Test
@@ -35,13 +36,9 @@ class HookProcessorTest {
     }
 
     @Test
-    fun theRefreshHookDoesNothingYet() {
-        assertEquals(HookReply(), HookProcessorImpl(refuse).process(HookKind.GATES_REFRESH, null, "claude"))
-    }
-
-    @Test
     fun hookKindsAreReadByTheirCommandName() {
-        assertEquals(HookKind.GATES_REFRESH, HookKind.of("gates-refresh"))
+        assertEquals(HookKind.SESSION, HookKind.of("session"))
+        assertEquals(null, HookKind.of("gates-refresh"), "the background refresh is gone (S2-20)")
         assertEquals(null, HookKind.of("Gate"))
     }
 }

@@ -57,10 +57,22 @@ class PackageTrustTest {
     }
 
     @Test
+    fun aPackageSignedForAnotherRepositoryIsRefused() = runTest {
+        // S2-33: the server (or a proxy) answering another repository's valid package is not this session's
+        serve()
+        server["GET /api/v1/packages/current?repo=other"] = 200 to PackageVector.ENVELOPE
+        val refused = trust.fetch("https://ostrom.example", "dev-token", "other", config)
+        assertEquals(PackageOutcome.Refused("the package was signed for acme-api, not other"), refused)
+        assertEquals(null, files.texts[join(config, "packages", "${PackageVector.DIGEST}.json")])
+    }
+
+    @Test
     fun noPackageIsNoneAndAnyOtherFailureIsARefusal() = runTest {
         assertEquals(PackageOutcome.None, fetch())
         server[packageRoute] = 500 to """{"error":{"type":"internal","message":"boom"}}"""
         assertEquals(PackageOutcome.Refused("boom"), fetch())
+        server.unreachable = setOf(packageRoute)
+        assertEquals(PackageOutcome.Refused("connection refused"), fetch(), "an unreachable server is no 404")
     }
 
     @Test
@@ -98,6 +110,10 @@ class PackageTrustTest {
         serve()
         server[keysRoute] = 503 to "down"
         assertEquals(PackageOutcome.Refused("the server does not publish the key ${PackageVector.KID}"), fetch())
+        serve()
+        server[keysRoute] = 200 to """{"keys":[{"kid":"${PackageVector.KID}"}]}"""
+        val noPem = fetch()
+        assertEquals(PackageOutcome.Refused("the server does not publish the key ${PackageVector.KID}"), noPem)
     }
 
     @Test

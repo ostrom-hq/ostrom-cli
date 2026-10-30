@@ -27,8 +27,9 @@ class DeviceLoginTest {
         if (call.path == "/api/v1/auth/device") start else polls.removeFirst()
     }
 
-    private suspend fun signIn() = DeviceLogin(ServerJson(transport), { waits += it }) { said += it }
-        .signIn("https://api.ostrom.run")
+    private suspend fun signIn() =
+        DeviceLogin(ServerJson(transport), "https://github.com", { waits += it }) { said += it }
+            .signIn("https://api.ostrom.run")
 
     private fun pending() = ServerReply(428, """{"error":{"type":"authorization_pending","message":"waiting"}}""")
 
@@ -76,6 +77,21 @@ class DeviceLoginTest {
         start = ServerReply(null, "connection refused")
         val unreachable = "Ostrom is unreachable at https://api.ostrom.run. Check your network, or the --server URL."
         assertEquals(LoginOutcome.Stopped(69, unreachable), signIn())
+    }
+
+    @Test
+    fun aSignInPageThatIsNotGitHubsIsNeverShown() = runTest {
+        // S2-35: a server that is not Ostrom could send the developer to a look-alike page for their code
+        for (page in listOf("https://github.com.evil.example/login/device", "http://github.com/login/device")) {
+            start = ServerReply(200, """{"deviceCode":"dc","userCode":"X","verificationUri":"$page"}""")
+            val stopped = LoginOutcome.Stopped(
+                69,
+                "https://api.ostrom.run sent a sign-in page that is not GitHub's ($page). Check the --server URL.",
+            )
+            assertEquals(stopped, signIn())
+        }
+        assertEquals(emptyList(), said, "the code is never shown")
+        assertEquals(listOf("/api/v1/auth/device", "/api/v1/auth/device"), calls.map { it.path })
     }
 
     @Test

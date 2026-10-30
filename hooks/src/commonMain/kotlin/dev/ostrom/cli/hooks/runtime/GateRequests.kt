@@ -16,11 +16,12 @@ import dev.ostrom.cli.hooks.gate.UnreadablePushException
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * A gated action the before-tool hook asks a yes for.
  *
- * @property written The command as the agent wrote it: the after-tool hook finds the yes under it.
+ * @property written The command as the agent wrote it.
  * @property subject The command with where its pushes land appended, which the gate patterns read.
  * @property gate The action's gate.
  * @property failMode The organisation's fail mode (`open` lets the action through when Ostrom is unreachable).
@@ -54,14 +55,13 @@ class GateRequests(
         val read = if (redirected == null && subject.kind == ToolKind.BASH) {
             readPush(directory, subject.text)
         } else {
-            Result.success(null)
+            PushRead(null, null)
         }
-        val problem = read.exceptionOrNull()
         return when {
             redirected != null -> replies.deny(GateTexts.redirected(ask.action.name, ask.gate, redirected))
-            problem != null && ask.gate.enforce ->
-                replies.deny(GateTexts.unreadable(ask.action.name, ask.gate, problem.message.orEmpty()))
-            else -> request(ask, directory, read.getOrNull())
+            read.problem != null && ask.gate.enforce ->
+                replies.deny(GateTexts.unreadable(ask.action.name, ask.gate, read.problem))
+            else -> request(ask, directory, read.push)
         }
     }
 
@@ -105,29 +105,28 @@ class GateRequests(
         val request = if ("status" in body) body else body["gate"] as? JsonObject ?: body
         val answer = GateAnswer.of(request, ask.action.name, ask.gate)
         return when (request.string("status")) {
-            "approved" -> {
-                request.string("id")?.let { ids.rememberYes(ask.written, it) }
-                replies.say(GateTexts.approved(answer))
-            }
+            "approved" -> replies.say(GateTexts.approved(answer))
             "shadow" -> replies.say(GateTexts.shadow(answer))
-            "ungated", "consumed" -> replies.allow()
+            "ungated" -> replies.allow()
             "rejected" -> replies.deny(GateTexts.rejected(answer))
             else -> replies.deny(GateTexts.waiting(answer))
         }
     }
 
-    private fun readPush(directory: String, text: String): Result<Push?> = try {
-        Result.success(pushes.read(directory, text.substringBefore(NOTE)))
+    /** A push read from a command, or why it could not be. */
+    private class PushRead(val push: Push?, val problem: String?)
+
+    private fun readPush(directory: String, text: String): PushRead = try {
+        PushRead(pushes.read(directory, text.substringBefore(NOTE)), null)
     } catch (e: UnreadablePushException) {
-        Result.failure(e)
+        PushRead(null, e.reason)
     }
 
     private fun redirection(subject: ToolSubject): String? = if (subject.kind != ToolKind.BASH) {
         null
     } else {
-        ShellWords.segments(subject.text).firstNotNullOfOrNull { words ->
-            GitInvocation.parse(words)?.takeIf { it.verb == "push" }?.redirection()
-        }
+        // any git call of a gated command, not only its push: `git -c alias.x=push x` redirects too (S2-27)
+        ShellWords.segments(subject.text).firstNotNullOfOrNull { words -> GitInvocation.parse(words)?.redirection() }
     }
 
     /** The note the hooks append to a push for the gate patterns, and how they read it. */
@@ -182,10 +181,9 @@ data class GateAnswer(
         }
 
         private fun approversOf(gate: JsonObject): String? {
-            val list = (gate["approvers"] as? JsonArray)?.mapNotNull { element ->
-                (element as? JsonPrimitive)?.takeIf { it.isString }?.content
-            }
-            return list?.let { if (it.isEmpty()) "the gate owner" else it.joinToString(" or ") }
+            val array = gate["approvers"] as? JsonArray ?: return null
+            val list = array.filter { it is JsonPrimitive && it.isString }.map { it.jsonPrimitive.content }
+            return if (list.isEmpty()) "the gate owner" else list.joinToString(" or ")
         }
     }
 }
