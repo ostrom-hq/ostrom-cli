@@ -1,3 +1,6 @@
+// One actual per expect of the module, as in posixMain and mingwMain: their number follows the platform API.
+@file:Suppress("TooManyFunctions")
+
 package dev.ostrom.cli.platform
 
 import java.io.IOException

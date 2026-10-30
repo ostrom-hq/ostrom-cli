@@ -14,7 +14,7 @@ class LoopbackTest {
         val post = LoopbackRequest("POST", "/api/x?a=1", mapOf("Authorization" to "Bearer t"), "{\"é\":1}")
         assertEquals(
             "POST /api/x?a=1 HTTP/1.1\r\nHost: 127.0.0.1:4100\r\nAuthorization: Bearer t\r\n" +
-                "Content-Type: application/json\r\nContent-Length: 9\r\nConnection: close\r\n\r\n{\"é\":1}",
+                "Content-Type: application/json\r\nContent-Length: 8\r\nConnection: close\r\n\r\n{\"é\":1}",
             HttpMessages.encode(post, 4100).decodeToString(),
         )
         assertEquals(
