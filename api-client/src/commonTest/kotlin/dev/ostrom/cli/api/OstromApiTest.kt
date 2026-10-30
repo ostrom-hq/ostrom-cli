@@ -24,6 +24,8 @@ class OstromApiTest {
         val engine = MockEngine { request ->
             assertEquals("https://ostrom.example/api/health", request.url.toString())
             assertEquals("ostrom/0.1.0", request.headers[HttpHeaders.UserAgent])
+            val traceparent = request.headers[TRACEPARENT_HEADER].orEmpty()
+            assertTrue(Regex("^00-[0-9a-f]{32}-[0-9a-f]{16}-01$").matches(traceparent), traceparent)
             respond("down", HttpStatusCode.ServiceUnavailable)
         }
         val api = OstromApiImpl("https://ostrom.example/", "ostrom/0.1.0", HttpClient(engine) { expectSuccess = false })

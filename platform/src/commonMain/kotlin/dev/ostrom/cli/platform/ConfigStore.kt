@@ -9,6 +9,8 @@ enum class ConfigKey(val key: String, val description: String) {
     DEFAULT_AGENT("default_agent", "agent started by ostrom when none is named"),
     COLOR("color", "auto, always or never"),
     EDITOR("editor", "editor opened by commands that edit text"),
+    TELEMETRY("telemetry", "anonymous usage statistics, on or off (off unless turned on: ostrom telemetry)"),
+    TELEMETRY_ID("telemetry_id", "random id of this install, sent with usage statistics only"),
     ;
 
     /** Lookup by key name. */

@@ -42,6 +42,7 @@ class OstromCliTest {
     private val console = FakeConsole()
     private val fileSystem = FakeFileSystem()
     private val hookCalls = mutableListOf<List<String>>()
+    private val statistics = mutableListOf<String>()
     private val withServer = mapOf("HOME" to "/home/maya", "OSTROM_URL" to "https://ostrom.example")
 
     /** A server that answers every request with [status] after [millis]. */
@@ -58,6 +59,7 @@ class OstromCliTest {
         environment: Map<String, String> = mapOf("HOME" to "/home/maya"),
         installed: Set<String> = setOf("git", "claude"),
         api: (String) -> OstromApi = { error("no server in this test") },
+        postHogKey: String = "",
     ) = OstromCli(
         CliDependencies(
             console = console,
@@ -71,6 +73,8 @@ class OstromCliTest {
                 override fun run(arguments: List<String>): Int = 0.also { hookCalls += arguments }
             },
             mcpServer = { object : McpServer { override fun serve() = 0 } },
+            postHogKey = postHogKey,
+            sendStatistics = { _, body -> statistics += body },
         ),
     )
 
@@ -147,7 +151,8 @@ class OstromCliTest {
         assertEquals(0, cli.run(arrayOf("config", "unset", "default_agent")))
         assertEquals(1, cli.run(arrayOf("config", "get", "default_agent")))
         assertEquals(64, cli.run(arrayOf("config", "set", "colour", "never")))
-        assertTrue(console.err.contains("Unknown key \"colour\". Keys: server, default_agent, color, editor."))
+        val keys = "server, default_agent, color, editor, telemetry, telemetry_id"
+        assertTrue(console.err.contains("Unknown key \"colour\". Keys: $keys."), console.err.toString())
     }
 
     @Test
@@ -255,5 +260,46 @@ class OstromCliTest {
         dependencies.api("https://ostrom.example")
         dependencies.mcpServer()
         assertTrue(dependencies.configFile("/x").endsWith("config.toml"))
+    }
+
+    @Test
+    fun telemetryIsOffByDefaultAndSaysWhatItWouldSend() {
+        assertEquals(0, cli().run(arrayOf("telemetry")))
+        assertOut("Usage statistics: off (this build has no statistics destination)")
+        assertOut("Never arguments, paths, repositories, code or your")
+        assertEquals(0, cli(postHogKey = "phc").run(arrayOf("telemetry", "status")))
+        assertOut("Usage statistics: off (the default; ostrom telemetry enable turns it on)")
+        assertTrue(statistics.isEmpty())
+    }
+
+    @Test
+    fun telemetryEnableSendsOneEventPerCommandUntilDisabled() {
+        assertEquals(0, cli(postHogKey = "phc").run(arrayOf("telemetry", "enable")))
+        assertOut("✓ Usage statistics turned on, thank you. ostrom telemetry disable stops them.\n")
+        assertEquals(0, cli(postHogKey = "phc").run(arrayOf("version")))
+        assertEquals(0, cli(postHogKey = "phc").run(arrayOf("telemetry", "disable")))
+        assertOut("✓ Usage statistics turned off; the install id is deleted.\n")
+        assertEquals(0, cli(postHogKey = "phc").run(arrayOf("version")))
+
+        assertEquals(2, statistics.size)
+        assertTrue(statistics.all { it.contains("\"cli_command_run\"") }, statistics.toString())
+        assertTrue(statistics[0].contains("\"command\":\"telemetry\""), statistics[0])
+        assertTrue(statistics[1].contains("\"command\":\"version\""), statistics[1])
+    }
+
+    @Test
+    fun telemetryEnableExplainsWhenTheEnvironmentKeepsItOff() {
+        val environment = mapOf("HOME" to "/home/maya", "DO_NOT_TRACK" to "1")
+        assertEquals(0, cli(environment = environment, postHogKey = "phc").run(arrayOf("telemetry", "enable")))
+        assertOut("Right now they are off (OSTROM_TELEMETRY=0 or DO_NOT_TRACK is set, whatever the setting).")
+    }
+
+    @Test
+    fun telemetryWithoutAHomeOrAWritableFileIsExit73() {
+        assertEquals(73, cli(environment = emptyMap()).run(arrayOf("telemetry", "enable")))
+        fileSystem.createDirectories("/home/maya".toPath())
+        fileSystem.write("/home/maya/.config".toPath()) { writeUtf8("a file where the folder should be") }
+        assertEquals(73, cli().run(arrayOf("telemetry", "disable")))
+        assertTrue(console.err.contains("Could not write"), console.err.toString())
     }
 }

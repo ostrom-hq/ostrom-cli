@@ -11,8 +11,12 @@ plugins {
 val generatedBuildInfo = layout.buildDirectory.dir("generated/build-info")
 val generateBuildInfo by tasks.registering {
     val version = project.version.toString()
+    // The PostHog project key of the official builds (a public, write-only key): blank in local builds, which then
+    // never send usage statistics, even when turned on.
+    val postHogKey = providers.gradleProperty("ostromPosthogKey").orElse("").get()
     val output = generatedBuildInfo
     inputs.property("version", version)
+    inputs.property("postHogKey", postHogKey)
     outputs.dir(output)
     doLast {
         val file = output.get().file("dev/ostrom/cli/BuildInfo.kt").asFile
@@ -27,6 +31,9 @@ val generateBuildInfo by tasks.registering {
             |internal object BuildInfo {
             |    /** The CLI version (gradle.properties `ostromVersion`, or `-PostromVersion` in CI). */
             |    const val VERSION = "$version"
+            |
+            |    /** The usage statistics destination (`-PostromPosthogKey`), blank when the build has none. */
+            |    const val POSTHOG_KEY = "$postHogKey"
             |}
             |""".trimMargin(),
         )
