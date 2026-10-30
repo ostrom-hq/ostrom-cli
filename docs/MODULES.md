@@ -14,6 +14,7 @@ all Ostrom repositories are in `ostrom-core/docs/CONVENTIONS.md`; this page only
 | `api-client` | `dev.ostrom.cli.api` | the server over HTTPS (Ktor, platform engine) | ostrom-core `api` |
 | `launcher` | `dev.ostrom.cli.launcher` | the agents (`Agent`) and starting one in this terminal | `platform` |
 | `mcp` | `dev.ostrom.cli.mcp` | the local MCP server on stdio (`ostrom mcp`) | `platform` |
+| `relay` | `dev.ostrom.cli.relay` | the launch's local relay on `127.0.0.1` (Ktor CIO): hooks, MCP and inference reach Ostrom through it | `platform` |
 | `cli` | `dev.ostrom.cli` | the command tree (Clikt), `main`, the wiring (`CliDependencies`), the executable | all of the above |
 
 Rules that keep the binary fast and the modules apart:
@@ -34,6 +35,29 @@ Rules that keep the binary fast and the modules apart:
 - Wiring is plain constructors in `CliDependencies` (no container: the start-up of `ostrom hook` matters more than
   the convenience). Tests build `CliDependencies` with fakes.
 - Output goes through `Console` (unbuffered, UTF-8 on Windows consoles). Commands never call `println`.
+
+## The local relay
+
+While `ostrom <agent>` runs, the launcher starts a `LocalRelay`
+(`LocalRelayStarterImpl(report).start(RelayConfig(...))`) on `127.0.0.1` and a port chosen by the system, and closes
+it when the agent exits. The agent's hooks, its MCP client
+and, when the launch relays it, its inference reach Ostrom through it with the relay's random capability
+(`LocalRelay.token`, 64 hexadecimal characters from `secureRandomBytes`); the relay adds the launch's agent token,
+which never enters the agent's environment (audit A12/A13).
+
+- Every request needs the capability (`Authorization: Bearer`, `x-api-key` or `x-ostrom-local-token`, compared in
+  constant time): 401 otherwise. An `Origin` header or a `Host` that is not the loopback: 403.
+- Only an allow-list is forwarded, everything else is 404 (never an open proxy): the hook routes
+  (`POST /api/v1/sessions`, `/sessions/{id}/reopen|seen`, `/api/v1/gates`, `/api/v1/notifications`, `GET
+  /api/v1/gates/{id}` and `/gates/catalog`, as they are, 2 MiB, 15 s, 70 s for a gate wait; ending a session, its sign
+  of life, the use of a yes and check runs are the launcher's and Ostrom's, never forwarded for the agent, S2-25 and
+  S2-29), the catalogue of the verified package answered from memory when there is one (S2-20), `POST /mcp/{server}` for the launch's servers (to `/api/v1/mcp/{server}`, streamed, 401/403 from
+  Ostrom become 502), and with inference `/v1/messages`, `/v1/chat/completions`, `/v1/models` (to
+  `/api/v1/inference/…`, 4 MiB, the response streamed, only the provider headers forwarded).
+- Ostrom unreachable or too slow: 502 with `{"error":{"type":"unreachable","message":"Ostrom is unreachable (…)"}}`,
+  and one line for the user per outage through the starter's `report`; Ktor's own logger is silenced.
+- `hooks` never depends on `relay`: it speaks plain HTTP to the loopback URL and capability the launcher hands it
+  (how they reach the hook is the launch flow's choice, not this module's).
 
 ## Exit codes
 

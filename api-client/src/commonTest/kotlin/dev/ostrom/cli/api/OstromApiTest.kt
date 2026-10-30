@@ -66,7 +66,8 @@ class OstromApiTest {
 
     /**
      * A real HTTPS call with the platform's engine and certificate store, on each of the four targets. It needs the
-     * network, so it runs only with OSTROM_NETWORK_TESTS=1 (set by CI).
+     * network, so it runs only with OSTROM_NETWORK_TESTS=1 (set by CI). Any HTTP answer proves the TLS handshake and
+     * the certificate check: a shared runner is often over GitHub's anonymous rate limit and gets 403 or 429.
      */
     @Test
     fun aRealHttpsCallSucceeds() {
@@ -74,7 +75,7 @@ class OstromApiTest {
         val response = runBlocking {
             OstromApiImpl("https://api.github.com", "ostrom-cli-tests").use { it.get("/zen") }
         }
-        assertEquals(200, response.status, response.body)
+        assertTrue(response.status in HTTP_ANSWERS, "status ${response.status}")
         assertTrue(response.body.isNotBlank())
     }
 
@@ -85,5 +86,9 @@ class OstromApiTest {
         assertEquals("No such gate.", refusal.apiError()?.message)
         assertEquals(null, ServerResponse(502, "<html>Bad gateway</html>", 3).apiError())
         assertEquals(null, ServerResponse(204, "", 3).apiError())
+    }
+
+    private companion object {
+        val HTTP_ANSWERS = 200..599
     }
 }

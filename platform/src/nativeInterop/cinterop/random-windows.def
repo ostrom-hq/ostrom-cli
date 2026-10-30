@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+package = dev.ostrom.cli.platform.interop.random
+linkerOpts = -lbcrypt
+---
+#include <windows.h>
+#include <bcrypt.h>
+
+/* Fills `buffer` with `length` bytes from the system's preferred generator. Returns 0, or -1 on failure. */
+static inline int ostrom_secure_random(unsigned char *buffer, int length) {
+    NTSTATUS status = BCryptGenRandom(NULL, buffer, (ULONG)length, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+    return status >= 0 ? 0 : -1;
+}
