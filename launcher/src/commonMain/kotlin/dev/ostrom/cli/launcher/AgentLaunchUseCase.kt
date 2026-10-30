@@ -73,10 +73,10 @@ class LaunchDependencies(
 )
 
 /** The launch stops before the agent runs, with an exit code of the spec (CLI.md § 2.3). */
-private class LaunchStopped(val exitCode: Int, message: String) : Exception(message)
+internal class LaunchStopped(val exitCode: Int, message: String) : Exception(message)
 
 /** Stops the launch with [exitCode] and [message]. */
-private fun stop(exitCode: Int, message: String): Nothing = throw LaunchStopped(exitCode, message)
+internal fun stop(exitCode: Int, message: String): Nothing = throw LaunchStopped(exitCode, message)
 
 /**
  * `ostrom <agent>` (prototype `cmd_run`): the organisation's policy, the launch and its agent token, the signed session
@@ -86,7 +86,7 @@ private fun stop(exitCode: Int, message: String): Nothing = throw LaunchStopped(
  */
 class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters: List<AgentAdapter>) {
     private val adapters = adapters.associateBy { it.agent }
-    private val trust = PackageTrust(dependencies.server, dependencies.files, dependencies.clock::now, dependencies.say)
+    private val calls = LaunchCalls(dependencies)
 
     /** Runs the launch; returns the exit code. */
     suspend fun launch(request: LaunchRequest, site: LaunchSite): Int = try {
@@ -103,9 +103,9 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         val top = gitTop(site.cwd)
         val repo = request.repo ?: site.variable(LaunchVariables.REPO)?.takeIf { it.isNotEmpty() } ?: folderName(top)
         val model = request.model ?: modelOf(request.arguments)
-        checkPolicy(agent, model, site)
-        val launch = createLaunch(repo, agent, model, site)
-        val pack = packageOf(repo, site)
+        calls.checkPolicy(agent, model, site)
+        val launch = calls.createLaunch(repo, agent, model, site)
+        val pack = calls.packageOf(repo, site)
         val temporary = join(site.temporaryDirectory, "ostrom-run-${dependencies.clock.millis()}")
         try {
             dependencies.files.createPrivateDirectory(temporary)
@@ -144,8 +144,8 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         val files = dependencies.files
         files.createPrivateDirectory(run.plugin)
         val view = run.pack?.let { PackageLayout(files).layDown(it, run.plugin, run.temporary) }
-        prefetchCatalogue(run)
-        val mcp = (mcpServers(run.site) + run.pack?.mcpServers.orEmpty()).distinct()
+        calls.prefetchCatalogue(run.repo, run.launch.agentToken, run.gates)
+        val mcp = (calls.mcpServers(run.site) + run.pack?.mcpServers.orEmpty()).distinct()
         val inference = inferenceRelayed(run)
         val settings = RelaySettings(
             run.site.serverUrl,
@@ -245,67 +245,6 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         }
     }
 
-    private suspend fun checkPolicy(agent: Agent, model: String?, site: LaunchSite) {
-        val query = "agent=${Routes.encode(ostromName(agent))}&dev=${Routes.encode(site.credentials.login)}" +
-            model?.let { "&model=${Routes.encode(it)}" }.orEmpty()
-        val answer = dependencies.server.get("${Routes.POLICY}?$query", site.credentials.token, POLICY_MILLIS)
-        if (answer is ServerAnswer.Failed) {
-            dependencies.say("ostrom: policy not checked (${answer.message})")
-            return
-        }
-        val body = (answer as ServerAnswer.Ok).body
-        if (body.flag("allowed") == false) {
-            stop(REFUSED, "refused by your organisation's policy: ${body.text("reason") ?: "not allowed"}")
-        }
-        body.text("note")?.let { dependencies.say("ostrom: $it") }
-    }
-
-    private suspend fun createLaunch(repo: String, agent: Agent, model: String?, site: LaunchSite): Launch {
-        val body = objectOf("repo" to repo, "agent" to ostromName(agent), "model" to model)
-        val answer = dependencies.server.post(Routes.LAUNCHES, body, site.credentials.token, LAUNCH_MILLIS)
-        if (answer is ServerAnswer.Failed) {
-            val (code, message) = when (answer.status) {
-                null -> UNREACHABLE to "Ostrom is unreachable at ${site.serverUrl} (${answer.message})"
-                UNAUTHORIZED -> SIGN_IN_REQUIRED to "not signed in to ${site.serverUrl}: run `ostrom login`"
-                FORBIDDEN -> REFUSED to "launch refused: ${answer.message}"
-                else -> UNREACHABLE to "launch not created: ${answer.message}"
-            }
-            stop(code, message)
-        }
-        val launch = (answer as ServerAnswer.Ok).body
-        val id = launch.text("launchId")
-        val token = launch.text("agentToken")
-        if (id.isNullOrEmpty() || token.isNullOrEmpty()) stop(UNREACHABLE, "Ostrom gave no launch for this session")
-        return Launch(id, token)
-    }
-
-    private suspend fun packageOf(repo: String, site: LaunchSite): SessionPackage? =
-        when (val outcome = trust.fetch(site.serverUrl, site.credentials.token, repo, site.configDirectory)) {
-            is PackageOutcome.Verified -> outcome.pack.also { dependencies.say("ostrom: ${it.summary()}") }
-            PackageOutcome.None -> null.also {
-                dependencies.say("ostrom: no session package for $repo; your organisation's gates apply")
-            }
-            is PackageOutcome.Refused ->
-                stop(SIGNATURE_REFUSED, "session package refused: ${outcome.reason}. The agent is not started.")
-        }
-
-    private suspend fun prefetchCatalogue(run: Run) {
-        val path = "${Routes.CATALOG}?repo=${Routes.encode(run.repo)}"
-        val answer = dependencies.server.get(path, run.launch.agentToken, CATALOG_MILLIS)
-        if (answer is ServerAnswer.Ok) dependencies.files.write(run.gates, answer.body.toString())
-    }
-
-    private suspend fun mcpServers(site: LaunchSite): List<String> =
-        when (val answer = dependencies.server.get(Routes.MCP_SERVERS, site.credentials.token, MCP_MILLIS)) {
-            is ServerAnswer.Ok -> answer.body.list("items").filterIsInstance<JsonObject>()
-                .filter { it.flag("enabled") != false }
-                .mapNotNull { it.text("name") }
-                .filter { MCP_NAME.matches(it) }
-            is ServerAnswer.Failed -> emptyList<String>().also {
-                dependencies.say("ostrom: your organisation's MCP servers are not listed (${answer.message})")
-            }
-        }
-
     private suspend fun inferenceRelayed(run: Run): Boolean {
         val choice = run.site.variable(INFERENCE_VARIABLE)
         return when {
@@ -339,23 +278,10 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
             .mapValues { JsonPrimitive(it.value) },
     )
 
-    /** A launch created by Ostrom. */
-    private data class Launch(val launchId: String, val agentToken: String)
-
     private companion object {
-        const val UNREACHABLE = 69
-        const val SIGN_IN_REQUIRED = 65
         const val NO_ADAPTER = 70
         const val CANNOT_WRITE = 73
-        const val REFUSED = 77
-        const val SIGNATURE_REFUSED = 78
         const val AGENT_MISSING = 127
-        const val UNAUTHORIZED = 401
-        const val FORBIDDEN = 403
-        const val POLICY_MILLIS = 5_000L
-        const val LAUNCH_MILLIS = 10_000L
-        const val CATALOG_MILLIS = 5_000L
-        const val MCP_MILLIS = 5_000L
         const val INFERENCE_MILLIS = 3_000L
         const val GIT_MILLIS = 3_000
         const val ALIVE_MILLIS = 20_000L
@@ -364,7 +290,6 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         const val INFERENCE_VARIABLE = "OSTROM_INFERENCE"
         val ON = setOf("on", "1", "true")
         val OFF = setOf("off", "0", "false")
-        val MCP_NAME = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
         fun missing(agent: Agent): String = "${agent.displayName} is not installed (`${agent.executable}` is not on " +
             "your PATH)." + agent.installUrl?.let { " Install it: $it" }.orEmpty()

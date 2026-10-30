@@ -24,9 +24,6 @@ object Routes {
     /** `POST`: a yes served the action it was given for. */
     fun consume(gateId: String) = "/api/v1/gates/${Urls.encode(gateId)}/consume"
 
-    /** `GET`: a gate request, long-polled up to [waitSeconds] for its answer. */
-    fun gate(gateId: String, waitSeconds: Int) = "/api/v1/gates/${Urls.encode(gateId)}?wait=$waitSeconds"
-
     /** `POST`: end a session; the server signs its receipt. */
     fun end(sessionId: String) = session(sessionId, "end")
 
@@ -35,9 +32,6 @@ object Routes {
 
     /** `POST`: a skill or a sub-agent of the package was opened. */
     fun seen(sessionId: String) = session(sessionId, "seen")
-
-    /** `POST`: the launcher's sign of life. */
-    fun alive(sessionId: String) = session(sessionId, "alive")
 
     private fun session(sessionId: String, action: String) = "/api/v1/sessions/${Urls.encode(sessionId)}/$action"
 }

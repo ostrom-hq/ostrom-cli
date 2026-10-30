@@ -68,9 +68,16 @@ class ServerJson(private val transport: ServerTransport) {
         timeoutMillis: Long,
     ): ServerAnswer {
         val reply = transport.send(ServerCall(method, path, body?.toString(), token, timeoutMillis))
-        val status = reply.status ?: return ServerAnswer.Failed(null, "unreachable", reply.body)
+        val status = reply.status
         val json = parseObject(reply.body)
-        if (status in SUCCESS) return ServerAnswer.Ok(json ?: JsonObject(emptyMap()))
+        return when {
+            status == null -> ServerAnswer.Failed(null, "unreachable", reply.body)
+            status in SUCCESS -> ServerAnswer.Ok(json ?: JsonObject(emptyMap()))
+            else -> failure(status, json)
+        }
+    }
+
+    private fun failure(status: Int, json: JsonObject?): ServerAnswer.Failed {
         val error = json?.child("error")
         val message = error?.text("message") ?: json?.text("error") ?: "HTTP $status"
         return ServerAnswer.Failed(status, error?.text("type"), message)
