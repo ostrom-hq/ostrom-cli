@@ -88,8 +88,8 @@ internal class InitCommand(private val dependencies: CliDependencies) : CliktCom
         }
         // GET /api/v1/repos (SRV-LECTURES), when served. A clone in a folder named otherwise is not found by its name:
         // a warning, never a refusal, so that init still sets the device up.
-        val repos = access.readIfServed("/api/v1/repos")?.list("items")?.filterIsInstance<JsonObject>()
-        val covered = repos?.any { it.text("name") == name || it.text("name")?.endsWith("/$name") == true }
+        // Beyond the first page (100), a repository not found is not known to be missing: no warning.
+        val covered = access.readIfServed("/api/v1/repos?limit=$REPOS_PAGE")?.let { coverage(it, name) }
         summary["covered"] = covered
         val workflows = access.readIfServed("/api/v1/workflows?repo=${segment(name)}")?.list("items")
             ?.filterIsInstance<JsonObject>()
@@ -175,5 +175,18 @@ internal class InitCommand(private val dependencies: CliDependencies) : CliktCom
     private companion object {
         /** The proposed rules init lists; the others are counted. */
         const val SHOWN = 5
+
+        /** The repositories init reads to find this one: the largest page the contract allows. */
+        const val REPOS_PAGE = 100
     }
+}
+
+/**
+ * True when the page of repositories lists [name] (by itself or as `owner/name`), false when it does not and is the
+ * last page, null when more pages follow: not found there, it is not known to be missing.
+ */
+private fun coverage(page: JsonObject, name: String): Boolean? {
+    val found = page.list("items").filterIsInstance<JsonObject>()
+        .any { it.text("name") == name || it.text("name")?.endsWith("/$name") == true }
+    return found.takeIf { it || page.text("next").isNullOrEmpty() }
 }

@@ -16,7 +16,8 @@ class InitCommandTest : SetupKit() {
 
     /** Signed in with a console token: the one that may accept rules (S2-04). */
     private val zshAdmin = zsh + ("OSTROM_TOKEN" to "otk_admin")
-    private val repos = "GET /api/v1/repos" to (200 to """{"items":[{"name":"acme/acme-api"},{"name":"web"}]}""")
+    private val repos =
+        "GET /api/v1/repos?limit=100" to (200 to """{"items":[{"name":"acme/acme-api"},{"name":"web"}]}""")
     private val harness = "GET /api/v1/workflows?repo=acme-api" to
         (200 to """{"items":[{"name":"git-safety","status":"proposed"},{"name":"tests","status":"accepted"}]}""")
     private val proposed = "GET /api/v1/rules?status=proposed"
@@ -104,13 +105,18 @@ class InitCommandTest : SetupKit() {
     @Test
     fun aRepositoryTheServerDoesNotListIsAWarningNotARefusal() {
         // a clone in a folder named otherwise is not found by its name: init still sets the device up
-        val other = mapOf("GET /api/v1/repos" to (200 to """{"items":[{"name":"acme/web"},{}]}"""))
+        val other = mapOf("GET /api/v1/repos?limit=100" to (200 to """{"items":[{"name":"acme/web"},{}]}"""))
         assertEquals(0, run(other, "init", "--yes", environment = zsh, capture = gitTop()))
         assertOut("  Repository  acme-api\n  Harness     not on this server yet\n")
         assertOut("! acme-api is not among Acme's repositories on the server: ask an admin to add it " +
             "(https://ostrom.example).\n")
         assertTrue(fileSystem.exists("/home/maya/.zshrc".toPath()), "the device is set up all the same")
-        val same = mapOf("GET /api/v1/repos" to (200 to """{"items":[{"name":"acme-api"}]}"""))
+        // on a first page with more after it, a repository not found is not known to be missing
+        console.out.clear()
+        val paged = mapOf("GET /api/v1/repos?limit=100" to (200 to """{"items":[{"name":"acme/web"}],"next":"p2"}"""))
+        assertEquals(0, run(paged, "init", "--json", environment = zsh, capture = gitTop()))
+        assertTrue("covered" !in console.out, console.out.toString())
+        val same = mapOf("GET /api/v1/repos?limit=100" to (200 to """{"items":[{"name":"acme-api"}]}"""))
         assertEquals(0, run(same, "init", environment = zsh, capture = gitTop()))
         assertOut("  Repository  acme-api · covered\n")
     }
