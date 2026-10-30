@@ -16,6 +16,8 @@ import dev.ostrom.cli.launcher.CredentialStore
 import dev.ostrom.cli.launcher.FileCredentialStore
 import dev.ostrom.cli.launcher.LaunchFilesImpl
 import dev.ostrom.cli.launcher.join
+import dev.ostrom.cli.mcp.BridgeTarget
+import dev.ostrom.cli.mcp.McpBridge
 import dev.ostrom.cli.mcp.McpDispatcher
 import dev.ostrom.cli.mcp.McpServer
 import dev.ostrom.cli.mcp.McpServerImpl
@@ -53,6 +55,7 @@ import kotlin.time.TimeSource
  * @property api Builds the client of the server at the given URL.
  * @property hookRunner Runs `ostrom hook <kind>`.
  * @property mcpServer Builds the local MCP server.
+ * @property mcpBridge Builds the stdio bridge to a session's local relay.
  * @property credentials The developer's credentials, kept in the CLI folder given.
  * @property workingDirectory The folder `ostrom` runs in, its links resolved.
  * @property executable This binary, or null when the system does not say.
@@ -78,6 +81,7 @@ class CliDependencies(
     val api: (String) -> OstromApi,
     val hookRunner: HookRunner,
     val mcpServer: () -> McpServer,
+    val mcpBridge: (BridgeTarget) -> McpServer,
     val credentials: (String) -> CredentialStore,
     val workingDirectory: () -> String,
     val executable: String?,
@@ -128,6 +132,7 @@ class CliDependencies(
                 api = api,
                 hookRunner = hookRunner(console, environment),
                 mcpServer = { McpServerImpl(McpDispatcher(BuildInfo.VERSION), console) },
+                mcpBridge = { McpBridge(it, LoopbackHttpImpl(), console) },
                 credentials = { directory ->
                     val path = join(directory, "credentials.json")
                     FileCredentialStore(launchFiles, path, secrets, { console.err("$it\n") }) { environment[it] }

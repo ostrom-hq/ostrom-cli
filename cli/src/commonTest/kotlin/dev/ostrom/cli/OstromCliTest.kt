@@ -15,6 +15,7 @@ import dev.ostrom.cli.launch.AgentRunner
 import dev.ostrom.cli.launcher.Agent
 import dev.ostrom.cli.launcher.Credentials
 import dev.ostrom.cli.launcher.LaunchRequest
+import dev.ostrom.cli.mcp.BridgeTarget
 import dev.ostrom.cli.mcp.McpServer
 import dev.ostrom.cli.platform.ExecutableFinder
 import dev.ostrom.cli.platform.FileStoreImpl
@@ -311,6 +312,7 @@ class OstromCliTest : CliKit() {
         val dependencies = CliDependencies.create()
         dependencies.api("https://ostrom.example").close()
         dependencies.mcpServer()
+        dependencies.mcpBridge(BridgeTarget(1, "t", "ostrom"))
         // Nothing listens on the discard port of the loopback: the sender is built on this first send and drops the
         // refused connection.
         runBlocking { dependencies.sendStatistics("http://127.0.0.1:9/batch/", "{}") }
@@ -605,6 +607,7 @@ class OstromCliTest : CliKit() {
             agents = AgentRunner { _, _ -> 0 },
             gateWait = { error("no gate wait in this test") },
             sleep = {},
+            mcpBridge = { object : McpServer { override fun serve() = 0 } },
             capture = FakeMysql(),
             readLine = { null },
             openUrl = { false },

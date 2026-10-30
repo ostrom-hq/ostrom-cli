@@ -2,6 +2,7 @@
 package dev.ostrom.cli.launcher
 
 import dev.ostrom.cli.launcher.adapters.AdapterException
+import dev.ostrom.cli.launcher.adapters.AgentLaunch
 import dev.ostrom.cli.launcher.adapters.AgentAdapter
 import dev.ostrom.cli.launcher.adapters.ClaudeAdapter
 import dev.ostrom.cli.launcher.adapters.CodexAdapter
@@ -81,7 +82,12 @@ class AgentLaunchUseCaseTest {
         serveALaunch()
         installed["git"] = "/usr/local/bin/git"
         assertEquals(3, start(), "the agent's exit code is the CLI's")
-        assertEquals(listOf("/usr/bin/claude", "--plugin-dir", join(temporary, "plugin")), commands.single())
+        val mcp = join(temporary, "mcp.json")
+        assertEquals(
+            listOf("/usr/bin/claude", "--plugin-dir", join(temporary, "plugin"), "--mcp-config", mcp),
+            commands.single(),
+            "Ostrom's own MCP server is relayed to every session",
+        )
         val environment = environments.single()
         assertEquals("http://127.0.0.1:4100", environment[LaunchVariables.RELAY_URL])
         // S2-25: the agent gets its own capability; the hooks' is in a private file, never in an environment
@@ -95,8 +101,8 @@ class AgentLaunchUseCaseTest {
         // S2-20: the instance's keys, read before the agent starts, are what the gate policy must be signed with
         assertEquals(KEYS, environment[LaunchVariables.INSTANCE_KEYS])
         assertNull(server.sent("GET ${Routes.INSTANCE_KEYS}").single().token, "a public route")
-        assertNull(environment[LaunchVariables.PACKAGE_SEAL], "no package, no seal")
-        assertNull(environment[LaunchVariables.PACKAGE_MANIFEST])
+        val noPackage = listOf(LaunchVariables.PACKAGE_SEAL, LaunchVariables.PACKAGE_MANIFEST, LaunchVariables.PACKAGE)
+        assertTrue(noPackage.all { environment[it] == null }, "no package, no seal")
         for (name in listOf(LaunchVariables.DEVICE_TOKEN, LaunchVariables.SERVER)) {
             assertTrue(environment.containsKey(name) && environment[name] == null, "$name is removed")
         }
@@ -108,10 +114,9 @@ class AgentLaunchUseCaseTest {
         assertEquals("alice", environment[LaunchVariables.DEV])
         assertEquals("L1", environment[LaunchVariables.LAUNCH_ID])
         assertEquals("", environment[LaunchVariables.HARNESS_VERSION])
-        assertNull(environment[LaunchVariables.PACKAGE])
         assertEquals("/usr/local/bin/git", environment[LaunchVariables.GIT], "S2-28: the hooks run the git found here")
         assertEquals(
-            RelaySettings("https://ostrom.example", "agent-token", "ostrom/test", "L1", emptySet(), false),
+            RelaySettings("https://ostrom.example", "agent-token", "ostrom/test", "L1", setOf("ostrom"), false),
             relaySettings.single(),
         )
         assertTrue(relayClosed)
@@ -352,6 +357,22 @@ class AgentLaunchUseCaseTest {
     }
 
     @Test
+    fun whatAnAdapterNotesIsSaidBeforeTheAgentStarts() = runTest {
+        serveALaunch()
+        adapters = listOf(
+            object : AgentAdapter {
+                override val agent = Agent.CLAUDE
+
+                override fun prepare(layout: dev.ostrom.cli.launcher.adapters.SessionLayout, files: LaunchFiles) =
+                    AgentLaunch(listOf("-x"), emptyMap(), listOf("your config has hooks too"))
+            },
+        )
+        assertEquals(3, start())
+        assertTrue("ostrom: your config has hooks too" in said, said.toString())
+        assertEquals(listOf("/usr/bin/claude", "-x"), commands.single())
+    }
+
+    @Test
     fun anAdapterThatCannotPrepareStopsTheLaunch() = runTest {
         serveALaunch()
         val broken = object : AgentAdapter {
@@ -430,7 +451,7 @@ class AgentLaunchUseCaseTest {
         assertTrue("ostrom: your organisation's MCP servers are not listed (connection refused)" in said)
         assertNull(filesWhileRunning[join(temporary, "plugin", "ostrom", "gates.json")])
         assertEquals("/usr/bin", environments.single()["PATH"], "a bare executable name adds no folder")
-        assertEquals(emptySet(), relaySettings.single().mcpServers)
+        assertEquals(setOf("ostrom"), relaySettings.single().mcpServers, "the built-in server only")
     }
 
     @Test

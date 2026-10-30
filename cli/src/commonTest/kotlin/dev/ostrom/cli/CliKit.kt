@@ -12,6 +12,7 @@ import dev.ostrom.cli.launcher.FileCredentialStore
 import dev.ostrom.cli.launcher.LaunchFilesImpl
 import dev.ostrom.cli.launcher.LaunchRequest
 import dev.ostrom.cli.launcher.LaunchSite
+import dev.ostrom.cli.mcp.BridgeTarget
 import dev.ostrom.cli.mcp.McpServer
 import dev.ostrom.cli.platform.Console
 import dev.ostrom.cli.platform.Environment
@@ -61,6 +62,7 @@ open class CliKit {
     protected val waits = mutableListOf<Long>()
     protected val typed = ArrayDeque<String>()
     protected val opened = mutableListOf<String>()
+    protected val bridged = mutableListOf<BridgeTarget>()
     protected var browser = true
     protected val requests = mutableListOf<Pair<String, ServerRequest>>()
 
@@ -115,6 +117,7 @@ open class CliKit {
                 override fun run(arguments: List<String>): Int = 0.also { hookCalls += arguments }
             },
             mcpServer = { object : McpServer { override fun serve() = 0 } },
+            mcpBridge = { target -> object : McpServer { override fun serve() = 5.also { bridged += target } } },
             credentials = { directory ->
                 val path = (directory.toPath() / "credentials.json").toString()
                 val files = LaunchFilesImpl(fileSystem) { _, _ -> }
