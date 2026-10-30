@@ -20,6 +20,7 @@ import dev.ostrom.cli.platform.ExecutableFinder
 import dev.ostrom.cli.platform.FileStoreImpl
 import dev.ostrom.cli.platform.OperatingSystem
 import dev.ostrom.cli.platform.StandardInput
+import kotlinx.coroutines.test.runTest
 import okio.Path.Companion.toPath
 import okio.fakefilesystem.FakeFileSystem
 import kotlin.test.Test
@@ -360,6 +361,12 @@ class OstromCliTest {
         assertTrue(dependencies.configFile("/x").endsWith("config.toml"))
         assertTrue(dependencies.workingDirectory().isNotEmpty())
         assertEquals(null, dependencies.credentials("/nowhere-ostrom").load("https://ostrom.example")?.login)
+    }
+
+    @Test
+    fun theRealWaitOfLoginIsTheCoroutinesDelay() = runTest {
+        // a delay: virtual time in a test, so this returns at once
+        CliDependencies.create().sleep(1_000)
     }
 
     @Test
