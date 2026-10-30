@@ -55,8 +55,9 @@ class CompletionTest : CliKit() {
             },
         )
         val script = powerShellCompletion(tree)
-        assertTrue(script.contains("        '' = @('it''s', '--help', '-h')\n"), script)
-        assertTrue(script.contains("        'it''s' = @('--help', '-h')\n"), script)
+        // outside a parse, Clikt has not added --help yet: only what the tree declares
+        assertTrue(script.contains("        '' = @('it''s')\n"), script)
+        assertTrue(script.contains("        'it''s' = @()\n"), script)
         assertFalse(script.contains("--secret"), script)
     }
 
