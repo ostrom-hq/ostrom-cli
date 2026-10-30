@@ -28,12 +28,6 @@ internal class LogsCommand : PendingCommand("logs", "The thread of a session: to
     val json by jsonOption()
 }
 
-internal class UpdateCommand : PendingCommand("update", "Update ostrom (signed release)") {
-    val check by option("--check", help = "Only say whether an update exists").flag()
-    val rollback by option("--rollback", help = "Go back to the previous version").flag()
-    val version by option("--version", help = "Install this version")
-}
-
 internal class CheckCommand : PendingCommand("check", "Run a workflow check (used by agents)", hidden = true) {
     val node by argument("node")
 }
@@ -59,7 +53,7 @@ fun pendingCommands(implemented: List<CliktCommand>): List<CliktCommand> {
         named("config"),
         named("doctor"),
         named("telemetry"),
-        UpdateCommand(),
+        named("update"),
         named("version"),
         named("invite"),
         named("members"),

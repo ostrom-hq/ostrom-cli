@@ -5,6 +5,7 @@ import com.github.ajalt.clikt.core.Abort
 import com.github.ajalt.clikt.core.PrintHelpMessage
 import com.github.ajalt.clikt.core.ProgramResult
 import com.github.ajalt.clikt.core.UsageError
+import dev.ostrom.cli.api.Download
 import dev.ostrom.cli.api.OstromApi
 import dev.ostrom.cli.api.ServerRequest
 import dev.ostrom.cli.api.ServerResponse
@@ -22,6 +23,9 @@ import dev.ostrom.cli.platform.FileStoreImpl
 import dev.ostrom.cli.platform.SecretBackend
 import dev.ostrom.cli.platform.SecretStore
 import dev.ostrom.cli.platform.SecretStoreException
+import dev.ostrom.cli.update.AgentSessions
+import dev.ostrom.cli.update.SelfUpdate
+import dev.ostrom.cli.update.UpdateRequest
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import okio.Path.Companion.toPath
@@ -31,6 +35,8 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class OstromCliTest : CliKit() {
+    private val noSessions = AgentSessions { null }
+
     @Test
     fun anAgentRunsWithTheServerAndTheCredentialsOfThisDevice() {
         signIn("/home/maya/.config/ostrom")
@@ -326,6 +332,8 @@ class OstromCliTest : CliKit() {
         val dependencies = CliDependencies.create()
         dependencies.api("https://ostrom.example").close()
         dependencies.mcpServer()
+        val nowhere = UpdateRequest("1.0.0", "linux-x64", "/nowhere-ostrom/ostrom", "https://releases.example")
+        assertEquals(66, runBlocking { dependencies.selfUpdate.rollback(nowhere) })
         dependencies.mcpBridge(BridgeTarget(1, "t", "ostrom"))
         // Nothing listens on the discard port of the loopback: the sender is built on this first send and drops the
         // refused connection.
@@ -625,6 +633,7 @@ class OstromCliTest : CliKit() {
             capture = FakeMysql(),
             readLine = { null },
             openUrl = { false },
+            selfUpdate = SelfUpdate({ _, _ -> Download.Missing(404) }, fileSystem, { _, _ -> false }, {}, noSessions),
             postHogKey = "",
             sendStatistics = { _, _ -> },
         )
