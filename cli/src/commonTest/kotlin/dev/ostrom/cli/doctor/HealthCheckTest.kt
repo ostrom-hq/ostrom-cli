@@ -59,5 +59,10 @@ class HealthCheckTest {
             "ostrom.example answers 503: the server is in trouble (database: down), try again later.",
             check(failed, "0.3.0").message,
         )
+        val odd = ServerResponse(503, """{"checks":{"database":{"state":"down"},"cache":"d\u001b[31mown"}}""", 5)
+        assertEquals(
+            "ostrom.example answers 503: the server is in trouble (database: ?, cache: ?), try again later.",
+            check(odd, "0.3.0").message,
+        )
     }
 }
