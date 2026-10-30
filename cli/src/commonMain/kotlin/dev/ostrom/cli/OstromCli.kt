@@ -40,7 +40,8 @@ class OstromCli(private val dependencies: CliDependencies) {
         val code = execute(root, args) { failure = it }
         val known = root.registeredSubcommands().map { it.commandName }.toSet()
         // A failed line is named from the parser's context; a line that ran, by the subcommand the root invoked.
-        val command = failure?.let(::failedCommand) ?: root.invoked
+        val failed = failure
+        val command = if (failed == null) root.invoked else failedCommand(failed)
         runBlocking {
             withTimeoutOrNull(STATISTICS_TIMEOUT) {
                 dependencies.usage.commandRun(command, known, code, started.elapsedNow())
