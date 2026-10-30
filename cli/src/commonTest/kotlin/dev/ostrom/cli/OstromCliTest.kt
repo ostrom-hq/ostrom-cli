@@ -134,6 +134,9 @@ class OstromCliTest {
         signIn("/home/maya/.config/ostrom")
         assertEquals(7, cli(environment = withServer).run(arrayOf("codex", "--dry-run", "--repo", "acme/api")))
         assertEquals(LaunchRequest(Agent.CODEX, emptyList(), "acme/api", null, dryRun = true), launches.single().first)
+        assertEquals(64, cli(environment = withServer).run(arrayOf("claude", "--cloud", "--dry-run")))
+        assertTrue(console.err.contains("it does not go with --cloud"), console.err.toString())
+        assertEquals(1, launches.size, "nothing launched")
     }
 
     @Test

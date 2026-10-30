@@ -182,17 +182,37 @@ class AgentLaunchUseCaseTest {
         server["GET ${Routes.KEYS}"] = 200 to objectOf(
             "keys" to listOf(mapOf("kid" to PackageVector.KID, "publicKeyPem" to PackageVector.PUBLIC_KEY_PEM)),
         ).toString()
+        server["GET ${Routes.MCP_SERVERS}"] = 200 to """{"items":[{"name":"linear"}]}"""
+        val before = files.texts.toMap()
         assertEquals(0, start(model = "opus", dryRun = true))
-        assertTrue(said.first().startsWith("ostrom: package "), said.toString())
-        assertEquals("ostrom: dry run for acme-api, model opus: Claude Code was not started", said.last())
+        assertTrue(said.any { it.startsWith("ostrom: package ") }, said.toString())
+        assertTrue(said[said.size - 2].startsWith("ostrom: MCP servers: linear"), said.toString())
+        val passed = "ostrom: dry run for acme-api, model opus: every check passed; Claude Code was not started"
+        assertEquals(passed, said.last())
         assertTrue(commands.isEmpty(), "the agent never starts")
         assertTrue(server.sent("POST ${Routes.LAUNCHES}").isEmpty(), "no launch is created")
         assertTrue(files.directories.isEmpty(), "no folder is made")
+        assertEquals(before, files.texts.toMap(), "no file is written: neither the envelope nor a key pinned")
+        assertEquals(1, server.sent("GET ${Routes.INSTANCE_KEYS}").size, "the instance's keys are read")
         said.clear()
+        server["GET ${Routes.MCP_SERVERS}"] = 200 to """{"items":[]}"""
         assertEquals(0, start(repo = "acme/web", dryRun = true))
-        assertEquals("ostrom: dry run for acme/web: Claude Code was not started", said.last())
+        assertEquals("ostrom: MCP servers: none", said[said.size - 2])
+        assertEquals("ostrom: dry run for acme/web: every check passed; Claude Code was not started", said.last())
+    }
+
+    @Test
+    fun aDryRunStopsWhereALaunchWouldStop() = runTest {
+        serveALaunch()
         server["GET ${Routes.POLICY}?agent=claude-code&dev=alice"] = 200 to """{"allowed":false,"reason":"x"}"""
         assertEquals(77, start(dryRun = true), "a refusal is the same as for a launch")
+        serveALaunch()
+        server["GET ${Routes.PACKAGE}?repo=acme-api"] = 500 to """{"error":{"type":"e","message":"down"}}"""
+        assertEquals(78, start(dryRun = true), "a package that cannot be verified")
+        server["GET ${Routes.PACKAGE}?repo=acme-api"] = 404 to "{}"
+        server.unreachable = setOf("GET ${Routes.INSTANCE_KEYS}")
+        assertEquals(69, start(dryRun = true), "the instance's keys cannot be read")
+        assertTrue(commands.isEmpty())
     }
 
     @Test
@@ -472,7 +492,8 @@ class AgentLaunchUseCaseTest {
             pathSeparator = ':',
             variable = { variables[it] },
         )
-        return AgentLaunchUseCase(dependencies, adapters).launch(LaunchRequest(agent, arguments, repo, model, dryRun), site)
+        val request = LaunchRequest(agent, arguments, repo, model, dryRun)
+        return AgentLaunchUseCase(dependencies, adapters).launch(request, site)
     }
 
     /** The routes of a launch that goes well, without a package. */

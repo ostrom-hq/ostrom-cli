@@ -32,7 +32,7 @@ class SignedPackageTest {
         server["GET /api/v1/receipts/keys"] = 200 to objectOf(
             "keys" to listOf(mapOf("kid" to PackageVector.KID, "publicKeyPem" to PackageVector.PUBLIC_KEY_PEM)),
         ).toString()
-        return trust.fetch("https://ostrom.example", "t", "r", "/config")
+        return trust.fetch("https://ostrom.example", "t", "r", "/config", keep = true)
     }
 
     @Test

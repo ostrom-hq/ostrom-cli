@@ -5,6 +5,7 @@ import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.Context
 import com.github.ajalt.clikt.core.PrintMessage
 import com.github.ajalt.clikt.core.ProgramResult
+import com.github.ajalt.clikt.core.UsageError
 import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.arguments.multiple
 import com.github.ajalt.clikt.parameters.options.flag
@@ -37,6 +38,7 @@ internal class AgentCommand(private val agent: Agent, private val dependencies: 
 
     override fun run() {
         val path = currentContext.commandNameWithParents()
+        if (cloud && dryRun) throw UsageError("--dry-run checks a launch on this machine: it does not go with --cloud")
         if (cloud) throw notImplemented(path + "--cloud")
         val environment = dependencies.environment
         val directory = environment.configDirectory ?: throw stop(ExitCode.CANNOT_WRITE, NO_HOME)

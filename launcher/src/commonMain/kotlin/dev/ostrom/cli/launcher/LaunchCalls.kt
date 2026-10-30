@@ -57,8 +57,8 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
     }
 
     /** The verified session package of [repo], null without one; a refused one stops the launch. */
-    suspend fun packageOf(repo: String, site: LaunchSite): SessionPackage? =
-        when (val outcome = trust.fetch(site.serverUrl, site.credentials.token, repo, site.configDirectory)) {
+    suspend fun packageOf(repo: String, site: LaunchSite, keep: Boolean): SessionPackage? =
+        when (val outcome = trust.fetch(site.serverUrl, site.credentials.token, repo, site.configDirectory, keep)) {
             is PackageOutcome.Verified -> outcome.pack.also { dependencies.say("ostrom: ${it.summary()}") }
             PackageOutcome.None -> null.also {
                 dependencies.say("ostrom: no session package for $repo; your organisation's gates apply")
