@@ -47,6 +47,16 @@ class ProcessCapturePosixTest {
     }
 
     @Test
+    fun whatAChildWritesJustBeforeItExitsIsNeverLost() {
+        // the child answers right at the end of a 50 ms poll slice, where its output and its exit can land between
+        // the empty poll and the wait: the pipe is drained once more after the exit is seen
+        repeat(40) {
+            val result = capture.capture(listOf("sh", "-c", "sleep 0.05; printf abc"), 5_000)
+            assertEquals(CaptureResult.Exited(0, "abc"), result, "run $it")
+        }
+    }
+
+    @Test
     fun aDetachedChildRunsOnItsOwn() {
         val marker = "/tmp/ostrom-detached-${capture.hashCode()}"
         assertTrue(capture.detach(listOf("sh", "-c", "echo done > $marker")))
