@@ -125,6 +125,16 @@ class AdaptersTest {
         assertFalse(files.write("/s/file/child", "y"), "a file is in the way")
         assertFalse(files.write("/", "z"), "the root has no folder to make and is no file")
         assertNull(files.read("/s"), "a folder is not a file")
+        assertNull(files.readStart("/s", 4))
+    }
+
+    @Test
+    fun aScriptIsReadUpToItsLimitOnly() {
+        val fileSystem = FakeFileSystem()
+        val files = FileSystemHookFiles(fileSystem) { 0 }
+        files.write("/s/big", "x".repeat(100))
+        assertEquals("xxxx", files.readStart("/s/big", 4))
+        assertEquals("x".repeat(100), files.readStart("/s/big", 1_000), "a shorter file whole")
     }
 
     @Test

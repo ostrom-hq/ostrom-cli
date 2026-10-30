@@ -6,8 +6,9 @@ package dev.ostrom.cli.hooks.gate
  * in the prototype's `launcher/src/push.rs` and `bridge/plugin/bin/push.mjs`).
  *
  * The cut happens at `&&`, `||`, `;`, `|`, `&` and new lines; quotes are honoured (a separator inside a quoted commit
- * message does not cut), a backslash escapes the next character, `2>&1` and `&>file` stay redirections, and a `#`
- * that starts a word comments out the rest of the line (the note the hook appends, `# ostrom: …`, is left out).
+ * message does not cut), a backslash escapes the next character (a backslash and a new line join the lines, as the
+ * shell does), `2>&1` and `&>file` stay redirections, and a `#` that starts a word comments out the rest of the line
+ * (the note the hook appends, `# ostrom: …`, is left out).
  */
 object ShellWords {
     /**
@@ -37,6 +38,8 @@ object ShellWords {
             val c = text[i]
             when {
                 c == q -> quote = null
+                // a line continuation is no character at all, in double quotes as outside
+                c == '\\' && q == '"' && text.getOrNull(i + 1) == '\n' -> i++
                 c == '\\' && q == '"' && i + 1 < text.length -> token.append(text[++i])
                 else -> token.append(c)
             }
@@ -48,6 +51,7 @@ object ShellWords {
                     quote = c
                     hasToken = true
                 }
+                c == '\\' && text.getOrNull(i + 1) == '\n' -> i++
                 c == '\\' && i + 1 < text.length -> append(text[++i])
                 c == '#' && !hasToken -> skipComment()
                 c == ' ' || c == '\t' -> flush()

@@ -96,6 +96,15 @@ class FileSystemHookFiles(
         null
     }
 
+    override fun readStart(path: String, maxBytes: Int): String? = try {
+        fileSystem.read(path.toPath()) {
+            request(maxBytes.toLong())
+            readUtf8(minOf(buffer.size, maxBytes.toLong()))
+        }
+    } catch (_: IOException) {
+        null
+    }
+
     override fun write(path: String, text: String): Boolean = try {
         val file = path.toPath()
         val temporary = "$path.${now()}.tmp".toPath()

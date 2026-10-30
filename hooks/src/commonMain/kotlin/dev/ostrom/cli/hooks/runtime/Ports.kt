@@ -43,6 +43,9 @@ interface HookFiles {
     /** The text of the file, or null when it does not exist or cannot be read. */
     fun read(path: String): String?
 
+    /** At most the first [maxBytes] bytes of the file as text, or null: a script read never loads a whole binary. */
+    fun readStart(path: String, maxBytes: Int): String?
+
     /** Replaces the file whole (a reader sees the old or the new text, never half); false when it cannot be written. */
     fun write(path: String, text: String): Boolean
 }

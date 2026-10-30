@@ -21,7 +21,7 @@ import kotlinx.serialization.json.jsonPrimitive
 /**
  * A gated action the before-tool hook asks a yes for.
  *
- * @property written The command as the agent wrote it.
+ * @property written The command as the agent wrote it, with the scripts it runs: never the note the hook appends.
  * @property subject The command with where its pushes land appended, which the gate patterns read.
  * @property gate The action's gate.
  * @property failMode The organisation's fail mode (`open` lets the action through when Ostrom is unreachable).
@@ -47,18 +47,23 @@ class GateRequests(
     private val pushes: PushReader,
     private val git: GitRunner,
 ) {
-    /** Refuses a push Ostrom cannot read or that redirects git, else asks the gate. */
+    /**
+     * Refuses a push Ostrom cannot read or that redirects git while the gate is enforced, else asks the gate. A gate
+     * only proposed (shadow) never stops the agent: it is asked, and what Ostrom logs is all it does.
+     */
     fun ask(ask: GateAsk): HookReply {
         val subject = ask.subject
         val directory = location.directory(ask.cwd, subject.text)
         val redirected = redirection(subject)
         val read = if (redirected == null && subject.kind == ToolKind.BASH) {
-            readPush(directory, subject.text)
+            // what the agent wrote, never cut at a note it may have written itself: the shell runs all of it
+            readPush(directory, ask.written)
         } else {
             PushRead(null, null)
         }
         return when {
-            redirected != null -> replies.deny(GateTexts.redirected(ask.action.name, ask.gate, redirected))
+            redirected != null && ask.gate.enforce ->
+                replies.deny(GateTexts.redirected(ask.action.name, ask.gate, redirected))
             read.problem != null && ask.gate.enforce ->
                 replies.deny(GateTexts.unreadable(ask.action.name, ask.gate, read.problem))
             else -> request(ask, directory, read.push)
@@ -95,6 +100,7 @@ class GateRequests(
     }
 
     private fun failure(answer: CallResult.Failed, ask: GateAsk): HookReply = when {
+        !ask.gate.enforce -> replies.allow()
         answer.sessionClosed -> replies.deny(GateTexts.closed(ask.action.name, answer.message))
         ask.failMode == "open" -> replies.say(GateTexts.letThrough(ask.action.name, answer.message))
         else -> replies.deny(GateTexts.unreachable(ask.action.name, ask.gate, answer.message))
@@ -117,7 +123,7 @@ class GateRequests(
     private class PushRead(val push: Push?, val problem: String?)
 
     private fun readPush(directory: String, text: String): PushRead = try {
-        PushRead(pushes.read(directory, text.substringBefore(NOTE)), null)
+        PushRead(pushes.read(directory, text), null)
     } catch (e: UnreadablePushException) {
         PushRead(null, e.reason)
     }
