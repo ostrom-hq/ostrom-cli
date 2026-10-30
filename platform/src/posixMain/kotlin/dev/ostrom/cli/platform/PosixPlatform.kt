@@ -17,6 +17,7 @@ import kotlinx.cinterop.usePinned
 import kotlinx.cinterop.value
 import platform.posix.chmod
 import platform.posix.getenv
+import platform.posix.getuid
 import platform.posix.setenv
 import platform.posix.unsetenv
 import dev.ostrom.cli.platform.interop.ostrom_capture
@@ -44,10 +45,12 @@ internal actual fun writeBytes(descriptor: Int, bytes: ByteArray) {
 
 internal actual fun isTerminal(descriptor: Int): Boolean = ostrom_is_terminal(descriptor) == 1
 
-internal actual fun readStdin(buffer: ByteArray, timeoutMillis: Int): Int =
-    buffer.usePinned { ostrom_read_stdin(it.addressOf(0).reinterpret(), buffer.size, timeoutMillis) }
+internal actual fun readStdin(buffer: ByteArray, offset: Int, timeoutMillis: Int): Int =
+    buffer.usePinned { ostrom_read_stdin(it.addressOf(0).reinterpret(), buffer.size, offset, timeoutMillis) }
 
 internal actual fun environmentVariable(name: String): String? = getenv(name)?.toKString()
+
+internal actual fun currentUserId(): String = getuid().toString()
 
 internal actual fun restrictToOwner(path: String) {
     chmod(path, OWNER_READ_WRITE.convert())
