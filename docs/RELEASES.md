@@ -73,6 +73,7 @@ newest non-draft, non-pre-release one):
 ```json
 {
   "version": "1.0.0",
+  "floor": "1.0.0",
   "date": "2026-10-30T10:00:00Z",
   "assets": {
     "linux-x64":   { "url": "https://github.com/ostrom-hq/ostrom-cli/releases/download/1.0.0/ostrom-1.0.0-linux-x64.tar.gz",   "sha256": "<hex>", "size": 1234567 },
@@ -85,12 +86,20 @@ newest non-draft, non-pre-release one):
 
 `sha256` is lowercase hex, `size` is in bytes. The archive holds `ostrom` (`ostrom.exe` on Windows) at its root.
 
+`floor` is the lowest version `ostrom update --version` and `ostrom update --rollback` may install (security audit
+S2-39): signed with the manifest, so a downgrade to a version with a known hole cannot be slipped in. It comes from
+`release-floor.txt` at the root of the repository (or `RELEASE_FLOOR`), `MAJOR.MINOR.PATCH`, never above the version
+released (`latest-json.sh` refuses it). **Raise it in the release that fixes a security hole**, to that release's
+version. The CLI reads the floor of the latest release, never the old release's own manifest, and refuses any move
+back when the latest release publishes none.
+
 `latest.json.sig` is the **base64 (one line) of the raw 64-byte Ed25519 signature of the exact bytes of `latest.json`**
 (no hashing first, no canonicalisation: verify the bytes as downloaded). `ostrom update` must:
 
 1. download `latest.json` and `latest.json.sig`;
 2. verify the signature with the public key below, and refuse to go on if it fails;
-3. compare `version` with its own (never move to an older or equal version unless asked);
+3. compare `version` with its own (never move to an older or equal version unless asked, and never below the latest
+   release's `floor`);
 4. download `assets[<its target>].url`, check `size` and `sha256`, unpack, replace the binary atomically.
 
 **Ed25519 public key to embed in the CLI** (SPKI DER, base64; the private half is the organisation secret

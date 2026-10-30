@@ -28,6 +28,9 @@ class UpdateCommandTest : CliKit() {
     fun updateRollbackNeedsAKeptBinary() {
         assertEquals(66, cli().run(arrayOf("update", "--rollback")))
         assertOut("No previous version of ostrom is kept on this device.\n")
+        for (other in listOf("--check", "--version=1.0.0")) {
+            assertEquals(64, cli().run(arrayOf("update", "--rollback", other)), other)
+        }
     }
 
     @Test
@@ -36,7 +39,7 @@ class UpdateCommandTest : CliKit() {
         val session = mapOf("HOME" to "/home/maya", "OSTROM_LAUNCH_ID" to "L1")
         assertEquals(77, cli(environment = session).run(arrayOf("update", "--version", "0.1.0")))
         assertEquals(77, cli(environment = session).run(arrayOf("update", "--rollback")))
-        assertOut("✗ ostrom does not update itself inside an agent's session (OSTROM_LAUNCH_ID is set).")
+        assertOut("✗ ostrom does not update itself while an agent's session runs (OSTROM_LAUNCH_ID is set)")
         assertEquals(emptyList(), releaseUrls, "nothing was fetched")
     }
 

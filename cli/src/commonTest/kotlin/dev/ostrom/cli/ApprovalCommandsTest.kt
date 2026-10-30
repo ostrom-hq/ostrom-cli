@@ -41,6 +41,27 @@ class ApprovalCommandsTest : CliKit() {
     }
 
     @Test
+    fun theInboxReadsEveryPageAndNeverPrintsAMissingField() {
+        signIn("/home/maya/.config/ostrom")
+        val inbox = "GET /api/v1/approvals?mine=true&status=pending"
+        val pages = mapOf(
+            inbox to (200 to """{"items":[{"title":"No id"}],"next":"c/1"}"""),
+            "$inbox&before=c%2F1" to (200 to """{"items":[],"next":"c2"}"""),
+            "$inbox&before=c2" to (200 to """{"items":[{"id":"g9","title":"Last"}],"next":""}"""),
+        )
+        assertEquals(0, serving(pages).run(arrayOf("inbox")))
+        assertOut("2 requests wait for your yes\n  No id\n  g9  Last\n")
+        assertTrue("Next:" !in console.out, "the first request has no id to name")
+        assertEquals(3, requests.size)
+        // a server that always has a next page is read 20 pages deep, never forever
+        requests.clear()
+        val again = 200 to """{"items":[],"next":"x"}"""
+        val endless = mapOf(inbox to again, "$inbox&before=x" to again)
+        assertEquals(0, serving(endless).run(arrayOf("inbox")))
+        assertEquals(20, requests.size)
+    }
+
+    @Test
     fun aServerThatCannotAnswerGivesTheSpecsCodes() {
         signIn("/home/maya/.config/ostrom")
         val inbox = "GET /api/v1/approvals?mine=true&status=pending"
@@ -95,6 +116,20 @@ class ApprovalCommandsTest : CliKit() {
         assertEquals(77, cli(environment = session).run(arrayOf("approve", "g1")))
         assertTrue(console.err.endsWith("ostrom approve: an agent session cannot answer. Use your own terminal.\n"))
         assertTrue(requests.isEmpty() && opened.isEmpty())
+        // an empty variable is no session
+        val empty = withServer + ("OSTROM_LAUNCH_ID" to "")
+        val get = mapOf("GET /api/v1/approvals/g1" to (200 to pending))
+        assertEquals(0, cli(environment = empty, api = serverOf(get)).run(arrayOf("approve", "g1")))
+    }
+
+    @Test
+    fun aRequestWithoutItsDetailsPrintsWhatItHas() {
+        signIn("/home/maya/.config/ostrom")
+        val sparse = """{"id":"g1","status":"pending","commitDetails":[{},{"title":"only a title"}],""" +
+            """"checks":[{}]}"""
+        assertEquals(0, serving(mapOf("GET /api/v1/approvals/g1" to (200 to sparse))).run(arrayOf("approve", "g1")))
+        assertOut("    only a title\n    check: unknown\n")
+        assertTrue("null" !in console.out, console.out.toString())
     }
 
     @Test
@@ -107,6 +142,13 @@ class ApprovalCommandsTest : CliKit() {
         val configured = official + ("OSTROM_CONSOLE_URL" to "https://console.acme.example/")
         assertEquals(0, cli(environment = configured, api = serverOf(get)).run(arrayOf("approve", "g/1")))
         assertEquals("https://console.acme.example/yes/g%2F1", opened.last())
+        // only a web page goes to the system's opener
+        val file = official + ("OSTROM_CONSOLE_URL" to "file:///Applications/Calculator.app")
+        assertEquals(0, cli(environment = file, api = serverOf(get)).run(arrayOf("approve", "g/1")))
+        assertEquals("https://app.ostrom.run/yes/g%2F1", opened.last())
+        val plain = official + ("OSTROM_CONSOLE_URL" to "http://localhost:3000")
+        assertEquals(0, cli(environment = plain, api = serverOf(get)).run(arrayOf("approve", "g/1")))
+        assertEquals("http://localhost:3000/yes/g%2F1", opened.last())
     }
 
     @Test
@@ -118,7 +160,10 @@ class ApprovalCommandsTest : CliKit() {
         assertTrue(console.err.endsWith("Already approved by @omar.\n"))
         val anonymous = mapOf(get to (200 to """{"id":"g1","status":"rejected"}"""))
         assertEquals(64, serving(anonymous).run(arrayOf("deny", "g1")))
-        assertTrue(console.err.endsWith("Already rejected by @?.\n"))
+        assertTrue(console.err.endsWith("Already rejected.\n"))
+        val unknown = mapOf(get to (200 to """{"id":"g1"}"""))
+        assertEquals(64, serving(unknown).run(arrayOf("deny", "g1")))
+        assertTrue(console.err.endsWith("This request no longer waits for an answer.\n"))
         val expired = mapOf(get to (200 to """{"id":"g1","status":"expired"}"""))
         assertEquals(64, serving(expired).run(arrayOf("deny", "g1")))
         assertTrue(console.err.endsWith("This request expired.\n"))

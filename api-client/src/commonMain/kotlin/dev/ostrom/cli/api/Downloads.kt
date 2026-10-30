@@ -3,12 +3,16 @@ package dev.ostrom.cli.api
 
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.timeout
-import io.ktor.client.request.get
 import io.ktor.client.request.header
-import io.ktor.client.statement.readRawBytes
+import io.ktor.client.request.prepareGet
+import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.HttpHeaders
+import io.ktor.http.contentLength
 import io.ktor.http.isSuccess
+import io.ktor.utils.io.readRemaining
 import kotlinx.io.IOException
+import kotlinx.io.readByteArray
 import kotlin.coroutines.cancellation.CancellationException
 
 /** A file fetched whole by [Downloads.fetch], or why it was not. */
@@ -45,13 +49,11 @@ class DownloadsImpl(
 ) : Downloads {
     override suspend fun fetch(url: String, maxBytes: Long): Download {
         try {
-            val response = client.get(url) {
+            val request = client.prepareGet(url) {
                 header(HttpHeaders.UserAgent, userAgent)
                 timeout { requestTimeoutMillis = DOWNLOAD_TIMEOUT_MILLIS }
             }
-            if (!response.status.isSuccess()) return Download.Missing(response.status.value)
-            val bytes = response.readRawBytes()
-            return if (bytes.size > maxBytes) Download.TooLarge(maxBytes) else Download.Bytes(bytes)
+            return request.execute { read(it, maxBytes) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: IOException) {
@@ -59,6 +61,15 @@ class DownloadsImpl(
         } catch (e: IllegalStateException) {
             // The Curl and WinHttp engines report a failed connection or TLS handshake as IllegalStateException.
             throw ServerUnreachableException(url, e)
+        }
+    }
+
+    /** At most [maxBytes] + 1 bytes are ever held: a larger or endless body is cut, never read whole. */
+    private suspend fun read(response: HttpResponse, maxBytes: Long): Download = when {
+        !response.status.isSuccess() -> Download.Missing(response.status.value)
+        (response.contentLength() ?: 0) > maxBytes -> Download.TooLarge(maxBytes)
+        else -> response.bodyAsChannel().readRemaining(maxBytes + 1).readByteArray().let {
+            if (it.size > maxBytes) Download.TooLarge(maxBytes) else Download.Bytes(it)
         }
     }
 
