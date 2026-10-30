@@ -51,14 +51,19 @@ object ShellWords {
                     quote = c
                     hasToken = true
                 }
-                c == '\\' && text.getOrNull(i + 1) == '\n' -> i++
-                c == '\\' && i + 1 < text.length -> append(text[++i])
+                c == '\\' && i + 1 < text.length -> escape()
                 c == '#' && !hasToken -> skipComment()
                 c == ' ' || c == '\t' -> flush()
                 c == '&' && (token.endsWith('>') || text.getOrNull(i + 1) == '>') -> append(c)
                 c in SEPARATORS -> separate()
                 else -> append(c)
             }
+        }
+
+        /** A backslash: the next character as it is, or nothing when it ends the line (a continuation). */
+        private fun escape() {
+            val next = text[++i]
+            if (next != '\n') append(next)
         }
 
         private fun append(c: Char) {

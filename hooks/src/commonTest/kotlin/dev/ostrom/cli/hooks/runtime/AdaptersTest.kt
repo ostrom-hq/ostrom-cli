@@ -77,7 +77,9 @@ class AdaptersTest {
         assertEquals(CallResult.Failed("HTTP 404"), call(404, """{"error":{"message":3}}"""))
         val down = Http(Result.failure(LoopbackException(LoopbackFailure.TIMED_OUT)))
         val late = RelayCalls("http://127.0.0.1:1", null, down).call("/", null, 1)
-        assertEquals(CallResult.Failed("the local relay did not answer in time"), late)
+        assertEquals(CallResult.Failed("the local relay did not answer in time", CallResult.UNREACHABLE), late)
+        assertTrue((late as CallResult.Failed).unreachable, "a relay that does not answer is an outage")
+        assertFalse(CallResult.Failed("HTTP 403").unreachable, "a refusal is not")
     }
 
     @Test

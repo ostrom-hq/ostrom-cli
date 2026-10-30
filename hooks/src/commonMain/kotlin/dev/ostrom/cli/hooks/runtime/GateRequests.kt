@@ -102,7 +102,9 @@ class GateRequests(
     private fun failure(answer: CallResult.Failed, ask: GateAsk): HookReply = when {
         !ask.gate.enforce -> replies.allow()
         answer.sessionClosed -> replies.deny(GateTexts.closed(ask.action.name, answer.message))
-        ask.failMode == "open" -> replies.say(GateTexts.letThrough(ask.action.name, answer.message))
+        // `open` is for an outage only: a 401, a 403 or an error of Ostrom never lets a gated action through
+        ask.failMode == "open" && answer.unreachable ->
+            replies.say(GateTexts.letThrough(ask.action.name, answer.message))
         else -> replies.deny(GateTexts.unreachable(ask.action.name, ask.gate, answer.message))
     }
 

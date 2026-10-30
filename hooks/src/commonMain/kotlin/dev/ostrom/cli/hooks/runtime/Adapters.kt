@@ -14,6 +14,7 @@ import kotlinx.serialization.json.JsonObject
 import okio.FileSystem
 import okio.IOException
 import okio.Path.Companion.toPath
+import kotlin.random.Random
 
 /**
  * [OstromCalls] through the launcher's local relay (`OSTROM_RELAY_URL`, `http://127.0.0.1:<port>`), with the
@@ -34,7 +35,7 @@ class RelayCalls(
         } else {
             http.exchange(port, request, timeoutMillis).fold(
                 onSuccess = ::resultOf,
-                onFailure = { CallResult.Failed((it as LoopbackException).failure.message) },
+                onFailure = { CallResult.Failed((it as LoopbackException).failure.message, CallResult.UNREACHABLE) },
             )
         }
     }
@@ -107,7 +108,8 @@ class FileSystemHookFiles(
 
     override fun write(path: String, text: String): Boolean = try {
         val file = path.toPath()
-        val temporary = "$path.${now()}.tmp".toPath()
+        // hooks of parallel tool calls write the same file in the same millisecond: each has its own temporary file
+        val temporary = "$path.${now()}-${Random.nextInt().toUInt().toString(HEX)}.tmp".toPath()
         file.parent?.let { fileSystem.createDirectories(it) }
         fileSystem.write(temporary) { writeUtf8(text) }
         fileSystem.atomicMove(temporary, file)
@@ -121,5 +123,10 @@ class FileSystemHookFiles(
         fileSystem.canonicalize(path.toPath()).toString()
     } catch (_: IOException) {
         path
+    }
+
+    /** How temporary file names are written. */
+    companion object {
+        private const val HEX = 16
     }
 }

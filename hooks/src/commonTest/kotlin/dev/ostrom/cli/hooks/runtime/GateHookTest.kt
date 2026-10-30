@@ -175,9 +175,12 @@ class GateHookTest {
         assertEquals(2, closed.exitCode)
         assertContains(closed.stderr, "needs a yes from omar (Main), and Ostrom is unreachable (HTTP 404)")
         val open = catalogue.replace("\"closed\"", "\"open\"")
+        assertEquals(2, hook(catalogueText = open).handle(bash("git push origin main")).exitCode, "a 404 is no outage")
+        val outage = CallResult.Failed("Ostrom is unreachable (no connection)", CallResult.UNREACHABLE)
+        calls = FakeCalls().on("/api/v1/gates", outage)
         val reply = hook(catalogueText = open).handle(bash("git push origin main"))
         assertEquals(0, reply.exitCode)
-        assertContains(reply.stdout, "Ostrom unreachable (HTTP 404): \\\"Push to main\\\" let through")
+        assertContains(reply.stdout, "Ostrom unreachable (Ostrom is unreachable (no connection)): \\\"Push to main\\\"")
         val noLabel = hook(catalogueText = catalogue).handle(event("mcp__github__merge_pr", """{"pr":1}"""))
         assertContains(noLabel.stderr, "\"merge\" needs a yes from the gate owner (gate)")
     }

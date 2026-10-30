@@ -18,6 +18,18 @@ sealed interface CallResult {
     data class Failed(val message: String, val type: String? = null) : CallResult {
         /** Ostrom refused the write because its session is closed (the machine slept past Ostrom's wait). */
         val sessionClosed: Boolean get() = type == "session_closed" || message.startsWith("session closed:")
+
+        /**
+         * Ostrom could not be reached at all (the relay's `unreachable` error, or the relay itself down): the only
+         * failure an organisation's `open` fail mode lets an action through. A refusal or an error of Ostrom is not.
+         */
+        val unreachable: Boolean get() = type == UNREACHABLE
+    }
+
+    /** The error type of a call that never reached Ostrom. */
+    companion object {
+        /** The relay's `{"error":{"type":"unreachable"}}`, also given to a relay that does not answer. */
+        const val UNREACHABLE = "unreachable"
     }
 }
 
