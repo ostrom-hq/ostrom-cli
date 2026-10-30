@@ -83,6 +83,8 @@ class PushReaderTest {
         assertContains(refusal(r, "bash -c 'git push origin main'"), "plain")
         // a shell reading its input
         assertContains(refusal(r, "echo 'git push origin main' | /bin/sh"), "plain")
+        // a segment of variables only has no program: the others are still read
+        assertContains(refusal(r, "A=1; echo 'git push origin main' | sh"), "plain")
         assertContains(refusal(r, "git push origin 'refs/heads/*:refs/heads/*'"), "every matching branch")
         assertNull(r.read("/r", "git commit -m 'document the git push flow'"), "a message is only text")
         assertNull(r.read("/r", "grep -rn 'git push' docs/"))
