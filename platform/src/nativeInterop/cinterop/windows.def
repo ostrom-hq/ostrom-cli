@@ -214,6 +214,18 @@ static inline int ostrom_wait_socket(SOCKET s, short events, ULONGLONG start, in
     return 1;
 }
 
+/*
+ * SIO_TCP_INITIAL_RTO and its parameters (mstcpip.h, Windows 8 and later), written out: the MinGW headers of the
+ * Kotlin/Native toolchain do not have them, and without them a closed port answers only after two seconds.
+ */
+#define OSTROM_SIO_TCP_INITIAL_RTO _WSAIOW(IOC_VENDOR, 17)
+#define OSTROM_RTO_UNSPECIFIED_RTT ((USHORT)-1)
+#define OSTROM_RTO_NO_SYN_RETRANSMISSIONS ((UCHAR)-2)
+struct ostrom_initial_rto {
+    USHORT rtt;
+    UCHAR max_syn_retransmissions;
+};
+
 /* Same contract as the POSIX ostrom_tcp_exchange: count, -1 connection failed, -2 deadline, -3 too large. */
 static inline int ostrom_tcp_exchange(int port, const unsigned char *request, int length, unsigned char *response,
                                       int capacity, int timeout_ms) {
@@ -233,12 +245,10 @@ static inline int ostrom_tcp_exchange(int port, const unsigned char *request, in
     address.sin_family = AF_INET;
     address.sin_port = htons((unsigned short)port);
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-#if defined(SIO_TCP_INITIAL_RTO) && defined(TCP_INITIAL_RTO_NO_SYN_RETRANSMISSIONS)
     /* Windows retries a refused SYN for about two seconds, even on the loopback: a closed port must fail at once */
-    TCP_INITIAL_RTO_PARAMETERS rto = {TCP_INITIAL_RTO_UNSPECIFIED_RTT, TCP_INITIAL_RTO_NO_SYN_RETRANSMISSIONS};
+    struct ostrom_initial_rto rto = {OSTROM_RTO_UNSPECIFIED_RTT, OSTROM_RTO_NO_SYN_RETRANSMISSIONS};
     DWORD returned = 0;
-    WSAIoctl(s, SIO_TCP_INITIAL_RTO, &rto, sizeof rto, NULL, 0, &returned, NULL, NULL);
-#endif
+    WSAIoctl(s, OSTROM_SIO_TCP_INITIAL_RTO, &rto, sizeof rto, NULL, 0, &returned, NULL, NULL);
     if (connect(s, (struct sockaddr *)&address, sizeof address) != 0) {
         if (WSAGetLastError() != WSAEWOULDBLOCK) { closesocket(s); return -1; }
         /* select, not WSAPoll: older WSAPoll never reports a connect that failed */
