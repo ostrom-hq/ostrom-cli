@@ -27,9 +27,10 @@ class CloudCommandsTest : CliKit() {
 
     @Test
     fun attachGivesThisTerminalToACloudSession() {
-        assertEquals(65, cli(environment = withServer).run(arrayOf("attach", "cs1")), "not signed in")
+        val none = serverOf(emptyMap())
+        assertEquals(65, cli(environment = withServer, api = none).run(arrayOf("attach", "cs1")), "not signed in")
         signIn("/home/maya/.config/ostrom")
-        assertEquals(6, cli(environment = withServer).run(arrayOf("attach", "cs1")))
+        assertEquals(6, cli(environment = withServer, api = none).run(arrayOf("attach", "cs1")))
         assertEquals(listOf("cs1" to CloudSite("https://ostrom.example", "ost_1", "/work/acme")), attached)
         assertEquals(64, cli(environment = withServer).run(arrayOf("attach")), "the session is required")
     }

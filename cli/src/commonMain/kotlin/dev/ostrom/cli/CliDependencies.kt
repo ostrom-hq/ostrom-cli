@@ -157,15 +157,7 @@ class CliDependencies(
                     blocking = Dispatchers.IO,
                     userAgent = USER_AGENT,
                 ),
-                gateWait = {
-                    val relay = RelayCalls(
-                        environment["OSTROM_RELAY_URL"],
-                        GateWait.tokenOf { environment[it] },
-                        LoopbackHttpImpl(),
-                    )
-                    val started = TimeSource.Monotonic.markNow()
-                    GateWait(relay, { started.elapsedNow().inWholeMilliseconds }, ::pause, console::err)
-                },
+                gateWait = { gateWait(environment, console) },
                 sleep = { delay(it) },
                 capture = ProcessCaptureImpl(),
                 readLine = ::readlnOrNull,
@@ -184,6 +176,14 @@ class CliDependencies(
         }
 
         private val USER_AGENT = "ostrom/${BuildInfo.VERSION}"
+
+        /** `ostrom wait`: asks through the relay of the session this process runs in. */
+        private fun gateWait(environment: Environment, console: Console): GateWait {
+            val token = GateWait.tokenOf { environment[it] }
+            val relay = RelayCalls(environment["OSTROM_RELAY_URL"], token, LoopbackHttpImpl())
+            val started = TimeSource.Monotonic.markNow()
+            return GateWait(relay, { started.elapsedNow().inWholeMilliseconds }, ::pause, console::err)
+        }
 
         /** The hook runner alone, for the fast path of `main` (nothing else is built). */
         fun hookRunner(console: Console, environment: Environment): HookRunner {
