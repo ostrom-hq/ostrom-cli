@@ -116,7 +116,10 @@ command is built. An option of a built command that this version does not have y
 (`USAGE`); none is in that state since `--cloud` was built. `ostrom <agent> --cloud` and `ostrom attach` end with the
 session: 0 when it ends or the developer detaches, 64 for agent arguments (before any sign-in is read) or a `--repo`
 not on GitHub, 65 to sign in again, 66 for no such session, 69 when Ostrom or the connection is lost (the session
-keeps running: `ostrom attach <id>`), 77 for a session of someone else.
+keeps running: `ostrom attach <id>`), 77 for a session of someone else. `ostrom logs` exits 0 once the thread is printed
+(`-f`: once the session ends), 64 for `--json` with `-f`, 65 to sign in again, 66 for no such session, 69 when Ostrom
+cannot be reached, does not serve the sessions' reads (`GET /api/v1/sessions` not found: an older server) or answers
+without the session, 77 for a session the caller may not read (a gate it may not read is shown by its id).
 
 ## What every command does the same way
 
@@ -136,8 +139,9 @@ keeps running: `ostrom attach <id>`), 77 for a session of someone else.
 
 ## Add a command
 
-1. Find its declaration in `cli/.../commands/PendingCommands.kt` (every command of the spec is declared there with
-   its options and arguments, as `PendingCommand` or `GroupCommand`).
+1. Find its declaration: a command of the spec not built yet extends `PendingCommand`, with its options and
+   arguments (`cli/.../commands/CheckCommand.kt` is the last one); `pendingCommands()` in `PendingCommands.kt` places
+   it in the help.
 2. Move it to its own file in `cli/.../commands/`, extend `CliktCommand` instead of `PendingCommand`, take
    `CliDependencies` in the constructor, and write `run()`. Put the logic in a use case (`XxxUseCase` /
    `XxxUseCaseImpl`) in the module it belongs to, or in a `cli/.../<topic>/` package when it only assembles others

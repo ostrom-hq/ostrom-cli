@@ -150,8 +150,8 @@ class OstromCliTest : CliKit() {
 
     @Test
     fun aDeclaredCommandNotBuiltYetExitsWith70() {
-        assertEquals(70, cli().run(arrayOf("logs", "--json")))
-        assertEquals("ostrom logs: not implemented yet.\n", console.err.toString())
+        assertEquals(70, cli().run(arrayOf("check", "n1")))
+        assertEquals("ostrom check: not implemented yet.\n", console.err.toString())
         assertEquals(64, cli().run(arrayOf("approve")))
     }
 
