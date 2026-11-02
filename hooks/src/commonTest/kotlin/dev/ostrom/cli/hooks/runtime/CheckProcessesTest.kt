@@ -24,8 +24,10 @@ class CheckProcessesTest {
     private val variables = mapOf("PATH" to "/usr/bin:/bin", "HOME" to "/home/lena", "OSTROM_TOKEN" to "secret")
     private val request = ScriptRequest("s1", "/t/sbx/s1.sh", "/w", "/t/sbx", "/t", network = false, 30_000)
 
+    private val lena = CredentialFolders("/home/lena", null)
+
     private fun runner(capture: Capture, sandboxExec: Boolean, budget: HookBudget = HookBudget.NONE) =
-        SandboxedScripts(capture, variables::get, sandboxExec, "/home/lena", { "/real$it" }, budget, null)
+        SandboxedScripts(capture, variables::get, sandboxExec, lena, { "/real$it" }, budget)
 
     /** What every git command of a check is given before its own arguments. */
     private val safe = listOf(
@@ -77,9 +79,7 @@ class CheckProcessesTest {
         assertEquals(allowed, open.run(networked).sandbox)
         assertTrue(open.profile(networked).startsWith("(version 1)\n(allow default)\n(deny file-write*)\n"))
         assertTrue("(subpath \"/real/w\\\"x\")" in open.profile(networked), "a quote never ends a path of the profile")
-        val linked = SandboxedScripts(
-            Capture(), variables::get, true, "/home/lena", { it.replace("/home", "/Users") }, configDirectory = null,
-        )
+        val linked = SandboxedScripts(Capture(), variables::get, true, lena, { it.replace("/home", "/Users") })
         assertTrue(
             "(subpath \"/Users/lena/.ssh\")" in linked.profile(request),
             "a credential folder reached through a link is hidden at its real path",
@@ -91,7 +91,7 @@ class CheckProcessesTest {
         // security audit L3: credentials.json and admin.json follow OSTROM_HOME or XDG_CONFIG_HOME, so does the sandbox
         val moved = variables + ("XDG_CONFIG_HOME" to "/srv/xdg")
         fun sandbox(variable: (String) -> String?, folder: String) =
-            SandboxedScripts(Capture(), variable, true, "/home/lena", { "/real$it" }, configDirectory = folder)
+            SandboxedScripts(Capture(), variable, true, CredentialFolders("/home/lena", folder), { "/real$it" })
         val profile = sandbox(moved::get, "/srv/ostrom").profile(request)
         assertTrue("(subpath \"/real/srv/ostrom\")" in profile, "the CLI's folder, where OSTROM_HOME puts it")
         assertTrue("(subpath \"/real/srv/xdg/gh\")" in profile, "GitHub's CLI's, where XDG_CONFIG_HOME puts it")

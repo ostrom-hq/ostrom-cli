@@ -41,7 +41,7 @@ class SandboxConfigFolderTest {
         files.write(script) { writeUtf8("cat '${config / "credentials.json"}'\n") }
         val variables = mapOf("PATH" to "/usr/bin:/bin", "HOME" to home.toString())
         val scripts = SandboxedScripts(
-            ProcessCaptureImpl(), variables::get, true, home.toString(), ::canonical, configDirectory = hidden,
+            ProcessCaptureImpl(), variables::get, true, CredentialFolders(home.toString(), hidden), ::canonical,
         )
         val request = ScriptRequest(
             "s1", script.toString(), repository.toString(), sandbox.toString(), root.toString(), false, 10_000,
