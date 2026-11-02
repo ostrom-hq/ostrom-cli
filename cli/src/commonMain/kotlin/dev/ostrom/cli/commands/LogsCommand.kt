@@ -17,6 +17,7 @@ import dev.ostrom.cli.launcher.child
 import dev.ostrom.cli.launcher.list
 import dev.ostrom.cli.launcher.text
 import dev.ostrom.cli.sessions.heading
+import dev.ostrom.cli.sessions.instant
 import dev.ostrom.cli.sessions.thread
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonArray
@@ -157,7 +158,12 @@ private fun sessionPath(id: String) = "$SESSIONS/${Routes.encode(id)}"
  */
 private suspend fun readOf(signed: SignedIn, id: String, answer: ServerAnswer, kept: MutableMap<String, JsonObject>) =
     answer.orStop(signed.serverUrl, "No session $id on ${signed.serverUrl}.").let { response ->
-        val session = response.child("session") ?: JsonObject(emptyMap())
+        // an answer without the session is not Ostrom's (a proxy, a portal): never followed forever
+        val session = response.child("session") ?: throw PrintMessage(
+            "ostrom: ${signed.serverUrl} answered without the session $id: is it an Ostrom server?",
+            ExitCode.UNREACHABLE.code,
+            printError = true,
+        )
         val ids = session.list("gates").mapNotNull { (it as? JsonPrimitive)?.content }
         val gates = ids.map { gate ->
             kept[gate] ?: gate(signed, gate).let { read ->
@@ -174,7 +180,7 @@ private suspend fun lastSession(signed: SignedIn): String? {
     served(signed, answer)
     val body = answer.orStop(signed.serverUrl, "No sessions on ${signed.serverUrl}.")
     val sessions = body.list("items").filterIsInstance<JsonObject>().filter { it.text("id") != null }
-    return sessions.maxByOrNull { it.text("startedAt").orEmpty() }?.text("id")
+    return sessions.maxByOrNull { instant(it.text("startedAt").orEmpty()).orEmpty() }?.text("id")
 }
 
 /** A gate's request as read, and whether it is [final]: never asked again by `--follow`. */

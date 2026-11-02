@@ -18,10 +18,11 @@ private const val CLOCK = 8
 private const val WHAT = 17
 
 /**
- * The day, the time of day and the fraction of a second of an ISO instant (`2026-10-30T14:02:11.5Z` → `2026-10-30`,
- * `14:02:11`, `5`).
+ * The day, the time of day and the fraction of a second of an ISO instant in UTC, as the server writes them
+ * (`2026-10-30T14:02:11.5Z` → `2026-10-30`, `14:02:11`, `5`). One with an offset is not read: it is shown as it is,
+ * never as if it were UTC.
  */
-private val INSTANT = Regex("""^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?""")
+private val INSTANT = Regex("""^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?Z$""")
 
 /** The digits of a nanosecond: a fraction is padded to them, so `11.9` sorts after `11`. */
 private const val NANOS = 9
@@ -55,7 +56,7 @@ internal fun heading(session: JsonObject): String {
  * The thread of a session: [response] is the server's `SessionResponse` (the session and its receipt), [gates] the
  * `GateRequest` of each gate it asked, in the order of the session's `gates` (one without an `at` sorts last). The
  * start comes first, then the nodes of the receipt, which carry no time (its gate nodes are left out: the gates' own
- * lines tell them), then the requests for a yes and the end in order of time.
+ * lines tell them), then the requests for a yes the server gave no time for, then the rest in order of time.
  */
 internal fun thread(response: JsonObject, gates: List<JsonObject>): List<ThreadLine> {
     val session = response.child("session") ?: JsonObject(emptyMap())
@@ -64,14 +65,18 @@ internal fun thread(response: JsonObject, gates: List<JsonObject>): List<ThreadL
     val checks = nodes.withIndex().mapNotNull { (index, node) ->
         (node as? JsonObject)?.takeIf { it.text("kind") != "gate" }?.let { check(it, index) }
     }
-    val timed = gates.withIndex().flatMap { (index, gate) -> requested(gate, index) } + listOfNotNull(ended(session))
-    return listOf(start) + checks + timed.sortedBy { order(it.at) }
+    val events = gates.withIndex().flatMap { (index, gate) -> requested(gate, index) } + listOfNotNull(ended(session))
+    val (timed, untimed) = events.partition { instant(it.at) != null }
+    return listOf(start) + checks + untimed + timed.sortedBy { instant(it.at) }
 }
 
-/** The sort key of an instant: to the nanosecond, whatever the precision it is written with; one unread sorts last. */
-private fun order(at: String): String = INSTANT.find(at)?.let {
+/**
+ * The sort key of an instant, to the nanosecond whatever the precision it is written with (`11.9Z` after `11Z`), or
+ * null when [at] is not an instant in UTC.
+ */
+internal fun instant(at: String): String? = INSTANT.find(at)?.let {
     "${it.groupValues[1]}T${it.groupValues[2]}.${it.groupValues[3].padEnd(NANOS, '0')}"
-} ?: "~$at"
+}
 
 /** `claude · claude-sonnet-4 · harness 2026.10.30-3`: who started the session, with what. */
 private fun started(session: JsonObject): String {

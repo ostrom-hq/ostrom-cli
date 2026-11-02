@@ -218,9 +218,15 @@ class LogsCommandTest : CliKit() {
         val signedOut = mapOf("GET $session" to (200 to odd), "GET /api/v1/gates/g_gone" to (401 to "{}"))
         assertEquals(65, serving(signedOut).run(arrayOf("logs", "ses_41b2")), "signed out stops")
         console.out.clear()
-        assertEquals(0, serving(mapOf("GET /api/v1/sessions/s0" to (200 to "{}"))).run(arrayOf("logs", "s0")))
-        val bare = "Session ?\n          session started\nStill running. Follow it: ostrom logs s0 --follow\n"
-        assertEquals(bare, console.out.toString())
+        assertEquals(69, serving(mapOf("GET /api/v1/sessions/s0" to (200 to "{}"))).run(arrayOf("logs", "s0", "-f")))
+        assertTrue(console.err.contains("answered without the session s0"), console.err.toString())
+        assertTrue(waits.isEmpty(), "never followed")
+        val bare = """{"session":{}}"""
+        assertEquals(0, serving(mapOf("GET /api/v1/sessions/s0" to (200 to bare))).run(arrayOf("logs", "s0")))
+        val said = "Session ?\n          session started\nStill running. Follow it: ostrom logs s0 --follow\n"
+        assertEquals(said, console.out.toString())
+        val notYours = mapOf("GET /api/v1/sessions/s0" to (403 to "{}"))
+        assertEquals(77, serving(notYours).run(arrayOf("logs", "s0")), "a session the caller may not read")
     }
 
     @Test
@@ -241,16 +247,16 @@ class LogsCommandTest : CliKit() {
                 "yesterday  session started",
                 "          check              lint",
                 "          check              lint",
+                "          asked for a yes    g1",
+                "          asked for a yes    g2",
                 "14:30:00  rejected",
                 "14:40:00  decided            @omar",
                 "15:00:00  session ended",
-                "          asked for a yes    g1",
-                "          asked for a yes    g2",
             ),
             lines,
         )
         val events = thread(response, listOf(decided, JsonObject(emptyMap()))).map(ThreadLine::event)
-        assertEquals(listOf("start", "node:0", "node:2", "answer:g1", "end", "gate:g1", "gate:#1"), events)
+        assertEquals(listOf("start", "node:0", "node:2", "gate:g1", "gate:#1", "answer:g1", "end"), events)
         assertEquals("Session ? · 2026-10-30 UTC", heading(json("""{"startedAt":"2026-10-30T14:00:00Z"}""")))
         assertEquals("Session ?", heading(json("""{"startedAt":"yesterday"}""")))
         val unsaid = json("""{"session":{"endedAt":"2026-10-30T15:00:00Z"}}""")
@@ -258,6 +264,9 @@ class LogsCommandTest : CliKit() {
         // a fraction of a second sorts as time, not as text ('.' is before 'Z')
         val late = json("""{"id":"g3","status":"approved","decidedAt":"2026-10-30T15:00:00.5Z"}""")
         val order = thread(unsaid, listOf(late)).map(ThreadLine::event)
-        assertEquals(listOf("start", "end", "answer:g3", "gate:g3"), order)
+        assertEquals(listOf("start", "gate:g3", "end", "answer:g3"), order)
+        // an instant with an offset is shown as it is, never as if it were UTC
+        val offset = ThreadLine("2026-10-30T16:02:11+02:00", "approved", "", "x")
+        assertEquals("2026-10-30T16:02:11+02:00  approved", offset.render())
     }
 }

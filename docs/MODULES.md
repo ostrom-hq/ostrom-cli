@@ -98,8 +98,9 @@ built. `ostrom <agent> --cloud` and `ostrom attach` end with the session: 0 when
 64 for agent arguments (before any sign-in is read) or a `--repo` not on GitHub, 65 to sign in again, 66 for no such
 session, 69 when Ostrom or the connection is lost (the session keeps running: `ostrom attach <id>`), 77 for a session
 of someone else. `ostrom logs` exits 0 once the thread is printed (`-f`: once the session ends), 64 for `--json` with
-`-f`, 65 to sign in again, 66 for no such session, 69 when Ostrom cannot be reached or does not serve the sessions'
-reads (`GET /api/v1/sessions` not found: an older server), 77 for a session the caller may not read (a gate it may not read is shown by its id).
+`-f`, 65 to sign in again, 66 for no such session, 69 when Ostrom cannot be reached, does not serve the sessions'
+reads (`GET /api/v1/sessions` not found: an older server) or answers without the session, 77 for a session the
+caller may not read (a gate it may not read is shown by its id).
 
 ## Add a command
 
