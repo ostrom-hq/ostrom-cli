@@ -32,7 +32,7 @@ class TeamCodePlanTest {
                "sharedSecret":null,"stdio":{"launcher":"npm","packageName":"@notionhq/mcp","args":["--quiet"],
                "secretEnv":{"API_KEY":"k1"}},"toolMode":null,"tools":[]}],
             "assignments":[{"memberId":"m1","serverId":"v2","memberSecret":"tok-maya"}],
-            "accounts":[{"provider":"anthropic","providerAccountId":"acc-1","label":"Team Max",
+            "accounts":[{"provider":"claude","providerAccountId":"acc-1","label":"Team Max",
               "email":"ops@acme.example","accessToken":"at","refreshToken":"rt",
               "expiresAt":"2026-10-29T00:00:00Z","disabled":false}],
             "memberMap":{"m1":"u-1"}}""",
@@ -133,6 +133,14 @@ class TeamCodePlanTest {
             parseObject("""{"launcher":"npm","packageName":"@x/github","args":["--read-only"],"secretEnv":{}}""")
         assertEquals(expected, stdio)
         assertTrue(skipped.single().contains("names no package"), skipped.single())
+    }
+
+    @Test
+    fun teamCodesProviderNamesBecomeOstroms() {
+        // TeamCode names the company; the contract's TeamCodeAccount.provider is claude or codex
+        val names = listOf("anthropic", " Anthropic ", "claude", "openai", "codex", "mistral")
+        val ostroms = listOf("claude", "claude", "claude", "codex", "codex", "mistral")
+        assertEquals(ostroms, names.map(TeamCodePlan::providerOf))
     }
 
     @Test
