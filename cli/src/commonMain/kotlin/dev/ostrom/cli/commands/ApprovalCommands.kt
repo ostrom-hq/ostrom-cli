@@ -26,8 +26,12 @@ private fun stop(code: ExitCode, message: String) = PrintMessage(message, code.c
 /** The body of a 2xx answer, or the exit code and message the spec gives a failure (CLI.md § 2.4). */
 internal fun ServerAnswer.orStop(serverUrl: String, notFound: String): JsonObject = when (this) {
     is ServerAnswer.Ok -> body
-    is ServerAnswer.Failed -> throw failure(status ?: UNANSWERED, message, serverUrl, notFound)
+    is ServerAnswer.Failed -> throw refusal(serverUrl, notFound)
 }
+
+/** The exit code and message the spec gives this failure (CLI.md § 2.4), to be thrown. */
+internal fun ServerAnswer.Failed.refusal(serverUrl: String, notFound: String): PrintMessage =
+    failure(status ?: UNANSWERED, message, serverUrl, notFound)
 
 private fun failure(status: Int, message: String, serverUrl: String, notFound: String): PrintMessage =
     when (status) {
