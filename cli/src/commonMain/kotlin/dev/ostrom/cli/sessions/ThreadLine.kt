@@ -76,7 +76,8 @@ internal fun thread(response: JsonObject, gates: List<JsonObject>): List<ThreadL
  * null when [at] is not an instant in UTC.
  */
 internal fun instant(at: String): String? = INSTANT.find(at)?.let {
-    "${it.groupValues[1]}T${it.groupValues[2]}.${it.groupValues[3].padEnd(NANOS, '0')}"
+    val (day, clock, fraction) = it.destructured
+    "${day}T$clock.${fraction.padEnd(NANOS, '0')}"
 }
 
 /** `claude · claude-sonnet-4 · harness 2026.10.30-3`: who started the session, with what. */

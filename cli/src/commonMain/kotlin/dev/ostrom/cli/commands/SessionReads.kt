@@ -115,8 +115,10 @@ internal suspend fun lastSession(signed: SignedIn): String? {
     val answer = signed.server.get(mine(signed), signed.token)
     served(signed, answer)
     val body = answer.orStop(signed.serverUrl, "No sessions on ${signed.serverUrl}.")
-    val sessions = body.list("items").filterIsInstance<JsonObject>().filter { it.text("id") != null }
-    return sessions.sortedByDescending { instant(it.text("startedAt").orEmpty()).orEmpty() }.firstOrNull()?.text("id")
+    val started = body.list("items").filterIsInstance<JsonObject>().mapNotNull { session ->
+        session.text("id")?.let { it to instant(session.text("startedAt").orEmpty()).orEmpty() }
+    }
+    return started.maxByOrNull { it.second }?.first
 }
 
 /** A gate's request as read, and whether it is [final]: never asked again by `--follow`. */

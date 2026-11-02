@@ -178,6 +178,15 @@ class LogsCommandTest : CliKit() {
             .run(arrayOf("logs")))
         val expired = mapOf("GET /api/v1/sessions?dev=maya" to (401 to "{}"))
         assertEquals(65, serving(expired).run(arrayOf("logs")), "a refused list is not a list not served")
+        val down: (String) -> OstromApi = { url ->
+            object : OstromApi {
+                override suspend fun get(path: String) = throw ServerUnreachableException(url, Exception("refused"))
+                override suspend fun send(request: ServerRequest) = get(request.path)
+            }
+        }
+        val unreachable = cli(environment = withServer, api = down)
+        assertEquals(69, unreachable.run(arrayOf("logs")), "no list: unreachable")
+        assertEquals(69, unreachable.run(arrayOf("logs", "ses_41b2")), "no session either")
     }
 
     @Test
