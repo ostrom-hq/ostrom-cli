@@ -4,6 +4,7 @@ package dev.ostrom.cli
 import dev.ostrom.cli.api.OstromApi
 import dev.ostrom.cli.api.ServerRequest
 import dev.ostrom.cli.api.ServerResponse
+import dev.ostrom.cli.api.ServerUnreachableException
 import dev.ostrom.cli.sessions.ThreadLine
 import dev.ostrom.cli.sessions.heading
 import dev.ostrom.cli.sessions.thread
@@ -38,7 +39,7 @@ class LogsCommandTest : CliKit() {
         assertEquals(0, serving(routes).run(arrayOf("logs", "ses_41b2")))
         assertEquals(
             """
-            |Session ses_41b2 · claude · acme/api · @maya-k
+            |Session ses_41b2 · claude · acme/api · @maya-k · 2026-10-30 UTC
             |14:02:11  session started    claude · claude-sonnet-4 · harness 2026.10.30-3
             |          check              Run the tests before any push · passed
             |14:05:41  asked for a yes    Push to main · g_7d1e
@@ -57,7 +58,10 @@ class LogsCommandTest : CliKit() {
         val pending = """{"gate":{"id":"g_7d1e","label":"Push to main","status":"pending",""" +
             """"at":"2026-10-30T14:05:41Z"}}"""
         val routes = mapOf(
-            "GET /api/v1/sessions?dev=maya" to (200 to """{"items":[{"agent":"codex"},{"id":"ses_41b2"}]}"""),
+            "GET /api/v1/sessions?dev=maya" to (
+                200 to """{"items":[{"agent":"codex"},{"id":"ses_old","startedAt":"2026-10-29T09:00:00Z"},""" +
+                    """{"id":"ses_41b2","startedAt":"2026-10-30T14:02:11Z"},{"id":"ses_undated"}]}"""
+                ),
             "GET $session" to (200 to running),
             "GET /api/v1/gates/g_7d1e" to (200 to pending),
         )
@@ -69,28 +73,64 @@ class LogsCommandTest : CliKit() {
         val none = mapOf("GET /api/v1/sessions?dev=maya" to (200 to """{"items":[]}"""))
         assertEquals(0, serving(none).run(arrayOf("logs")))
         assertEquals("No sessions yet. Start one: ostrom claude\n", console.out.toString())
+        console.out.clear()
+        assertEquals(0, serving(none).run(arrayOf("logs", "--json")))
+        assertEquals("""{"session":null,"receipt":null,"gates":[]}""" + "\n", console.out.toString(), "json stays json")
     }
 
-    @Test
-    fun followPrintsWhatIsNewUntilTheSessionEnds() {
-        signIn("/home/maya/.config/ostrom")
-        val answers = ArrayDeque(listOf(running, running, ended))
-        val api: (String) -> OstromApi = {
+    /** Answers the session with [sessions] in turn (`503`: failing, `down`: unreachable), a gate with [gates]. */
+    private fun turns(sessions: List<String>, gates: List<String>): (String) -> OstromApi {
+        val sessionAnswers = ArrayDeque(sessions)
+        val gateAnswers = ArrayDeque(gates)
+        return {
             object : OstromApi {
                 override suspend fun get(path: String) = send(ServerRequest("GET", path))
                 override suspend fun send(request: ServerRequest): ServerResponse {
                     requests += it to request
-                    val body = if (request.path == session) answers.removeFirst() else gate
-                    return ServerResponse(200, body, 1)
+                    val body = if (request.path == session) sessionAnswers.removeFirst() else gateAnswers.removeFirst()
+                    if (body == "down") throw ServerUnreachableException(it, Exception("refused"))
+                    return if (body == "503") ServerResponse(503, "{}", 1) else ServerResponse(200, body, 1)
                 }
             }
         }
+    }
+
+    @Test
+    fun followPrintsEachEventOnceUntilTheSessionEndsThroughAFailingServer() {
+        signIn("/home/maya/.config/ostrom")
+        val pending = """{"gate":{"id":"g_7d1e","label":"Push to main","status":"pending",""" +
+            """"at":"2026-10-30T14:05:41Z"}}"""
+        val api = turns(listOf(running, "503", "down", running, ended), listOf(pending, gate, gate))
         assertEquals(0, cli(environment = withServer, api = api).run(arrayOf("logs", "ses_41b2", "--follow")))
-        assertEquals(1, console.out.split("session started").size - 1, "each line once")
-        assertEquals(1, console.out.split("approved").size - 1, "each line once")
-        assertTrue(console.out.endsWith("14:09:00  session ended      stop · exit 0\n"), console.out.toString())
-        assertEquals(listOf(2_000L, 2_000L), waits)
-        assertTrue(answers.isEmpty())
+        val out = console.out.toString()
+        assertEquals(1, out.split("session started").size - 1, "each line once")
+        assertEquals(1, out.split("waiting for a yes").size - 1, "the request once, answered or not")
+        assertTrue(!out.contains("asked for a yes"), out)
+        assertEquals(1, out.split("approved").size - 1, "each line once")
+        assertTrue(out.endsWith("14:09:00  session ended      stop · exit 0\n"), out)
+        assertEquals(listOf(2_000L, 2_000L, 2_000L, 2_000L), waits, "a failing turn is asked again")
+    }
+
+    @Test
+    fun aGateKeptForGoodIsAskedOnceAndAMissingSessionStopsTheFollow() {
+        signIn("/home/maya/.config/ostrom")
+        val rejected = """{"gate":{"id":"g_7d1e","label":"Push to main","status":"rejected",""" +
+            """"at":"2026-10-30T14:05:41Z","decidedAt":"2026-10-30T14:06:00Z"}}"""
+        val api = turns(listOf(running, running, ended), listOf(rejected))
+        assertEquals(0, cli(environment = withServer, api = api).run(arrayOf("logs", "ses_41b2", "--follow")))
+        assertEquals(1, requests.count { it.second.path == "/api/v1/gates/g_7d1e" })
+        assertOut("14:06:00  rejected\n")
+        val gone = mapOf("GET $session" to (404 to "{}"))
+        var turn = 0
+        val vanishing: (String) -> OstromApi = { url ->
+            val first = serverOf(mapOf("GET $session" to (200 to """{"session":{$started}}""")))(url)
+            val then = serverOf(gone)(url)
+            object : OstromApi {
+                override suspend fun get(path: String) = (if (turn++ == 0) first else then).get(path)
+                override suspend fun send(request: ServerRequest) = (if (turn++ == 0) first else then).send(request)
+            }
+        }
+        assertEquals(66, cli(environment = withServer, api = vanishing).run(arrayOf("logs", "ses_41b2", "--follow")))
     }
 
     @Test
@@ -123,6 +163,8 @@ class LogsCommandTest : CliKit() {
         val odd = """{"session":{$started,"gates":["g_gone",{"not":"an id"}]}}"""
         assertEquals(0, serving(mapOf("GET $session" to (200 to odd))).run(arrayOf("logs", "ses_41b2")))
         assertOut("          asked for a yes    g_gone\n")
+        val refused = mapOf("GET $session" to (200 to odd), "GET /api/v1/gates/g_gone" to (403 to "{}"))
+        assertEquals(77, serving(refused).run(arrayOf("logs", "ses_41b2")), "a refusal is not a gate gone")
         console.out.clear()
         assertEquals(0, serving(mapOf("GET /api/v1/sessions/s0" to (200 to "{}"))).run(arrayOf("logs", "s0")))
         val bare = "Session ?\n          session started\nStill running. Follow it: ostrom logs s0 --follow\n"
@@ -133,11 +175,11 @@ class LogsCommandTest : CliKit() {
     fun aThreadReadsWhatEverTheServerLeavesOut() {
         assertEquals("Session ?", heading(JsonObject(emptyMap())))
         val bare = thread(JsonObject(emptyMap()), emptyList())
-        assertEquals(listOf(ThreadLine("", "session started", "")), bare)
+        assertEquals(listOf(ThreadLine("", "session started", "", "start")), bare)
         assertEquals("          session started", bare.single().render())
         val response = json(
             """{"session":{"startedAt":"yesterday","endedAt":"2026-10-30T15:00:00Z","exitCode":"x"},""" +
-                """"receipt":{"nodes":[{"label":"lint"},"not a node"]}}""",
+                """"receipt":{"nodes":[{"label":"lint"},"not a node",{"label":"lint"}]}}""",
         )
         val decided = json("""{"id":"g1","status":"rejected","decidedAt":"2026-10-30T14:30:00Z"}""")
         val unanswered = json("""{"id":"g2","decidedAt":"2026-10-30T14:40:00Z","decidedBy":"omar"}""")
@@ -145,6 +187,7 @@ class LogsCommandTest : CliKit() {
         assertEquals(
             listOf(
                 "yesterday  session started",
+                "          check              lint",
                 "          check              lint",
                 "14:30:00  rejected",
                 "14:40:00  decided            @omar",
@@ -154,6 +197,10 @@ class LogsCommandTest : CliKit() {
             ),
             lines,
         )
+        val events = thread(response, listOf(decided, JsonObject(emptyMap()))).map(ThreadLine::event)
+        assertEquals(listOf("start", "node:0", "node:2", "answer:g1", "end", "gate:g1", "gate:#1"), events)
+        assertEquals("Session ? · 2026-10-30 UTC", heading(json("""{"startedAt":"2026-10-30T14:00:00Z"}""")))
+        assertEquals("Session ?", heading(json("""{"startedAt":"yesterday"}""")))
         val unsaid = json("""{"session":{"endedAt":"2026-10-30T15:00:00Z"}}""")
         assertEquals("15:00:00  session ended", thread(unsaid, emptyList()).last().render())
     }

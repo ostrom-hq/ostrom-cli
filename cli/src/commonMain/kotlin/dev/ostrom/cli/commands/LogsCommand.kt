@@ -14,7 +14,6 @@ import dev.ostrom.cli.launcher.ServerAnswer
 import dev.ostrom.cli.launcher.child
 import dev.ostrom.cli.launcher.list
 import dev.ostrom.cli.launcher.text
-import dev.ostrom.cli.sessions.ThreadLine
 import dev.ostrom.cli.sessions.heading
 import dev.ostrom.cli.sessions.thread
 import kotlinx.coroutines.runBlocking
@@ -27,6 +26,18 @@ private const val GATES = "/api/v1/gates"
 
 /** How often `ostrom logs --follow` asks the server again. */
 private const val FOLLOW_MILLIS = 2_000L
+
+/** The statuses a gate keeps for good: `--follow` asks for such a gate once. */
+private val FINAL = setOf("rejected", "consumed", "shadow", "ungated")
+
+/** `--json` when there is no session: the keys of a session's thread, nothing in them. */
+private const val NO_SESSION = """{"session":null,"receipt":null,"gates":[]}"""
+
+/** 401 and 403: a refusal of the server, never a gate it could not give. */
+private val REFUSED = setOf(401, 403)
+
+/** From this status on, the server failed: `--follow` asks again at the next turn. */
+private const val SERVER_ERROR = 500
 
 /**
  * `ostrom logs [<session>] [--follow] [--json]`: the thread of a session (CLI.md § 2.2), the developer's last one by
@@ -51,24 +62,28 @@ private suspend fun CliDependencies.logs(asked: String?, follow: Boolean, json: 
     val signed = signedIn(server)
     val id = asked ?: lastSession(signed)
     when {
-        id == null -> console.out("No sessions yet. Start one: ostrom claude\n")
-        json -> console.out(read(signed, id).json() + "\n")
+        id == null -> console.out(if (json) "$NO_SESSION\n" else "No sessions yet. Start one: ostrom claude\n")
+        json -> console.out(read(signed, id, mutableMapOf()).json() + "\n")
         else -> tail(signed, id, follow)
     }
 }
 
-/** The thread of session [id]; with [follow], asked again until the session ends, printing only what is new. */
+/**
+ * The thread of session [id]; with [follow], asked again until the session ends, printing each event once (a request
+ * answered meanwhile is not printed again). A turn the server fails is skipped; a gate it keeps for good is asked once.
+ */
 private suspend fun CliDependencies.tail(signed: SignedIn, id: String, follow: Boolean) {
-    val shown = mutableSetOf<ThreadLine>()
-    var read = read(signed, id)
+    val shown = mutableSetOf<String>()
+    val kept = mutableMapOf<String, JsonObject>()
+    var read = read(signed, id, kept)
     var running: Boolean
     console.out(heading(read.session) + "\n")
     while (true) {
-        thread(read.response, read.gates).filter(shown::add).forEach { console.out(it.render() + "\n") }
+        thread(read.response, read.gates).filter { shown.add(it.event) }.forEach { console.out(it.render() + "\n") }
         running = read.session.text("endedAt") == null
         if (!follow || !running) break
         sleep(FOLLOW_MILLIS)
-        read = read(signed, id)
+        read = poll(signed, id, kept) ?: read
     }
     if (running) console.out("Still running. Follow it: ostrom logs $id --follow\n")
 }
@@ -80,24 +95,43 @@ private class SessionRead(val response: JsonObject, val session: JsonObject, val
 }
 
 /** Session [id] from the server, with the request of each gate it asked; exit 66 when there is no such session. */
-private suspend fun read(signed: SignedIn, id: String): SessionRead {
-    val path = "$SESSIONS/${Routes.encode(id)}"
-    val notFound = "No session $id on ${signed.serverUrl}."
-    val response = signed.server.get(path, signed.token).orStop(signed.serverUrl, notFound)
-    val session = response.child("session") ?: JsonObject(emptyMap())
-    val gates = session.list("gates").mapNotNull { (it as? JsonPrimitive)?.content }.map { gate(signed, it) }
-    return SessionRead(response, session, gates)
+private suspend fun read(signed: SignedIn, id: String, kept: MutableMap<String, JsonObject>): SessionRead =
+    readOf(signed, id, signed.server.get(sessionPath(id), signed.token), kept)
+
+/** [read] for a turn of `--follow`: null when the server fails or cannot be reached, so the next turn asks again. */
+private suspend fun poll(signed: SignedIn, id: String, kept: MutableMap<String, JsonObject>): SessionRead? {
+    val answer = signed.server.get(sessionPath(id), signed.token)
+    val failing = ((answer as? ServerAnswer.Failed)?.let { it.status ?: SERVER_ERROR } ?: 0) >= SERVER_ERROR
+    return if (failing) null else readOf(signed, id, answer, kept)
 }
 
-/** The id of the developer's newest session, or null when there is none. */
+private fun sessionPath(id: String) = "$SESSIONS/${Routes.encode(id)}"
+
+/** The session of [answer], with its gates' requests ([kept]: the gates the server keeps for good, asked once). */
+private suspend fun readOf(signed: SignedIn, id: String, answer: ServerAnswer, kept: MutableMap<String, JsonObject>) =
+    answer.orStop(signed.serverUrl, "No session $id on ${signed.serverUrl}.").let { response ->
+        val session = response.child("session") ?: JsonObject(emptyMap())
+        val ids = session.list("gates").mapNotNull { (it as? JsonPrimitive)?.content }
+        val gates = ids.map { gate ->
+            kept[gate] ?: gate(signed, gate).also { if (it.text("status") in FINAL) kept[gate] = it }
+        }
+        SessionRead(response, session, gates)
+    }
+
+/** The id of the developer's newest session (the latest start of the first page), or null when there is none. */
 private suspend fun lastSession(signed: SignedIn): String? {
     val path = "$SESSIONS?dev=${Routes.encode(signed.login)}"
     val body = signed.server.get(path, signed.token).orStop(signed.serverUrl, "No sessions on ${signed.serverUrl}.")
-    return body.list("items").filterIsInstance<JsonObject>().firstNotNullOfOrNull { it.text("id") }
+    val sessions = body.list("items").filterIsInstance<JsonObject>().filter { it.text("id") != null }
+    return sessions.maxByOrNull { it.text("startedAt").orEmpty() }?.text("id")
 }
 
-/** The request of gate [id] as the server keeps it, or only its id when the server does not give it. */
+/**
+ * The request of gate [id] as the server keeps it, or only its id when the server does not give it (gone, failing);
+ * a refusal (401, 403) stops with its code.
+ */
 private suspend fun gate(signed: SignedIn, id: String): JsonObject {
     val answer = signed.server.get("$GATES/${Routes.encode(id)}", signed.token)
+    if (answer is ServerAnswer.Failed && answer.status in REFUSED) answer.orStop(signed.serverUrl, "")
     return (answer as? ServerAnswer.Ok)?.body?.child("gate") ?: JsonObject(mapOf("id" to JsonPrimitive(id)))
 }

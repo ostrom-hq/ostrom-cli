@@ -17,8 +17,8 @@ private const val CLOCK = 8
 /** The width of the event column: `waiting for a yes`. */
 private const val WHAT = 17
 
-/** The time of day of an ISO instant (`2026-10-30T14:02:11Z` → `14:02:11`). */
-private val TIME_OF_DAY = Regex("""^\d{4}-\d{2}-\d{2}T(\d{2}:\d{2}:\d{2})""")
+/** The day and the time of day of an ISO instant (`2026-10-30T14:02:11Z` → `2026-10-30`, `14:02:11`). */
+private val INSTANT = Regex("""^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})""")
 
 /**
  * One line of a session's thread.
@@ -26,18 +26,22 @@ private val TIME_OF_DAY = Regex("""^\d{4}-\d{2}-\d{2}T(\d{2}:\d{2}:\d{2})""")
  * @property at The ISO instant of the event, empty when the server gives none (a check of the receipt).
  * @property what What happened: `session started`, `check`, `waiting for a yes`, `approved`…
  * @property detail Who or what it was about.
+ * @property event Which event of the session the line tells (`start`, `node:0`, `gate:g_7d1e`, `answer:g_7d1e`,
+ *   `end`): the same event keeps it when its text changes (a request answered meanwhile), and two checks of the same
+ *   text keep two.
  */
-internal data class ThreadLine(val at: String, val what: String, val detail: String) {
-    /** `14:02:11  session started   Claude Code · harness 2026.10.30-3`. */
+internal data class ThreadLine(val at: String, val what: String, val detail: String, val event: String) {
+    /** `14:02:11  session started   Claude Code · harness 2026.10.30-3`, the time in UTC as the server keeps it. */
     fun render(): String {
-        val clock = TIME_OF_DAY.find(at)?.groupValues?.get(1) ?: at
+        val clock = INSTANT.find(at)?.groupValues?.get(2) ?: at
         return "${clock.padEnd(CLOCK)}  ${what.padEnd(WHAT)}  $detail".trimEnd()
     }
 }
 
-/** `Session ses_41b2 · claude · acme/api · @maya-k`: the head of the thread of [session]. */
+/** `Session ses_41b2 · claude · acme/api · @maya-k · 2026-10-30 UTC`: the head of the thread of [session]. */
 internal fun heading(session: JsonObject): String {
-    val parts = listOfNotNull(session.text("agent"), session.text("repo"), session.text("dev")?.let { "@$it" })
+    val day = session.text("startedAt")?.let { INSTANT.find(it) }?.groupValues?.get(1)?.let { "$it UTC" }
+    val parts = listOfNotNull(session.text("agent"), session.text("repo"), session.text("dev")?.let { "@$it" }, day)
     return (listOf("Session ${session.text("id") ?: "?"}") + parts).joinToString(" · ")
 }
 
@@ -49,9 +53,10 @@ internal fun heading(session: JsonObject): String {
  */
 internal fun thread(response: JsonObject, gates: List<JsonObject>): List<ThreadLine> {
     val session = response.child("session") ?: JsonObject(emptyMap())
-    val start = ThreadLine(session.text("startedAt").orEmpty(), "session started", started(session))
-    val checks = response.child("receipt")?.list("nodes").orEmpty().filterIsInstance<JsonObject>().map(::check)
-    val timed = gates.flatMap(::requested) + listOfNotNull(ended(session))
+    val start = ThreadLine(session.text("startedAt").orEmpty(), "session started", started(session), "start")
+    val nodes = response.child("receipt")?.list("nodes").orEmpty()
+    val checks = nodes.withIndex().mapNotNull { (index, node) -> (node as? JsonObject)?.let { check(it, index) } }
+    val timed = gates.withIndex().flatMap { (index, gate) -> requested(gate, index) } + listOfNotNull(ended(session))
     return listOf(start) + checks + timed.sortedBy { it.at.ifEmpty { "~" } }
 }
 
@@ -62,24 +67,26 @@ private fun started(session: JsonObject): String {
 }
 
 /** A node of the receipt: `check  Run the tests before any push · passed`. */
-private fun check(node: JsonObject): ThreadLine {
+private fun check(node: JsonObject, index: Int): ThreadLine {
     val outcome = listOfNotNull(node.text("label"), node.text("outcome")).joinToString(" · ")
-    return ThreadLine("", node.text("kind") ?: "check", outcome)
+    return ThreadLine("", node.text("kind") ?: "check", outcome, "node:$index")
 }
 
-/** A gate the session asked: the request, then its answer once there is one. */
-private fun requested(gate: JsonObject): List<ThreadLine> {
+/** The [index]th gate the session asked: the request, then its answer once there is one. */
+private fun requested(gate: JsonObject, index: Int): List<ThreadLine> {
     val status = gate.text("status")
     val asked = if (status == "pending") "waiting for a yes" else "asked for a yes"
     val what = listOfNotNull(gate.text("label"), gate.text("id")).joinToString(" · ")
-    val decidedAt = gate.text("decidedAt") ?: return listOf(ThreadLine(gate.text("at").orEmpty(), asked, what))
+    val id = gate.text("id") ?: "#$index"
+    val request = ThreadLine(gate.text("at").orEmpty(), asked, what, "gate:$id")
+    val decidedAt = gate.text("decidedAt") ?: return listOf(request)
     val by = gate.text("decidedBy")?.let { "@$it" }.orEmpty()
-    return listOf(ThreadLine(gate.text("at").orEmpty(), asked, what), ThreadLine(decidedAt, status ?: "decided", by))
+    return listOf(request, ThreadLine(decidedAt, status ?: "decided", by, "answer:$id"))
 }
 
 /** The end of the session, or null while it runs: `session ended  stop · exit 0`. */
 private fun ended(session: JsonObject): ThreadLine? {
     val at = session.text("endedAt") ?: return null
     val exit = (session["exitCode"] as? JsonPrimitive)?.intOrNull?.let { "exit $it" }
-    return ThreadLine(at, "session ended", listOfNotNull(session.text("endedBy"), exit).joinToString(" · "))
+    return ThreadLine(at, "session ended", listOfNotNull(session.text("endedBy"), exit).joinToString(" · "), "end")
 }
