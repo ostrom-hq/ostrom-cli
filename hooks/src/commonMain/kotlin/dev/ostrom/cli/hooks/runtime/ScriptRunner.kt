@@ -44,12 +44,12 @@ interface CommitCheckouts {
     fun clean(repository: String): Boolean
 
     /**
-     * Checks [sha] out, detached, at [path] (a worktree of [repository]).
+     * Checks [sha] out, detached, at [path] (a clone of [repository] that shares its objects).
      *
      * @return False when git could not.
      */
     fun add(repository: String, path: String, sha: String): Boolean
 
-    /** Removes the worktree at [path], if any, and prunes the worktrees of [repository]. */
+    /** Removes the checkout at [path], if any, and prunes the worktrees of [repository]. */
     fun remove(repository: String, path: String)
 }
