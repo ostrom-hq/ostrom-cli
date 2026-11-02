@@ -156,10 +156,11 @@ class GitCheckouts(
      * No filter driver but Git LFS's in the repository's configuration (exit 1: none at all). LFS's is known by its
      * exact keys: `filter.lfs.x.smudge` is another driver.
      */
-    private fun noFilter(listed: CaptureResult): Boolean {
-        val keys = (listed as? CaptureResult.Exited)?.takeIf { it.code == 0 }?.output?.lines()
-        return listed is CaptureResult.Exited && listed.code == NONE_DECLARED ||
-            keys != null && keys.none { it.startsWith(FILTER) && it !in LFS_KEYS }
+    private fun noFilter(listed: CaptureResult): Boolean = when {
+        listed !is CaptureResult.Exited -> false
+        listed.code == NONE_DECLARED -> true
+        listed.code != 0 -> false
+        else -> listed.output.lines().none { it.startsWith(FILTER) && it !in LFS_KEYS }
     }
 
     /** `git` with [arguments], with every configuration (the user's ignored files make a tree clean or not). */
