@@ -9,6 +9,7 @@ import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import dev.ostrom.cli.BuildInfo
 import dev.ostrom.cli.CliDependencies
+import dev.ostrom.cli.ExitCode
 import dev.ostrom.cli.platform.Environment
 import dev.ostrom.cli.platform.OperatingSystem
 import dev.ostrom.cli.update.UpdateRequest
@@ -22,7 +23,13 @@ internal class UpdateCommand(private val dependencies: CliDependencies) : CliktC
     val rollback by option("--rollback", help = "Go back to the previous version").flag()
     val version by option("--version", help = "Install this version")
 
+    // plumbing of the update notice, started detached once a day at most: records the latest release, says nothing
+    val recordLatest by option("--record-latest", hidden = true).flag()
+
     override fun run() {
+        if (recordLatest && listOf(rollback, check, version != null).any { it }) {
+            throw UsageError("--record-latest is the update notice's own refresh: it takes no other option")
+        }
         if (rollback && (check || version != null)) {
             throw UsageError("--rollback goes back to the version kept: it takes neither --check nor --version")
         }
@@ -36,6 +43,11 @@ internal class UpdateCommand(private val dependencies: CliDependencies) : CliktC
             version = version,
             checkOnly = check,
         )
+        if (recordLatest) {
+            val latest = runBlocking { updates.latest(request) }
+            dependencies.updateNotice?.record(latest)
+            throw ProgramResult(ExitCode.OK.code)
+        }
         val code = runBlocking { if (rollback) updates.rollback(request) else updates.update(request) }
         throw ProgramResult(code)
     }

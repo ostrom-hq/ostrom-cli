@@ -39,6 +39,7 @@ import dev.ostrom.cli.launcher.Agent
 import dev.ostrom.cli.platform.SecretStoreException
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
+import okio.IOException
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
 
@@ -58,12 +59,42 @@ class OstromCli(private val dependencies: CliDependencies) {
         // A failed line is named from the parser's context; a line that ran, by the subcommand the root invoked.
         val failed = failure
         val command = if (failed == null) root.invoked else failedCommand(failed)
-        runBlocking {
-            withTimeoutOrNull(STATISTICS_TIMEOUT) {
-                dependencies.usage.commandRun(command, known, code, started.elapsedNow())
+        // the notice's own refresh, started detached: plumbing nobody typed, so no statistic
+        if (!(command == UPDATE_COMMAND && RECORD_LATEST in args)) {
+            runBlocking {
+                withTimeoutOrNull(STATISTICS_TIMEOUT) {
+                    dependencies.usage.commandRun(command, known, code, started.elapsedNow())
+                }
             }
         }
+        if (!command.isNullOrEmpty() && command !in QUIET_COMMANDS && noticeAllowed()) {
+            sayNotice()
+        }
         return code
+    }
+
+    /**
+     * The notice is a courtesy: a file it cannot read or write, a path the platform refuses, never changes the
+     * command's code.
+     */
+    private fun sayNotice() {
+        try {
+            dependencies.updateNotice?.after(dependencies.console::err)
+        } catch (_: IllegalArgumentException) {
+            // a path the file system refuses: nothing to say, the next command tries again
+        } catch (_: IOException) {
+            // a file or a probe that failed: nothing to say, the next command tries again
+        }
+    }
+
+    /**
+     * The update notice is for a person at a terminal: never in a pipe or a CI log, never in an agent's session (the
+     * agent cannot update the ostrom of its own hooks, S2-39).
+     */
+    private fun noticeAllowed(): Boolean {
+        val environment = dependencies.environment
+        val off = listOf("CI", "OSTROM_LAUNCH_ID").any { !environment[it].isNullOrEmpty() }
+        return dependencies.console.isInteractive && !off
     }
 
     private fun execute(root: RootCommand, args: Array<String>, failed: (CliktError) -> Unit): Int {
@@ -145,6 +176,18 @@ class OstromCli(private val dependencies: CliDependencies) {
         val STATISTICS_TIMEOUT = STATISTICS_TIMEOUT_MILLIS.milliseconds
 
         const val HELP_COMMAND = "help"
+
+        /**
+         * Commands after which no update notice is said: the plumbing, and `update` itself (nor after `ostrom` alone
+         * or a line that names no known command).
+         */
+        val QUIET_COMMANDS = setOf("hook", "mcp", "wait", "check", "update", HELP_COMMAND)
+
+        /** The self-update command. */
+        const val UPDATE_COMMAND = "update"
+
+        /** Its hidden option that makes it the notice's detached refresh. */
+        const val RECORD_LATEST = "--record-latest"
 
         /** Not a command name: the statistics report it as `unknown`. */
         const val UNKNOWN_COMMAND = ""
