@@ -5,7 +5,12 @@ the way the server answers them, every request written to a log the end-to-end r
 It stands in for ostrom-server until the server serves launches, packages and sessions (QUESTIONS.md, CLI-AGENTS);
 the run then points OSTROM_URL at the real server and keeps every assertion.
 
-    python3 e2e/contract_server.py --port 0 --log requests.jsonl --ready ready.txt [--package vectors/package.json]
+    python3 e2e/contract_server.py --port 0 --log requests.jsonl --ready ready.txt [--package vectors/package.json] \
+        [--without-session-reads]
+
+It keeps the sessions the hooks start, their gates and their end, and serves them back to `ostrom logs` with the
+device's token (`GET /api/v1/sessions`, `GET /api/v1/sessions/{id}`, `GET /api/v1/gates/{id}`).
+`--without-session-reads` plays an older server that does not serve those reads.
 """
 import argparse
 import base64
@@ -38,6 +43,15 @@ CATALOGUE = {
         }
     ],
 }
+
+
+# The one gate of the run: asked by the hook of `kubectl apply`, approved by Lena.
+GATE = {"id": "G-e2e", "label": "deploy to production", "status": "approved", "decidedBy": "lena",
+        "at": "2026-11-02T10:00:00Z", "decidedAt": "2026-11-02T10:00:05Z", "receiptId": "R-gate"}
+
+
+def now_stamp():
+    return datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def instance_keys():
@@ -92,6 +106,10 @@ def make_handler(state):
         def _route(self, method, path, token, body, query):
             device = token == DEVICE_TOKEN
             agent = token == AGENT_TOKEN
+            if method == "GET" and device and state["session_reads"]:
+                read = self._session_read(path, query)
+                if read is not None:
+                    return self._answer(*read)
             if (method, path) == ("GET", "/api/v1/policy/agents") and device:
                 return self._answer(200, {"allowed": True, "note": "e2e policy"})
             if (method, path) == ("POST", "/api/v1/launches") and device:
@@ -117,16 +135,29 @@ def make_handler(state):
                 return self._answer(200, CATALOGUE)
             if (method, path) == ("POST", "/api/v1/sessions"):
                 session = body.get("sessionId") or "seg-1"
+                with state["lock"]:
+                    fields = {"id": session, "agent": body.get("agent"), "dev": "maya", "repo": body.get("repo"),
+                              "model": body.get("model"), "startedAt": now_stamp(), "gates": []}
+                    # the server leaves out what it does not know, never a null
+                    state["sessions"].setdefault(session, {k: v for k, v in fields.items() if v is not None})
                 return self._answer(201, {"session": {"id": session}, "context": "[Ostrom] e2e rules"})
             if method == "POST" and path == "/api/v1/gates":
+                with state["lock"]:
+                    for session in state["sessions"].values():
+                        if session["id"] == body.get("sessionId") or len(state["sessions"]) == 1:
+                            session["gates"].append("G-e2e")
                 return self._answer(201, {"gate": {"id": "G-e2e", "status": "pending", "receiptId": None}})
             if (method, path) == ("GET", "/api/v1/gates/G-e2e"):
-                return self._answer(200, {"gate": {"id": "G-e2e", "status": "approved", "decidedBy": "@lena",
-                                                   "receiptId": "R-gate"}})
+                return self._answer(200, {"gate": GATE})
             match = re.fullmatch(r"/api/v1/sessions/([^/]+)/(alive|end|seen|reopen|workflow-receipt)", path)
             if method == "POST" and match:
                 session, action = match.groups()
                 if action == "end":
+                    with state["lock"]:
+                        kept = state["sessions"].get(session)
+                        if kept is not None:
+                            kept.update({"endedAt": now_stamp(), "endedBy": body.get("source") or "hook",
+                                         "exitCode": body.get("exitCode"), "receiptId": "R-e2e"})
                     return self._answer(200, {"session": {"id": session, "receiptId": "R-e2e", "gates": []},
                                               "verification": {"ok": True}})
                 if action == "workflow-receipt":
@@ -135,6 +166,27 @@ def make_handler(state):
             if (method, path) == ("GET", "/api/v1/receipts/W-e2e/bundle"):
                 return self._answer(200, state["bundle"])
             return self._error(404, "not_found", f"no {method} {path} in the e2e contract server")
+
+        def _session_read(self, path, query):
+            """`ostrom logs`' reads, as (status, body), or None for another route."""
+            if path == "/api/v1/sessions":
+                dev = query.get("dev", [None])[0]
+                with state["lock"]:
+                    items = [dict(s) for s in state["sessions"].values() if dev in (None, s["dev"])]
+                return 200, {"items": items}
+            match = re.fullmatch(r"/api/v1/sessions/([^/]+)", path)
+            if match:
+                with state["lock"]:
+                    session = state["sessions"].get(match.group(1))
+                    session = dict(session) if session else None
+                if session is None:
+                    return 404, {"error": {"type": "not_found", "message": "Session not found."}}
+                return 200, {"session": session, "receipt": {"id": "R-e2e", "nodes": [
+                    {"id": "n1", "workflowId": "w1", "kind": "check", "label": "Run the tests", "outcome": "passed",
+                     "attestation": "workstation_declared"}]}}
+            if path == "/api/v1/gates/G-e2e":
+                return 200, {"gate": GATE}
+            return None
 
         def do_GET(self):
             self._handle("GET")
@@ -151,12 +203,14 @@ def main():
     parser.add_argument("--log", required=True)
     parser.add_argument("--ready", required=True)
     parser.add_argument("--package")
+    parser.add_argument("--without-session-reads", action="store_true")
     args = parser.parse_args()
     package = json.load(open(args.package)) if args.package else None
     # W-e2e, signed by the TEST key that signs vectors/package.json: `ostrom verify W-e2e` holds once the key is pinned
     with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "vectors", "receipt-bundle.json")) as handle:
         bundle = json.load(handle)["bundle"]
-    state = {"lock": threading.Lock(), "log": open(args.log, "a"), "package": package, "bundle": bundle}
+    state = {"lock": threading.Lock(), "log": open(args.log, "a"), "package": package, "bundle": bundle,
+             "sessions": {}, "session_reads": not args.without_session_reads}
     server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(state))
     with open(args.ready, "w") as ready:
         ready.write(f"http://127.0.0.1:{server.server_address[1]}")

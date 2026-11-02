@@ -120,7 +120,10 @@ class LogsCommandTest : CliKit() {
         assertEquals(0, cli(environment = withServer, api = api).run(arrayOf("logs", "ses_41b2", "--follow")))
         assertEquals(1, requests.count { it.second.path == "/api/v1/gates/g_7d1e" })
         assertOut("14:06:00  rejected\n")
-        val gone = mapOf("GET $session" to (404 to "{}"))
+        val gone = mapOf(
+            "GET $session" to (404 to "{}"),
+            "GET /api/v1/sessions?dev=maya" to (200 to """{"items":[]}"""),
+        )
         var turn = 0
         val vanishing: (String) -> OstromApi = { url ->
             val first = serverOf(mapOf("GET $session" to (200 to """{"session":{$started}}""")))(url)
@@ -149,12 +152,38 @@ class LogsCommandTest : CliKit() {
     @Test
     fun aMissingSessionAndASignedOutDeviceGiveTheSpecsCodes() {
         signIn("/home/maya/.config/ostrom")
-        assertEquals(66, serving(emptyMap()).run(arrayOf("logs", "ses_none")))
+        val listed = mapOf("GET /api/v1/sessions?dev=maya" to (200 to """{"items":[]}"""))
+        assertEquals(66, serving(listed).run(arrayOf("logs", "ses_none")))
         assertTrue(console.err.contains("No session ses_none on https://ostrom.example."), console.err.toString())
-        assertEquals(66, serving(emptyMap()).run(arrayOf("logs")))
-        assertTrue(console.err.contains("No sessions on https://ostrom.example."), console.err.toString())
         assertEquals(65, cli(environment = mapOf("HOME" to "/home/omar", "OSTROM_URL" to "https://x.example"))
             .run(arrayOf("logs")))
+    }
+
+    @Test
+    fun aServerThatDoesNotServeTheSessionsReadsSaysSo() {
+        signIn("/home/maya/.config/ostrom")
+        val unserved = "ostrom: https://ostrom.example does not serve the sessions' reads (GET /api/v1/sessions): " +
+            "ostrom logs needs a newer Ostrom server. Ask your admin to update it.\n"
+        assertEquals(69, serving(emptyMap()).run(arrayOf("logs")), "no list of sessions")
+        assertTrue(console.err.endsWith(unserved), console.err.toString())
+        console.err.clear()
+        assertEquals(69, serving(emptyMap()).run(arrayOf("logs", "ses_41b2", "-f")), "nor the session itself")
+        assertTrue(console.err.endsWith(unserved), console.err.toString())
+        val asked = requests.takeLast(2).map { it.second.path.substringBefore('?') }
+        assertEquals(listOf("/api/v1/sessions/ses_41b2", "/api/v1/sessions"), asked, "the list tells the two apart")
+        assertTrue(waits.isEmpty(), "nothing followed")
+    }
+
+    @Test
+    fun yourOnlySessionIsYourLastAndAGateWithoutItsRequestIsShownByItsId() {
+        signIn("/home/maya/.config/ostrom")
+        val routes = mapOf(
+            "GET /api/v1/sessions?dev=maya" to (200 to """{"items":[{"id":"ses_41b2"}]}"""),
+            "GET $session" to (200 to ended),
+            "GET /api/v1/gates/g_7d1e" to (200 to "{}"),
+        )
+        assertEquals(0, serving(routes).run(arrayOf("logs")))
+        assertOut("          asked for a yes    g_7d1e\n")
     }
 
     @Test
@@ -164,7 +193,11 @@ class LogsCommandTest : CliKit() {
         assertEquals(0, serving(mapOf("GET $session" to (200 to odd))).run(arrayOf("logs", "ses_41b2")))
         assertOut("          asked for a yes    g_gone\n")
         val refused = mapOf("GET $session" to (200 to odd), "GET /api/v1/gates/g_gone" to (403 to "{}"))
-        assertEquals(77, serving(refused).run(arrayOf("logs", "ses_41b2")), "a refusal is not a gate gone")
+        console.out.clear()
+        assertEquals(0, serving(refused).run(arrayOf("logs", "ses_41b2")), "a token that may not read gates")
+        assertOut("          asked for a yes    g_gone\n")
+        val signedOut = mapOf("GET $session" to (200 to odd), "GET /api/v1/gates/g_gone" to (401 to "{}"))
+        assertEquals(65, serving(signedOut).run(arrayOf("logs", "ses_41b2")), "signed out stops")
         console.out.clear()
         assertEquals(0, serving(mapOf("GET /api/v1/sessions/s0" to (200 to "{}"))).run(arrayOf("logs", "s0")))
         val bare = "Session ?\n          session started\nStill running. Follow it: ostrom logs s0 --follow\n"

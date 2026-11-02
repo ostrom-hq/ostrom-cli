@@ -33,14 +33,14 @@ private val INSTANT = Regex("""^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})""")
 internal data class ThreadLine(val at: String, val what: String, val detail: String, val event: String) {
     /** `14:02:11  session started   Claude Code · harness 2026.10.30-3`, the time in UTC as the server keeps it. */
     fun render(): String {
-        val clock = INSTANT.find(at)?.groupValues?.get(2) ?: at
+        val clock = INSTANT.find(at)?.let { it.groupValues[2] } ?: at
         return "${clock.padEnd(CLOCK)}  ${what.padEnd(WHAT)}  $detail".trimEnd()
     }
 }
 
 /** `Session ses_41b2 · claude · acme/api · @maya-k · 2026-10-30 UTC`: the head of the thread of [session]. */
 internal fun heading(session: JsonObject): String {
-    val day = session.text("startedAt")?.let { INSTANT.find(it) }?.groupValues?.get(1)?.let { "$it UTC" }
+    val day = session.text("startedAt")?.let { INSTANT.find(it) }?.let { "${it.groupValues[1]} UTC" }
     val parts = listOfNotNull(session.text("agent"), session.text("repo"), session.text("dev")?.let { "@$it" }, day)
     return (listOf("Session ${session.text("id") ?: "?"}") + parts).joinToString(" · ")
 }
