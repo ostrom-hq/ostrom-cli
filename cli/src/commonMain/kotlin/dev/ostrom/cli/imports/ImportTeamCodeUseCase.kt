@@ -185,28 +185,34 @@ class ImportTeamCodeUseCase(
         is ServerAnswer.Failed -> throw stopOf(answer, cutover)
     }
 
-    private fun stopOf(failed: ServerAnswer.Failed, cutover: Boolean): Stop = when {
+    private fun stopOf(failed: ServerAnswer.Failed, cutover: Boolean): Stop {
         // the cutover may have rotated tokens before the answer was lost: its plan says what still waits
-        failed.status == null && cutover -> Stop(
+        val status = failed.status ?: return Stop(
             ExitCode.UNREACHABLE,
-            "Ostrom did not answer (${failed.message}): the cutover may have run in part. " +
-                "Run the same command again: its plan shows the accounts that still wait.",
+            if (cutover) {
+                "Ostrom did not answer (${failed.message}): the cutover may have run in part. " +
+                    "Run the same command again: its plan shows the accounts that still wait."
+            } else {
+                "Ostrom is unreachable (${failed.message})."
+            },
         )
-        failed.status == null -> Stop(ExitCode.UNREACHABLE, "Ostrom is unreachable (${failed.message}).")
-        cutover && failed.status == FORBIDDEN -> Stop(
-            ExitCode.REFUSED,
-            "Ostrom refused (${failed.message}): the cutover is the owner's, with their own console token.",
-        )
-        cutover && failed.status == UNAVAILABLE -> Stop(
-            ExitCode.FAILED,
-            "Ostrom cannot run the cutover now (${failed.message}): it needs the server's audit log and " +
-                "shared accounts.",
-        )
-        failed.status == UNAUTHORIZED || failed.status == FORBIDDEN -> Stop(
-            ExitCode.REFUSED,
-            "Ostrom refused (${failed.message}): the import needs an owner's or admin's console token (import:write).",
-        )
-        else -> Stop(ExitCode.FAILED, "Ostrom answered ${failed.status}: ${failed.message}")
+        return when {
+            cutover && status == FORBIDDEN -> Stop(
+                ExitCode.REFUSED,
+                "Ostrom refused (${failed.message}): the cutover is the owner's, with their own console token.",
+            )
+            cutover && status == UNAVAILABLE -> Stop(
+                ExitCode.FAILED,
+                "Ostrom cannot run the cutover now (${failed.message}): it needs the server's audit log and " +
+                    "shared accounts.",
+            )
+            status == UNAUTHORIZED || status == FORBIDDEN -> Stop(
+                ExitCode.REFUSED,
+                "Ostrom refused (${failed.message}): the import needs an owner's or admin's console token " +
+                    "(import:write).",
+            )
+            else -> Stop(ExitCode.FAILED, "Ostrom answered $status: ${failed.message}")
+        }
     }
 
     /** Ends the import with [code]. */
