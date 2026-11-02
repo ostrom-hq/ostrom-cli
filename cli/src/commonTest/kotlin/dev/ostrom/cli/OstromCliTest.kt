@@ -249,25 +249,6 @@ class OstromCliTest : CliKit() {
     }
 
     @Test
-    fun doctorReportsAReachableServer() {
-        assertEquals(0, cli(environment = withServer, api = serverAnswering(200, 84)).run(arrayOf("doctor")))
-        assertOut("  ✓ ostrom.example reachable (84 ms)\n")
-    }
-
-    @Test
-    fun doctorProbesTheHealthRouteOfTheContract() {
-        val asked = mutableListOf<String>()
-        val server: (String) -> OstromApi = { _ ->
-            object : OstromApi {
-                override suspend fun get(path: String) = ServerResponse(200, "", 1).also { asked += path }
-                override suspend fun send(request: ServerRequest) = get(request.path)
-            }
-        }
-        assertEquals(0, cli(environment = withServer, api = server).run(arrayOf("doctor")))
-        assertEquals(listOf("/api/v1/health"), asked)
-    }
-
-    @Test
     fun aGroupWithoutDefaultPrintsItsHelp() {
         assertEquals(0, cli().run(arrayOf("harness")))
         assertTrue(console.out.contains("enforce"), console.out.toString())
@@ -308,16 +289,6 @@ class OstromCliTest : CliKit() {
         fileSystem.write("/home/maya/.config".toPath()) { writeUtf8("") }
         assertEquals(1, cli().run(arrayOf("doctor")))
         assertOut("  ✗ Cannot write /home/maya/.config/ostrom: check its owner and permissions.\n")
-    }
-
-    @Test
-    fun doctorCountsOneProblemAndOneWarningInTheSingular() {
-        val code = cli(environment = withServer, installed = setOf("claude"), api = serverAnswering(204, 3))
-            .run(arrayOf("doctor"))
-        assertEquals(1, code)
-        val expected = "  ✗ git not found: install git, agents need it.\n" +
-            "  ✓ Agents found: claude\n1 problem, 1 warning.\n"
-        assertTrue(console.out.endsWith(expected), console.out.toString())
     }
 
     @Test

@@ -271,6 +271,12 @@ class CloudSessionUseCaseTest {
         on("POST /api/v1/cloud/sessions", 402 to """{"error":{"type":"plan","message":"no cloud hours left"}}""")
         assertEquals(1, useCase().start(claude, "device"))
         assertEquals("ostrom: no cloud hours left", said.last())
+        on("POST /api/v1/cloud/sessions", 409 to """{"error":{"type":"org_required","message":"Name it"}}""")
+        assertEquals(64, useCase().start(claude, "device"), "a member of several organisations names one")
+        assertEquals(
+            "ostrom: you are a member of several organisations: add --org <name>, set OSTROM_ORG, or run `ostrom init`",
+            said.last(),
+        )
     }
 
     @Test

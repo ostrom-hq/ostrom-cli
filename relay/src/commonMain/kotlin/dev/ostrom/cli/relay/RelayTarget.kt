@@ -31,8 +31,14 @@ internal sealed interface RelayTarget {
     data object NotFound : RelayTarget
 }
 
-/** One path segment of an identifier: no dot, so no `..`, and no encoded character. */
+/** One path segment of a gate's identifier: no dot, so no `..`, and no encoded character. */
 private const val ID = "[A-Za-z0-9_-]{1,128}"
+
+/**
+ * One path segment of a session: the agent's id as ostrom-server's `SessionSegments` accepts it (`.` and `:` in it),
+ * and `~r<n>` after it for a reopened one. Never a dot first, so never `.` nor `..`.
+ */
+private const val SESSION = "[A-Za-z0-9_:~-][A-Za-z0-9_.:~-]{0,127}"
 private const val API_PREFIX = "/api/v1/"
 private const val MCP_PREFIX = "/mcp/"
 private const val GATE_CATALOG = "/api/v1/gates/catalog"
@@ -47,7 +53,7 @@ private const val SIGNED_GATE_CATALOG = "/api/v1/gates/catalog/signed"
  * file is readable by the agent's own user (S2-20), so a report is the developer machine's word, never a proof.
  * Reading check runs (`GET /api/v1/checks`) is the console's, not a hook's: not on this list.
  */
-private val HOOK_POST = Regex("/api/v1/(sessions|gates|notifications|checks)|/api/v1/sessions/$ID/(reopen|seen)")
+private val HOOK_POST = Regex("/api/v1/(sessions|gates|notifications|checks)|/api/v1/sessions/$SESSION/(reopen|seen)")
 private val HOOK_GET = Regex("/api/v1/gates/$ID")
 
 /** An MCP server name, as the server accepts it. */
