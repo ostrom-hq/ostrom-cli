@@ -374,7 +374,12 @@ class Journey:
             self.begin("5.3 cleanup", "the gating workflow, removed on the console")
             status, body, _ = self.call("DELETE", f"/api/v1/workflows/{gated}", session=self.owner_signed_in(maya),
                                         org=self.org_id)
-            self.check(status in (200, 204), f"the owner removes it ({status}): {error_of(body)[:200]}")
+            if status == 409 and "workflow_in_use" in json.dumps(body):
+                # the session's package pinned it: the server keeps a compiled workflow, and the stamp keeps runs apart
+                print(f"  note  the gating workflow stays, pinned by the session's package: {error_of(body)[:200]}",
+                      flush=True)
+            else:
+                self.check(status in (200, 204), f"the owner removes it ({status}): {error_of(body)[:200]}")
 
         if self.invitee:
             self.begin("2.6", "ostrom members remove")
