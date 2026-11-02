@@ -55,6 +55,8 @@ class Journey:
         self.org_resolved = False
         self.invitee = None
         self.owner = None
+        self.org_id = None
+        self.owner_session = None
         self.temporary = options.work is None
 
     # ---- what the run says -------------------------------------------------------------------------------------
@@ -268,6 +270,7 @@ class Journey:
         org = next((o for o in (orgs or {}).get("items", []) if o.get("id") == seeded.get("organizationId")), None)
         if not self.check(org is not None, "the owner's organisation is listed"):
             return
+        self.org_id = org["id"]
         # A token made on the console is bound to no organisation: the server reads which one from Ostrom-Org.
         status, body, _ = self.call("GET", "/api/v1/workflows", token=maya["token"], org=org["id"])
         self.org_resolved = 200 <= status < 300
@@ -368,9 +371,10 @@ class Journey:
         if gated:
             if seen is not None:
                 self.gate(maya, tom_email, seen)
-            self.begin("5.3 cleanup", "the gating workflow, removed")
-            done = self.ostrom(maya, "harness", "remove", gated, "--yes", console=True)
-            self.check(done.returncode == 0, f"harness remove ({done.returncode}): {done.stderr.strip()[:300]}")
+            self.begin("5.3 cleanup", "the gating workflow, removed on the console")
+            status, body, _ = self.call("DELETE", f"/api/v1/workflows/{gated}", session=self.owner_signed_in(maya),
+                                        org=self.org_id)
+            self.check(status in (200, 204), f"the owner removes it ({status}): {error_of(body)[:200]}")
 
         if self.invitee:
             self.begin("2.6", "ostrom members remove")
@@ -462,9 +466,24 @@ class Journey:
         workflow = next((w for w in (read_json(listed.stdout) or {}).get("items", []) if w.get("name") == name), None)
         if not self.check(workflow is not None, f"harness list shows it ({listed.returncode})"):
             return None
-        done = self.ostrom(maya, "harness", "enforce", workflow["id"], console=True)
-        self.check(done.returncode == 0, f"harness enforce ({done.returncode}): {done.stderr.strip()[:300]}")
+        # only a person signed in to the console enforces a workflow: the owner's browser session, as the console does
+        session = self.owner_signed_in(maya)
+        path = f"/api/v1/workflows/{workflow['id']}"
+        status, current, _ = self.call("GET", path, session=session, org=self.org_id) if session else (0, None, None)
+        if not self.check(status == 200, f"the console reads it ({status})"):
+            return None
+        document = {k: v for k, v in current.items() if k not in ("version", "updatedBy", "updatedAt")}
+        enforced = {"workflow": {**document, "status": "accepted"}, "expectedVersion": current.get("version")}
+        status, body, _ = self.call("PUT", path, enforced, session=session, org=self.org_id)
+        self.check(status in (200, 201, 204), f"the owner enforces it on the console ({status}): "
+                                              f"{error_of(body)[:200]}")
         return workflow["id"]
+
+    def owner_signed_in(self, maya):
+        """The owner's browser session, signed in once."""
+        if self.owner_session is None:
+            self.owner_session = self.sign_in(maya["email"])
+        return self.owner_session
 
     def gate(self, maya, tom_email, seen):
         """5.3 to 5.7: the deployment held, the asker's yes refused, the second person's yes, the wait, the receipt."""
@@ -508,7 +527,7 @@ class Journey:
         answer = {"answer": "approve", "shownDigest": approval.get("shownDigest", ""), "note": "go"}
 
         self.begin("5.6", "the asker's own yes is refused (self-approval never)")
-        owner_session = self.sign_in(maya["email"])
+        owner_session = self.owner_signed_in(maya)
         if owner_session:
             status, body, _ = self.call("POST", f"/api/v1/approvals/{approval['id']}/answer", answer,
                                         session=owner_session)
