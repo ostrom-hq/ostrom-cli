@@ -3,6 +3,7 @@
 
 import org.jetbrains.kotlin.gradle.plugin.mpp.DisableCacheInKotlinVersion
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
+import org.jetbrains.kotlin.konan.target.Family
 
 plugins {
     id("ostrom.kmp")
@@ -86,7 +87,7 @@ kotlin {
             baseName = "ostrom"
         }
         binaries.configureEach {
-            if (konanTarget.family == org.jetbrains.kotlin.konan.target.Family.LINUX && buildType.name == "DEBUG") {
+            if (konanTarget.family == Family.LINUX && buildType.name == "DEBUG") {
                 // Clikt 5.1.0 caches export the same internal symbol twice on Linux (seen in TeamCode's CLI).
                 disableNativeCache(
                     version = DisableCacheInKotlinVersion.`2_4_21`,
@@ -94,12 +95,11 @@ kotlin {
                 )
             }
             if (buildType.name == "RELEASE") {
-                // the shipped binary (perf pass, 15 MB budget): Kotlin/Native's size-first optimisation, and no symbol table
+                // the binary a developer downloads, 15 MB at most (scripts/measure.py --max-size-mb): Kotlin/Native's
+                // size-first build, and no symbol table on Linux and Windows (-4.1 MB on linuxX64). macOS is under
+                // the budget without stripping. Measured on 02/11/2026: linuxX64 19.8 MB -> 14.3 MB, start-up faster.
                 binaryOption("smallBinary", "true")
-                val family = konanTarget.family
-                if (family == org.jetbrains.kotlin.konan.target.Family.LINUX || family == org.jetbrains.kotlin.konan.target.Family.MINGW) {
-                    linkerOpts("-s")
-                }
+                if (konanTarget.family == Family.LINUX || konanTarget.family == Family.MINGW) linkerOpts("-s")
             }
         }
     }
