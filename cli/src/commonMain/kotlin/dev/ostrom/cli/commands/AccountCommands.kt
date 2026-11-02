@@ -108,16 +108,24 @@ internal class LoginCommand(private val dependencies: CliDependencies) : CliktCo
         }
         when (val outcome = runBlocking { login.signIn(serverUrl, scopes) }) {
             is LoginOutcome.Stopped -> throw PrintMessage(outcome.message, outcome.exitCode, printError = true)
-            is LoginOutcome.SignedIn -> if (admin) keepAdmin(directory, serverUrl, outcome) else {
-                keep(directory) {
-                    dependencies.credentials(directory).save(serverUrl, outcome.credentials)
-                    ConfigStoreImpl(dependencies.files, dependencies.configFile(directory))
-                        .set(ConfigKey.SERVER, serverUrl)
-                }
-                dependencies.console.out("✓ Signed in as @${outcome.credentials.login} on $serverUrl\n")
-                dependencies.console.out("Next: cd into a repository and run ostrom claude\n")
-            }
+            is LoginOutcome.SignedIn ->
+                if (admin) keepAdmin(directory, serverUrl, outcome) else keepDevice(directory, serverUrl, outcome)
         }
+    }
+
+    /** Keeps the device's token and the server. */
+    private fun keepDevice(directory: String, serverUrl: String, outcome: LoginOutcome.SignedIn) {
+        keep(directory) {
+            dependencies.credentials(directory).save(serverUrl, outcome.credentials)
+            ConfigStoreImpl(dependencies.files, dependencies.configFile(directory)).set(ConfigKey.SERVER, serverUrl)
+        }
+        dependencies.console.out("✓ Signed in as @${outcome.credentials.login} on $serverUrl\n")
+        dependencies.console.out("Next: cd into a repository and run ostrom claude\n")
+    }
+
+    /** Revokes [token] on [serverUrl], as best it can: its answer changes nothing here. */
+    private suspend fun signedOut(serverUrl: String, token: String) {
+        ServerJson(ApiServerTransport(dependencies.api(serverUrl))).post(LOGOUT_PATH, objectOf(), token)
     }
 
     /**
@@ -126,15 +134,27 @@ internal class LoginCommand(private val dependencies: CliDependencies) : CliktCo
      */
     private fun keepAdmin(directory: String, serverUrl: String, outcome: LoginOutcome.SignedIn) {
         val missing = AdminTokens.SCOPES - outcome.scopes.toSet()
-        if (missing.isNotEmpty()) {
-            val message = "ostrom: $serverUrl did not grant ${missing.joinToString(", ")}: it does not serve " +
-                "ostrom login --admin yet. Nothing was kept."
-            throw PrintMessage(message, ExitCode.UNREACHABLE.code, printError = true)
-        }
-        val latest = dependencies.clock() + AdminTokens.MAX_MILLIS
+        val now = dependencies.clock()
+        val latest = now + AdminTokens.MAX_MILLIS
         val until = minOf(outcome.expiresAt?.let(::millisOf) ?: latest, latest)
+        val refusal = when {
+            missing.isNotEmpty() -> "$serverUrl did not grant ${missing.joinToString(", ")}: it does not serve " +
+                "ostrom login --admin yet."
+            until <= now -> "$serverUrl answered a token that has already expired (check this machine's clock)."
+            else -> null
+        }
+        if (refusal != null) {
+            // the token is of no use here: the server is told, so that it does not stay open on it
+            runBlocking { signedOut(serverUrl, outcome.credentials.token) }
+            throw PrintMessage("ostrom: $refusal Nothing was kept.", ExitCode.UNREACHABLE.code, printError = true)
+        }
         keep(directory) { dependencies.adminTokens(directory).save(serverUrl, outcome.credentials.token, until) }
         val login = outcome.credentials.login
+        val device = dependencies.credentials(directory).saved(serverUrl)?.login
+        if (device != null && device != login) {
+            dependencies.console.err("! The admin token is @$login's, not @$device's (this device): the policy and " +
+                "the harness change in @$login's name.\n")
+        }
         val instant = Instant.fromEpochMilliseconds(until)
         dependencies.console.out("✓ Admin token for @$login on $serverUrl until $instant, never renewed.\n")
         dependencies.console.out("It changes the policy and the harness: ostrom policy set, ostrom harness enforce\n")
@@ -176,25 +196,25 @@ internal class LogoutCommand(private val dependencies: CliDependencies) : CliktC
         val store: CredentialStore = dependencies.credentials(directory)
         // the saved entry, never OSTROM_TOKEN: a CI token in the environment is not this device's session
         val credentials = store.saved(serverUrl)
-        // the admin token of ostrom login --admin goes too, revoked with the device's session when there is one
+        // the admin token of ostrom login --admin goes too: revoked first (as best it can), then forgotten
         val tokens = dependencies.adminTokens(directory)
         val admin = tokens.valid(serverUrl)
-        tokens.forget(serverUrl)
         if (inClear(serverUrl)) {
-            // signed out here all the same: the token is forgotten, only the server is not told
+            // signed out here all the same: the tokens are forgotten, only the server is not told
+            tokens.forget(serverUrl)
             store.forget(serverUrl)
             refuseInClear(serverUrl, "the token")
         }
+        val api = ServerJson(ApiServerTransport(dependencies.api(serverUrl)))
+        if (admin != null) runBlocking { api.post(LOGOUT_PATH, objectOf(), admin) }
+        tokens.forget(serverUrl)
         if (credentials == null) {
             // S2-32: a token left only in the other store (the encrypted file of an SSH session) is forgotten too
             store.forget(serverUrl)
             dependencies.console.out("Not signed in. Nothing to do.\n")
             throw ProgramResult(ExitCode.OK.code)
         }
-        val api = ServerJson(ApiServerTransport(dependencies.api(serverUrl)))
-        val answer = runBlocking { api.post(LOGOUT, objectOf(), credentials.token) }
-        // the admin token is revoked as best it can: it expires on its own within 8 hours anyway
-        if (admin != null) runBlocking { api.post(LOGOUT, objectOf(), admin) }
+        val answer = runBlocking { api.post(LOGOUT_PATH, objectOf(), credentials.token) }
         store.forget(serverUrl)
         // a session already expired or revoked (401) has nothing left to revoke
         if (answer is ServerAnswer.Failed && answer.status != UNAUTHORIZED) {
@@ -206,12 +226,14 @@ internal class LogoutCommand(private val dependencies: CliDependencies) : CliktC
     }
 
     private companion object {
-        const val LOGOUT = "/api/v1/auth/logout"
         const val UNAUTHORIZED = 401
     }
 }
 
 private const val DEFAULT_SERVER = "https://api.ostrom.run"
+
+/** `POST`: revokes the token it is sent with (served). */
+private const val LOGOUT_PATH = "/api/v1/auth/logout"
 
 /**
  * The signed-in device for a command that reads or writes on the server.

@@ -133,13 +133,15 @@ keeps running: `ostrom attach <id>`), 77 for a session of someone else.
   `ostrom inbox --json` and `ostrom receipts list --json` are an array of the server's items as they are (the
   `items` of their route in the API contract). `JsonOutputTest` and `ReceiptCommandsTest` hold these shapes.
 - **Errors**: say what happened and the command that gets you out (`ostrom login`, `ostrom doctor`, `--server`).
-- **Governance writes** (`ostrom policy set`, `ostrom harness enforce`, `update`, `remove`, `add --enforce`) never go
-  with the device's token nor a console token (S2-52): they take the token of `ostrom login --admin`, which asks for
+- **Governance writes** (`ostrom policy set`, the rule decisions and edits of `ostrom policy rules`, `ostrom harness
+  enforce`, `update`, `remove`, `add --enforce`) never go with the device's token nor a console token (S2-52): they take the token of `ostrom login --admin`, which asks for
   `policy:write`, `harness:write` and `gates:policy` (`AdminTokens.SCOPES`), shown and approved in the browser by an
   owner or admin. It is kept apart from the device's token (`<server>#admin` in the secret store, its expiry in
   `admin.json`), lasts until the server's expiry or 8 hours, the sooner, and is never renewed. Without a valid one, a
-  403 is exit 77 saying to run `ostrom login --admin`; a 401 to it forgets it (exit 65). `ostrom logout` revokes and
-  forgets it too. A server that does not grant all three scopes yet gets nothing kept (exit 69).
+  403 is exit 77 saying to run `ostrom login --admin`; a 401 to it forgets it (exit 65). `OSTROM_TOKEN`, set on purpose,
+  is never swapped for it. `ostrom logout` revokes and forgets it too, with or without the device's token. A token
+  without all three scopes (a server that does not serve `--admin` yet), or already expired, is revoked and not kept
+  (exit 69); one approved by another person than the device's is kept, and said.
 
 ## Add a command
 

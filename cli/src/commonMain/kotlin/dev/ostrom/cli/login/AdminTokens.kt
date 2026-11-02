@@ -27,10 +27,12 @@ class AdminTokens(
     private val store by lazy(secrets)
 
     /**
-     * Keeps [token] for [server] until [expiresAtMillis]: the expiry first, so that a token in the secret store always
-     * has its entry, and [forget] reaches it.
+     * Keeps [token] for [server] until [expiresAtMillis]. The token it replaces goes first, and the expiry is written
+     * before the new token: a store that fails midway leaves an expiry without a token (no admin token), never an old
+     * token with a new expiry, nor a token [forget] cannot reach.
      */
     fun save(server: String, token: String, expiresAtMillis: Long) {
+        store.delete(nameOf(server))
         files.write(path, JsonObject(all() + (server to JsonPrimitive(expiresAtMillis))).toString())
         store.write(nameOf(server), token)
     }
@@ -52,8 +54,8 @@ class AdminTokens(
     fun forget(server: String) {
         val all = all()
         if (server in all) {
-            store.delete(nameOf(server))
             files.write(path, JsonObject(all - server).toString())
+            store.delete(nameOf(server))
         }
     }
 

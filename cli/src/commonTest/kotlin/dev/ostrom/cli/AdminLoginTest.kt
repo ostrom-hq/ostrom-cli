@@ -43,6 +43,10 @@ class AdminLoginTest : SetupKit() {
 
     @Test
     fun loginAdminAsksForTheGovernanceScopesAndKeepsTheTokenApart() {
+        // no device token yet: the admin token alone, nobody else's to warn about
+        assertEquals(0, login(admin(null)))
+        assertFalse(console.err.contains("The admin token is"), console.err.toString())
+        assertEquals(null, secretsKept[server])
         signIn(home)
         assertEquals(0, login(admin("1970-01-12T00:00:00Z")))
         val start = requests.first { it.second.path == "/api/v1/auth/device" }.second
@@ -56,6 +60,9 @@ class AdminLoginTest : SetupKit() {
         assertOut("✓ Admin token for @maya-k on $server until 1970-01-11T08:00:00Z, never renewed.\n")
         assertOut("It changes the policy and the harness: ostrom policy set, ostrom harness enforce\n")
         assertFalse(console.out.contains("ost_adm"), "the token is never printed")
+        // approved in a browser signed in as someone else than this device: said
+        assertTrue(console.err.contains("! The admin token is @maya-k's, not @maya's (this device): the policy and " +
+            "the harness change in @maya-k's name."), console.err.toString())
         // a sooner expiry is the server's; one that is not an instant, or none, is 8 hours
         assertEquals(0, login(admin("1970-01-11T01:00:00Z")))
         assertEquals("""{"$server":${now + hour}}""", adminFile())
@@ -63,9 +70,12 @@ class AdminLoginTest : SetupKit() {
             assertEquals(0, login(admin(expiry)))
             assertEquals("""{"$server":${now + 8 * hour}}""", adminFile())
         }
-        // the ordinary sign-in asks for no scope
+        // the ordinary sign-in asks for no scope; the same person then gets no warning
         assertEquals(0, cli(environment = withServer, api = serverOf(deviceFlow)).run(arrayOf("login")))
         assertEquals("{}", requests.last { it.second.path == "/api/v1/auth/device" }.second.body)
+        console.err.clear()
+        assertEquals(0, login(admin(null)))
+        assertFalse(console.err.contains("The admin token is"), console.err.toString())
     }
 
     @Test
@@ -79,6 +89,15 @@ class AdminLoginTest : SetupKit() {
         }
         assertTrue(console.err.contains("did not grant gates:policy:"), console.err.toString())
         assertEquals(null, secretsKept[adminSecret])
+        assertEquals(null, adminFile())
+        // the token it was answered is revoked, not left open on the server
+        val revoked = requests.filter { it.second.path == "/api/v1/auth/logout" }.map { it.second.token }
+        assertEquals(listOf("ost_adm", "ost_adm"), revoked)
+        // a token already expired (a clock ahead, a server behind) is kept no more
+        console.err.clear()
+        assertEquals(69, login(admin("1970-01-10T23:00:00Z")))
+        assertTrue(console.err.contains("answered a token that has already expired (check this machine's clock). " +
+            "Nothing was kept."), console.err.toString())
         assertEquals(null, adminFile())
         // nor is a refused sign-in
         val denied = 400 to """{"error":{"type":"access_denied"}}"""
@@ -131,9 +150,12 @@ class AdminLoginTest : SetupKit() {
         fileSystem.write(adminFile.toPath()) { writeUtf8("""{"$server":"tomorrow"}""") }
         assertEquals(77, run(refused, "policy", "set", "self-approval", "never"))
         assertEquals("ost_1", requests.last().second.token)
+        // a console token set on purpose is never swapped for a valid admin token, and is refused all the same (S2-52)
         console.err.clear()
+        keptAdmin(now + hour)
         assertEquals(77, run(refused, "policy", "set", "self-approval", "never", environment = withServer +
             ("OSTROM_TOKEN" to "ost_console")))
+        assertEquals("ost_console", requests.last().second.token)
         assertErr(elevate)
     }
 
@@ -161,8 +183,24 @@ class AdminLoginTest : SetupKit() {
         keptAdmin(now + hour)
         val logout = mapOf("POST /api/v1/auth/logout" to (204 to ""))
         assertEquals(0, cli(environment = withServer, api = serverOf(logout)).run(arrayOf("logout")))
-        assertEquals(listOf("ost_1", "ost_adm"), requests.map { it.second.token })
+        assertEquals(listOf("ost_adm", "ost_1"), requests.map { it.second.token })
         assertEquals(null, secretsKept[adminSecret])
         assertEquals("{}", adminFile())
+        // an admin token alone, without the device's: revoked and forgotten all the same
+        requests.clear()
+        keptAdmin(now + hour)
+        assertEquals(0, cli(environment = withServer, api = serverOf(logout)).run(arrayOf("logout")))
+        assertEquals(listOf("ost_adm"), requests.map { it.second.token })
+        assertOut("Not signed in. Nothing to do.\n")
+        assertEquals(null, secretsKept[adminSecret])
+        // a server in clear is not told: both tokens are forgotten here
+        requests.clear()
+        signIn(home, server = "http://ostrom.example")
+        fileSystem.write(adminFile.toPath()) { writeUtf8("""{"http://ostrom.example":${now + hour}}""") }
+        secretsKept["http://ostrom.example#admin"] = "ost_adm"
+        val clear = mapOf("HOME" to "/home/maya", "OSTROM_URL" to "http://ostrom.example")
+        assertEquals(64, cli(environment = clear, api = serverOf(logout)).run(arrayOf("logout")))
+        assertTrue(requests.isEmpty())
+        assertEquals(null, secretsKept["http://ostrom.example#admin"])
     }
 }

@@ -63,9 +63,9 @@ internal class OrgAccess(
      * Sends a change; a 403 to the device's token says what the device cannot do and where it is done instead, since
      * `ostrom login`'s token never holds an organisation's write scopes (S2-04).
      *
-     * A [governance] write (the policy, the harness) goes with the token of `ostrom login --admin` while it is valid:
-     * no other token writes the governance (S2-52, decision of 02/11/2026). Without one, a 403 says to run it; a 401
-     * to it (revoked, or expired on the server) forgets it and says the same.
+     * A [governance] write (the policy, its rules, the harness) goes with the token of `ostrom login --admin` while it
+     * is valid: no other token writes the governance (S2-52, decision of 02/11/2026). Without one, a 403 says to run
+     * it; a 401 to it (revoked, or expired on the server) forgets it and says the same.
      */
     fun write(
         method: String,
@@ -74,7 +74,8 @@ internal class OrgAccess(
         notFound: String,
         governance: Boolean = false,
     ): JsonObject {
-        val elevated = if (governance) admin.valid(signed.serverUrl) else null
+        // OSTROM_TOKEN, set on purpose, is the token the change goes with: never swapped for the admin token
+        val elevated = if (governance && !consoleToken) admin.valid(signed.serverUrl) else null
         val answer = runBlocking { server.call(method, path, body, elevated ?: signed.token, WRITE_MILLIS) }
         if (answer is ServerAnswer.Failed) refused(answer, governance, elevated)
         return answer.orStop(signed.serverUrl, notFound)
