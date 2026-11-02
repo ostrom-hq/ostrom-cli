@@ -294,7 +294,10 @@ class Journey:
         self.check(said.get("organization") == org.get("name"),
                    f"in the owner's organisation ({said.get('organization')})")
         self.check(said.get("repository") == "acme-api", f"in this repository ({said.get('repository')})")
-        self.check(said.get("server") == self.server and said.get("version"), "on this server, with this version")
+        self.check(said.get("server") == self.server, f"on this server ({said.get('server')})")
+        self.check(bool(said.get("version")), f"with this version ({said.get('version')})")
+        missing = sorted(STATUS_KEYS - said.keys())
+        self.check(not missing, f"with every key, null when unknown (missing: {missing})")
         text = self.ostrom(maya, "status")
         self.check(text.returncode == 0 and text.stdout.startswith(f"Signed in   @{said.get('login')}"),
                    f"and says it in words ({text.returncode}): {text.stdout.strip()[:200]}")
@@ -398,8 +401,10 @@ class Journey:
                 self.check(status in (200, 204), f"the owner removes it ({status}): {error_of(body)[:200]}")
 
         self.begin("6.1", "ostrom logs: the thread of the session that just ran")
-        if self.needs(("POST", "/api/v1/sessions"), ("GET", "/api/v1/sessions"), org=True):
-            self.logs(maya)
+        # the session read is the one ostrom claude just ran: the routes of 5.2 too
+        if self.needs(("GET", "/api/v1/policy/agents"), ("POST", "/api/v1/launches"), ("POST", "/api/v1/sessions"),
+                      ("GET", "/api/v1/sessions"), org=True):
+            self.logs(maya, gated)
 
         if self.invitee:
             self.begin("2.6", "ostrom members remove")
@@ -407,7 +412,7 @@ class Journey:
             self.check(done.returncode == 0, f"a console token removes @{self.invitee} ({done.returncode}): "
                                              f"{done.stderr.strip()[:300]}")
 
-    def logs(self, maya):
+    def logs(self, maya, gated):
         last = self.ostrom(maya, "logs", "--json")
         thread = read_json(last.stdout) or {}
         session = thread.get("session") or {}
@@ -415,19 +420,28 @@ class Journey:
                           f"ostrom logs --json reads the developer's last session ({last.returncode}): "
                           f"{(last.stderr or last.stdout).strip()[:300]}"):
             return
-        self.check(isinstance(thread.get("gates"), list), f"with the requests for a yes it asked "
-                                                          f"({len(thread.get('gates') or [])})")
+        gates = thread.get("gates") or []
+        if gated:
+            self.check(len(gates) > 0, f"with the request for a yes it asked ({len(gates)})")
         shown = self.ostrom(maya, "logs", session["id"])
         lines = shown.stdout.splitlines()
         self.check(shown.returncode == 0 and lines[:1] and lines[0].startswith(f"Session {session['id']}"),
                    f"ostrom logs {session['id']} heads its thread ({shown.returncode}): {shown.stderr.strip()[:300]}")
         self.check(any("session started" in line for line in lines), "from its start")
-        if session.get("endedAt"):
-            self.check(any("session ended" in line for line in lines), "to its end")
-            # on a session still open, -f waits for its end: only an ended one is followed here
+        if gated:
+            self.check(any("asked for a yes" in line for line in lines), "through the request for a yes")
+        # ostrom claude has returned: the session is over, and -f on it must print and return, not wait
+        if not self.check(session.get("endedAt") and any("session ended" in line for line in lines),
+                          f"to its end ({session.get('endedAt')})"):
+            return
+        try:
             followed = self.ostrom(maya, "logs", session["id"], "-f", timeout=60)
-            self.check(followed.returncode == 0 and followed.stdout == shown.stdout,
-                       f"-f on an ended session prints the same thread and returns ({followed.returncode})")
+        except subprocess.TimeoutExpired:
+            self.check(False, "-f on an ended session returns (it was still waiting after 60 s)")
+            return
+        tail = followed.stdout.splitlines()
+        self.check(followed.returncode == 0 and tail[:1] == lines[:1] and any("session ended" in t for t in tail),
+                   f"-f on an ended session prints its thread to the end and returns ({followed.returncode})")
         gone = self.ostrom(maya, "logs", f"ses_none_{self.stamp}")
         self.check(gone.returncode == 66, f"a session that does not exist is 66 ({gone.returncode})")
 
@@ -684,6 +698,9 @@ class Journey:
 
 
 CODE = re.compile(r"one-time code: (\S+)")
+# what ostrom status --json always holds (CLI.md principle 6: null when unknown, never missing)
+STATUS_KEYS = {"login", "organization", "role", "server", "repository", "harness", "waiting", "waitingComplete",
+               "version", "pinnedKey"}
 ORG_HEADER = "Ostrom-Org (the organisation of a token bound to none, server#64)"
 
 
