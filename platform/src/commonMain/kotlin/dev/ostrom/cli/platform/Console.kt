@@ -32,12 +32,18 @@ sealed interface StandardInput {
 /**
  * The standard streams, written to directly (no buffer to flush before exit): a hook answers on stdout and exits
  * within milliseconds, and the MCP server must never mix logs into its JSON-RPC stream.
+ *
+ * Two kinds of text (security audits M2 and L8). What is written for a person ([out], [err]) holds what others wrote (a
+ * commit title, a server's message, an organisation's name) and is cleaned by [terminalSafe] wherever it goes: a
+ * terminal, or a pipe or a file a person reads later (`| cat`, `| tee`, `> log`). What is written for a program
+ * ([data], [dataErr]: `--json`, a hook's answer, the MCP stream) goes as it is: a program needs the exact bytes, and
+ * whoever shows them to a person cleans them.
  */
 interface Console {
-    /** Writes [text] to stdout as UTF-8, as is (no newline added; on a terminal, [terminalSafe]). */
+    /** Writes [text] for a person to stdout as UTF-8 (no newline added), cleaned by [terminalSafe]. */
     fun out(text: String)
 
-    /** Writes [text] to stderr as UTF-8, as is (no newline added; on a terminal, [terminalSafe]). */
+    /** Writes [text] for a person to stderr as UTF-8 (no newline added), cleaned by [terminalSafe]. */
     fun err(text: String)
 
     /**
@@ -68,12 +74,10 @@ interface Console {
 }
 
 /**
- * [Console] over the file descriptors (POSIX) or the standard handles (Windows). What goes to a terminal is cleaned
- * ([terminalSafe]), `--json` included; what goes to a pipe or a file (a hook's answer, the MCP stream, `--json`
- * redirected) is written as it is: those streams are for programs, which need the bytes. Output piped on to a
- * terminal by the user (`| cat`, `| tee`, `| less -R`) is therefore not cleaned.
+ * [Console] over the file descriptors (POSIX) or the standard handles (Windows): [out] and [err] are cleaned
+ * ([terminalSafe]) wherever they go, [help], [data] and [dataErr] are written as they are.
  *
- * @param terminal Whether a descriptor is a terminal, asked once per descriptor.
+ * @param terminal Whether a descriptor is a terminal, asked once (stdout, for [isInteractive]).
  * @param write Writes bytes to a descriptor.
  */
 class ConsoleImpl(
@@ -81,15 +85,16 @@ class ConsoleImpl(
     private val write: (Int, ByteArray) -> Unit = ::writeBytes,
 ) : Console {
     private val stdoutTerminal by lazy { terminal(1) }
-    private val stderrTerminal by lazy { terminal(2) }
 
-    override fun out(text: String) = writeTo(1, text)
+    override fun out(text: String) = written(1, terminalSafe(text))
 
-    override fun err(text: String) = writeTo(2, text)
+    override fun err(text: String) = written(2, terminalSafe(text))
 
-    override fun help(text: String) {
-        if (text.isNotEmpty()) write(1, text.encodeToByteArray())
-    }
+    override fun help(text: String) = written(1, text)
+
+    override fun data(text: String) = written(1, text)
+
+    override fun dataErr(text: String) = written(2, text)
 
     override val isInteractive: Boolean
         get() = stdoutTerminal
@@ -98,11 +103,8 @@ class ConsoleImpl(
         return readGrowing(maxBytes, timeoutMillis, ::readStdin, TimeSource.Monotonic.markNow())
     }
 
-    private fun writeTo(descriptor: Int, text: String) {
-        if (text.isEmpty()) return
-        val onTerminal = if (descriptor == 1) stdoutTerminal else stderrTerminal
-        val shown = if (onTerminal) terminalSafe(text) else text
-        write(descriptor, shown.encodeToByteArray())
+    private fun written(descriptor: Int, text: String) {
+        if (text.isNotEmpty()) write(descriptor, text.encodeToByteArray())
     }
 }
 

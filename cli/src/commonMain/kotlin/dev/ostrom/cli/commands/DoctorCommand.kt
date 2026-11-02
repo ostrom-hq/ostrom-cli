@@ -38,7 +38,8 @@ class DoctorCommand(private val dependencies: CliDependencies) : CliktCommand(na
         val checks = runBlocking { doctor() }
         val problems = checks.count { it.status == CheckStatus.PROBLEM }
         val warnings = checks.count { it.status == CheckStatus.WARNING }
-        dependencies.console.out(if (json) asJson(checks, problems, warnings) else asText(checks, problems, warnings))
+        val console = dependencies.console
+        if (json) console.data(asJson(checks, problems, warnings)) else console.out(asText(checks, problems, warnings))
         if (problems > 0) throw ProgramResult(ExitCode.FAILED.code)
     }
 
