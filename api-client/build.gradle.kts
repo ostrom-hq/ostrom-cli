@@ -28,7 +28,14 @@ kotlin {
         commonTest.dependencies {
             implementation(projects.platform)
             implementation(libs.ktor.client.mock)
+            implementation(libs.ktor.network)
             implementation(libs.coroutines.test)
+        }
+        // The in-process WebSocket server of TerminalChannelServerTest: on Kotlin/Native the test host has no WebSocket
+        // (NotImplementedError), and its client engine would replace the system one the real HTTPS test checks.
+        jvmTest.dependencies {
+            implementation(libs.ktor.server.test.host)
+            implementation(libs.ktor.server.websockets)
         }
     }
 }

@@ -1,6 +1,8 @@
 package = dev.ostrom.cli.platform.interop
 ---
 #include <errno.h>
+#include <sys/ioctl.h>
+#include <termios.h>
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
@@ -355,6 +357,94 @@ static inline int ostrom_tcp_exchange(int port, const unsigned char *request, in
     }
     close(fd);
     return result;
+}
+
+/* The terminal mode before ostrom_raw_enter_fd, kept to give it back, and the terminal it was taken from. */
+static struct termios ostrom_saved_mode;
+static volatile sig_atomic_t ostrom_mode_saved = 0;
+static int ostrom_raw_fd = -1;
+
+/* The signals that end this process with the keyboard still raw, and what they did before raw mode. */
+static const int ostrom_raw_signals[3] = {SIGINT, SIGTERM, SIGHUP};
+static struct sigaction ostrom_raw_previous[3];
+
+/* The mode ostrom_raw_enter_fd found, given back; then each signal does again what it did before. */
+static void ostrom_raw_give_back(void) {
+    if (!ostrom_mode_saved) return;
+    tcsetattr(ostrom_raw_fd, TCSANOW, &ostrom_saved_mode);
+    ostrom_mode_saved = 0;
+    for (int i = 0; i < 3; i++) sigaction(ostrom_raw_signals[i], &ostrom_raw_previous[i], NULL);
+}
+
+/*
+ * A signal that would end this process (a kill, the terminal window closed) while the keyboard is raw: the shell would
+ * get a terminal with no echo and no line editing. The mode is given back first, then the signal is raised again with
+ * the handler it had before, so it ends the process as it would have. tcsetattr and sigaction are async-signal-safe.
+ */
+static void ostrom_raw_on_signal(int signal_number) {
+    ostrom_raw_give_back();
+    raise(signal_number);
+}
+
+/* Raw mode on the terminal `fd` (no echo, no line editing, no signal keys). 1 when set, 0 when `fd` is no terminal. */
+static inline int ostrom_raw_enter_fd(int fd) {
+    if (ostrom_mode_saved || !isatty(fd) || tcgetattr(fd, &ostrom_saved_mode) != 0) return 0;
+    struct termios raw = ostrom_saved_mode;
+    /* what cfmakeraw does, written out: cfmakeraw is not POSIX and some C modes hide it */
+    raw.c_iflag &= ~(tcflag_t)(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL | IXON);
+    raw.c_oflag &= ~(tcflag_t)OPOST;
+    raw.c_lflag &= ~(tcflag_t)(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
+    raw.c_cflag &= ~(tcflag_t)(CSIZE | PARENB);
+    raw.c_cflag |= CS8;
+    raw.c_cc[VMIN] = 1;
+    raw.c_cc[VTIME] = 0;
+    /* saved before any handler is set: a signal right away finds the mode to give back */
+    ostrom_raw_fd = fd;
+    ostrom_mode_saved = 1;
+    struct sigaction give_back;
+    give_back.sa_handler = ostrom_raw_on_signal;
+    sigemptyset(&give_back.sa_mask);
+    give_back.sa_flags = 0;
+    for (int i = 0; i < 3; i++) {
+        sigaction(ostrom_raw_signals[i], NULL, &ostrom_raw_previous[i]);
+        /* a signal ignored before (nohup's SIGHUP) stays ignored: raising it again would not end the process, which
+           would go on with the keyboard given back while it relays raw */
+        int ignored = !(ostrom_raw_previous[i].sa_flags & SA_SIGINFO) && ostrom_raw_previous[i].sa_handler == SIG_IGN;
+        if (!ignored) sigaction(ostrom_raw_signals[i], &give_back, NULL);
+    }
+    if (tcsetattr(fd, TCSANOW, &raw) != 0) {
+        ostrom_raw_give_back();
+        return 0;
+    }
+    return 1;
+}
+
+/* Raw mode on stdin. */
+static inline int ostrom_raw_enter(void) {
+    return ostrom_raw_enter_fd(STDIN_FILENO);
+}
+
+/* The mode ostrom_raw_enter_fd found, and the signals' handlers; nothing when it set none. */
+static inline void ostrom_raw_restore(void) {
+    ostrom_raw_give_back();
+}
+
+/* columns << 16 | rows of stdout's terminal, or -1. */
+static inline long long ostrom_terminal_size(void) {
+    struct winsize size;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) != 0 || size.ws_col == 0) return -1;
+    return ((long long)size.ws_col << 16) | size.ws_row;
+}
+
+/* Bytes from stdin as they come: count, 0 when none within timeout_ms, -1 at the end or on an error. */
+static inline int ostrom_terminal_read(unsigned char *buffer, int capacity, int timeout_ms) {
+    struct pollfd input = {STDIN_FILENO, POLLIN, 0};
+    int ready = poll(&input, 1, timeout_ms);
+    if (ready == 0 || (ready < 0 && errno == EINTR)) return 0;
+    if (ready < 0) return -1;
+    ssize_t count = read(STDIN_FILENO, buffer, (size_t)capacity);
+    if (count < 0) return errno == EINTR || errno == EAGAIN ? 0 : -1;
+    return count == 0 ? -1 : (int)count;
 }
 
 /*
