@@ -6,11 +6,14 @@ import dev.ostrom.cli.api.OstromApi
 import dev.ostrom.cli.api.ServerRequest
 import dev.ostrom.cli.api.ServerResponse
 import dev.ostrom.cli.api.ServerUnreachableException
+import dev.ostrom.cli.cloud.CloudRunner
+import dev.ostrom.cli.cloud.CloudSite
 import dev.ostrom.cli.hooks.HookRunner
 import dev.ostrom.cli.imports.FakeMysql
 import dev.ostrom.cli.launch.AgentRunner
 import dev.ostrom.cli.launcher.FileCredentialStore
 import dev.ostrom.cli.launcher.LaunchFilesImpl
+import dev.ostrom.cli.launcher.cloud.CloudStart
 import dev.ostrom.cli.mcp.McpServer
 import dev.ostrom.cli.platform.Console
 import dev.ostrom.cli.platform.Environment
@@ -125,6 +128,11 @@ class ReceiptCommandsTest {
             capture = FakeMysql(),
             readLine = { null },
             openUrl = { false },
+            cloud = object : CloudRunner {
+                override suspend fun start(start: CloudStart, site: CloudSite) = 0
+
+                override suspend fun attach(id: String, site: CloudSite) = 0
+            },
             selfUpdate = SelfUpdate({ _, _ -> Download.Missing(404) }, fileSystem, { _, _ -> false }, {}, noSessions),
             postHogKey = "",
             sendStatistics = { _, _ -> },

@@ -349,6 +349,124 @@ static inline int ostrom_tcp_exchange(int port, const unsigned char *request, in
     return result;
 }
 
+#ifndef ENABLE_VIRTUAL_TERMINAL_INPUT
+#define ENABLE_VIRTUAL_TERMINAL_INPUT 0x0200
+#endif
+#ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
+#define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x0004
+#endif
+#ifndef DISABLE_NEWLINE_AUTO_RETURN
+#define DISABLE_NEWLINE_AUTO_RETURN 0x0008
+#endif
+
+/* The console modes and code pages before ostrom_raw_enter, kept to give them back. */
+static DWORD ostrom_saved_input_mode, ostrom_saved_output_mode;
+static UINT ostrom_saved_input_cp, ostrom_saved_output_cp;
+static int ostrom_modes_saved = 0;
+
+/* The modes and code pages ostrom_raw_enter found, given back; nothing when it set none. */
+static void ostrom_raw_give_back(void) {
+    if (!ostrom_modes_saved) return;
+    SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), ostrom_saved_input_mode);
+    SetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), ostrom_saved_output_mode);
+    if (ostrom_saved_input_cp != 0) SetConsoleCP(ostrom_saved_input_cp);
+    if (ostrom_saved_output_cp != 0) SetConsoleOutputCP(ostrom_saved_output_cp);
+    ostrom_modes_saved = 0;
+}
+
+/*
+ * The console's own signals (Ctrl-Break, the window closed, a log-off or shut-down) while the input is raw: the modes
+ * are given back first, then FALSE lets the next handler, and in the end the default one, end the process as before.
+ */
+static BOOL WINAPI ostrom_raw_on_console_event(DWORD event) {
+    (void)event;
+    ostrom_raw_give_back();
+    return FALSE;
+}
+
+/*
+ * Raw console input as VT sequences, and VT output, both in UTF-8 for the whole raw session: a typed « é » reaches the
+ * session as UTF-8, and a character split between two frames of the session is never written in two code pages. 1
+ * when set, 0 when stdin or stdout is no console.
+ */
+static inline int ostrom_raw_enter(void) {
+    HANDLE input = GetStdHandle(STD_INPUT_HANDLE), output = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD input_mode, output_mode;
+    if (!GetConsoleMode(input, &input_mode) || !GetConsoleMode(output, &output_mode)) return 0;
+    DWORD raw = (input_mode & ~(ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT | ENABLE_PROCESSED_INPUT))
+        | ENABLE_VIRTUAL_TERMINAL_INPUT;
+    if (!SetConsoleMode(input, raw)) return 0;
+    SetConsoleMode(output, output_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN);
+    ostrom_saved_input_mode = input_mode;
+    ostrom_saved_output_mode = output_mode;
+    ostrom_saved_input_cp = GetConsoleCP();
+    ostrom_saved_output_cp = GetConsoleOutputCP();
+    SetConsoleCP(CP_UTF8);
+    SetConsoleOutputCP(CP_UTF8);
+    ostrom_modes_saved = 1;
+    SetConsoleCtrlHandler(ostrom_raw_on_console_event, TRUE);
+    return 1;
+}
+
+/* The modes ostrom_raw_enter found, and the console's signals as they were; nothing when it set none. */
+static inline void ostrom_raw_restore(void) {
+    if (!ostrom_modes_saved) return;
+    ostrom_raw_give_back();
+    SetConsoleCtrlHandler(ostrom_raw_on_console_event, FALSE);
+}
+
+/* columns << 16 | rows of stdout's console window, or -1. */
+static inline long long ostrom_terminal_size(void) {
+    CONSOLE_SCREEN_BUFFER_INFO info;
+    if (!GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &info)) return -1;
+    long long columns = info.srWindow.Right - info.srWindow.Left + 1, rows = info.srWindow.Bottom - info.srWindow.Top + 1;
+    return (columns << 16) | rows;
+}
+
+/* Same contract as the POSIX ostrom_terminal_read: count, 0 on the deadline, -1 at the end or on an error. */
+static inline int ostrom_terminal_read(unsigned char *buffer, int capacity, int timeout_ms) {
+    HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
+    DWORD type = GetFileType(input), count = 0;
+    if (type == FILE_TYPE_CHAR) {
+        DWORD waited = WaitForSingleObject(input, (DWORD)timeout_ms);
+        if (waited == WAIT_TIMEOUT) return 0;
+        if (waited != WAIT_OBJECT_0) return -1;
+        /* focus, mouse and resize events also wake the wait, and so do a key release and a modifier pressed alone
+           (Shift, Ctrl, Alt, the Windows keys, CapsLock, NumLock, ScrollLock): ReadFile would then block until a
+           character, so drop them. Any other key goes on: an arrow, Home or F5 types no character, but the console
+           turns it into its VT sequence in ReadFile (ENABLE_VIRTUAL_TERMINAL_INPUT). */
+        INPUT_RECORD records[64];
+        DWORD pending = 0;
+        if (!PeekConsoleInputW(input, records, 64, &pending)) return -1;
+        if (pending == 0) return 0;
+        int key = 0;
+        for (DWORD i = 0; i < pending; i++) {
+            KEY_EVENT_RECORD *event = &records[i].Event.KeyEvent;
+            if (records[i].EventType != KEY_EVENT || !event->bKeyDown) continue;
+            WORD vk = event->wVirtualKeyCode;
+            int modifier = vk == VK_SHIFT || vk == VK_CONTROL || vk == VK_MENU || vk == VK_CAPITAL
+                || vk == VK_NUMLOCK || vk == VK_SCROLL || vk == VK_LWIN || vk == VK_RWIN
+                || (vk >= VK_LSHIFT && vk <= VK_RMENU);
+            if (event->uChar.UnicodeChar != 0 || !modifier) key = 1;
+        }
+        if (!key) {
+            ReadConsoleInputW(input, records, pending, &pending);
+            return 0;
+        }
+    } else if (type == FILE_TYPE_PIPE) {
+        DWORD available = 0;
+        ULONGLONG start = GetTickCount64();
+        while (PeekNamedPipe(input, NULL, 0, NULL, &available, NULL) && available == 0) {
+            if (GetTickCount64() - start >= (ULONGLONG)timeout_ms) return 0;
+            Sleep(1);
+        }
+        if (available == 0) return -1;
+        if (available < (DWORD)capacity) capacity = (int)available;
+    }
+    if (!ReadFile(input, buffer, (DWORD)capacity, &count, NULL)) return -1;
+    return count == 0 ? (type == FILE_TYPE_CHAR ? 0 : -1) : (int)count;
+}
+
 /*
  * Opens (creating it) and locks the whole file at the UTF-16 `path` with LockFileEx, waiting for any other process
  * that holds it. Returns the handle to give back to ostrom_unlock_file_w, or NULL. Closing the handle (or the process
