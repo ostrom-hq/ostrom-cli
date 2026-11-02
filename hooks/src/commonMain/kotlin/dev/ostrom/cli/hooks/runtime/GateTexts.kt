@@ -17,10 +17,11 @@ object GateTexts {
     /**
      * The gate failed on this tool call (a case it never met): refused, never let through. Its causes mostly last (a
      * file it cannot read, a broken setup), and an unreadable event may come after the tool ran: never "try again".
+     * `ostrom doctor` checks nothing of the gate's: the user is sent to a new session.
      */
     const val GATE_FAILED =
-        "Ostrom: denied. The gate failed on this tool call. Do not run it again: tell the user to run " +
-            "`ostrom doctor`."
+        "Ostrom: denied. The gate failed on this tool call. Do not run it again nor work around it: tell the " +
+            "user, and wait for their answer. A new session (`ostrom <agent>`) starts the gate again."
 
     /**
      * No gate policy to trust (unsigned, expired, the relay or Ostrom unreachable, the package changed): every action
