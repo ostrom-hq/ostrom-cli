@@ -142,6 +142,14 @@ def scenario_help(machine):
         check(good, f"ostrom {path} --help (exit {done.returncode})")
 
 
+def coming(machine):
+    """The commands the binary declares but has not built yet: their line of `ostrom --help` says (coming soon)."""
+    help = machine.run("--help").stdout
+    listing = help.split("\nCommands:\n", 1)[1].split("\n\n", 1)[0]
+    entries = re.findall(r"^  ([a-z-]+) +(.*(?:\n {4,}.*)*)", listing, re.M)
+    return [name for name, said in entries if "(coming soon)" in " ".join(said.split())]
+
+
 # Each line: what it shows, the command line, the exit code, a text its stdout or stderr holds, and the setting.
 def lines(machine, other, nowhere):
     return [
@@ -152,9 +160,10 @@ def lines(machine, other, nowhere):
         ("an unknown option", ["doctor", "--bad"], 64, "Run 'ostrom doctor --help' for usage.", None),
         ("an unknown help topic", ["help", "nope"], 64, "Topics: plumbing, exit-codes.", None),
         ("a shell without completion", ["completion", "tcsh"], 64, "tcsh", None),
-        ("an option not built yet", ["claude", "--cloud"], 64, "not in this version of ostrom yet", None),
-        ("a command not built yet", ["status"], 70, "not implemented yet", None),
-        ("a group not built yet", ["members"], 70, "not implemented yet", None),
+        ("agent arguments to a cloud session", ["claude", "--cloud", "-p", "hi"], 64, "do not go to a cloud", None),
+    ] + [
+        (f"a command not built yet, {name}", [name], 70, "not implemented yet", None) for name in coming(machine)
+    ] + [
         ("wait without a request", ["wait"], 64, "Run 'ostrom wait --help' for usage.", None),
         ("the doctor, with an Ostrom server", ["doctor"], 0, "reachable", None),
         ("which says the server's version", ["doctor"], 0, "· Ostrom 0.1.0-e2e", None),
