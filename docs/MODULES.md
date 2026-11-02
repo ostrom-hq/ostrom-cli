@@ -106,7 +106,7 @@ started.
 | 69 | `UNREACHABLE` | The server is unreachable, or the secret store did not answer. |
 | 70 | `NOT_IMPLEMENTED` | The command is not implemented in this version yet. |
 | 73 | `CANNOT_WRITE` | A local file could not be written. |
-| 75 | `STILL_WAITING` | Still waiting: wait reached its deadline. |
+| 75 | `STILL_WAITING` | Still waiting: wait reached its deadline, or nobody confirmed a governance change in time. |
 | 77 | `REFUSED` | Refused: the policy, your role, a self-approval, another organisation. |
 | 78 | `SIGNATURE_REFUSED` | A signature or a package was refused. |
 | 127 | `AGENT_MISSING` | The agent is not installed. |
@@ -145,6 +145,17 @@ without the session, 77 for a session the caller may not read (a gate it may not
   is never swapped for it. `ostrom logout` revokes and forgets it too, with or without the device's token. A token
   without all three scopes (a server that does not serve `--admin` yet), or already expired, is revoked and not kept
   (exit 69); one approved by another person than the device's is kept, and said.
+  Made with a CLI token (the admin token or the device's), a governance write is held by the server until an owner or
+  an admin confirms it on the console, from a session signed in less than 5 minutes ago (audit H1, decision of
+  02/11/2026; coming soon: ostrom-server does not hold these writes yet): the write answers 202
+  `GovernanceConfirmationPending` and nothing is written. Any write answered so is waited on (`ConfirmationWait`): the
+  CLI says the link (`confirmUrl`, else `<console>/confirm/<id>`) on stderr and polls
+  `GET /api/v1/confirmations/{id}?wait=30` with the token that asked; a pending answer that came at once is asked again
+  after 5 seconds, an outage (no answer, a 5xx) is tried 3 times in a row. The server says when it has expired; the CLI
+  stops waiting a minute past the 15 minutes by its own clock. Confirmed, the command goes on with `result`, what the
+  write returned (exit 0); refused, or confirmed but not written (`failed`, the server's reason said), exit 77;
+  expired, or still pending when the CLI stops waiting, exit 75; a status it does not know, exit 1. Every stop while
+  the request may still stand says where it can be confirmed; a 401 to the admin token forgets it.
 
 ## Add a command
 
