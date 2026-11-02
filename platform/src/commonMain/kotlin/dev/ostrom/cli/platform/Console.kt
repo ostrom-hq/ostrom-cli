@@ -64,8 +64,8 @@ interface Console {
 /**
  * [Console] over the file descriptors (POSIX) or the standard handles (Windows). What goes to a terminal is cleaned
  * ([terminalSafe]), `--json` included; what goes to a pipe or a file (a hook's answer, the MCP stream, `--json`
- * redirected) is written as it is. A pipe to a pager that passes escapes on (`less -R`) is not cleaned: a person who
- * reads the CLI through one reads the bytes the CLI was given.
+ * redirected) is written as it is: those streams are for programs, which need the bytes. Output piped on to a
+ * terminal by the user (`| cat`, `| tee`, `| less -R`) is therefore not cleaned.
  *
  * @param terminal Whether a descriptor is a terminal, asked once per descriptor.
  * @param write Writes bytes to a descriptor.

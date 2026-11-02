@@ -15,41 +15,22 @@ class TerminalTextTest {
     private val esc = "\u001B"
 
     @Test
-    fun plainTextLinesAndTabsPassAsTheyAre() {
+    fun linesTabsAndPrintableTextPassAsTheyAre() {
         // a middle dot, an accent, a per mille sign, an arrow, a family emoji (joined by ZWJ) and a ZWNJ
         val text = "Signed in   @maya\n\tcommit a1b2c3 Fix the tests \u00B7 \u00E9 \u2030 \u2192 " +
             "\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67 \u200C\n"
         assertEquals(text, terminalSafe(text))
-        assertEquals(text, plainText(text))
     }
 
     @Test
-    fun coloursStayButNotOneThatHidesTheText() {
-        assertEquals("$esc[1;31mred$esc[0m", terminalSafe("$esc[1;31mred$esc[0m"))
-        assertEquals("$esc[mplain$esc[;1m", terminalSafe("$esc[mplain$esc[;1m"))
-        // an extended colour whose index or red, green and blue is 8 is a colour, not SGR 8
-        assertEquals("$esc[38;5;8mgrey", terminalSafe("$esc[38;5;8mgrey"))
-        assertEquals("$esc[48;2;8;8;8mdark", terminalSafe("$esc[48;2;8;8;8mdark"))
-        assertEquals("$esc[58;5mx$esc[38mx", terminalSafe("$esc[58;5mx$esc[38mx"))
-        // an extended colour of an unknown kind: what follows is read as attributes, 8 among them
-        assertEquals("x", terminalSafe("$esc[38;3;8mx"))
-        // SGR 8 however it is written: a terminal reads the parameters as numbers
-        for (hidden in listOf("8", "0;8", "08", "008", "38;9;8", "1;99999999")) {
-            assertEquals("hidden", terminalSafe("$esc[${hidden}mhidden"), hidden)
-        }
-        // a colour with sub-parameters or a private marker is no colour this filter can read
-        assertEquals("x", terminalSafe("$esc[38:5:8mx"))
-        assertEquals("x", terminalSafe("$esc[?8mx"))
+    fun coloursGoTooTheyCanHideTextOrLeakIntoWhatFollows() {
+        // black on black, a conceal however written, a reverse video that would colour the prompt after it
+        assertEquals("red hidden x", terminalSafe("$esc[1;31mred$esc[0m $esc[30;40mhidden$esc[08m x$esc[7m"))
+        assertEquals("grey", terminalSafe("$esc[38;5;8mgrey"))
     }
 
     @Test
-    fun plainTextDropsTheColoursToo() {
-        val link = "$esc]8;;https://x\u0007a link$esc]8;;\u0007"
-        assertEquals("red and a link", plainText("$esc[1;31mred$esc[0m and $link"))
-    }
-
-    @Test
-    fun everyOtherEscapeSequenceIsDropped() {
+    fun everyEscapeSequenceIsDropped() {
         // the cursor moved up, then the line erased: an approver would read another commit title
         assertEquals("deploy", terminalSafe("$esc[2A$esc[2Kdeploy"))
         // OSC 52 writes the clipboard, ended by BEL, by ST or by the 8-bit ST
@@ -63,7 +44,6 @@ class TerminalTextTest {
         assertEquals("abcd", terminalSafe("a${esc}Xsos$esc\\b$esc^pm$esc\\c${esc}_apc$esc\\d"))
         assertEquals("ab", terminalSafe("a${esc}cb$esc"))
         assertEquals("ab", terminalSafe("a\u009B2Ab"))
-        assertEquals("ab", terminalSafe("a\u009B1;31mb"))
     }
 
     @Test
@@ -109,6 +89,8 @@ class TerminalTextTest {
         assertEquals("abc", terminalSafe("a\u202Eb\u2067c\u2069"))
         assertEquals("a\u202Fb\u2065c", terminalSafe("a\u202Fb\u2065c"))
         assertEquals("abcdefgh", terminalSafe("a\u200Eb\u200Fc\u061Cd\u2028e\u2029f\u200Bg\u2060h\uFEFF"))
+        // blank or invisible characters that pad or hide text
+        assertEquals("abcdef", terminalSafe("a\u00ADb\u2062c\u3164d\u2800e\uFFF9f\u180E"))
         // tag characters spell text no one sees; the supplement's variation selectors and a lone surrogate stay
         assertEquals("ab", terminalSafe("a\uDB40\uDC72\uDB40\uDC6Db"))
         assertEquals("a\uDB40\uDD00b\uDB40", terminalSafe("a\uDB40\uDD00b\uDB40"))

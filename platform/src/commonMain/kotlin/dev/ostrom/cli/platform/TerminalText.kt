@@ -3,22 +3,18 @@ package dev.ostrom.cli.platform
 
 /**
  * [text] as it may reach a terminal (security audit M2): what the CLI prints holds what others wrote (a commit title of
- * the agent, a server's message, the names of an organisation), and none of it may drive the terminal. Lines, tabs and
- * colours stay; every other escape sequence goes whole (CSI, OSC, DCS and the others, with their 7-bit and 8-bit
- * introducers), and so do a colour that hides the text (SGR 8, however it is written), the other control characters
- * (a carriage return prints over the line) and the characters that reorder or hide text (bidi marks, embeddings,
- * overrides and isolates, line and paragraph separators, zero-width spaces, tags).
+ * the agent, a server's message, the names of an organisation), and none of it may drive the terminal. Lines and tabs
+ * stay; every escape sequence goes whole, colours included (CSI, OSC, DCS and the others, nF, with their 7-bit and
+ * 8-bit introducers), and so do the other control characters (a carriage return prints over the line) and the
+ * characters that reorder, hide or blank text (bidi marks, embeddings, overrides and isolates, line and paragraph
+ * separators, zero-width and blank characters, tags). The CLI's own colours and links go through [Console.help].
  *
- * Not caught: text written in the colour of its background (`30;40`), which needs the terminal's palette to tell.
- * One pass, linear in the length of [text] whatever it holds.
+ * One pass, linear in the length of [text] whatever it holds. A surrogate pair split across two writes is not seen.
  */
-fun terminalSafe(text: String): String = TerminalScan(text, colours = true).cleaned()
-
-/** [text] cleaned as [terminalSafe] does, colours dropped too: for a stream that may not be a terminal. */
-fun plainText(text: String): String = TerminalScan(text, colours = false).cleaned()
+fun terminalSafe(text: String): String = TerminalScan(text).cleaned()
 
 /** One pass over [text]: each character is looked at a bounded number of times. */
-private class TerminalScan(private val text: String, private val colours: Boolean) {
+private class TerminalScan(private val text: String) {
     private val out = StringBuilder(text.length)
 
     /** No string terminator from there to the end: a string started further on is not searched again. */
@@ -35,7 +31,7 @@ private class TerminalScan(private val text: String, private val colours: Boolea
         val c = text[at]
         return when {
             c == ESC -> escape(at)
-            c == C1_CSI -> control(at, at + 1)
+            c == C1_CSI -> control(at + 1)
             c in C1_STRINGS -> string(at + 1)
             tag(at) -> at + 2
             else -> {
@@ -47,7 +43,7 @@ private class TerminalScan(private val text: String, private val colours: Boolea
 
     /** ESC at [at] and what it introduces. */
     private fun escape(at: Int): Int = when (text.getOrElse(at + 1) { NOTHING }) {
-        '[' -> control(at, at + 2)
+        '[' -> control(at + 2)
         ']', 'P', 'X', '^', '_' -> string(at + 2)
         in ' '..'/' -> withIntermediates(at + 1)
         in '0'..'~' -> at + 2
@@ -62,18 +58,12 @@ private class TerminalScan(private val text: String, private val colours: Boolea
         return if (at < text.length && text[at] in '0'..'~') at + 1 else at
     }
 
-    /**
-     * A control sequence started at [start], its parameters at [from]: kept only when it is a colour that leaves the
-     * text visible, written with the 7-bit introducer. An unfinished one is dropped up to where it stops.
-     */
-    private fun control(start: Int, from: Int): Int {
+    /** A control sequence whose parameters start at [from], dropped; an unfinished one up to where it stops. */
+    private fun control(from: Int): Int {
         var at = from
         while (at < text.length && text[at] in '0'..'?') at++
         while (at < text.length && text[at] in ' '..'/') at++
-        if (at == text.length || text[at] !in '@'..'~') return at
-        val sequence = text.substring(start, at + 1)
-        if (colours && visible(sequence)) out.append(sequence)
-        return at + 1
+        return if (at < text.length && text[at] in '@'..'~') at + 1 else at
     }
 
     /** A string (OSC, DCS, SOS, PM, APC) whose body starts at [from], dropped up to its terminator (BEL or ST). */
@@ -106,35 +96,6 @@ private fun shown(c: Char): Boolean = c == '\n' || c == '\t' || !hidden(c)
 /** A control character (C0, DEL, C1), or a character that reorders, breaks or hides text. */
 private fun hidden(c: Char): Boolean = c < ' ' || c in '\u007F'..'\u009F' || c in HIDDEN
 
-/** A colour (SGR, 7-bit, digits and `;` only) whose parameters leave the text visible. */
-private fun visible(sequence: String): Boolean {
-    val match = SGR.matchEntire(sequence)
-    return match != null && shows(match.groupValues[1].split(';'))
-}
-
-/**
- * Whether no parameter is SGR 8, read as a terminal reads them: as numbers (`08` is 8), an empty one as 0, and the
- * index or the red, green and blue of an extended colour (`38;5;8`, `48;2;8;8;8`) as no attribute of their own.
- * A parameter too long for a terminal's counter (one that could wrap to 8) hides nothing only if it is not there.
- */
-private fun shows(parameters: List<String>): Boolean {
-    var at = 0
-    var shown = true
-    while (shown && at < parameters.size) {
-        val value = parameters[at].toIntOrNull() ?: 0
-        shown = value != CONCEAL && parameters[at].length <= MAX_DIGITS
-        at += if (value in EXTENDED) extendedLength(parameters.getOrNull(at + 1)?.toIntOrNull()) else 1
-    }
-    return shown
-}
-
-/** How many parameters an extended colour takes, with the [kind] that follows 38, 48 or 58. */
-private fun extendedLength(kind: Int?): Int = when (kind) {
-    INDEXED -> INDEXED_LENGTH
-    DIRECT -> DIRECT_LENGTH
-    else -> 1
-}
-
 private const val ESC = '\u001B'
 private const val BEL = '\u0007'
 private const val C1_CSI = '\u009B'
@@ -153,25 +114,11 @@ private const val TAG_HIGH = '\uDB40'
 private val TAG_LOW = '\uDC00'..'\uDC7F'
 
 /**
- * ALM, zero-width space, LRM, RLM, line and paragraph separators, the embeddings and overrides, word joiner, the
- * isolates, and the byte order mark. The zero-width (non-)joiners stay: scripts and emoji need them.
+ * Soft hyphen, combining grapheme joiner, ALM, the Hangul fillers, the Mongolian variation selectors and vowel
+ * separator, zero-width space, LRM, RLM, line and paragraph separators, the embeddings and overrides, word joiner, the
+ * invisible operators, the isolates, the blank Braille pattern, the byte order mark and the interlinear annotations.
+ * The zero-width (non-)joiners stay: scripts and emoji need them.
  */
-private const val HIDDEN = "\u061C\u200B\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E\u2060" +
-    "\u2066\u2067\u2068\u2069\uFEFF"
-
-private val SGR = Regex("\u001B\\[([0-9;]*)m")
-
-/** The SGR parameter that hides the text. */
-private const val CONCEAL = 8
-
-/** The SGR parameters of an extended colour: foreground, background, underline. */
-private val EXTENDED = setOf(38, 48, 58)
-private const val INDEXED = 5
-private const val DIRECT = 2
-
-/** 38, 5 and the index; 38, 2, red, green and blue. */
-private const val INDEXED_LENGTH = 3
-private const val DIRECT_LENGTH = 5
-
-/** More digits than any parameter a terminal takes (xterm stops at 65535). */
-private const val MAX_DIGITS = 5
+private const val HIDDEN = "\u00AD\u034F\u061C\u115F\u1160\u180B\u180C\u180D\u180E\u200B\u200E\u200F" +
+    "\u2028\u2029\u202A\u202B\u202C\u202D\u202E\u2060\u2061\u2062\u2063\u2064\u2066\u2067\u2068\u2069" +
+    "\u2800\u3164\uFEFF\uFFA0\uFFF9\uFFFA\uFFFB"
