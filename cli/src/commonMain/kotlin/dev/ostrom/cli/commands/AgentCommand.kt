@@ -50,7 +50,8 @@ internal class AgentCommand(private val agent: Agent, private val dependencies: 
         }
         val environment = dependencies.environment
         val directory = environment.configDirectory ?: throw stop(ExitCode.CANNOT_WRITE, NO_HOME)
-        val saved = ConfigStoreImpl(dependencies.files, dependencies.configFile(directory)).get(ConfigKey.SERVER)
+        val config = ConfigStoreImpl(dependencies.files, dependencies.configFile(directory))
+        val saved = config.get(ConfigKey.SERVER)
         val chosen = server ?: environment["OSTROM_URL"] ?: saved ?: throw stop(ExitCode.SIGN_IN_REQUIRED, SIGN_IN)
         val serverUrl = chosen.trimEnd('/')
         refuseInClear(serverUrl, "the device's token")
@@ -67,6 +68,8 @@ internal class AgentCommand(private val agent: Agent, private val dependencies: 
             home = environment.homeDirectory.orEmpty(),
             pathSeparator = environment.pathListSeparator,
             variable = { environment[it] },
+            org = environment["OSTROM_ORG"]?.takeIf { it.isNotEmpty() }
+                ?: config.get(ConfigKey.ORG),
         )
         val request = LaunchRequest(agent, agentArguments, repo, model, dryRun)
         throw ProgramResult(runBlocking { dependencies.agents.run(request, site) })

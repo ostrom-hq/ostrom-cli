@@ -31,8 +31,11 @@ internal sealed interface RelayTarget {
     data object NotFound : RelayTarget
 }
 
-/** One path segment of an identifier: no dot, so no `..`, and no encoded character. */
-private const val ID = "[A-Za-z0-9_-]{1,128}"
+/**
+ * One path segment of an identifier: no dot, so no `..`, and no encoded character. `~` is in it: a reopened session's
+ * segment is `<id>~r<n>` (ostrom-server `SessionSegments`).
+ */
+private const val ID = "[A-Za-z0-9_~-]{1,128}"
 private const val API_PREFIX = "/api/v1/"
 private const val MCP_PREFIX = "/mcp/"
 private const val GATE_CATALOG = "/api/v1/gates/catalog"

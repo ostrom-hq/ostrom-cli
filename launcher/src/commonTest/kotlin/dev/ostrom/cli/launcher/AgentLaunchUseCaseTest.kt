@@ -264,6 +264,9 @@ class AgentLaunchUseCaseTest {
         assertEquals(65, start())
         server[policy] = 403 to """{"error":{"type":"forbidden","message":"agent not allowed"}}"""
         assertEquals(77, start())
+        // a member of several organisations who named none: a usage error, with the way to name one
+        server[policy] = 409 to """{"error":{"type":"org_required","message":"Name the organization"}}"""
+        assertEquals(64, start())
         assertEquals(
             listOf(
                 "ostrom: refused by your organisation's policy: over budget",
@@ -274,6 +277,7 @@ class AgentLaunchUseCaseTest {
                 "ostrom: your organisation's policy could not be read: the agent is not started",
                 "ostrom: not signed in to https://ostrom.example: run `ostrom login`",
                 "ostrom: refused by your organisation's policy: agent not allowed",
+                "ostrom: Name the organization: choose the organisation with `ostrom init`, or set OSTROM_ORG",
             ),
             said,
         )

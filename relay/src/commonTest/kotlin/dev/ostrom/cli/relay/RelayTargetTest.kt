@@ -14,6 +14,9 @@ class RelayTargetTest {
             "/api/v1/sessions",
             "/api/v1/sessions/s-1/reopen",
             "/api/v1/sessions/s-1/seen",
+            // a reopened session's segment (ostrom-server SessionSegments)
+            "/api/v1/sessions/s-1~r2/reopen",
+            "/api/v1/sessions/s-1~r2/seen",
             "/api/v1/gates",
             "/api/v1/notifications",
             "/api/v1/checks",

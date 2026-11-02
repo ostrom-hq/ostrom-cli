@@ -15,10 +15,14 @@ import dev.ostrom.cli.relay.LocalRelayStarter
 import dev.ostrom.cli.relay.RelayConfig
 import kotlin.time.Clock
 
-/** The launcher's way to the server, over the CLI's HTTP client: an unreachable server is a reply without status. */
-class ApiServerTransport(private val api: OstromApi) : ServerTransport {
+/**
+ * The launcher's way to the server, over the CLI's HTTP client: an unreachable server is a reply without status.
+ *
+ * @param org The organisation every call acts in (`Ostrom-Org`), or null to let the server take the only one.
+ */
+class ApiServerTransport(private val api: OstromApi, private val org: String? = null) : ServerTransport {
     override suspend fun send(call: ServerCall): ServerReply = try {
-        val response = api.send(ServerRequest(call.method, call.path, call.body, call.token, call.timeoutMillis))
+        val response = api.send(ServerRequest(call.method, call.path, call.body, call.token, call.timeoutMillis, org))
         ServerReply(response.status, response.body)
     } catch (e: ServerUnreachableException) {
         ServerReply(null, e.reason)

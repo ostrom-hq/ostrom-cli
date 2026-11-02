@@ -43,6 +43,8 @@ data class LaunchRequest(
  * @property configDirectory The CLI's folder (keys pinned, packages and receipts kept).
  * @property temporaryDirectory Where the private folder of the launch is made.
  * @property variable The developer's environment.
+ * @property org The organisation the launch acts in (`OSTROM_ORG`, else the one `ostrom init` kept), or null: the
+ * server then takes the person's only organisation, and asks to choose (409) when there are several.
  */
 data class LaunchSite(
     val serverUrl: String,
@@ -54,6 +56,7 @@ data class LaunchSite(
     val home: String,
     val pathSeparator: Char,
     val variable: (String) -> String?,
+    val org: String? = null,
 )
 
 /** The clock of a launch. */
