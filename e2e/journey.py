@@ -435,6 +435,33 @@ class Journey:
             self.gate(maya, tom_email, seen)
         elif gate and seen is not None:
             self.passed(maya, gate, seen)
+        if seen is not None and seen.get("perf"):
+            self.latency(seen)
+
+    def latency(self, seen):
+        """5.8: the hook's latency in the session, against the server's budget (it runs at every tool call)."""
+        self.begin("5.8", "the hook's latency, at every tool call of the agent")
+        measured = seen["perf"]
+        first = next((h for h in seen["hooks"] if h["event"] == "PreToolUse" and h["tool"] == "ls -la"), {})
+        rows = [("local decision (policy in the relay's memory)", measured["local"]),
+                ("policy asked of Ostrom (the relay's memory missed)", measured["miss"]),
+                ("command under a gate (a request to Ostrom)", measured["gated"])]
+        print(f"  {'':52} {'p50':>7} {'p95':>7} {'p99':>7} {'max':>7}  inside p50/p95  runs  exits", flush=True)
+        for label, row in rows:
+            print(f"  {label:52} {row['p50']:7.1f} {row['p95']:7.1f} {row['p99']:7.1f} {row['max']:7.1f}  "
+                  f"{row['inside_p50']}/{row['inside_p95']}  {row['runs']:4}  {row['codes']}", flush=True)
+        print(f"  first harmless call of the session, through sh as Claude Code runs it: {first.get('millis')} ms",
+              flush=True)
+        self.step["latency"] = {**measured, "first": first.get("millis")}
+        local, server = self.options.max_local_p95_ms, self.options.max_server_p95_ms
+        # a series that failed fast would pass any budget: each must have taken the path it times
+        for name, code in (("local", 0), ("miss", 0), ("gated", 2)):
+            self.check(measured[name]["codes"] == [code], f"every call of the {name} series exits {code} "
+                                                          f"(got {measured[name]['codes']})")
+        self.check(measured["local"]["p95"] < local, f"a local decision: p95 {measured['local']['p95']} ms < {local}")
+        for name in ("miss", "gated"):
+            self.check(measured[name]["p95"] < server, f"a round trip to Ostrom ({name}): p95 "
+                                                       f"{measured[name]['p95']} ms < {server}")
 
     def claude(self, maya, hold=None):
         """Starts `ostrom claude` with the fake agent; [claude_ended] waits for it and checks what it saw."""
@@ -448,7 +475,8 @@ class Journey:
         os.chmod(os.path.join(agents, "claude"), 0o755)
         report = os.path.join(self.work, "claude-report.json")
         extra = {"PATH": agents + os.pathsep + os.environ["PATH"], "E2E_REPORT": report, "E2E_EXIT": "0",
-                 "E2E_OSTROM": self.binary, **({"E2E_HOLD": hold} if hold else {})}
+                 "E2E_OSTROM": self.binary, **({"E2E_HOLD": hold} if hold else {}),
+                 **({"E2E_PERF": str(self.options.perf_runs)} if hold and self.options.perf_runs else {})}
         # files, not pipes: nobody reads them while the session waits for its yes
         out, err = (open(os.path.join(self.work, f"claude.{name}"), "w+") for name in ("out", "err"))
         process = subprocess.Popen([self.binary, "claude", "-p", "hello"], cwd=maya["repo"],
@@ -691,6 +719,11 @@ def main():
                         help="a route not served yet fails the run")
     parser.add_argument("--show", action="store_true", help="print every command and what it printed (the film)")
     parser.add_argument("--pace", type=float, default=0, help="seconds to wait before each step (the film)")
+    parser.add_argument("--perf-runs", type=int, default=100, help="calls per latency series in 5.8 (0: none)")
+    parser.add_argument("--max-local-p95-ms", type=float, default=20, help="5.8: a local decision, at p95")
+    # 75 ms, not the 150 first proposed: the journey measured 13.7 ms (policy asked) and 25.1 ms (gated) at p95 (run
+    # 41500895660); 150 would let a sixfold regression through, 75 keeps three times the gated one for the runner's noise.
+    parser.add_argument("--max-server-p95-ms", type=float, default=75, help="5.8: a round trip to Ostrom, at p95")
     parser.add_argument("--report", help="write every step as JSON there")
     parser.add_argument("--work", help="the folder of the machines (default: a new temporary one)")
     options = parser.parse_args()
