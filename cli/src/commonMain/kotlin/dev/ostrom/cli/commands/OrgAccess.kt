@@ -95,14 +95,13 @@ internal fun CliDependencies.orgAccess(
 ): OrgAccess {
     val signed = signedIn(serverOption)
     val kept = keptOrg(wanted)
-    val body = runBlocking { signed.server.get(ORGS, signed.token) }.orStop(signed.serverUrl, "No organisations here.")
-    val orgs = body.list("items").filterIsInstance<JsonObject>().mapNotNull(::orgOf)
+    val orgs = memberOrgs(signed.server, signed.serverUrl, signed.token)
     val console = consoleOf(this, signed.serverUrl)
     val org = if (kept == null) {
         onlyOrChosen(orgs, choose, "@${signed.login} is not a member of an organisation on ${signed.serverUrl} yet. " +
             "Create one on the console ($console), or ask an admin of your team to run: ostrom invite <your e-mail>")
     } else {
-        orgs.firstOrNull { it.id == kept || it.slug == kept } ?: throw unknownOrg(kept, orgs)
+        named(orgs, kept)
     }
     val consoleToken = environment[LaunchVariables.LAUNCH_ID].isNullOrEmpty() &&
         !environment[LaunchVariables.DEVICE_TOKEN].isNullOrEmpty()
@@ -110,7 +109,7 @@ internal fun CliDependencies.orgAccess(
 }
 
 /** The organisation named: [wanted] (`--org`), else `OSTROM_ORG`, else the one `ostrom init` kept; null if none. */
-internal fun CliDependencies.keptOrg(wanted: String?): String? = wanted
+internal fun CliDependencies.keptOrg(wanted: String?): String? = wanted?.takeIf { it.isNotEmpty() }
     ?: environment["OSTROM_ORG"]?.takeIf { it.isNotEmpty() }
     ?: ConfigStoreImpl(files, configFile(directory())).get(ConfigKey.ORG)
 
@@ -121,11 +120,17 @@ internal fun CliDependencies.keptOrg(wanted: String?): String? = wanted
  */
 internal fun CliDependencies.launchOrg(serverUrl: String, token: String, wanted: String?): String? {
     val kept = keptOrg(wanted) ?: return null
-    val body = runBlocking { ServerJson(ApiServerTransport(api(serverUrl))).get(ORGS, token) }
-        .orStop(serverUrl, "No organisations here.")
-    val orgs = body.list("items").filterIsInstance<JsonObject>().mapNotNull(::orgOf)
-    return (orgs.firstOrNull { it.id == kept || it.slug == kept } ?: throw unknownOrg(kept, orgs)).id
+    return named(memberOrgs(ServerJson(ApiServerTransport(api(serverUrl))), serverUrl, token), kept).id
 }
+
+/** The organisations the caller is a member of (`GET /api/v1/orgs`). */
+private fun memberOrgs(server: ServerJson, serverUrl: String, token: String): List<Org> =
+    runBlocking { server.get(ORGS, token) }.orStop(serverUrl, "No organisations here.")
+        .list("items").filterIsInstance<JsonObject>().mapNotNull(::orgOf)
+
+/** The organisation [kept] names, by id or short name, among [orgs]; one the person is not in is not found (66). */
+private fun named(orgs: List<Org>, kept: String): Org =
+    orgs.firstOrNull { it.id == kept || it.slug == kept } ?: throw unknownOrg(kept, orgs)
 
 /**
  * The only organisation in [orgs], else the one [choose] picks. None stops with [noneMessage] (66); several without

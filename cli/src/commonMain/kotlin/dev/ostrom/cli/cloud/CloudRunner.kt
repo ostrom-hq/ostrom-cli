@@ -43,12 +43,12 @@ interface CloudRunner {
 /**
  * [CloudRunner] over the API client.
  *
- * @param channels Opens a terminal WebSocket: server URL, path, token.
+ * @param channels Opens a terminal WebSocket: server URL, path, token, organisation.
  */
 class CloudRunnerImpl(
     private val console: Console,
     private val api: (String) -> OstromApi,
-    private val channels: suspend (String, String, String) -> TerminalChannel,
+    private val channels: suspend (String, String, String, String?) -> TerminalChannel,
     private val terminal: RawTerminal,
     private val capture: ProcessCapture,
 ) : CloudRunner {
@@ -64,7 +64,7 @@ class CloudRunnerImpl(
         ServerJson(ApiServerTransport(client, site.org)),
         TerminalConnector { path, token ->
             try {
-                ChannelSocket(channels(site.serverUrl, path, token))
+                ChannelSocket(channels(site.serverUrl, path, token, site.org))
             } catch (e: ServerUnreachableException) {
                 throw IOException(e.reason, e)
             }

@@ -36,9 +36,9 @@ private const val ID = "[A-Za-z0-9_-]{1,128}"
 
 /**
  * One path segment of a session: the agent's id as ostrom-server's `SessionSegments` accepts it (`.` and `:` in it),
- * and `~r<n>` after it for a reopened one. A segment `.` or `..` is never forwarded ([hookTarget]).
+ * and `~r<n>` after it for a reopened one. Never a dot first, so never `.` nor `..`.
  */
-private const val SESSION = "[A-Za-z0-9_.:~-]{1,128}"
+private const val SESSION = "[A-Za-z0-9_:~-][A-Za-z0-9_.:~-]{0,127}"
 private const val API_PREFIX = "/api/v1/"
 private const val MCP_PREFIX = "/mcp/"
 private const val GATE_CATALOG = "/api/v1/gates/catalog"
@@ -74,7 +74,6 @@ internal fun resolveTarget(method: HttpMethod, path: String, config: RelayConfig
 }
 
 private fun hookTarget(method: HttpMethod, path: String, catalog: String?): RelayTarget = when {
-    path.split('/').any { it == "." || it == ".." } -> RelayTarget.NotFound
     method == HttpMethod.Post && HOOK_POST.matches(path) -> RelayTarget.Hook(longPoll = false)
     method == HttpMethod.Get && path == SIGNED_GATE_CATALOG -> RelayTarget.SignedCatalog
     method == HttpMethod.Get && path == GATE_CATALOG ->

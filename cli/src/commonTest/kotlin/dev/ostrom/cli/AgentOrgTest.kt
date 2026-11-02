@@ -18,6 +18,8 @@ class AgentOrgTest : SetupKit() {
     fun noOrganisationNamedAsksTheServerNothing() {
         assertEquals(7, run(both, "claude"))
         assertNull(launches.last().second.org, "the server takes the only one")
+        assertEquals(7, run(both, "claude", "--org", ""))
+        assertNull(launches.last().second.org, "an empty --org names none")
         assertTrue(requests.isEmpty(), "no lookup when none is named")
     }
 

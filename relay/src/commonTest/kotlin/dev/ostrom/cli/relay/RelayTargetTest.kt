@@ -56,6 +56,7 @@ class RelayTargetTest {
             HttpMethod.Get to "/api/v1/gates/../launches",
             HttpMethod.Post to "/api/v1/sessions/../seen",
             HttpMethod.Post to "/api/v1/sessions/./reopen",
+            HttpMethod.Post to "/api/v1/sessions/.hidden/seen",
             HttpMethod.Get to "/api/v1/gates/g-1/consume",
             HttpMethod.Get to "/api/v1/sessions",
             HttpMethod.Put to "/api/v1/sessions",
