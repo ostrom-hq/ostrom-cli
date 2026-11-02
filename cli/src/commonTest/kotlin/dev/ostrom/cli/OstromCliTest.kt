@@ -435,6 +435,11 @@ class OstromCliTest : CliKit() {
             assertEquals(0, cli().run(arguments.toTypedArray()))
             assertTrue(console.help.isNotEmpty(), arguments.joinToString(" "))
         }
+        // a usage error quotes the arguments: it goes to stderr, cleaned, never written raw
+        console.help.clear()
+        assertEquals(64, cli().run(arrayOf("cluade")))
+        assertEquals("", console.help.toString())
+        assertTrue(console.err.contains("cluade"), console.err.toString())
         // a message that is not help, written to stdout, may quote a server's text: it goes through out()
         console.help.clear()
         console.out.clear()

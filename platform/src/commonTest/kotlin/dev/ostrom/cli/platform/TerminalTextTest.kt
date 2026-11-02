@@ -92,11 +92,13 @@ class TerminalTextTest {
         assertEquals("a\u202Fb\u2065c", terminalSafe("a\u202Fb\u2065c"))
         assertEquals("abcdefgh", terminalSafe("a\u200Eb\u200Fc\u061Cd\u2028e\u2029f\u200Bg\u2060h\uFEFF"))
         // every invisible character, one by one
-        val invisible = "\u00AD\u061C\u200B\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E\u2060\u2061" +
-            "\u2062\u2063\u2064\u2066\u2067\u2068\u2069\u206A\u206B\u206C\u206D\u206E\u206F\uFEFF\uFFF9\uFFFA\uFFFB"
+        val invisible = "\u00AD\u061C\u180E\u200B\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E\u2060" +
+            "\u2061\u2062\u2063\u2064\u2066\u2067\u2068\u2069\u206A\u206B\u206C\u206D\u206E\u206F\u3164\uFEFF" +
+            "\uFFA0\uFFF9\uFFFA\uFFFB"
         assertEquals(emptyList(), invisible.filter { terminalSafe("a${it}b") != "ab" }.toList())
-        // what a script needs stays: a variation selector, the combining grapheme joiner, the Hangul fillers, blanks
-        val kept = "\u180B\u034F\u115F\u1160\u3164\uFFA0\u2800\u200C\u200D"
+        // what a script needs stays: the variation selectors, the combining grapheme joiner, the fillers that compose
+        // a Hangul syllable, Braille's space, the zero-width (non-)joiners
+        val kept = "\u180B\u180C\u180D\u034F\u115F\u1160\u2800\u200C\u200D"
         assertEquals(kept, terminalSafe(kept))
         // tag characters spell text no one sees; the supplement's variation selectors and a lone surrogate stay
         assertEquals("ab", terminalSafe("a\uDB40\uDC72\uDB40\uDC6Db"))
