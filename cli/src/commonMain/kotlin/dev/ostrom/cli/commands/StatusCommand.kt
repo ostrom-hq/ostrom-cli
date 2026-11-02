@@ -90,10 +90,14 @@ internal class StatusCommand(private val dependencies: CliDependencies) : CliktC
     private suspend fun harnessOf(server: ServerJson, token: String, repository: String?): Read<String> {
         repository ?: return Read(null, known = true)
         val answer = server.get("$PACKAGE${Routes.encode(repository)}", token)
-        // a revoked package is one the launcher refuses: no harness is in force
-        val live = (answer as? ServerAnswer.Ok)?.let { ok -> ok.body.takeIf { it["revoked"] != JsonPrimitive(true) } }
-        val none = answer is ServerAnswer.Failed && answer.status == NOT_FOUND
-        return Read(live?.text("version"), known = answer is ServerAnswer.Ok || none, down = failing(answer))
+        return when (answer) {
+            is ServerAnswer.Ok -> {
+                // a revoked package is one the launcher refuses: no harness is in force
+                val live = answer.body.takeIf { it["revoked"] != JsonPrimitive(true) }
+                Read(live?.text("version"), known = true)
+            }
+            is ServerAnswer.Failed -> Read(null, known = answer.status == NOT_FOUND, down = failing(answer))
+        }
     }
 
     /** The requests waiting for this developer's yes, every page of the inbox as `ostrom inbox` reads it. */
