@@ -100,9 +100,6 @@ internal class OrgAccess(
     }
 
     private companion object {
-        // an Int? like the answer's status: no null test for a status the refusals always have
-        @Suppress("MayBeConst") // a const cannot be an Int?, and an Int would bring the null test back
-        val UNAUTHORIZED: Int? = 401
         const val ELEVATE =
             "Run ostrom login --admin: an owner or admin approves it in the browser, for 8 hours at most."
         const val FORBIDDEN = 403
@@ -190,6 +187,10 @@ private fun CliDependencies.gitTopName(): String? {
 
 /** The longest `git rev-parse` may take. */
 private const val GIT_MILLIS = 5_000
+
+/** 401, an Int? like the answer's status: no null test for a status the refusals always have. */
+@Suppress("MayBeConst") // a const cannot be an Int?, and an Int would bring the null test back
+private val UNAUTHORIZED: Int? = 401
 
 /** `GET`: the caller's organisations (served). */
 private const val ORGS = "/api/v1/orgs"
