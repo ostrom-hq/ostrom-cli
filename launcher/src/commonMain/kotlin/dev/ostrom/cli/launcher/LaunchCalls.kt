@@ -104,9 +104,9 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
                 stop(UNREACHABLE, "the instance's keys could not be read (${answer.message}): the agent is not started")
         }
 
-    /** The organisation's MCP servers the relay serves, by name. */
+    /** The organisation's MCP servers the relay serves to this agent (`?mine=true`), by name. */
     suspend fun mcpServers(site: LaunchSite): List<String> =
-        when (val answer = dependencies.server.get(Routes.MCP_SERVERS, site.credentials.token, MCP_MILLIS)) {
+        when (val answer = dependencies.server.get(Routes.MCP_MINE, site.credentials.token, MCP_MILLIS)) {
             is ServerAnswer.Ok -> answer.body.list("items").filterIsInstance<JsonObject>()
                 .filter { it.flag("enabled") != false }
                 .mapNotNull { it.text("name") }
