@@ -13,6 +13,7 @@ import dev.ostrom.cli.api.STATISTICS_TIMEOUT_MILLIS
 import dev.ostrom.cli.commands.AgentCommand
 import dev.ostrom.cli.commands.ApproveCommand
 import dev.ostrom.cli.commands.AttachCommand
+import dev.ostrom.cli.commands.CompletionCommand
 import dev.ostrom.cli.commands.ConfigCommand
 import dev.ostrom.cli.commands.DenyCommand
 import dev.ostrom.cli.commands.DoctorCommand
@@ -184,7 +185,8 @@ class OstromCli(private val dependencies: CliDependencies) {
         val plumbing = listOf(WaitCommand(dependencies), HookCommand(dependencies), McpCommand(dependencies))
         // The root always has a help screen: no null to handle.
         val help = HelpCommand(dependencies) { "${root.getFormattedHelp()}" }
-        return root.subcommands(agents + pendingCommands(implemented) + plumbing + help)
+        val completion = CompletionCommand(dependencies)
+        return root.subcommands(agents + pendingCommands(implemented) + plumbing + completion + help)
     }
 
     internal companion object {
