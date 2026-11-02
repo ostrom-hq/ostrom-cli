@@ -15,7 +15,6 @@ import dev.ostrom.cli.platform.StandardInputFailure
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import kotlin.time.TimeSource
 
@@ -98,18 +97,61 @@ class HookRunnerTest {
     }
 
     @Test
-    fun aCancellationIsNeverTakenForAFailure() {
+    fun aCancellationOrAFailureWithNoNameRefusesTheToolToo() {
+        // nothing above the hook process could receive a cancellation: it is a failure of the gate like another
         val cancelled = object : HookProcessor {
-            override fun process(kind: HookKind, input: ByteArray?, dialect: String) =
+            override fun process(kind: HookKind, input: ByteArray?, dialect: String): HookReply =
                 throw CancellationException("cancelled")
         }
         val console = FakeConsole(StandardInput.Read("{}".encodeToByteArray()))
-        val runner = HookRunnerImpl(console, FakeEnvironment(), cancelled)
-        assertFailsWith<CancellationException> { runner.run(listOf("gate")) }
-        val writing = object : Console by FakeConsole(StandardInput.Read("{}".encodeToByteArray())) {
-            override fun out(text: String) = throw CancellationException("cancelled")
+        assertEquals(2, HookRunnerImpl(console, FakeEnvironment(), cancelled).run(listOf("gate")))
+        assertEquals("${GateTexts.GATE_FAILED} (CancellationException)\n", console.err.toString())
+        val anonymous = object : HookProcessor {
+            override fun process(kind: HookKind, input: ByteArray?, dialect: String): HookReply =
+                throw object : IllegalStateException("no name") {}
         }
-        assertFailsWith<CancellationException> { HookRunnerImpl(writing, FakeEnvironment(), deny).run(listOf("gate")) }
+        val unnamed = FakeConsole(StandardInput.Read("{}".encodeToByteArray()))
+        assertEquals(2, HookRunnerImpl(unnamed, FakeEnvironment(), anonymous).run(listOf("gate")))
+        assertEquals("${GateTexts.GATE_FAILED} (an error)\n", unnamed.err.toString())
+    }
+
+    @Test
+    fun anEventWhoseNameCannotBeReadAgainIsTakenAsBeforeTheTool() {
+        val console = FakeConsole(StandardInput.Read("""{"hook_event_name":"PostToolUse"}""".encodeToByteArray()))
+        val runner = HookRunnerImpl(console, FakeEnvironment(), failing) { error("the parse failed again") }
+        assertEquals(2, runner.run(listOf("gate")))
+        assertEquals("$failed\n", console.err.toString())
+    }
+
+    @Test
+    fun aVariantOfTheEventAfterTheToolRefusesNothingEither() {
+        val failure = """{"hook_event_name":"PostToolUseFailure"}"""
+        val console = FakeConsole(StandardInput.Read(failure.encodeToByteArray()))
+        assertEquals(1, HookRunnerImpl(console, FakeEnvironment(), failing).run(listOf("gate")))
+    }
+
+    @Test
+    fun aDialectThatCannotBeReadRefusesInClaudesDialect() {
+        val environment = object : Environment by FakeEnvironment() {
+            override fun get(name: String): String? =
+                if (name == "OSTROM_HOOK_DIALECT") error("the environment cannot be read") else null
+        }
+        val console = FakeConsole(StandardInput.Read("{}".encodeToByteArray()))
+        assertEquals(2, HookRunnerImpl(console, environment, passThrough).run(listOf("gate")))
+        assertEquals("" to "$failed\n", console.out.toString() to console.err.toString())
+    }
+
+    @Test
+    fun aClosedStdoutKeepsTheReasonOnStderr() {
+        val closed = object : Console by FakeConsole(StandardInput.Read("{}".encodeToByteArray())) {
+            val said = StringBuilder()
+            override fun out(text: String) = error("stdout is closed")
+            override fun err(text: String) {
+                said.append(text)
+            }
+        }
+        assertEquals(2, HookRunnerImpl(closed, FakeEnvironment(), deny).run(listOf("gate")))
+        assertEquals("no\n", closed.said.toString())
     }
 
     /** A console whose stdin read, or else every write, fails (an agent that closed its pipes). */
