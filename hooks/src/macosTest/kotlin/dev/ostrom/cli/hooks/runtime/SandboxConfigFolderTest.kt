@@ -57,5 +57,7 @@ class SandboxConfigFolderTest {
         val closed = read(hidden = config.toString())
         assertTrue(closed.exit != 0, "the sandbox refuses the read (exit ${closed.exit}: ${closed.output})")
         assertFalse("maya" in closed.output, "nothing of the file reaches the script's output")
+        // the read itself is refused, not the whole profile (a profile sandbox-exec rejects would fail too)
+        assertTrue("Operation not permitted" in closed.output, closed.output)
     }
 }

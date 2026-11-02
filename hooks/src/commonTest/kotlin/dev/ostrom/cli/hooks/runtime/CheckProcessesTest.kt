@@ -25,7 +25,7 @@ class CheckProcessesTest {
     private val request = ScriptRequest("s1", "/t/sbx/s1.sh", "/w", "/t/sbx", "/t", network = false, 30_000)
 
     private fun runner(capture: Capture, sandboxExec: Boolean, budget: HookBudget = HookBudget.NONE) =
-        SandboxedScripts(capture, variables::get, sandboxExec, "/home/lena", { "/real$it" }, budget)
+        SandboxedScripts(capture, variables::get, sandboxExec, "/home/lena", { "/real$it" }, budget, null)
 
     /** What every git command of a check is given before its own arguments. */
     private val safe = listOf(
@@ -76,8 +76,10 @@ class CheckProcessesTest {
         val allowed = "macos sandbox-exec (network allowed, no write outside the repository)"
         assertEquals(allowed, open.run(networked).sandbox)
         assertTrue(open.profile(networked).startsWith("(version 1)\n(allow default)\n(deny file-write*)\n"))
-        assertTrue("(subpath \"/real/wx\")" in open.profile(networked), "a quote never ends a path of the profile")
-        val linked = SandboxedScripts(Capture(), variables::get, true, "/home/lena", { it.replace("/home", "/Users") })
+        assertTrue("(subpath \"/real/w\\\"x\")" in open.profile(networked), "a quote never ends a path of the profile")
+        val linked = SandboxedScripts(
+            Capture(), variables::get, true, "/home/lena", { it.replace("/home", "/Users") }, configDirectory = null,
+        )
         assertTrue(
             "(subpath \"/Users/lena/.ssh\")" in linked.profile(request),
             "a credential folder reached through a link is hidden at its real path",
@@ -94,6 +96,12 @@ class CheckProcessesTest {
         assertTrue("(subpath \"/real/srv/ostrom\")" in profile, "the CLI's folder, where OSTROM_HOME puts it")
         assertTrue("(subpath \"/real/srv/xdg/gh\")" in profile, "GitHub's CLI's, where XDG_CONFIG_HOME puts it")
         assertTrue("(subpath \"/real/home/lena/.config/ostrom\")" in profile, "the default folder stays hidden")
+        val gh = sandbox((moved + ("GH_CONFIG_DIR" to "/srv/gh"))::get, "/srv/ostrom").profile(request)
+        assertTrue("(subpath \"/real/srv/gh\")" in gh, "GH_CONFIG_DIR comes before XDG_CONFIG_HOME, as for gh")
+        assertFalse("/real/srv/xdg/gh" in gh)
+        // a quote or a backslash is escaped: stripped, the path would name another folder and leave this one readable
+        val odd = sandbox(variables::get, "/srv/o\"p\\s").profile(request)
+        assertTrue("(subpath \"/real/srv/o\\\"p\\\\s\")" in odd, odd)
         val usual = sandbox(variables::get, "/home/lena/.config/ostrom").profile(request)
         assertEquals(runner(Capture(), sandboxExec = true).profile(request), usual, "the usual folder, named once")
     }

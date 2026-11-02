@@ -17,8 +17,9 @@ import dev.ostrom.cli.platform.ProcessCapture
  *   the profile, the hidden credentials' included, goes through it.
  * @param budget What is left of the agent's limit on the hook: a script is cut to it, and not started once it is spent.
  * @param configDirectory The CLI's own folder ([dev.ostrom.cli.platform.Environment.configDirectory]), hidden wherever
- *   `OSTROM_HOME` or `XDG_CONFIG_HOME` put it, not only at `~/.config/ostrom` (security audit L3). GitHub's CLI follows
- *   `XDG_CONFIG_HOME` too: its folder there is hidden as well.
+ *   `OSTROM_HOME` or `XDG_CONFIG_HOME` put it, not only at `~/.config/ostrom` (security audit L3); null when none is
+ *   known. GitHub's CLI moves the same way (`GH_CONFIG_DIR`, else `XDG_CONFIG_HOME`): its folder there is hidden too.
+ *   Required, so that no construction forgets it.
  */
 class SandboxedScripts(
     private val capture: ProcessCapture,
@@ -27,7 +28,7 @@ class SandboxedScripts(
     private val home: String,
     private val canonical: (String) -> String,
     private val budget: HookBudget = HookBudget.NONE,
-    private val configDirectory: String? = null,
+    private val configDirectory: String?,
 ) : ScriptRunner {
     override fun run(request: ScriptRequest): ScriptRun {
         val temporary = "${request.sandbox}/tmp"
@@ -53,8 +54,11 @@ class SandboxedScripts(
 
     /** The `sandbox-exec` profile of the prototype (`profile` in `package.mjs`, `sandbox_profile` in `package.rs`). */
     fun profile(request: ScriptRequest): String {
-        val real = { path: String -> canonical(path).replace("\"", "") }
-        val moved = listOfNotNull(configDirectory, variable(XDG_CONFIG_HOME)?.let { "$it/gh" })
+        // a string of the profile: a quote or a backslash in a path is escaped, so it neither ends the string nor
+        // names another folder (a hidden folder renamed would be readable)
+        val real = { path: String -> canonical(path).replace("\\", "\\\\").replace("\"", "\\\"") }
+        val gh = variable(GH_CONFIG_DIR) ?: variable(XDG_CONFIG_HOME)?.let { "$it/gh" }
+        val moved = listOfNotNull(configDirectory, gh)
         val folders = HIDDEN.map { "${home.trimEnd('/')}/$it" } + moved
         val hidden = folders.map(real).distinct().joinToString(" ") { "(subpath \"$it\")" }
         val tmp = real(request.tmp)
@@ -79,6 +83,7 @@ class SandboxedScripts(
         internal const val SPENT = "the agent's time limit for a hook is reached, so the script was not started"
 
         private const val XDG_CONFIG_HOME = "XDG_CONFIG_HOME"
+        private const val GH_CONFIG_DIR = "GH_CONFIG_DIR"
 
         private val KEPT = listOf("PATH", "HOME", "LANG", "LC_ALL", "USER", "SHELL")
         private val HIDDEN = listOf(
