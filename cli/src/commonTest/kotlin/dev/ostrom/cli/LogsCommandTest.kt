@@ -184,9 +184,9 @@ class LogsCommandTest : CliKit() {
                 override suspend fun send(request: ServerRequest) = get(request.path)
             }
         }
-        val unreachable = cli(environment = withServer, api = down)
-        assertEquals(69, unreachable.run(arrayOf("logs")), "no list: unreachable")
-        assertEquals(69, unreachable.run(arrayOf("logs", "ses_41b2")), "no session either")
+        val unreachable = { cli(environment = withServer, api = down) }
+        assertEquals(69, unreachable().run(arrayOf("logs")), "no list: unreachable")
+        assertEquals(69, unreachable().run(arrayOf("logs", "ses_41b2")), "no session either")
     }
 
     @Test
