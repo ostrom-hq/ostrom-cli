@@ -63,11 +63,11 @@ class Machine:
             json.dump({self.server: {"token": "ost_e2e_device", "login": "maya"}}, handle)
 
     def signed_out(self):
-        """A CLI folder of its own, never signed in: deleting credentials.json is no sign-out, since the first read
-        moves the token into the secret store."""
+        """A CLI folder of its own and a server address never signed in to: deleting credentials.json is no sign-out,
+        since the first read moves the token into the secret store, which keeps it by the server's address."""
         home = os.path.join(self.work, "ostrom-home-signed-out")
         os.makedirs(home, exist_ok=True)
-        return {"OSTROM_HOME": home}
+        return {"OSTROM_HOME": home, "OSTROM_URL": self.server.replace("://127.0.0.1:", "://localhost:")}
 
     def run(self, *arguments, server=None, extra=None):
         # the D-Bus session of the CI step (an unlocked keyring, as on a desktop) reaches the secret store
