@@ -27,8 +27,12 @@ class AgentLaunchUseCaseTest {
     private val server = FakeServer()
     private val files = MemoryFiles()
     private val said = mutableListOf<String>()
+
+    /** What is said about the repository's name, kept apart so the other tests read the rest as before. */
+    private val warned = mutableListOf<String>()
     private val variables = mutableMapOf("PATH" to "/usr/bin")
     private var gitAnswer: CaptureResult = CaptureResult.Exited(0, "/work/acme-api\n")
+    private var originAnswer: CaptureResult = CaptureResult.Exited(2, "error: No such remote 'origin'\n")
     private var installed = mutableMapOf("claude" to "/usr/bin/claude", "codex" to "/usr/bin/codex")
     private var agentResult: ProcessResult = ProcessResult.Exited(3)
     private val commands = mutableListOf<List<String>>()
@@ -51,7 +55,8 @@ class AgentLaunchUseCaseTest {
     }
 
     private val capture = object : ProcessCapture {
-        override fun capture(command: List<String>, timeoutMillis: Int) = gitAnswer
+        override fun capture(command: List<String>, timeoutMillis: Int) =
+            if ("get-url" in command) originAnswer else gitAnswer
 
         override fun detach(command: List<String>) = false
     }
@@ -397,6 +402,63 @@ class AgentLaunchUseCaseTest {
     }
 
     @Test
+    fun theRepositoryIsOwnerAndNameOfTheOriginInHttpsAsInSsh() = runTest {
+        val urls = listOf(
+            "https://github.com/acme/api.git",
+            "https://github.com/acme/api",
+            "https://x-access-token:secret@github.com/acme/api.git",
+            "git@github.com:acme/api.git",
+            "ssh://git@github.com/acme/api.git",
+            "ssh://git@github.com:22/acme/api",
+        )
+        for (url in urls) {
+            serveALaunch()
+            said.clear()
+            warned.clear()
+            originAnswer = CaptureResult.Exited(0, "$url\n")
+            start()
+            assertEquals("acme/api", environments.last()[LaunchVariables.REPO], url)
+            val created = server.sent("POST ${Routes.LAUNCHES}").last()
+            assertEquals("""{"repo":"acme/api","agent":"claude-code"}""", created.body)
+            assertEquals(emptyList(), warned, url)
+            assertTrue(said.none { "secret" in it }, "the origin's URL, which may carry a token, is never said")
+        }
+    }
+
+    @Test
+    fun aRepositoryNamedOrInTheEnvironmentComesBeforeTheOrigin() = runTest {
+        originAnswer = CaptureResult.Exited(0, "git@github.com:acme/api.git\n")
+        serveALaunch()
+        start(repo = "given")
+        assertEquals("given", environments.last()[LaunchVariables.REPO])
+        serveALaunch()
+        variables["OSTROM_REPO"] = "from-env"
+        start()
+        assertEquals("from-env", environments.last()[LaunchVariables.REPO])
+    }
+
+    @Test
+    fun withoutAnOwnerAndANameTheFolderIsTakenAndSaid() = runTest {
+        val origins = listOf(
+            CaptureResult.Exited(2, "error: No such remote 'origin'\n"),
+            CaptureResult.Exited(0, "/srv/git/acme-api.git\n"),
+            CaptureResult.Exited(0, "https://x-access-token:secret@git.example/solo.git\n"),
+            CaptureResult.NotFound,
+        )
+        for (origin in origins) {
+            serveALaunch()
+            warned.clear()
+            originAnswer = origin
+            start()
+            assertEquals("acme-api", environments.last()[LaunchVariables.REPO], "$origin")
+            val warning = "ostrom: no origin with an owner/name here: the session is registered for \"acme-api\", " +
+                "this folder's name, and a gate set on owner/name does not cover it " +
+                "(--repo owner/name names the repository)"
+            assertEquals(listOf(warning), warned)
+        }
+    }
+
+    @Test
     fun theRepositoryIsAskedOrTheEnvironmentsOrTheFolders() = runTest {
         serveALaunch()
         start(repo = "given")
@@ -513,7 +575,7 @@ class AgentLaunchUseCaseTest {
             capture = capture,
             relays = relays,
             clock = clock,
-            say = { said += it },
+            say = { if (it.startsWith(NO_ORIGIN)) warned += it else said += it },
             blocking = UnconfinedTestDispatcher(testScheduler),
             userAgent = "ostrom/test",
         )
@@ -543,6 +605,7 @@ class AgentLaunchUseCaseTest {
     }
 
     private companion object {
+        const val NO_ORIGIN = "ostrom: no origin with an owner/name here"
         const val KEYS = """{"keys":[{"keyId":"k1","algorithm":"ed25519","publicKeyPem":"pem"}]}"""
     }
 }

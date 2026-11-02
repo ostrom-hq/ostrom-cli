@@ -122,6 +122,20 @@ class InitCommandTest : SetupKit() {
     }
 
     @Test
+    fun aCloneIsTheOwnerAndNameOfItsOriginForInit() {
+        val git = gitTop("/work/api", CaptureResult.Exited(0, "https://github.com/acme/api.git\n"))
+        val harness = "GET /api/v1/workflows?repo=acme%2Fapi" to (200 to """{"items":[]}""")
+        val repos = "GET /api/v1/repos?limit=100" to (200 to """{"items":[{"name":"acme/api"}]}""")
+        assertEquals(0, run(mapOf(repos, harness), "init", environment = zsh, capture = git))
+        assertOut("  Repository  acme/api · covered\n")
+        // another owner's repository of the same name is not covered by a bare name
+        console.out.clear()
+        val bare = "GET /api/v1/repos?limit=100" to (200 to """{"items":[{"name":"api"}]}""")
+        assertEquals(0, run(mapOf(bare, harness), "init", environment = zsh, capture = git))
+        assertOut("! acme/api is not among Acme's repositories on the server")
+    }
+
+    @Test
     fun outsideARepositoryInitSetsUpTheDevice() {
         val empty = mapOf(
             "GET /api/v1/workflows?repo=acme-api" to (200 to """{"items":[]}"""),

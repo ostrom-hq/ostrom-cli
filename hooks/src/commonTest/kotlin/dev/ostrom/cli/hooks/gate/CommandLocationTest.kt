@@ -5,22 +5,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
-class RemoteUrlsTest {
-    @Test
-    fun slugReadsEveryRemoteSpelling() {
-        assertEquals("ostrom-hq/ostrom", RemoteUrls.slug("git@github.com:ostrom-hq/ostrom.git"))
-        assertEquals("ostrom-hq/ostrom", RemoteUrls.slug("https://github.com/ostrom-hq/ostrom.git"))
-        assertEquals("ostrom-hq/ostrom", RemoteUrls.slug("https://github.com/ostrom-hq/ostrom/"))
-        assertEquals("acme/core", RemoteUrls.slug("ssh://git@github.com/acme/core.git"))
-        assertEquals("gate-demo", RemoteUrls.slug("/tmp/remotes/gate-demo.git"))
-        assertEquals("gate-demo", RemoteUrls.slug("../gate-demo"))
-        assertEquals("repo", RemoteUrls.slug("C:\\remotes\\repo.git"))
-        assertEquals("solo", RemoteUrls.slug("https://host/solo"))
-        assertEquals("", RemoteUrls.slug("https://host"))
-        assertEquals("a/b", RemoteUrls.slug("host:x/a/b"))
-        assertEquals("x:y", RemoteUrls.slug("dir/x:y"), "a colon after a slash is part of a path")
-    }
-
+class CommandLocationTest {
     @Test
     fun aRepositoryIsLabelledByItsOriginElseItsFolder() {
         assertEquals("o/n", RealRepository("/w/n", "o/n").label)

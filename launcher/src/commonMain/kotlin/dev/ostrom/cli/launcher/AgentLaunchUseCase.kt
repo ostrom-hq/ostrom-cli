@@ -116,7 +116,8 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         val adapter = adapters[agent] ?: stop(NO_ADAPTER, "${agent.displayName} has no adapter in this version.")
         val executable = dependencies.finder.find(agent.executable) ?: stop(AGENT_MISSING, missing(agent))
         val top = gitTop(site.cwd)
-        val repo = request.repo ?: site.variable(LaunchVariables.REPO)?.takeIf { it.isNotEmpty() } ?: folderName(top)
+        val repo = request.repo ?: site.variable(LaunchVariables.REPO)?.takeIf { it.isNotEmpty() }
+            ?: launchRepository(top, dependencies.capture, dependencies.say)
         val models = (listOfNotNull(request.model) + modelsOf(request.arguments)).distinct()
         if (models.size > 1) {
             stop(USAGE, "two models are named (${models.joinToString()}): name one, the one the policy checks")
@@ -331,9 +332,6 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         private fun missing(agent: Agent): String =
             "${agent.displayName} is not installed (`${agent.executable}` is not on your PATH)." +
                 agent.installUrl?.let { " Install it: $it" }.orEmpty()
-
-        private fun folderName(path: String): String =
-            path.trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\')
     }
 }
 

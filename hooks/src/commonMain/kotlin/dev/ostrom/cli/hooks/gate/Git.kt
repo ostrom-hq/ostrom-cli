@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.hooks.gate
 
+import dev.ostrom.cli.platform.RemoteUrls
+
 /**
  * Runs `git` for the gate. The gate asks git only for a guarded action (an ordinary `ls` starts no git process), and
  * each answer is read once per hook process.
@@ -35,7 +37,7 @@ object ShellPaths {
         path.startsWith("/") || path.startsWith("\\\\") || WINDOWS_DRIVE.matches(path.take(DRIVE_PREFIX))
 
     /** The last part of a path, `/` and `\` both separators. */
-    fun fileName(path: String): String = path.trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\')
+    fun fileName(path: String): String = RemoteUrls.folderName(path)
 
     private const val DRIVE_PREFIX = 3 // `C:\\`
     private val WINDOWS_DRIVE = Regex("[A-Za-z]:[\\\\/]")

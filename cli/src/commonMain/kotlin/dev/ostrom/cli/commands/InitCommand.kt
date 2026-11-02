@@ -187,7 +187,8 @@ internal class InitCommand(private val dependencies: CliDependencies) : CliktCom
 
 /**
  * True when the page of repositories lists [name] (by itself or as `owner/name`), false when it does not and is the
- * last page, null when more pages follow: not found there, it is not known to be missing.
+ * last page, null when more pages follow: not found there, it is not known to be missing. A bare name listed never
+ * covers an `owner/name`: a clone of another owner's repository of the same name is not this organisation's.
  */
 private fun coverage(page: JsonObject, name: String): Boolean? {
     val found = page.list("items").filterIsInstance<JsonObject>().mapNotNull { it.text("name") }
