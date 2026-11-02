@@ -21,7 +21,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK_BUDGET_MS = 15
 # A local decision at p95, in a session. 20 ms holds in the journey (100 calls, the real server: 8.1 to 10.6 ms), not
-# here: with the contract server and the other steps of `ci` on the same runner, six runs of the 02/11 gave 12.9 to
+# here: with the contract server and the other steps of `ci` on the same runner, five runs of the 02/11 gave 12.9 to
 # 22.0 ms, and two failed at 20. 35 ms keeps the regression (a hook twice as slow) and leaves the runner its noise.
 HOOK_P95_BUDGET_MS = 35
 START_BUDGET_MS = 30
