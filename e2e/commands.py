@@ -62,13 +62,19 @@ class Machine:
         with open(os.path.join(self.home, "credentials.json"), "w") as handle:
             json.dump({self.server: {"token": "ost_e2e_device", "login": "maya"}}, handle)
 
-    def sign_out(self):
-        credentials = os.path.join(self.home, "credentials.json")
-        if os.path.exists(credentials):
-            os.remove(credentials)
+    def signed_out(self):
+        """A CLI folder of its own, never signed in: deleting credentials.json is no sign-out, since the first read
+        moves the token into the secret store."""
+        home = os.path.join(self.work, "ostrom-home-signed-out")
+        os.makedirs(home, exist_ok=True)
+        return {"OSTROM_HOME": home}
 
     def run(self, *arguments, server=None, extra=None):
+        # the D-Bus session of the CI step (an unlocked keyring, as on a desktop) reaches the secret store
+        desktop = {name: os.environ[name] for name in ("DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR")
+                   if name in os.environ}
         environment = {
+            **desktop,
             "PATH": self.path,
             "HOME": self.work,
             "OSTROM_HOME": self.home,
@@ -136,24 +142,27 @@ def scenario_help(machine):
     check(len(paths) > 40, f"the binary lists its commands ({len(paths)})")
     for path in paths:
         done = machine.run(*path.split(" "), "--help")
-        help = done.stdout
-        good = (done.returncode == 0 and f"Usage: ostrom {path}" in help and "\nExamples:\n  ostrom" in help
-                and f"Docs: {DOCS}" in help and ESCAPE not in help)
+        page = done.stdout
+        good = (done.returncode == 0 and f"Usage: ostrom {path}" in page and "\nExamples:\n  ostrom" in page
+                and f"Docs: {DOCS}" in page and ESCAPE not in page)
         check(good, f"ostrom {path} --help (exit {done.returncode})")
 
 
 def coming(machine):
     """The commands the binary declares but has not built yet: their line of `ostrom --help` says (coming soon)."""
-    help = machine.run("--help").stdout
-    listing = help.split("\nCommands:\n", 1)[1].split("\n\n", 1)[0]
+    page = machine.run("--help").stdout
+    parts = page.split("\nCommands:\n", 1)
+    check(len(parts) == 2, "ostrom --help has a Commands: section")
+    listing = parts[-1].split("\n\n", 1)[0]
     entries = re.findall(r"^  ([a-z-]+) +(.*(?:\n {4,}.*)*)", listing, re.M)
+    check(len(entries) > 10, f"ostrom --help lists its commands ({len(entries)})")
     return [name for name, said in entries if "(coming soon)" in " ".join(said.split())]
 
 
 # Each line: what it shows, the command line, the exit code, a text its stdout or stderr holds, and the setting.
 def lines(machine, other, nowhere):
     return [
-        ("the home screen", [], 0, "Not signed in. Next: ostrom login", None),
+        ("the home screen", [], 0, "Start an agent   ostrom claude", None),
         ("the version", ["version"], 0, "ostrom ", None),
         ("the exit codes", ["help", "exit-codes"], 0, "   64  Bad usage", None),
         ("an unknown command", ["nope"], 64, "Run 'ostrom --help' for usage.", None),
@@ -173,16 +182,16 @@ def lines(machine, other, nowhere):
         ("the inbox, signed out", ["inbox"], 65, "ostrom login", "signed-out"),
         ("the inbox", ["inbox"], 0, "Nothing waits for you.", None),
         ("the inbox, for a script", ["inbox", "--json"], 0, "[]", None),
-        ("the receipts", ["receipts", "list"], 0, "", None),
+        ("the receipts", ["receipts", "list"], 0, "No receipts yet.", None),
         ("a receipt that does not exist", ["receipts", "show", "R-none"], 66, "R-none", None),
         ("a receipt pulled", ["receipts", "pull", "W-e2e"], 0, "Saved W-e2e", None),
-        ("and verified offline", ["verify", "W-e2e"], 0, "", None),
+        ("and verified offline", ["verify", "W-e2e"], 0, "VERIFIED offline", None),
         ("a setting", ["config", "set", "color", "never"], 0, "", None),
         ("read back", ["config", "get", "color"], 0, "never", None),
         ("a setting that cannot be", ["config", "set", "color", "purple"], 64, "auto, always or never", None),
-        ("usage statistics", ["telemetry"], 0, "", None),
+        ("usage statistics", ["telemetry"], 0, "Usage statistics: ", None),
         ("an import without its database", ["import", "teamcode"], 64, "--db", None),
-        ("sign out", ["logout"], 0, "", None),
+        ("sign out", ["logout"], 0, "Signed out @maya", None),
         ("and signed out", ["inbox"], 65, "ostrom login", None),
     ]
 
@@ -191,20 +200,20 @@ def scenario_exit_codes(machine, other, nowhere):
     print("exit codes, against the contract's server")
     documented = {int(code) for code in re.findall(r"^ +(\d+)  ", machine.run("help", "exit-codes").stdout, re.M)}
     machine.sign_in()
-    for what, arguments, code, text, setting in lines(machine, other, nowhere):
-        server = None
-        if setting == "signed-out":
-            machine.sign_out()
-        elif setting is not None:
-            server = setting
-        done = machine.run(*arguments, server=server)
+    table = lines(machine, other, nowhere)
+    expected = {code for _, _, code, _, _ in table}
+    check(expected <= documented, f"every exit code expected is in ostrom help exit-codes ({sorted(expected)})")
+    for what, arguments, code, text, setting in table:
+        signed_out = setting == "signed-out"
+        server = None if signed_out else setting
+        done = machine.run(*arguments, server=server, extra=machine.signed_out() if signed_out else None)
         said = done.stdout + done.stderr
-        check(code in documented, f"exit {code} is in ostrom help exit-codes")
         check(done.returncode == code and text in said,
               f"{what}: ostrom {' '.join(arguments)} exits {code} (got {done.returncode}) and says {text!r}"
               + ("" if text in said else f" (said {said.strip()[-300:]!r})"))
-        if setting == "signed-out":
-            machine.sign_in()
+    # the contract server reports the MAJOR.MINOR of the contract: a contract bump makes it say so here
+    doctor = machine.run("doctor").stdout
+    check("but this ostrom speaks" not in doctor, "the doctor finds the server on this ostrom's contract")
 
 
 def scenario_colours(machine):
@@ -215,6 +224,10 @@ def scenario_colours(machine):
     check(ESCAPE in machine.run("--help").stdout, "color always forces them")
     check(ESCAPE not in machine.run("--no-color", "--help").stdout, "--no-color wins over color always")
     check(ESCAPE not in machine.run("--help", extra={"NO_COLOR": "1"}).stdout, "NO_COLOR wins over color always")
+    for arguments in (["nope"], ["doctor", "--bad"]):
+        done = machine.run(*arguments)
+        check(done.returncode == 64 and done.stderr and ESCAPE not in done.stderr,
+              f"no colour on stderr, even with color always: ostrom {' '.join(arguments)}")
     json_out = machine.run("doctor", "--json").stdout
     check(ESCAPE not in json_out and json.loads(json_out)["problems"] == 0, "--json never has a colour")
     machine.run("config", "unset", "color")
@@ -245,8 +258,12 @@ def scenario_completion(machine):
     if fish is None:
         print("  skip  fish is not on this machine")
     else:
-        probe = f"{machine.binary} completion fish | source; complete -C 'ostrom completion '"
-        offered = subprocess.run([fish, "--no-config", "-c", probe], capture_output=True, text=True).stdout.split()
+        script = os.path.join(machine.work, "ostrom.fish")
+        with open(script, "w") as handle:
+            handle.write(machine.run("completion", "fish").stdout)
+        probe = f"source {script}; complete -C 'ostrom completion '"
+        offered = subprocess.run([fish, "--no-config", "-c", probe], capture_output=True, text=True,
+                                 env={"PATH": machine.path, "HOME": machine.work}).stdout.split()
         check("powershell" in offered, f"fish completes 'ostrom completion ' (offered {offered[:8]})")
     pwsh = shutil.which("pwsh")
     if pwsh is None:
