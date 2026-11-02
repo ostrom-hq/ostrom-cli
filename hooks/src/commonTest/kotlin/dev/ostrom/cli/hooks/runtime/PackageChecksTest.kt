@@ -345,6 +345,9 @@ class PackageChecksTest {
         )
         assertEquals("not run", reports().single().text("sandbox"))
         assertEquals(emptyList(), scripts.requests)
+        val path = "/t/sbx/wt-0123456789ab"
+        // half a clone is removed too
+        assertEquals(listOf("remove /w $path", "add /w $path $feature", "remove /w $path"), checkouts.log)
     }
 
     @Test

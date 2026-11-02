@@ -205,16 +205,17 @@ class PackageChecks(
         private fun inCheckout(hook: CompiledHook, script: CompiledScript, sha: String): String? {
             val path = "$sandbox/wt-${sha.take(SHORT_SHA)}"
             ports.checkouts.remove(repository, path)
-            return if (ports.checkouts.add(repository, path, sha)) {
-                try {
+            // removed afterwards even when the clone stopped half-way
+            return try {
+                if (ports.checkouts.add(repository, path, sha)) {
                     verified(hook, script, path, sha, "${script.id}:commit:$sha")
-                } finally {
-                    ports.checkouts.remove(repository, path)
+                } else {
+                    val why = "cannot check out $sha to test it"
+                    report(hook, script, script.sha256, Report(null, FAILED, why, NOT_RUN, sha))
+                    CheckTexts.noCheckout(script.label, why)
                 }
-            } else {
-                val why = "cannot check out $sha to test it"
-                report(hook, script, script.sha256, Report(null, FAILED, why, NOT_RUN, sha))
-                CheckTexts.noCheckout(script.label, why)
+            } finally {
+                ports.checkouts.remove(repository, path)
             }
         }
 

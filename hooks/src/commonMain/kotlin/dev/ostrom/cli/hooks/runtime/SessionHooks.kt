@@ -44,7 +44,7 @@ object SessionHooks {
             val budget = HookBudget.of(environment["OSTROM_HOOK_BUDGET_MS"], clock)
             val home = context.home
             val scripts = SandboxedScripts(capture, environment::get, sandboxExec, home, files::canonical, budget)
-            val checkouts = GitCheckouts(capture, context.git, budget)
+            val checkouts = GitCheckouts(capture, context.git, budget, environment["PATH"])
             // in a cloud session the runner runs the checks on its own host and reports them (isolated_runner)
             val runner = context.runnerChecks?.let { RunnerSocketChecks(it, UnixSocketsImpl(), budget) }
             PackageChecks(view, context, CheckPorts(files, calls, git, checkouts, scripts, clock, runner))

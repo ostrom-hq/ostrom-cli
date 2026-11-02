@@ -87,50 +87,59 @@ class SandboxedScripts(
  * [CommitCheckouts] over the real `git`. These commands run in the hook's own process, outside the sandbox, on a
  * repository the agent controls (security audit M3), so none of the repository's code may run, nor change the tree the
  * checks judge:
- * - a commit is checked out in a clone of its own (`clone --shared`: its objects, none of its configuration), with the
- *   user's and the system's configuration left out too: no filter driver, hook or fsmonitor of anyone's applies, and
- *   nothing has to be named in advance (a name with `=` in it, a filter added during the hook). The clone then takes
- *   every ref of the repository (its branches and tags, as a worktree saw them);
+ * - a commit is checked out in a clone of its own (`clone --shared`: its objects, none of its configuration), in an
+ *   environment of its own: no user's or system's configuration (whatever the version of git), no variable of the
+ *   agent's (`GIT_CONFIG_*`, `GIT_DIR`), no replaced object. No filter driver, hook or fsmonitor of anyone's applies,
+ *   and nothing has to be named in advance (a name with `=` in it, a filter added during the hook). A repository that
+ *   git trusts only through the user's `safe.directory` (owned by someone else) is not cloned: its commits are refused;
  * - the working tree is read in place only when no configuration declares a filter driver other than Git LFS's
- *   ([filtered]: its `git status` would run it, and it would answer for the tree), with hooks, fsmonitor, LFS's
- *   filter and submodules left out. A filter added between that reading and the status is not seen: the agent would
- *   need a process of its own, timed to that window.
+ *   ([filtered]: its `git status` would run it, and it would answer for the tree), with hooks, fsmonitor and LFS's
+ *   filter left out. The filters are read again after the status: one added meanwhile makes the tree unclean. Only
+ *   one added and removed again while the status ran is not seen. A submodule is compared by its commit, not by the
+ *   files of its own working tree (they would be read with its configuration).
  *
- * POSIX only, as the check scripts are (`/usr/bin/env`, `/bin/rm`).
+ * POSIX only, as the check scripts are (`/usr/bin/env -i`, `/bin/sh`): on Windows a commit cannot be checked out.
  *
  * @param git The `git` the launcher resolved (`OSTROM_GIT`).
  * @param budget What is left of the agent's limit on the hook: a command it leaves no time for is not run, and fails.
+ * @param path The `PATH` the clone's `git` is looked up in, or null.
  */
 class GitCheckouts(
     private val capture: ProcessCapture,
     private val git: String,
     private val budget: HookBudget = HookBudget.NONE,
+    private val path: String? = null,
 ) : CommitCheckouts {
-    override fun filtered(repository: String): Boolean {
-        // every configuration, the user's and the system's too (the agent can write them); reading runs nothing
-        val listed = run(listOf("-C", repository, "config", "--name-only", "--get-regexp", "^filter\\."), SHORT_MILLIS)
-        return !noFilter(listed)
-    }
+    /** Read once per repository and hook run: every check of every commit of a push asks. */
+    private val filters = mutableMapOf<String, Boolean>()
+
+    override fun filtered(repository: String): Boolean = filters.getOrPut(repository) { declared(repository) }
 
     override fun clean(repository: String): Boolean {
-        val read = listOf("-C", repository, "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=all")
-        val status = run(OFF + read, SHORT_MILLIS)
-        return status is CaptureResult.Exited && status.code == 0 && status.output.isEmpty()
+        val status = run(OFF + listOf("-C", repository, "status") + STATUS, SHORT_MILLIS)
+        val unchanged = status is CaptureResult.Exited && status.code == 0 && status.output.isEmpty()
+        // a filter declared while the status ran may have answered for the tree
+        return unchanged && !declared(repository)
     }
 
     override fun add(repository: String, path: String, sha: String): Boolean {
-        // the user's safe.directory is left out with their configuration: this repository is the one the agent works in
-        val own = HOOKS_OFF + listOf("-c", "safe.directory=$repository")
         val clone = listOf("clone", "--quiet", "--shared", "--no-checkout", "--", repository, path)
-        if (!succeeded(configless(own + clone))) return false
-        // every ref, as a worktree saw them; without them the commit is still there
-        configless(own + listOf("-C", path, "fetch", "--quiet", "--update-head-ok", "origin", "+refs/*:refs/*"))
-        return succeeded(configless(own + listOf("-C", path, "checkout", "--quiet", "--detach", sha)))
+        val checkout = listOf("-C", path, "checkout", "--quiet", "--detach", sha)
+        return succeeded(configless(clone)) && succeeded(configless(checkout))
     }
 
     override fun remove(repository: String, path: String) {
-        // what a check built in it (node_modules, target) can take long to delete
+        // a check may leave folders it cannot write (a module cache): rm alone would leave them, and the next clone
+        // would find the folder taken. What a check built (node_modules, target) can take long to delete
+        bounded(listOf(CHMOD, "-R", "u+w", "--", path), CHECKOUT_MILLIS)
         bounded(listOf(RM, "-rf", "--", path), CHECKOUT_MILLIS)
+    }
+
+    /** Whether any configuration declares a filter driver other than LFS's, or that cannot be read. */
+    private fun declared(repository: String): Boolean {
+        // every configuration, the user's and the system's too (the agent can write them); reading runs nothing
+        val listed = run(listOf("-C", repository, "config", "--name-only", "--get-regexp", "^filter\\."), SHORT_MILLIS)
+        return !noFilter(listed)
     }
 
     private fun succeeded(result: CaptureResult) = result is CaptureResult.Exited && result.code == 0
@@ -146,9 +155,15 @@ class GitCheckouts(
     private fun run(arguments: List<String>, timeoutMillis: Int): CaptureResult =
         bounded(listOf(git) + arguments, timeoutMillis)
 
-    /** `git` with [arguments], without the user's nor the system's configuration: a checkout runs no filter. */
-    private fun configless(arguments: List<String>): CaptureResult =
-        bounded(listOf(ENV, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", git) + arguments, CHECKOUT_MILLIS)
+    /**
+     * `git` with [arguments] in an environment of its own: without the user's nor the system's configuration (no
+     * `HOME`, for a git older than `GIT_CONFIG_GLOBAL`), nor any variable of the agent's, nor replaced objects, nor a
+     * hook or fsmonitor of the repository's. A checkout runs no filter.
+     */
+    private fun configless(arguments: List<String>): CaptureResult {
+        val environment = listOfNotNull(path?.let { "PATH=$it" }) + CONFIGLESS
+        return bounded(listOf(ENV, "-i") + environment + git + HOOKS_OFF + arguments, CHECKOUT_MILLIS)
+    }
 
     private fun bounded(command: List<String>, timeoutMillis: Int): CaptureResult {
         val limit = budget.cap(timeoutMillis) ?: return CaptureResult.TimedOut
@@ -158,6 +173,7 @@ class GitCheckouts(
     private companion object {
         const val ENV = "/usr/bin/env"
         const val RM = "/bin/rm"
+        const val CHMOD = "/bin/chmod"
         const val FILTER = "filter."
 
         /** What `git config --get-regexp` exits with when nothing matches. */
@@ -169,6 +185,12 @@ class GitCheckouts(
         const val CHECKOUT_MILLIS = 60_000
     }
 }
+
+/** Everything modified, staged or untracked; a submodule by its commit only. */
+private val STATUS = listOf("--porcelain", "--untracked-files=all", "--ignore-submodules=dirty")
+
+/** No configuration but the clone's own, and the objects as they are. */
+private val CONFIGLESS = listOf("GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_NO_REPLACE_OBJECTS=1")
 
 /** No hook and no fsmonitor of the repository's. */
 private val HOOKS_OFF = listOf("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false")
