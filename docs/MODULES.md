@@ -106,7 +106,7 @@ started.
 | 69 | `UNREACHABLE` | The server is unreachable, or the secret store did not answer. |
 | 70 | `NOT_IMPLEMENTED` | The command is not implemented in this version yet. |
 | 73 | `CANNOT_WRITE` | A local file could not be written. |
-| 75 | `STILL_WAITING` | Still waiting: wait reached its deadline. |
+| 75 | `STILL_WAITING` | Still waiting: wait reached its deadline, or nobody confirmed a governance change in time. |
 | 77 | `REFUSED` | Refused: the policy, your role, a self-approval, another organisation. |
 | 78 | `SIGNATURE_REFUSED` | A signature or a package was refused. |
 | 127 | `AGENT_MISSING` | The agent is not installed. |
@@ -145,6 +145,13 @@ without the session, 77 for a session the caller may not read (a gate it may not
   is never swapped for it. `ostrom logout` revokes and forgets it too, with or without the device's token. A token
   without all three scopes (a server that does not serve `--admin` yet), or already expired, is revoked and not kept
   (exit 69); one approved by another person than the device's is kept, and said.
+  Made with a CLI token (the admin token or the device's), a governance write is held by the server until an owner or
+  an admin confirms it with their passkey on the console (audit H1, decision of 02/11/2026): the write answers 202
+  `GovernanceConfirmationPending` and nothing is written. The CLI says the link (`confirmUrl`, `<console>/confirm/<id>`)
+  on stderr and waits on `GET /api/v1/confirmations/{id}?wait=30` with the token that asked, until it is answered or
+  `expiresAt` (15 minutes). Confirmed, the command goes on with what the write returned (exit 0); refused, or confirmed
+  but not written (`failed`, the server's reason said), exit 77; expired, or still pending at its expiry, exit 75
+  (`ConfirmationWait`).
 
 ## Add a command
 
