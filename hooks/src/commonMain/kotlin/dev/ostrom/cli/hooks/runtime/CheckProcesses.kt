@@ -12,7 +12,7 @@ import dev.ostrom.cli.platform.ProcessCapture
  *
  * @param variable Reads one variable of the hook's environment.
  * @param sandboxExec Whether `/usr/bin/sandbox-exec` is there to confine the script (macOS).
- * @param home The user's home folder, whose credential folders the sandbox hides.
+ * @param folders The user's home folder, whose credential folders the sandbox hides, and the CLI's own folder.
  * @param canonical A folder with its symbolic links resolved: `sandbox-exec` matches real paths only, so every path of
  *   the profile, the hidden credentials' included, goes through it.
  * @param budget What is left of the agent's limit on the hook: a script is cut to it, and not started once it is spent.
@@ -21,7 +21,7 @@ class SandboxedScripts(
     private val capture: ProcessCapture,
     private val variable: (String) -> String?,
     private val sandboxExec: Boolean,
-    private val home: String,
+    private val folders: CredentialFolders,
     private val canonical: (String) -> String,
     private val budget: HookBudget = HookBudget.NONE,
 ) : ScriptRunner {
@@ -49,8 +49,13 @@ class SandboxedScripts(
 
     /** The `sandbox-exec` profile of the prototype (`profile` in `package.mjs`, `sandbox_profile` in `package.rs`). */
     fun profile(request: ScriptRequest): String {
-        val real = { path: String -> canonical(path).replace("\"", "") }
-        val hidden = HIDDEN.joinToString(" ") { "(subpath \"${real("${home.trimEnd('/')}/$it")}\")" }
+        // a string of the profile: a quote or a backslash in a path is escaped, so it neither ends the string nor
+        // names another folder (a hidden folder renamed would be readable)
+        val real = { path: String -> canonical(path).replace("\\", "\\\\").replace("\"", "\\\"") }
+        val gh = variable(GH_CONFIG_DIR) ?: variable(XDG_CONFIG_HOME)?.let { "$it/gh" }
+        val moved = listOfNotNull(folders.cli, gh)
+        val paths = HIDDEN.map { "${folders.home.trimEnd('/')}/$it" } + moved
+        val hidden = paths.map(real).distinct().joinToString(" ") { "(subpath \"$it\")" }
         val tmp = real(request.tmp)
         val network = if (request.network) "" else "(deny network*)\n(allow network* (remote unix-socket))\n"
         return "(version 1)\n(allow default)\n$network(deny file-write*)\n" +
@@ -72,6 +77,9 @@ class SandboxedScripts(
         /** Why a script was not started: the agent's limit on the hook is reached. */
         internal const val SPENT = "the agent's time limit for a hook is reached, so the script was not started"
 
+        private const val XDG_CONFIG_HOME = "XDG_CONFIG_HOME"
+        private const val GH_CONFIG_DIR = "GH_CONFIG_DIR"
+
         private val KEPT = listOf("PATH", "HOME", "LANG", "LC_ALL", "USER", "SHELL")
         private val HIDDEN = listOf(
             ".ssh", ".config/ostrom", ".config/gh", ".aws", ".netrc", ".docker/config.json", ".npmrc", ".gnupg",
@@ -82,6 +90,17 @@ class SandboxedScripts(
         private const val SHELL = "exec 2>&1 && mkdir -p \"$3\" && cd \"$1\" && exec /bin/sh \"$2\""
     }
 }
+
+/**
+ * The folders a check's script never reads.
+ *
+ * @property home The user's home folder, whose credential folders are hidden (`.ssh`, `.config/gh`, `.aws`…).
+ * @property cli The CLI's own folder ([dev.ostrom.cli.platform.Environment.configDirectory]), hidden wherever
+ *   `OSTROM_HOME` or `XDG_CONFIG_HOME` put it, not only at `~/.config/ostrom` (security audit L3); null when none is
+ *   known. Required, so that no construction forgets it. GitHub's CLI moves the same way (`GH_CONFIG_DIR`, else
+ *   `XDG_CONFIG_HOME`): [SandboxedScripts] hides its folder there too.
+ */
+class CredentialFolders(val home: String, val cli: String?)
 
 /**
  * [CommitCheckouts] over the real `git`. These commands run in the hook's own process, outside the sandbox, on a

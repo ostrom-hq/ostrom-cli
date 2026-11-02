@@ -160,13 +160,6 @@ internal class LoginCommand(private val dependencies: CliDependencies) : CliktCo
         dependencies.console.out("It changes the policy and the harness: ostrom policy set, ostrom harness enforce\n")
     }
 
-    /** The instant [text] says, in milliseconds; null when it is not an ISO 8601 instant. */
-    private fun millisOf(text: String): Long? = try {
-        Instant.parse(text).toEpochMilliseconds()
-    } catch (_: IllegalArgumentException) {
-        null
-    }
-
     /** Runs [write]; a folder that cannot be written is exit 73 (the session expires on its own). */
     private fun keep(directory: String, write: () -> Unit) {
         val written = try {

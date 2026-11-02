@@ -39,8 +39,8 @@ enum class ExitCode(val code: Int, val meaning: String) {
     /** A local file could not be written. */
     CANNOT_WRITE(73, "A local file could not be written."),
 
-    /** Still waiting (`wait` at its deadline). */
-    STILL_WAITING(75, "Still waiting: wait reached its deadline."),
+    /** Still waiting (`wait` at its deadline), or a governance change nobody confirmed in time. */
+    STILL_WAITING(75, "Still waiting: wait reached its deadline, or nobody confirmed a governance change in time."),
 
     /** Refused: policy, role, self-approval, other organisation. */
     REFUSED(77, "Refused: the policy, your role, a self-approval, another organisation."),

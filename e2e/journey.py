@@ -75,6 +75,14 @@ class Journey:
             self.step["status"] = "failed"
         return bool(condition)
 
+    def guarded(self, act, *arguments):
+        """Runs [act]; an error fails the step and the journey goes on (the steps after it still clean up)."""
+        try:
+            act(*arguments)
+        except Exception as error:  # noqa: BLE001 - said in the step, the run goes on
+            traceback.print_exc()
+            self.check(False, f"the step stopped: {type(error).__name__}: {str(error)[:200]}")
+
     def needs(self, *routes, on_main=False, org=False):
         """
         True when the server serves every route (and, with [org], resolves the organisation of a token bound to none
@@ -196,17 +204,28 @@ class Journey:
     def ostrom(self, machine, *arguments, console=False, extra=None, cwd=None, timeout=120):
         shown = "ostrom " + " ".join(shlex.quote(a) for a in arguments)
         prefix = "OSTROM_TOKEN=… " if console else ""
-        done = subprocess.run([self.binary, *arguments], cwd=cwd or machine["repo"], capture_output=True, text=True,
-                              env=self.environment(machine, console, extra), stdin=subprocess.DEVNULL,
-                              timeout=timeout)
-        self.step["commands"].append({"who": machine["name"], "command": prefix + shown, "exit": done.returncode,
-                                      "stdout": done.stdout, "stderr": done.stderr})
-        if self.options.show:
-            print(f"  {machine['name']}$ {prefix}{shown}")
-            for line in (done.stdout + done.stderr).rstrip().splitlines():
-                print(f"    {line}")
-            print(f"    (exit {done.returncode})", flush=True)
+        try:
+            done = subprocess.run([self.binary, *arguments], cwd=cwd or machine["repo"], capture_output=True,
+                                  text=True, env=self.environment(machine, console, extra), stdin=subprocess.DEVNULL,
+                                  timeout=timeout)
+        except subprocess.TimeoutExpired as late:
+            # what it printed before the timeout is the report's only trace of a command that does not return
+            out, err = [part.decode(errors="replace") if isinstance(part, bytes) else part or ""
+                        for part in (late.stdout, late.stderr)]
+            self.record(machine, prefix + shown, f"still running after {timeout} s", out, err)
+            raise
+        self.record(machine, prefix + shown, done.returncode, done.stdout, done.stderr)
         return done
+
+    def record(self, machine, command, code, out, err):
+        """A command in the step's report, and on the console with --show."""
+        self.step["commands"].append({"who": machine["name"], "command": command, "exit": code, "stdout": out,
+                                      "stderr": err})
+        if self.options.show:
+            print(f"  {machine['name']}$ {command}")
+            for line in (out + err).rstrip().splitlines():
+                print(f"    {line}")
+            print(f"    (exit {code})", flush=True)
 
     def login(self, machine, email):
         """`ostrom login`: the code it shows is approved from [email]'s browser session, as on the console."""
@@ -281,7 +300,33 @@ class Journey:
         self.begin("2.1", "ostrom init: the organisation, the repository, the agents' hooks, the starting rules")
         if self.needs(("GET", "/api/v1/orgs"), ("GET", "/api/v1/workflows"), on_main=True, org=True):
             self.init(maya, org)
+        self.begin("5.1 status", "ostrom status: who, in which organisation, this repository, this device")
+        if self.needs(("GET", "/api/v1/auth/me"), ("GET", "/api/v1/orgs"), on_main=True):
+            self.guarded(self.status, maya, org)
         self.team(maya, tom_email, org)
+
+    def status(self, maya, org):
+        # who is signed in, as the server says it: not read back from what status printed
+        me = self.call("GET", "/api/v1/auth/me", token=maya["token"])[1]
+        me = me if isinstance(me, dict) else {}
+        login = (me.get("dev") or {}).get("login") or me.get("login")
+        done = self.ostrom(maya, "status", "--json")
+        said = read_json(done.stdout)
+        said = said if isinstance(said, dict) else {}
+        self.check(done.returncode == 0, f"ostrom status exits 0 ({done.returncode}): {done.stderr.strip()[:300]}")
+        self.check(login and said.get("login") == login, f"it says who is signed in (@{said.get('login')}, @{login})")
+        self.check(org.get("role") and said.get("role") == org.get("role"),
+                   f"with the role the organisation lists ({said.get('role')}, {org.get('role')})")
+        self.check(said.get("organization") == org.get("name"),
+                   f"in the owner's organisation ({said.get('organization')})")
+        self.check(said.get("repository") == "acme-api", f"in this repository ({said.get('repository')})")
+        self.check(said.get("server") == self.server, f"on this server ({said.get('server')})")
+        self.check(bool(said.get("version")), f"with this version ({said.get('version')})")
+        missing = sorted(STATUS_KEYS - said.keys())
+        self.check(not missing, f"with every key, null when unknown (missing: {missing})")
+        text = self.ostrom(maya, "status")
+        self.check(text.returncode == 0 and text.stdout.startswith(f"Signed in   @{login}"),
+                   f"and says it in words ({text.returncode}): {text.stdout.strip()[:200]}")
 
     def init(self, maya, org):
         done = self.ostrom(maya, "init", "--yes", "--json")
@@ -364,8 +409,7 @@ class Journey:
                 gated = self.gate_workflow(maya)
 
         self.begin("5.2", "ostrom claude: the launch, the session, the hooks")
-        if self.needs(("GET", "/api/v1/policy/agents"), ("POST", "/api/v1/launches"), ("POST", "/api/v1/sessions"),
-                      org=True):
+        if self.needs(*SESSION_ROUTES, org=True):
             if gated:
                 self.gated_session(maya, tom_email)
             else:
@@ -381,11 +425,53 @@ class Journey:
             else:
                 self.check(status in (200, 204), f"the owner removes it ({status}): {error_of(body)[:200]}")
 
+        self.begin("6.1", "ostrom logs: the thread of the session that just ran")
+        # the session read is the one ostrom claude just ran: the routes of 5.2 too
+        if self.needs(*SESSION_ROUTES, ("GET", "/api/v1/sessions"), org=True):
+            self.guarded(self.logs, maya, gated)
+
         if self.invitee:
             self.begin("2.6", "ostrom members remove")
             done = self.ostrom(maya, "members", "remove", self.invitee, "--yes", console=True)
             self.check(done.returncode == 0, f"a console token removes @{self.invitee} ({done.returncode}): "
                                              f"{done.stderr.strip()[:300]}")
+
+    def logs(self, maya, gated):
+        last = self.ostrom(maya, "logs", "--json")
+        thread = read_json(last.stdout) or {}
+        session = thread.get("session") or {}
+        if not self.check(last.returncode == 0 and session.get("id"),
+                          f"ostrom logs --json reads the developer's last session ({last.returncode}): "
+                          f"{(last.stderr or last.stdout).strip()[:300]}"):
+            return
+        gates = thread.get("gates") or []
+        if gated:
+            self.check(len(gates) > 0, f"with the request for a yes it asked ({len(gates)})")
+        # first, as it depends on nothing below
+        gone = self.ostrom(maya, "logs", f"ses_none_{self.stamp}")
+        self.check(gone.returncode == 66, f"a session that does not exist is 66 ({gone.returncode})")
+        shown = self.ostrom(maya, "logs", session["id"])
+        lines = shown.stdout.splitlines()
+        self.check(shown.returncode == 0 and lines[:1] and lines[0].startswith(f"Session {session['id']}"),
+                   f"ostrom logs {session['id']} heads its thread ({shown.returncode}): {shown.stderr.strip()[:300]}")
+        self.check(any("session started" in line for line in lines), "from its start")
+        if gated:
+            self.check(any("asked for a yes" in line for line in lines), "through the request for a yes")
+            if not any(gate.get("status") for gate in gates if isinstance(gate, dict)):
+                # a gate the device's token may not read is shown bare: its answer is then not on the thread
+                print(f"  note  no gate of the thread could be read: {gates[:3]}", flush=True)
+        # ostrom claude has returned: the session is over, and -f on it must print and return, not wait
+        if not self.check(session.get("endedAt") and any("session ended" in line for line in lines),
+                          f"to its end ({session.get('endedAt')})"):
+            return
+        try:
+            followed = self.ostrom(maya, "logs", session["id"], "-f", timeout=60)
+        except subprocess.TimeoutExpired:
+            self.check(False, "-f on an ended session returns (it was still waiting after 60 s)")
+            return
+        tail = followed.stdout.splitlines()
+        self.check(followed.returncode == 0 and tail[:1] == lines[:1] and any("session ended" in t for t in tail),
+                   f"-f on an ended session prints its thread to the end and returns ({followed.returncode})")
 
     def harness(self, maya):
         name = f"deploy-{self.stamp}"
@@ -609,6 +695,8 @@ class Journey:
             self.check(status == 403, f"the server refuses it ({status}): {error_of(body)[:200]}")
 
         self.begin("5.4", "the second person says yes")
+        # the yes's wall clock: 5.5 measures from it to the action passing in the session
+        self.yes_at = time.time()
         status, body, _ = self.call("POST", f"/api/v1/approvals/{approval['id']}/answer", answer, session=tom_session)
         self.check(status in (200, 201), f"{who(tom_email)}'s yes is taken ({status}): {error_of(body)[:200]}")
 
@@ -624,6 +712,18 @@ class Journey:
         retry = next((h for h in fired if h["event"] == "retry"), {})
         self.check(retry.get("code") == 0, f"the same deployment, again, passes the hook ({retry.get('code')}): "
                                            f"{(retry.get('stdout', '') + retry.get('stderr', '')).strip()[-300:]}")
+        yes_at = getattr(self, "yes_at", None)
+        timed = retry.get("at") and waited.get("at")
+        if yes_at is not None and waited.get("code") == 0 and not timed:
+            self.check(False, "the session stamps the end of ostrom wait and of the retry (the fake agent's \"at\")")
+        elif yes_at is not None and waited.get("code") == 0:
+            # ostrom wait was already waiting (Ostrom holds its read): the yes reaches it, not the next poll
+            answered, passed = (waited["at"] - yes_at) * 1000, (retry["at"] - yes_at) * 1000
+            print(f"  from the yes sent: ostrom wait answers in {answered:.0f} ms, "
+                  f"the action passes in {passed:.0f} ms", flush=True)
+            self.step["yes_to_action_ms"] = {"wait": round(answered), "action": round(passed)}
+            self.check(passed < self.options.max_yes_to_action_ms,
+                       f"the action passes {passed:.0f} ms after the yes < {self.options.max_yes_to_action_ms:.0f}")
 
         self.begin("5.7", "the signed receipt: listed, pulled, verified")
         # the device's token reads receipts once it has receipts:read (server#83); until then, a console token
@@ -668,6 +768,12 @@ class Journey:
 
 
 CODE = re.compile(r"one-time code: (\S+)")
+# what ostrom claude needs from the server (5.2), and so does the read of the session it ran (6.1)
+SESSION_ROUTES = (("GET", "/api/v1/policy/agents"), ("POST", "/api/v1/launches"), ("POST", "/api/v1/sessions"))
+
+# what ostrom status --json always holds (CLI.md principle 6: null when unknown, never missing)
+STATUS_KEYS = {"login", "organization", "role", "server", "repository", "harness", "waiting", "waitingComplete",
+               "version", "pinnedKey"}
 ORG_HEADER = "Ostrom-Org (the organisation of a token bound to none, server#64)"
 
 
@@ -722,8 +828,11 @@ def main():
     parser.add_argument("--perf-runs", type=int, default=100, help="calls per latency series in 5.8 (0: none)")
     parser.add_argument("--max-local-p95-ms", type=float, default=20, help="5.8: a local decision, at p95")
     # 75 ms, not the 150 first proposed: the journey measured 13.7 ms (policy asked) and 25.1 ms (gated) at p95 (run
-    # 41500895660); 150 would let a sixfold regression through, 75 keeps three times the gated one for the runner's noise.
+    # 41500895660); 150 would let a sixfold regression through, 75 keeps three times the gated one for the noise.
     parser.add_argument("--max-server-p95-ms", type=float, default=75, help="5.8: a round trip to Ostrom, at p95")
+    # a wait already held by Ostrom answers within the yes's own round trip; 5 s leaves the runner its noise, and a
+    # wait that polls each second (or misses the yes until its read ends, 30 s) shows here
+    parser.add_argument("--max-yes-to-action-ms", type=float, default=5_000, help="5.5: from the yes to the action")
     parser.add_argument("--report", help="write every step as JSON there")
     parser.add_argument("--work", help="the folder of the machines (default: a new temporary one)")
     options = parser.parse_args()

@@ -11,6 +11,7 @@ import dev.ostrom.cli.launcher.list
 import dev.ostrom.cli.launcher.text
 import dev.ostrom.cli.login.AdminTokens
 import dev.ostrom.cli.platform.CaptureResult
+import dev.ostrom.cli.platform.Console
 import dev.ostrom.cli.platform.RemoteUrls
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
@@ -36,7 +37,8 @@ internal data class Org(val id: String, val slug: String, val name: String, val 
  * @property server The server's JSON API, every call carrying `Ostrom-Org`.
  * @property console The console of the server, where what the CLI cannot do is done.
  * @property consoleToken True when the token is `OSTROM_TOKEN` (a token made on the console), not the device's.
- * @property admin The tokens of `ostrom login --admin`, read only by a governance write.
+ * @param dependencies The tokens of `ostrom login --admin`, and the clock, the terminal and the pause a governance
+ *   confirmation is waited on with.
  */
 internal class OrgAccess(
     val signed: SignedIn,
@@ -44,8 +46,20 @@ internal class OrgAccess(
     val server: ServerJson,
     val console: String,
     val consoleToken: Boolean,
-    val admin: AdminTokens,
+    private val dependencies: CliDependencies,
 ) {
+    /** The tokens of `ostrom login --admin`, read only by a governance write. */
+    val admin: AdminTokens = dependencies.adminTokens(dependencies.directory())
+
+    /** The time, in milliseconds since the epoch. */
+    val clock: () -> Long get() = dependencies.clock
+
+    /** Where a governance confirmation's link and wait are said. */
+    val terminal: Console get() = dependencies.console
+
+    /** Waits [millis] (between two polls of a governance confirmation). */
+    fun pause(millis: Long) = runBlocking { dependencies.sleep(millis) }
+
     /** `GET` [path] in the organisation, or the spec's exit code; [notFound] is said on a 404. */
     fun read(path: String, notFound: String): JsonObject =
         runBlocking { server.get(path, signed.token) }.orStop(signed.serverUrl, notFound)
@@ -67,6 +81,10 @@ internal class OrgAccess(
      * A [governance] write (the policy, its rules, the harness) goes with the token of `ostrom login --admin` while it
      * is valid: no other token writes the governance (S2-52, decision of 02/11/2026). Without one, a 403 says to run
      * it; a 401 to it (revoked, or expired on the server) forgets it and says the same.
+     *
+     * Made with a CLI token, a governance write is held by the server until an owner or an admin confirms it on the
+     * console (202 `GovernanceConfirmationPending`, audit H1): any write held so is waited on,
+     * the link said, and the write's result is what the confirmation returns (77 refused, 75 not answered in time).
      */
     fun write(
         method: String,
@@ -77,9 +95,13 @@ internal class OrgAccess(
     ): JsonObject {
         // OSTROM_TOKEN, set on purpose, is the token the change goes with: never swapped for the admin token
         val elevated = if (governance && !consoleToken) admin.valid(signed.serverUrl) else null
-        val answer = runBlocking { server.call(method, path, body, elevated ?: signed.token, WRITE_MILLIS) }
+        val token = elevated ?: signed.token
+        val answer = runBlocking { server.call(method, path, body, token, WRITE_MILLIS) }
         if (answer is ServerAnswer.Failed) refused(answer, governance, elevated)
-        return answer.orStop(signed.serverUrl, notFound)
+        val done = answer.orStop(signed.serverUrl, notFound)
+        // a write the server holds for a confirmation is waited on, whichever: nothing was written yet
+        val confirmation = done.text("confirmationId") ?: return done
+        return ConfirmationWait(this, token, elevated != null).await(done, confirmation)
     }
 
     /** Stops on a refusal that has more to say than the server's message: which token the change takes, and where. */
@@ -132,7 +154,7 @@ internal fun CliDependencies.orgAccess(
     val consoleToken = environment[LaunchVariables.LAUNCH_ID].isNullOrEmpty() &&
         !environment[LaunchVariables.DEVICE_TOKEN].isNullOrEmpty()
     val server = ServerJson(ApiServerTransport(api(signed.serverUrl), org.id))
-    return OrgAccess(signed, org, server, console, consoleToken, adminTokens(directory()))
+    return OrgAccess(signed, org, server, console, consoleToken, this)
 }
 
 /** The organisations the caller is a member of (`GET /api/v1/orgs`). */

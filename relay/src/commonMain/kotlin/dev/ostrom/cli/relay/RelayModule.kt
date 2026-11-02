@@ -24,7 +24,7 @@ import kotlin.time.TimeSource
 /** Default bound of a hook call. */
 private val HOOK_TIMEOUT = 15.seconds
 
-/** A gate wait: the server holds it up to 60 s, plus the time to answer. */
+/** A gate wait: the server holds it up to 30 s (contract core#43), plus the time to answer, with room to spare. */
 private val LONG_POLL_TIMEOUT = 70.seconds
 
 /** How long the signed gate policy is answered from memory: a policy tightened on the server reaches the hooks then. */
