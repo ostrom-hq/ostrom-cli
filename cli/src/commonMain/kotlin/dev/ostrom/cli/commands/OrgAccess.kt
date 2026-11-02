@@ -40,6 +40,7 @@ internal data class Org(val id: String, val slug: String, val name: String, val 
  * @property admin The tokens of `ostrom login --admin`, read only by a governance write.
  * @property clock The time, in milliseconds since the epoch (how long a governance confirmation is waited on).
  * @property terminal Where a governance confirmation's link and wait are said.
+ * @property pause Waits the given milliseconds (between two polls of a governance confirmation).
  */
 internal class OrgAccess(
     val signed: SignedIn,
@@ -50,6 +51,7 @@ internal class OrgAccess(
     val admin: AdminTokens,
     val clock: () -> Long,
     val terminal: Console,
+    val pause: (Long) -> Unit,
 ) {
     /** `GET` [path] in the organisation, or the spec's exit code; [notFound] is said on a 404. */
     fun read(path: String, notFound: String): JsonObject =
@@ -74,8 +76,8 @@ internal class OrgAccess(
      * it; a 401 to it (revoked, or expired on the server) forgets it and says the same.
      *
      * Made with a CLI token, a governance write is held by the server until an owner or an admin confirms it with
-     * their passkey on the console (202 `GovernanceConfirmationPending`, audit H1): the link is said, the answer
-     * waited for, and the write's result is what the confirmation returns (exit 77 refused, 75 not answered in time).
+     * their passkey on the console (202 `GovernanceConfirmationPending`, audit H1): any write held so is waited on,
+     * the link said, and the write's result is what the confirmation returns (77 refused, 75 not answered in time).
      */
     fun write(
         method: String,
@@ -90,10 +92,9 @@ internal class OrgAccess(
         val answer = runBlocking { server.call(method, path, body, token, WRITE_MILLIS) }
         if (answer is ServerAnswer.Failed) refused(answer, governance, elevated)
         val done = answer.orStop(signed.serverUrl, notFound)
-        val confirmation = done.text("confirmationId")
-        if (!governance || confirmation == null) return done
-        return ConfirmationWait(server, signed.serverUrl, token, clock, terminal)
-            .await(done, confirmation, org.slug, console)
+        // a write the server holds for a confirmation is waited on, whichever: nothing was written yet
+        val confirmation = done.text("confirmationId") ?: return done
+        return ConfirmationWait(this, token, elevated != null).await(done, confirmation)
     }
 
     /** Stops on a refusal that has more to say than the server's message: which token the change takes, and where. */
@@ -146,7 +147,8 @@ internal fun CliDependencies.orgAccess(
     val consoleToken = environment[LaunchVariables.LAUNCH_ID].isNullOrEmpty() &&
         !environment[LaunchVariables.DEVICE_TOKEN].isNullOrEmpty()
     val server = ServerJson(ApiServerTransport(api(signed.serverUrl), org.id))
-    return OrgAccess(signed, org, server, console, consoleToken, adminTokens(directory()), clock, this.console)
+    return OrgAccess(signed, org, server, console, consoleToken, adminTokens(directory()), clock, this.console,
+        { runBlocking { sleep(it) } })
 }
 
 /** The organisations the caller is a member of (`GET /api/v1/orgs`). */

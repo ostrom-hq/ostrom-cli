@@ -147,11 +147,14 @@ without the session, 77 for a session the caller may not read (a gate it may not
   (exit 69); one approved by another person than the device's is kept, and said.
   Made with a CLI token (the admin token or the device's), a governance write is held by the server until an owner or
   an admin confirms it with their passkey on the console (audit H1, decision of 02/11/2026): the write answers 202
-  `GovernanceConfirmationPending` and nothing is written. The CLI says the link (`confirmUrl`, `<console>/confirm/<id>`)
-  on stderr and waits on `GET /api/v1/confirmations/{id}?wait=30` with the token that asked, until it is answered or
-  `expiresAt` (15 minutes). Confirmed, the command goes on with what the write returned (exit 0); refused, or confirmed
-  but not written (`failed`, the server's reason said), exit 77; expired, or still pending at its expiry, exit 75
-  (`ConfirmationWait`).
+  `GovernanceConfirmationPending` and nothing is written. Any write answered so is waited on (`ConfirmationWait`): the
+  CLI says the link (`confirmUrl`, else `<console>/confirm/<id>`) on stderr and polls
+  `GET /api/v1/confirmations/{id}?wait=30` with the token that asked; a pending answer that came at once is asked again
+  after 5 seconds, an outage (no answer, a 5xx) is tried 3 times in a row. The server says when it has expired; the CLI
+  stops waiting a minute past the 15 minutes by its own clock. Confirmed, the command goes on with `result`, what the
+  write returned (exit 0); refused, or confirmed but not written (`failed`, the server's reason said), exit 77;
+  expired, or still pending when the CLI stops waiting, exit 75; a status it does not know, exit 1. Every stop while
+  the request may still stand says where it can be confirmed; a 401 to the admin token forgets it.
 
 ## Add a command
 
