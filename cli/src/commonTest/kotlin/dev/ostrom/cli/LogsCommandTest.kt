@@ -166,6 +166,10 @@ class LogsCommandTest : CliKit() {
         val refused = mapOf("GET $session" to (200 to odd), "GET /api/v1/gates/g_gone" to (403 to "{}"))
         assertEquals(77, serving(refused).run(arrayOf("logs", "ses_41b2")), "a refusal is not a gate gone")
         console.out.clear()
+        val blank = mapOf("GET $session" to (200 to odd), "GET /api/v1/gates/g_gone" to (200 to "{}"))
+        assertEquals(0, serving(blank).run(arrayOf("logs", "ses_41b2")))
+        assertOut("          asked for a yes    g_gone\n")
+        console.out.clear()
         assertEquals(0, serving(mapOf("GET /api/v1/sessions/s0" to (200 to "{}"))).run(arrayOf("logs", "s0")))
         val bare = "Session ?\n          session started\nStill running. Follow it: ostrom logs s0 --follow\n"
         assertEquals(bare, console.out.toString())

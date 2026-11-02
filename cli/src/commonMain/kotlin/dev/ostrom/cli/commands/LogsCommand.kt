@@ -122,8 +122,10 @@ private suspend fun readOf(signed: SignedIn, id: String, answer: ServerAnswer, k
 private suspend fun lastSession(signed: SignedIn): String? {
     val path = "$SESSIONS?dev=${Routes.encode(signed.login)}"
     val body = signed.server.get(path, signed.token).orStop(signed.serverUrl, "No sessions on ${signed.serverUrl}.")
-    val sessions = body.list("items").filterIsInstance<JsonObject>().filter { it.text("id") != null }
-    return sessions.maxByOrNull { it.text("startedAt").orEmpty() }?.text("id")
+    val started = body.list("items").filterIsInstance<JsonObject>().mapNotNull { session ->
+        session.text("id")?.let { it to session.text("startedAt").orEmpty() }
+    }
+    return started.maxByOrNull { it.second }?.first
 }
 
 /**
@@ -133,5 +135,5 @@ private suspend fun lastSession(signed: SignedIn): String? {
 private suspend fun gate(signed: SignedIn, id: String): JsonObject {
     val answer = signed.server.get("$GATES/${Routes.encode(id)}", signed.token)
     if (answer is ServerAnswer.Failed && answer.status in REFUSED) answer.orStop(signed.serverUrl, "")
-    return (answer as? ServerAnswer.Ok)?.body?.child("gate") ?: JsonObject(mapOf("id" to JsonPrimitive(id)))
+    return (answer as? ServerAnswer.Ok)?.let { it.body.child("gate") } ?: JsonObject(mapOf("id" to JsonPrimitive(id)))
 }
