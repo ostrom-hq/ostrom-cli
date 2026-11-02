@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.commands
 
-import com.github.ajalt.clikt.core.PrintMessage
 import dev.ostrom.cli.CliDependencies
 import dev.ostrom.cli.ExitCode
 import dev.ostrom.cli.launch.ApiServerTransport
@@ -10,6 +9,7 @@ import dev.ostrom.cli.launcher.ServerAnswer
 import dev.ostrom.cli.launcher.ServerJson
 import dev.ostrom.cli.launcher.list
 import dev.ostrom.cli.launcher.text
+import dev.ostrom.cli.login.AdminTokens
 import dev.ostrom.cli.platform.CaptureResult
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
@@ -35,6 +35,7 @@ internal data class Org(val id: String, val slug: String, val name: String, val 
  * @property server The server's JSON API, every call carrying `Ostrom-Org`.
  * @property console The console of the server, where what the CLI cannot do is done.
  * @property consoleToken True when the token is `OSTROM_TOKEN` (a token made on the console), not the device's.
+ * @property admin The tokens of `ostrom login --admin`, read only by a governance write.
  */
 internal class OrgAccess(
     val signed: SignedIn,
@@ -42,6 +43,7 @@ internal class OrgAccess(
     val server: ServerJson,
     val console: String,
     val consoleToken: Boolean,
+    val admin: AdminTokens,
 ) {
     /** `GET` [path] in the organisation, or the spec's exit code; [notFound] is said on a 404. */
     fun read(path: String, notFound: String): JsonObject =
@@ -60,21 +62,46 @@ internal class OrgAccess(
     /**
      * Sends a change; a 403 to the device's token says what the device cannot do and where it is done instead, since
      * `ostrom login`'s token never holds an organisation's write scopes (S2-04).
+     *
+     * A [governance] write (the policy, the harness) goes with the token of `ostrom login --admin` while it is valid:
+     * no other token writes the governance (S2-52, decision of 02/11/2026). Without one, a 403 says to run it; a 401
+     * to it (revoked, or expired on the server) forgets it and says the same.
      */
-    fun write(method: String, path: String, body: JsonObject?, notFound: String): JsonObject {
-        val answer = runBlocking { server.call(method, path, body, signed.token, WRITE_MILLIS) }
-        if (answer is ServerAnswer.Failed && answer.status == FORBIDDEN && !consoleToken) {
-            throw PrintMessage(
-                "${answer.message}\nThe token of ostrom login cannot change ${org.slug}: do it on the console " +
-                    "($console), or set OSTROM_TOKEN to a token an owner or admin made there.",
-                ExitCode.REFUSED.code,
-                printError = true,
-            )
-        }
+    fun write(
+        method: String,
+        path: String,
+        body: JsonObject?,
+        notFound: String,
+        governance: Boolean = false,
+    ): JsonObject {
+        val elevated = if (governance) admin.valid(signed.serverUrl) else null
+        val answer = runBlocking { server.call(method, path, body, elevated ?: signed.token, WRITE_MILLIS) }
+        if (answer is ServerAnswer.Failed) refused(answer, governance, elevated)
         return answer.orStop(signed.serverUrl, notFound)
     }
 
+    /** Stops on a refusal that has more to say than the server's message: which token the change takes, and where. */
+    private fun refused(answer: ServerAnswer.Failed, governance: Boolean, elevated: String?) {
+        val message = when {
+            elevated != null -> if (answer.status == UNAUTHORIZED) {
+                admin.forget(signed.serverUrl)
+                throw stopWith(ExitCode.SIGN_IN_REQUIRED, "Your admin token is no longer valid. $ELEVATE")
+            } else {
+                null
+            }
+            answer.status != FORBIDDEN -> null
+            governance -> "Changing the policy or the harness of ${org.slug} takes an admin token. $ELEVATE"
+            consoleToken -> null
+            else -> "The token of ostrom login cannot change ${org.slug}: do it on the console ($console), or set " +
+                "OSTROM_TOKEN to a token an owner or admin made there."
+        }
+        if (message != null) throw stopWith(ExitCode.REFUSED, "${answer.message}\n$message")
+    }
+
     private companion object {
+        const val UNAUTHORIZED = 401
+        const val ELEVATE =
+            "Run ostrom login --admin: an owner or admin approves it in the browser, for 8 hours at most."
         const val FORBIDDEN = 403
         const val NOT_FOUND = 404
         const val WRITE_MILLIS = 15_000L
@@ -103,7 +130,8 @@ internal fun CliDependencies.orgAccess(
     }
     val consoleToken = environment[LaunchVariables.LAUNCH_ID].isNullOrEmpty() &&
         !environment[LaunchVariables.DEVICE_TOKEN].isNullOrEmpty()
-    return OrgAccess(signed, org, ServerJson(ApiServerTransport(api(signed.serverUrl), org.id)), console, consoleToken)
+    val server = ServerJson(ApiServerTransport(api(signed.serverUrl), org.id))
+    return OrgAccess(signed, org, server, console, consoleToken, adminTokens(directory()))
 }
 
 /** The organisations the caller is a member of (`GET /api/v1/orgs`). */

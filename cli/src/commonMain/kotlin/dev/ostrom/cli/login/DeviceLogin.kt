@@ -4,6 +4,7 @@ package dev.ostrom.cli.login
 import dev.ostrom.cli.launcher.Credentials
 import dev.ostrom.cli.launcher.ServerAnswer
 import dev.ostrom.cli.launcher.ServerJson
+import dev.ostrom.cli.launcher.list
 import dev.ostrom.cli.launcher.objectOf
 import dev.ostrom.cli.launcher.text
 import kotlinx.serialization.json.JsonObject
@@ -13,8 +14,18 @@ import kotlin.text.RegexOption.IGNORE_CASE
 
 /** How a sign-in ended. */
 sealed interface LoginOutcome {
-    /** Signed in. @property credentials The device's credentials. */
-    data class SignedIn(val credentials: Credentials) : LoginOutcome
+    /**
+     * Signed in.
+     *
+     * @property credentials The device's credentials.
+     * @property scopes The scopes the server says the token holds (`AuthToken.scopes`).
+     * @property expiresAt When the server says the token expires (`AuthToken.expiresAt`), as it wrote it.
+     */
+    data class SignedIn(
+        val credentials: Credentials,
+        val scopes: List<String> = emptyList(),
+        val expiresAt: String? = null,
+    ) : LoginOutcome
 
     /**
      * Not signed in.
@@ -45,10 +56,16 @@ class DeviceLogin(
     private val sleep: suspend (Long) -> Unit,
     private val say: (String) -> Unit,
 ) {
-    /** Signs in on [serverUrl]. */
-    suspend fun signIn(serverUrl: String): LoginOutcome = when (val start = server.post(START, objectOf(), null)) {
-        is ServerAnswer.Failed -> LoginOutcome.Stopped(codeOf(start), messageOf(start, serverUrl))
-        is ServerAnswer.Ok -> started(start.body, serverUrl)
+    /**
+     * Signs in on [serverUrl]; with [scopes], asks for those scopes, which the browser's page shows to the person who
+     * approves (`ostrom login --admin`).
+     */
+    suspend fun signIn(serverUrl: String, scopes: List<String> = emptyList()): LoginOutcome {
+        val body = if (scopes.isEmpty()) objectOf() else objectOf("scopes" to scopes)
+        return when (val start = server.post(START, body, null)) {
+            is ServerAnswer.Failed -> LoginOutcome.Stopped(codeOf(start), messageOf(start, serverUrl))
+            is ServerAnswer.Ok -> started(start.body, serverUrl)
+        }
     }
 
     /** Shows the code of a started flow, then waits for GitHub's yes. */
@@ -126,7 +143,8 @@ class DeviceLogin(
         return if (token.isNullOrEmpty() || login.isNullOrEmpty()) {
             LoginOutcome.Stopped(UNREACHABLE, "Ostrom answered without a token. Try again later.")
         } else {
-            LoginOutcome.SignedIn(Credentials(token, login))
+            val scopes = answer.body.list("scopes").filterIsInstance<JsonPrimitive>().map { it.content }
+            LoginOutcome.SignedIn(Credentials(token, login), scopes, answer.body.text("expiresAt"))
         }
     }
 
