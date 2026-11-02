@@ -230,3 +230,7 @@ internal actual fun terminalSize(): Long = -1
 @ExcludeFromCoverage
 internal actual fun terminalRead(buffer: ByteArray, timeoutMillis: Int): Int = -1
 
+
+// coverage: test-only JVM target; the shipped native actual is tested in posixTest.
+@ExcludeFromCoverage
+actual fun exitOnCrash(code: Int, stdout: String, stderr: String): Boolean = false

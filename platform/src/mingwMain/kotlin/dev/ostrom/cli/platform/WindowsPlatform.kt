@@ -150,3 +150,6 @@ internal actual fun terminalSize(): Long = ostrom_terminal_size()
 
 internal actual fun terminalRead(buffer: ByteArray, timeoutMillis: Int): Int =
     buffer.usePinned { ostrom_terminal_read(it.addressOf(0).reinterpret(), buffer.size, timeoutMillis) }
+
+/** Windows has no signal to catch here (a crash is a structured exception): nothing is set. */
+actual fun exitOnCrash(code: Int, stdout: String, stderr: String): Boolean = false

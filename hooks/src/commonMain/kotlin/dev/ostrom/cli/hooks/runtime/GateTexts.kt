@@ -100,4 +100,9 @@ object GateTexts {
         "Ostrom: waiting for a yes. Run `ostrom wait ${answer.id}` as its own command, then the exact same command " +
             "again once it says approved. Not run yet: \"${answer.label}\" needs a yes from ${answer.who} (gate " +
             "\"${answer.gateLabel}\"); the request is in the Ostrom console. Do not work around it."
+
+    /** The gate crashed on this tool call (a stack overflow, an abort): refused, never let through (M1). */
+    const val GATE_CRASHED =
+        "Ostrom: denied. The gate stopped on this tool call, so it was not run. Try again; if it stops again, tell " +
+            "the user to run `ostrom doctor`."
 }

@@ -509,3 +509,67 @@ static inline void ostrom_unlock_file(int fd) {
     flock(fd, LOCK_UN);
     close(fd);
 }
+
+/*
+ * What a crashing `ostrom hook` says and exits with (security audit CLI n°2, M1): a stack overflow, a bad access, an
+ * abort (an uncaught Kotlin exception, memory exhausted) never leave the agent a code other than the refusal's, which
+ * it would read as "run the tool". Copied here when the handlers are set: the handler only writes and exits.
+ */
+#define OSTROM_CRASH_TEXT 4096
+static char ostrom_crash_stdout[OSTROM_CRASH_TEXT];
+static size_t ostrom_crash_stdout_length = 0;
+static char ostrom_crash_stderr[OSTROM_CRASH_TEXT];
+static size_t ostrom_crash_stderr_length = 0;
+static int ostrom_crash_code = 2;
+/* The handler's own stack: a stack overflow has none left on the thread's. */
+static char ostrom_crash_stack[64 * 1024];
+
+static void ostrom_crash_write(int fd, const char *text, size_t length) {
+    while (length > 0) {
+        ssize_t written = write(fd, text, length);
+        if (written < 0 && errno == EINTR) continue;
+        if (written <= 0) return;
+        text += written;
+        length -= (size_t)written;
+    }
+}
+
+static void ostrom_crash_exit(int signal_number) {
+    (void)signal_number;
+    ostrom_crash_write(STDOUT_FILENO, ostrom_crash_stdout, ostrom_crash_stdout_length);
+    ostrom_crash_write(STDERR_FILENO, ostrom_crash_stderr, ostrom_crash_stderr_length);
+    _exit(ostrom_crash_code);
+}
+
+static size_t ostrom_crash_copy(char *target, const char *text) {
+    size_t length = strlen(text);
+    if (length > OSTROM_CRASH_TEXT) length = OSTROM_CRASH_TEXT;
+    memcpy(target, text, length);
+    return length;
+}
+
+/*
+ * From here on, a crash of this process (SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT) writes `out` on stdout and `err`
+ * on stderr (4 KiB each at most) and exits with `code`, on a stack of its own. Returns 0, or -1 when a handler could
+ * not be set (errno says why).
+ */
+static inline int ostrom_exit_on_crash(int code, const char *out, const char *err) {
+    ostrom_crash_stdout_length = ostrom_crash_copy(ostrom_crash_stdout, out);
+    ostrom_crash_stderr_length = ostrom_crash_copy(ostrom_crash_stderr, err);
+    ostrom_crash_code = code;
+    stack_t alternate;
+    memset(&alternate, 0, sizeof alternate);
+    alternate.ss_sp = ostrom_crash_stack;
+    alternate.ss_size = sizeof ostrom_crash_stack;
+    if (sigaltstack(&alternate, NULL) != 0) return -1;
+    struct sigaction action;
+    memset(&action, 0, sizeof action);
+    action.sa_handler = ostrom_crash_exit;
+    action.sa_flags = SA_ONSTACK;
+    sigemptyset(&action.sa_mask);
+    const int crashes[] = {SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT};
+    for (size_t i = 0; i < sizeof crashes / sizeof crashes[0]; i++) {
+        if (sigaction(crashes[i], &action, NULL) != 0) return -1;
+    }
+    return 0;
+}
