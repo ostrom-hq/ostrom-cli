@@ -20,7 +20,7 @@ object GateTexts {
      */
     const val GATE_FAILED =
         "Ostrom: denied. The gate failed on this tool call. Do not run it again: tell the user to run " +
-            "`ostrom doctor`, and wait for them."
+            "`ostrom doctor`."
 
     /**
      * No gate policy to trust (unsigned, expired, the relay or Ostrom unreachable, the package changed): every action
