@@ -68,7 +68,7 @@ class ImportTeamCodeUseCase(
     }
 
     /** The normal pass: the plan, then the import with `--yes`; the accounts waiting for the cutover are said. */
-    private suspend fun normal(body: String, apply: Boolean): Int {
+    private suspend fun normal(body: JsonObject, apply: Boolean): Int {
         var last = report("Plan (nothing imported yet):", ok(import("?dryRun=true", body)))
         if (apply) {
             last = report("Imported:", ok(import("", body)))
@@ -87,7 +87,7 @@ class ImportTeamCodeUseCase(
      * The cutover: its plan (no token tested, nothing written), the owner's confirmation, then the cutover. Without an
      * account to revive it stops at the plan; an account left as it was ends it with [ExitCode.INCOMPLETE].
      */
-    private suspend fun cutover(body: String): Int {
+    private suspend fun cutover(body: JsonObject): Int {
         val asked = ok(import("?dryRun=true&cutover=true", body), cutover = true)
         val plan = report("Cutover plan (nothing changed yet):", asked)
         val waiting = count(plan, REVIVE)
@@ -105,16 +105,14 @@ class ImportTeamCodeUseCase(
         val left = done.list("items").count {
             (it as? JsonObject)?.let { item -> item.text("kind") == ACCOUNT && item.text("action") == SKIPPED } == true
         }
-        if (left == 0) return ExitCode.OK.code
-        say(
-            "! ${shared(left)} left as before, for the reasons above (tokens refused, provider unreachable): " +
-                "the same command tries again.\n",
-        )
-        return ExitCode.INCOMPLETE.code
+        if (left > 0) {
+            say(
+                "! ${shared(left)} left as before, for the reasons above (tokens refused, provider unreachable): " +
+                    "the same command tries again.\n",
+            )
+        }
+        return if (left == 0) ExitCode.OK.code else ExitCode.INCOMPLETE.code
     }
-
-    /** "1 shared account", "2 shared accounts". */
-    private fun shared(count: Int) = if (count == 1) "1 shared account" else "$count shared accounts"
 
     /** Every page of Ostrom's members (`next` is the cursor of the following one), up to [MAX_PAGES]. */
     private suspend fun members(): List<JsonObject> {
@@ -178,10 +176,8 @@ class ImportTeamCodeUseCase(
         return body
     }
 
-    private fun count(body: JsonObject, name: String) = (body[name] as? JsonPrimitive)?.intOrNull ?: 0
-
     /** `POST /api/v1/import/teamcode[query]` with the export. */
-    private suspend fun import(query: String, body: String, timeoutMillis: Long = TIMEOUT_MILLIS) =
+    private suspend fun import(query: String, body: JsonObject, timeoutMillis: Long = TIMEOUT_MILLIS) =
         server.post("$IMPORT$query", body, token, timeoutMillis)
 
     private fun ok(answer: ServerAnswer, cutover: Boolean = false): JsonObject = when (answer) {
@@ -234,3 +230,9 @@ class ImportTeamCodeUseCase(
         private val COUNTS = listOf("created", "updated", "unchanged", "skipped")
     }
 }
+
+/** "1 shared account", "2 shared accounts". */
+private fun shared(count: Int) = if (count == 1) "1 shared account" else "$count shared accounts"
+
+/** The count [name] of an import report, 0 when absent or not a number. */
+private fun count(body: JsonObject, name: String) = (body[name] as? JsonPrimitive)?.intOrNull ?: 0
