@@ -16,6 +16,9 @@ import dev.ostrom.cli.platform.ProcessCapture
  * @param canonical A folder with its symbolic links resolved: `sandbox-exec` matches real paths only, so every path of
  *   the profile, the hidden credentials' included, goes through it.
  * @param budget What is left of the agent's limit on the hook: a script is cut to it, and not started once it is spent.
+ * @param configDirectory The CLI's own folder ([dev.ostrom.cli.platform.Environment.configDirectory]), hidden wherever
+ *   `OSTROM_HOME` or `XDG_CONFIG_HOME` put it, not only at `~/.config/ostrom` (security audit L3). GitHub's CLI follows
+ *   `XDG_CONFIG_HOME` too: its folder there is hidden as well.
  */
 class SandboxedScripts(
     private val capture: ProcessCapture,
@@ -24,6 +27,7 @@ class SandboxedScripts(
     private val home: String,
     private val canonical: (String) -> String,
     private val budget: HookBudget = HookBudget.NONE,
+    private val configDirectory: String? = null,
 ) : ScriptRunner {
     override fun run(request: ScriptRequest): ScriptRun {
         val temporary = "${request.sandbox}/tmp"
@@ -50,7 +54,9 @@ class SandboxedScripts(
     /** The `sandbox-exec` profile of the prototype (`profile` in `package.mjs`, `sandbox_profile` in `package.rs`). */
     fun profile(request: ScriptRequest): String {
         val real = { path: String -> canonical(path).replace("\"", "") }
-        val hidden = HIDDEN.joinToString(" ") { "(subpath \"${real("${home.trimEnd('/')}/$it")}\")" }
+        val moved = listOfNotNull(configDirectory, variable(XDG_CONFIG_HOME)?.let { "$it/gh" })
+        val folders = HIDDEN.map { "${home.trimEnd('/')}/$it" } + moved
+        val hidden = folders.map(real).distinct().joinToString(" ") { "(subpath \"$it\")" }
         val tmp = real(request.tmp)
         val network = if (request.network) "" else "(deny network*)\n(allow network* (remote unix-socket))\n"
         return "(version 1)\n(allow default)\n$network(deny file-write*)\n" +
@@ -71,6 +77,8 @@ class SandboxedScripts(
 
         /** Why a script was not started: the agent's limit on the hook is reached. */
         internal const val SPENT = "the agent's time limit for a hook is reached, so the script was not started"
+
+        private const val XDG_CONFIG_HOME = "XDG_CONFIG_HOME"
 
         private val KEPT = listOf("PATH", "HOME", "LANG", "LC_ALL", "USER", "SHELL")
         private val HIDDEN = listOf(

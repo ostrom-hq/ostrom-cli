@@ -43,7 +43,9 @@ object SessionHooks {
             // a check never outlives the agent's limit on its hook: past it, Grok runs the action unchecked
             val budget = HookBudget.of(environment["OSTROM_HOOK_BUDGET_MS"], clock)
             val home = context.home
-            val scripts = SandboxedScripts(capture, environment::get, sandboxExec, home, files::canonical, budget)
+            val scripts = SandboxedScripts(
+                capture, environment::get, sandboxExec, home, files::canonical, budget, environment.configDirectory,
+            )
             val checkouts = GitCheckouts(capture, context.git, budget)
             // in a cloud session the runner runs the checks on its own host and reports them (isolated_runner)
             val runner = context.runnerChecks?.let { RunnerSocketChecks(it, UnixSocketsImpl(), budget) }

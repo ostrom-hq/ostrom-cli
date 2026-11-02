@@ -85,6 +85,20 @@ class CheckProcessesTest {
     }
 
     @Test
+    fun theCliFolderIsHiddenWhereverOstromHomeOrXdgConfigHomePutsIt() {
+        // security audit L3: credentials.json and admin.json follow OSTROM_HOME or XDG_CONFIG_HOME, so does the sandbox
+        val moved = variables + ("XDG_CONFIG_HOME" to "/srv/xdg")
+        fun sandbox(variable: (String) -> String?, folder: String) =
+            SandboxedScripts(Capture(), variable, true, "/home/lena", { "/real$it" }, configDirectory = folder)
+        val profile = sandbox(moved::get, "/srv/ostrom").profile(request)
+        assertTrue("(subpath \"/real/srv/ostrom\")" in profile, "the CLI's folder, where OSTROM_HOME puts it")
+        assertTrue("(subpath \"/real/srv/xdg/gh\")" in profile, "GitHub's CLI's, where XDG_CONFIG_HOME puts it")
+        assertTrue("(subpath \"/real/home/lena/.config/ostrom\")" in profile, "the default folder stays hidden")
+        val usual = sandbox(variables::get, "/home/lena/.config/ostrom").profile(request)
+        assertEquals(runner(Capture(), sandboxExec = true).profile(request), usual, "the usual folder, named once")
+    }
+
+    @Test
     fun aScriptIsCutToTheHookBudgetAndNotStartedOnceItIsSpent() {
         var now = 0L
         val budget = HookBudget(11_000) { now }
