@@ -281,7 +281,23 @@ class Journey:
         self.begin("2.1", "ostrom init: the organisation, the repository, the agents' hooks, the starting rules")
         if self.needs(("GET", "/api/v1/orgs"), ("GET", "/api/v1/workflows"), on_main=True, org=True):
             self.init(maya, org)
+        self.begin("5.1 status", "ostrom status: who, in which organisation, this repository, this device")
+        if self.needs(("GET", "/api/v1/auth/me"), ("GET", "/api/v1/orgs"), on_main=True):
+            self.status(maya, org)
         self.team(maya, tom_email, org)
+
+    def status(self, maya, org):
+        done = self.ostrom(maya, "status", "--json")
+        said = read_json(done.stdout) or {}
+        self.check(done.returncode == 0, f"ostrom status exits 0 ({done.returncode}): {done.stderr.strip()[:300]}")
+        self.check(said.get("login") not in (None, "unknown"), f"it says who is signed in (@{said.get('login')})")
+        self.check(said.get("organization") == org.get("name"),
+                   f"in the owner's organisation ({said.get('organization')})")
+        self.check(said.get("repository") == "acme-api", f"in this repository ({said.get('repository')})")
+        self.check(said.get("server") == self.server and said.get("version"), "on this server, with this version")
+        text = self.ostrom(maya, "status")
+        self.check(text.returncode == 0 and text.stdout.startswith(f"Signed in   @{said.get('login')}"),
+                   f"and says it in words ({text.returncode}): {text.stdout.strip()[:200]}")
 
     def init(self, maya, org):
         done = self.ostrom(maya, "init", "--yes", "--json")
@@ -381,11 +397,39 @@ class Journey:
             else:
                 self.check(status in (200, 204), f"the owner removes it ({status}): {error_of(body)[:200]}")
 
+        self.begin("6.1", "ostrom logs: the thread of the session that just ran")
+        if self.needs(("POST", "/api/v1/sessions"), ("GET", "/api/v1/sessions"), org=True):
+            self.logs(maya)
+
         if self.invitee:
             self.begin("2.6", "ostrom members remove")
             done = self.ostrom(maya, "members", "remove", self.invitee, "--yes", console=True)
             self.check(done.returncode == 0, f"a console token removes @{self.invitee} ({done.returncode}): "
                                              f"{done.stderr.strip()[:300]}")
+
+    def logs(self, maya):
+        last = self.ostrom(maya, "logs", "--json")
+        thread = read_json(last.stdout) or {}
+        session = thread.get("session") or {}
+        if not self.check(last.returncode == 0 and session.get("id"),
+                          f"ostrom logs --json reads the developer's last session ({last.returncode}): "
+                          f"{(last.stderr or last.stdout).strip()[:300]}"):
+            return
+        self.check(isinstance(thread.get("gates"), list), f"with the requests for a yes it asked "
+                                                          f"({len(thread.get('gates') or [])})")
+        shown = self.ostrom(maya, "logs", session["id"])
+        lines = shown.stdout.splitlines()
+        self.check(shown.returncode == 0 and lines[:1] and lines[0].startswith(f"Session {session['id']}"),
+                   f"ostrom logs {session['id']} heads its thread ({shown.returncode}): {shown.stderr.strip()[:300]}")
+        self.check(any("session started" in line for line in lines), "from its start")
+        if session.get("endedAt"):
+            self.check(any("session ended" in line for line in lines), "to its end")
+            # on a session still open, -f waits for its end: only an ended one is followed here
+            followed = self.ostrom(maya, "logs", session["id"], "-f", timeout=60)
+            self.check(followed.returncode == 0 and followed.stdout == shown.stdout,
+                       f"-f on an ended session prints the same thread and returns ({followed.returncode})")
+        gone = self.ostrom(maya, "logs", f"ses_none_{self.stamp}")
+        self.check(gone.returncode == 66, f"a session that does not exist is 66 ({gone.returncode})")
 
     def harness(self, maya):
         name = f"deploy-{self.stamp}"
