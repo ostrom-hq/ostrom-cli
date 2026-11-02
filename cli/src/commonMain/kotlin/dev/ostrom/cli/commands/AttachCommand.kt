@@ -16,10 +16,12 @@ internal class AttachCommand(private val dependencies: CliDependencies) : CliktC
 
     private val session by argument("session", help = "The cloud session's id")
     private val server by option("--server", help = "Ostrom server URL (else OSTROM_URL, else the one of ostrom login)")
+    private val org by option("--org", help = "Organisation to act in (else OSTROM_ORG, else the one of ostrom init)")
 
     override fun run() {
         val signedIn = dependencies.signedIn(server)
-        val site = CloudSite(signedIn.serverUrl, signedIn.token, dependencies.workingDirectory())
+        val orgId = dependencies.launchOrg(signedIn.serverUrl, signedIn.token, org)
+        val site = CloudSite(signedIn.serverUrl, signedIn.token, dependencies.workingDirectory(), orgId)
         throw ProgramResult(runBlocking { dependencies.cloud.attach(session, site) })
     }
 }

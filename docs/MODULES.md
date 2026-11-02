@@ -36,6 +36,14 @@ Rules that keep the binary fast and the modules apart:
   the convenience). Tests build `CliDependencies` with fakes.
 - Output goes through `Console` (unbuffered, UTF-8 on Windows consoles). Commands never call `println`.
 
+## The organisation of a launch
+
+`ostrom <agent>` (and `--cloud`, and `ostrom attach`) acts in one organisation: `--org`, else `OSTROM_ORG`, else the
+one `ostrom init` kept. It is looked up among the caller's (`GET /api/v1/orgs`, by id or short name) and its id is sent
+as `Ostrom-Org` on every call (`ApiServerTransport`); one the person is not a member of stops with 66. With none named,
+nothing is looked up, the header is left out and the server takes the person's only organisation; a member of several
+gets 409 `org_required` from the policy check, and the launch stops with 64 and the way to name one.
+
 ## The local relay
 
 While `ostrom <agent>` runs, the launcher starts a `LocalRelay`

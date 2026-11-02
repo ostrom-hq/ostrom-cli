@@ -102,13 +102,15 @@ class CloudRunnerTest {
     }
 
     private val opened = mutableListOf<Triple<String, String, String>>()
+    private val orgs = mutableListOf<String?>()
     private var unreachable = false
 
     private fun runner() = CloudRunnerImpl(
         console,
         api,
-        { url, path, token ->
+        { url, path, token, org ->
             opened += Triple(url, path, token)
+            orgs += org
             if (unreachable) throw ServerUnreachableException(url, IOException("connection reset"))
             Channel(ArrayDeque())
         },
@@ -132,6 +134,16 @@ class CloudRunnerTest {
             opened,
         )
         assertTrue(errors.contains("Starting Claude Code in Ostrom's cloud (session cs1)…\n"), errors.toString())
+    }
+
+    @Test
+    fun theOrganisationNamedGoesOnEveryCallAndOnTheTerminal() = runTest {
+        assertEquals(0, runner().start(CloudStart(Agent.CLAUDE, null, null), site.copy(org = "o2")))
+        assertEquals(listOf("o2"), requests.map { it.second.org }.distinct())
+        assertEquals(listOf<String?>("o2"), orgs)
+        orgs.clear()
+        assertEquals(0, runner().start(CloudStart(Agent.CLAUDE, null, null), site))
+        assertEquals(listOf<String?>(null), orgs, "none named: no header")
     }
 
     @Test
