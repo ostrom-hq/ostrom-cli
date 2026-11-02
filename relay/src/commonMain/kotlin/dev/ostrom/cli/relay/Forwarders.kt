@@ -40,7 +40,7 @@ internal data class RelayTimeouts(val hook: Duration, val longPoll: Duration)
 
 /**
  * Hook calls: method, path, query and body as they are, the response status and body back as they are. They share
- * one client: they are short, and a gate wait is bounded by the server (60 s) and here (70 s).
+ * one client: they are short, and a gate wait is bounded by the server (30 s) and here (70 s).
  */
 internal class HookForwarder(
     private val config: RelayConfig,
