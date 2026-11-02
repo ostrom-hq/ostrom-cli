@@ -23,10 +23,14 @@ import kotlinx.cinterop.allocArray
 import kotlinx.cinterop.toKStringFromUtf16
 import dev.ostrom.cli.platform.interop.ostrom_capture_w
 import dev.ostrom.cli.platform.interop.ostrom_is_terminal
+import dev.ostrom.cli.platform.interop.ostrom_raw_enter
+import dev.ostrom.cli.platform.interop.ostrom_raw_restore
 import dev.ostrom.cli.platform.interop.ostrom_read_stdin
 import dev.ostrom.cli.platform.interop.ostrom_spawn_detached_w
 import dev.ostrom.cli.platform.interop.ostrom_spawn_wait_w
 import dev.ostrom.cli.platform.interop.ostrom_tcp_exchange
+import dev.ostrom.cli.platform.interop.ostrom_terminal_read
+import dev.ostrom.cli.platform.interop.ostrom_terminal_size
 import dev.ostrom.cli.platform.interop.ostrom_write
 
 internal actual fun spawnAndWait(command: List<String>, environment: Map<String, String?>): ProcessResult = memScoped {
@@ -46,7 +50,8 @@ internal actual fun spawnAndWait(command: List<String>, environment: Map<String,
 }
 
 internal actual fun writeBytes(descriptor: Int, bytes: ByteArray) {
-    bytes.usePinned { ostrom_write(descriptor, it.addressOf(0).reinterpret(), bytes.size) }
+    // an empty array has no element 0 to pin: nothing to write (Console.out(""), a terminal frame with no bytes)
+    if (bytes.isNotEmpty()) bytes.usePinned { ostrom_write(descriptor, it.addressOf(0).reinterpret(), bytes.size) }
 }
 
 internal actual fun isTerminal(descriptor: Int): Boolean = ostrom_is_terminal(descriptor) == 1
@@ -128,3 +133,12 @@ actual fun currentExecutable(): String? = memScoped {
 
 /** Long enough for any path Windows hands out without the `\\?\` prefix. */
 private const val MODULE_PATH_CAPACITY = 32_768
+
+internal actual fun terminalEnterRaw(): Boolean = ostrom_raw_enter() == 1
+
+internal actual fun terminalRestore() = ostrom_raw_restore()
+
+internal actual fun terminalSize(): Long = ostrom_terminal_size()
+
+internal actual fun terminalRead(buffer: ByteArray, timeoutMillis: Int): Int =
+    buffer.usePinned { ostrom_terminal_read(it.addressOf(0).reinterpret(), buffer.size, timeoutMillis) }
