@@ -37,12 +37,13 @@ class ImportTeamCodeUseCaseTest {
         apply: Boolean = false,
         key: String? = Sealed.KEY,
         mysql: FakeMysql = FakeMysql(FULL_SCHEMA, TEAM_TABLES),
+        cutover: (() -> Boolean)? = null,
     ): Int {
         val useCase = ImportTeamCodeUseCase(TeamCodeDatabase(mysql), server, "ost_console", { said.append(it) }) {
             failed.append(it)
             said.append(it)
         }
-        return useCase(ImportTeamCodeRequest("mysql://ro@db/teamcode", key, "default", apply))
+        return useCase(ImportTeamCodeRequest("mysql://ro@db/teamcode", key, "default", apply, cutover))
     }
 
     @Test
@@ -169,9 +170,95 @@ class ImportTeamCodeUseCaseTest {
         assertEquals("ostrom import teamcode: Ostrom answered 404: HTTP 404", lines[3])
     }
 
+    @Test
+    fun aNormalPassSaysTheAccountsWaitingForTheCutoverAndRefreshesNone() = runTest {
+        replies["POST /api/v1/import/teamcode"] = ServerReply(200, WAITING)
+        assertEquals(0, import(apply = true))
+        assertEquals(listOf("?dryRun=true", ""), calls.drop(1).map { it.path.removePrefix("/api/v1/import/teamcode") })
+        val wait = "! 2 shared accounts wait for the final pass: ostrom import teamcode --cutover, " +
+            "once TeamCode is stopped.\n"
+        val end = "Imported:\n  revive_at_cutover  account  Team Max (TeamCode still uses it)\n" +
+            "0 created, 1 updated, 0 unchanged, 0 skipped, 2 to revive at the cutover.\n$wait"
+        assertTrue(said.endsWith(end), said.toString())
+        // the plan alone says it too, from the plan's count
+        said.clear()
+        replies["POST /api/v1/import/teamcode?dryRun=true"] = ServerReply(200, WAITING)
+        assertEquals(0, import())
+        assertTrue(said.endsWith("Run the same command with --yes to import.\n$wait"), said.toString())
+    }
+
+    @Test
+    fun theCutoverShowsItsPlanAndRunsOnlyOnceConfirmed() = runTest {
+        replies["POST /api/v1/import/teamcode?dryRun=true&cutover=true"] = ServerReply(200, WAITING)
+        replies["POST /api/v1/import/teamcode?cutover=true"] = ServerReply(200, CUT)
+        val asked = mutableListOf<String>()
+        val declined = {
+            asked += said.toString()
+            false
+        }
+        assertEquals(2, import(cutover = declined))
+        val plan = "Cutover plan (nothing changed yet):\n" +
+            "  revive_at_cutover  account  Team Max (TeamCode still uses it)\n" +
+            "0 created, 1 updated, 0 unchanged, 0 skipped, 2 to revive at the cutover.\n" +
+            "The cutover tests and rotates the tokens of 2 shared accounts at their provider: " +
+            "TeamCode must be stopped, it would keep the old ones.\n"
+        assertTrue(asked.single().endsWith(plan), "the plan comes before the question: ${asked.single()}")
+        assertTrue(failed.endsWith("ostrom import teamcode: No cutover: nothing was changed.\n"), failed.toString())
+        assertEquals("/api/v1/import/teamcode?dryRun=true&cutover=true", calls.last().path, "nothing run")
+        calls.clear()
+        said.clear()
+        assertEquals(0, import(cutover = { true }))
+        assertEquals(calls[1].body, calls[2].body, "the cutover sends the export of its plan")
+        assertEquals("/api/v1/import/teamcode?cutover=true", calls[2].path)
+        val done = "Cutover:\n  updated  account  Team Max\n  skipped  account  Team Bo (tokens refused)\n" +
+            "0 created, 1 updated, 0 unchanged, 1 skipped.\n" +
+            "! 1 left as they were, for the reasons above (tokens refused, provider unreachable).\n"
+        assertTrue(said.endsWith(done), said.toString())
+        // every account revived: nothing left to say
+        said.clear()
+        replies["POST /api/v1/import/teamcode?cutover=true"] = ServerReply(200, """{"items":[],"updated":2}""")
+        assertEquals(0, import(cutover = { true }))
+        assertTrue(said.endsWith("0 created, 2 updated, 0 unchanged, 0 skipped.\n"), said.toString())
+    }
+
+    @Test
+    fun theCutoverIsTheOwnersOnAServerThatCanRunIt() = runTest {
+        val route = "POST /api/v1/import/teamcode?dryRun=true&cutover=true"
+        replies[route] = ServerReply(403, """{"error":{"type":"forbidden","message":"owner only"}}""")
+        assertEquals(77, import(cutover = { true }))
+        replies[route] = ServerReply(503, """{"error":{"type":"unavailable","message":"no audit log"}}""")
+        assertEquals(1, import(cutover = { true }))
+        replies[route] = ServerReply(401, "{}")
+        assertEquals(77, import(cutover = { true }))
+        replies[route] = ServerReply(500, "{}")
+        assertEquals(1, import(cutover = { true }))
+        // a normal pass never says the cutover's reasons
+        replies["POST /api/v1/import/teamcode?dryRun=true"] = ServerReply(503, "{}")
+        assertEquals(1, import())
+        val lines = failed.lines().filter { it.isNotEmpty() }
+        assertEquals(
+            listOf(
+                "ostrom import teamcode: Ostrom refused (owner only): the cutover is the owner's, with their own " +
+                    "console token.",
+                "ostrom import teamcode: Ostrom cannot run the cutover (no audit log): this server has no audit log " +
+                    "or no shared accounts.",
+                "ostrom import teamcode: Ostrom refused (HTTP 401): the import needs an owner's or admin's console " +
+                    "token (import:write).",
+                "ostrom import teamcode: Ostrom answered 500: HTTP 500",
+                "ostrom import teamcode: Ostrom answered 503: HTTP 503",
+            ),
+            lines,
+        )
+    }
+
     private companion object {
         const val REPORT = """{"items":[{"kind":"mcp_server","name":"grafana","action":"created"},""" +
             """{"kind":"account","name":"Team Max","action":"skipped","reason":"no account importer yet"},"x"],""" +
             """"created":2,"unchanged":1,"skipped":1,"updated":"many"}"""
+        const val WAITING = """{"items":[{"kind":"account","name":"Team Max","action":"revive_at_cutover",""" +
+            """"reason":"TeamCode still uses it"}],"updated":1,"reviveAtCutover":2}"""
+        const val CUT = """{"items":[{"kind":"account","name":"Team Max","action":"updated"},""" +
+            """{"kind":"account","name":"Team Bo","action":"skipped","reason":"tokens refused"}],""" +
+            """"updated":1,"skipped":1,"reviveAtCutover":0}"""
     }
 }

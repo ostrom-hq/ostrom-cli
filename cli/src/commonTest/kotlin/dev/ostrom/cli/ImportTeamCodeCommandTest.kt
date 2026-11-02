@@ -44,4 +44,38 @@ class ImportTeamCodeCommandTest : CliKit() {
         assertEquals(0, cli().run(arrayOf("import")), "the group shows its help")
         assertOut("teamcode")
     }
+
+    @Test
+    fun theCutoverRunsOnlyOnceTheOwnerTypedCutover() {
+        val import = arrayOf("import", "teamcode", "--db", "mysql://ro@db/teamcode", "--key-file", "/keys/tc.key")
+        val admin = withServer + ("OSTROM_TOKEN" to "ost_console")
+        fileSystem.createDirectories("/keys".toPath())
+        fileSystem.write("/keys/tc.key".toPath()) { writeUtf8(Sealed.KEY + "\n") }
+        val plan = "POST /api/v1/import/teamcode?dryRun=true&cutover=true"
+        val routes = mapOf(
+            "GET /api/v1/members" to (200 to """{"items":[]}"""),
+            plan to (200 to """{"items":[],"reviveAtCutover":1}"""),
+            "POST /api/v1/import/teamcode?cutover=true" to (200 to """{"items":[],"updated":1}"""),
+        )
+        fun run(vararg more: String) =
+            cli(environment = admin, api = serverOf(routes), capture = FakeMysql(FULL_SCHEMA, TEAM_TABLES))
+                .run(import + more)
+        // no terminal and no --confirm: stops before asking Ostrom anything; --confirm alone is no cutover
+        assertEquals(64, run("--cutover"))
+        assertTrue("no terminal to type cutover: add --confirm cutover" in console.err.toString())
+        assertEquals(64, run("--confirm", "cutover"))
+        assertTrue("--confirm goes with --cutover" in console.err.toString())
+        assertTrue(requests.isEmpty(), "nothing asked of Ostrom")
+        assertEquals(2, run("--cutover", "--yes", "--confirm", "yes"), "--yes or another word is never the cutover")
+        val paths = { requests.map { it.second.path } }
+        assertEquals(listOf("/api/v1/members", plan.removePrefix("POST ")), paths())
+        assertEquals(0, run("--cutover", "--confirm", "cutover"))
+        assertEquals("/api/v1/import/teamcode?cutover=true", paths().last())
+        // at a terminal, the word is typed
+        console.isInteractive = true
+        typed += "cutover"
+        assertEquals(0, run("--cutover"))
+        assertOut("Type cutover to run it: ")
+        assertEquals(listOf("ost_console"), requests.map { it.second.token }.distinct())
+    }
 }
