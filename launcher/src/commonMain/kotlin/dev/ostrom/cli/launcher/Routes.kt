@@ -20,14 +20,12 @@ object Routes {
     /** `GET`, unauthenticated: every signing key of the instance, which signs the hooks' gate policy (S2-20). */
     const val INSTANCE_KEYS = "/api/v1/instance/keys"
 
-    /** `GET`: the MCP servers of the organisation, relayed by Ostrom. */
-    const val MCP_SERVERS = "/api/v1/mcp/servers"
-
     /**
-     * `GET`: only the MCP servers the session's agent will reach, without secret names, policies or assignments: the
-     * one view a CLI token is given, an owner's or an admin's included (least privilege, JOURNAL 02/11 17:45).
+     * `GET`: only the MCP servers the session's agent will reach, without upstream URLs or secret names (the
+     * contract's `listMcpServers` with `mine`). The whole list is the console's, never asked by the CLI, an owner's or
+     * an admin's token included: least privilege.
      */
-    const val MCP_MINE = "$MCP_SERVERS?mine=true"
+    const val MCP_MINE = "/api/v1/mcp/servers?mine=true"
 
     /** `GET`: the models of the inference gateway; a 2xx with models means the organisation relays inference. */
     const val INFERENCE_MODELS = "/api/v1/inference/v1/models"
