@@ -90,9 +90,10 @@ class SandboxedScripts(
  * - a commit is checked out in a clone of its own (`clone --shared`: its objects, none of its configuration), in an
  *   environment of its own: no user's or system's configuration (whatever the version of git), no variable of the
  *   agent's (`GIT_CONFIG_*`, `GIT_DIR`), no replaced object. No filter driver, hook or fsmonitor of anyone's applies,
- *   and nothing has to be named in advance (a name with `=` in it, a filter added during the hook). The clone takes the
- *   repository's branches and tags too. A repository that git trusts only through the user's `safe.directory` (owned
- *   by someone else) is not cloned: its commits are refused;
+ *   and nothing has to be named in advance (a name with `=` in it, a filter added during the hook). The clone has the
+ *   repository's tags, and its branches as `origin/<name>`: fetching them under their own names would start
+ *   `upload-pack` in the repository, with its configuration. A repository that git trusts only through the user's
+ *   `safe.directory` (owned by someone else) is not cloned: its commits are refused;
  * - the working tree is read in place only when no configuration declares a filter driver other than Git LFS's
  *   ([filtered], read at each check: a check may write the configuration): its `git status` would run it, and it
  *   would answer for the tree. The status leaves out hooks, fsmonitor, LFS's filter and replaced objects, and the
@@ -126,20 +127,16 @@ class GitCheckouts(
 
     override fun add(repository: String, path: String, sha: String): Boolean {
         val clone = listOf("clone", "--quiet", "--shared", "--no-checkout", "--", repository, path)
-        // the branches and tags, as a worktree saw them (a check may compare with main); never refs/replace
-        val refs = listOf("-C", path, "fetch", "--quiet", "--update-head-ok", "origin") + BRANCHES_AND_TAGS
         val checkout = listOf("-C", path, "checkout", "--quiet", "--detach", sha)
-        if (!succeeded(configless(clone))) return false
-        configless(refs)
-        return succeeded(configless(checkout))
+        return succeeded(configless(clone)) && succeeded(configless(checkout))
     }
 
     override fun remove(repository: String, path: String) {
-        // what a check built (node_modules, target) can take long to delete
+        // what a check built (node_modules, target) can take long to delete: a timeout is not tried again
         val removed = bounded(listOf(RM, "-rf", "--", path), CHECKOUT_MILLIS)
-        if (succeeded(removed)) return
-        // a folder a check left unwritable (a module cache) would take the next clone's place
-        bounded(listOf(CHMOD, "-R", "u+w", "--", path), CHECKOUT_MILLIS)
+        if (removed !is CaptureResult.Exited || removed.code == 0) return
+        // a folder a check left closed (a module cache) would take the next clone's place
+        bounded(listOf(CHMOD, "-R", "u+rwx", "--", path), CHECKOUT_MILLIS)
         bounded(listOf(RM, "-rf", "--", path), CHECKOUT_MILLIS)
     }
 
@@ -197,9 +194,6 @@ class GitCheckouts(
         const val CHECKOUT_MILLIS = 60_000
     }
 }
-
-/** Every branch and tag of the repository, under the same names. */
-private val BRANCHES_AND_TAGS = listOf("+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*")
 
 /** Everything modified, staged or untracked; a submodule by its commit only. */
 private val STATUS = listOf("--porcelain", "--untracked-files=all", "--ignore-submodules=dirty")
