@@ -212,7 +212,8 @@ to the hooks, the binary reads `OSTROM_URL` (server), `OSTROM_HOME` (the CLI fol
 (`ProcessCapture`, one `START TRANSACTION READ ONLY`, the password in `MYSQL_PWD`, never on the command line), opens
 TeamCode's credential envelopes with its key file (`aesGcmOpen` of `launcher`: AES-256-GCM, `v1:` then base64url of
 nonce, ciphertext and tag, bound to `variant:<team>:<id>[:<member>]` or `<team>:<account>`), maps the members to
-Ostrom's by e-mail then login, and sends the plan to `POST /api/v1/import/teamcode?dryRun=true` (ostrom-server#28).
+Ostrom's by e-mail then login (a server that does not list its members matches no one, and every
+assignment is skipped), and sends the plan to `POST /api/v1/import/teamcode?dryRun=true` (ostrom-server#28).
 It imports only with `--yes`, and prints no secret. A normal pass refreshes no token: a shared account TeamCode still
 uses is reported `revive_at_cutover`, and the CLI says how many wait. `--cutover` is the owner's final pass once
 TeamCode is stopped (ostrom-server#86): the plan with `?dryRun=true&cutover=true`, then, only once the owner typed

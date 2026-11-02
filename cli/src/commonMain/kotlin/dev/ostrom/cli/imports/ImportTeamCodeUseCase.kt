@@ -114,14 +114,23 @@ class ImportTeamCodeUseCase(
         return if (left == 0) ExitCode.OK.code else ExitCode.INCOMPLETE.code
     }
 
-    /** Every page of Ostrom's members (`next` is the cursor of the following one), up to [MAX_PAGES]. */
+    /**
+     * Every page of Ostrom's members (`next` is the cursor of the following one), up to [MAX_PAGES]. A server that does
+     * not list them (`GET /api/v1/members` of the contract, not served by ostrom-server main) matches no one: the
+     * import goes on, every assignment skipped, as for a member Ostrom does not have.
+     */
     private suspend fun members(): List<JsonObject> {
         val members = mutableListOf<JsonObject>()
         var cursor: String? = null
         var page = 0
         do {
             val before = cursor?.let { "?before=${Routes.encode(it)}" }.orEmpty()
-            val body = ok(server.get("$MEMBERS$before", token))
+            val answer = server.get("$MEMBERS$before", token)
+            if (page == 0 && answer is ServerAnswer.Failed && answer.status == NOT_FOUND) {
+                say("! Ostrom did not list its members (${answer.message}): every assignment is skipped.\n")
+                return emptyList()
+            }
+            val body = ok(answer)
             members += body.list("items").mapNotNull { it as? JsonObject }
             cursor = body.text("next")?.takeIf { it.isNotEmpty() }
             page++
@@ -226,6 +235,7 @@ class ImportTeamCodeUseCase(
         private const val MAX_PAGES = 20
         private const val UNAUTHORIZED = 401
         private const val FORBIDDEN = 403
+        private const val NOT_FOUND = 404
         private const val UNAVAILABLE = 503
         private const val REVIVE = "reviveAtCutover"
         private const val ACCOUNT = "account"

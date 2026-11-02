@@ -160,7 +160,7 @@ class ImportTeamCodeUseCaseTest {
         assertEquals(77, import())
         replies["GET /api/v1/members"] = ServerReply(null, "connection refused")
         assertEquals(69, import())
-        replies.remove("GET /api/v1/members")
+        replies["GET /api/v1/members"] = ServerReply(500, """{"error":{"type":"internal","message":"boom"}}""")
         assertEquals(1, import())
         val lines = said.lines().filter { it.isNotEmpty() }
         assertEquals(
@@ -169,7 +169,7 @@ class ImportTeamCodeUseCaseTest {
             lines.first(),
         )
         assertEquals("ostrom import teamcode: Ostrom is unreachable (connection refused).", lines[2])
-        assertEquals("ostrom import teamcode: Ostrom answered 404: HTTP 404", lines[3])
+        assertEquals("ostrom import teamcode: Ostrom answered 500: boom", lines[3])
     }
 
     @Test
@@ -270,6 +270,18 @@ class ImportTeamCodeUseCaseTest {
             ),
             lines,
         )
+    }
+
+    @Test
+    fun aServerThatListsNoMembersMatchesNoOneAndTheImportGoesOn() = runTest {
+        replies["GET /api/v1/members"] = ServerReply(404, """{"error":{"type":"not_found","message":"Not found."}}""")
+        assertEquals(0, import())
+        assertTrue(said.startsWith("! Ostrom did not list its members (Not found.): every assignment is skipped.\n"))
+        assertEquals(parseObject("{}"), parseObject(calls.last().body)?.child("memberMap"), "no one matched")
+        assertEquals("/api/v1/import/teamcode?dryRun=true", calls.last().path)
+        // a later page that is gone is a failure, never a shorter list
+        replies["GET /api/v1/members"] = ServerReply(200, """{"items":[],"next":"p/2"}""")
+        assertEquals(1, import())
     }
 
     private companion object {
