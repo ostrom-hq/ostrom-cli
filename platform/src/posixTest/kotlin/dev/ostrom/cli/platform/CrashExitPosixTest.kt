@@ -13,7 +13,11 @@ import kotlinx.cinterop.ptr
 import kotlinx.cinterop.usePinned
 import kotlinx.cinterop.value
 import platform.posix.SIGABRT
+import platform.posix.SIGBUS
+import platform.posix.SIGFPE
+import platform.posix.SIGILL
 import platform.posix.SIGSEGV
+import platform.posix.SIGSYS
 import platform.posix.SIGTRAP
 import platform.posix.STDERR_FILENO
 import platform.posix.STDOUT_FILENO
@@ -68,20 +72,20 @@ class CrashExitPosixTest {
         Crash(if (signal == 0) (status.value shr EXIT_SHIFT) and EXIT_MASK else SIGNALLED + signal, output)
     }
 
+    /** Everything the child wrote, to the end of the pipe: a refusal written twice shows. */
     private fun readAll(descriptor: Int): String {
+        val output = StringBuilder()
         val bytes = ByteArray(BUFFER)
-        var length = 0
-        while (length < bytes.size) {
-            val count = bytes.usePinned { read(descriptor, it.addressOf(length), (bytes.size - length).toULong()) }
-            if (count <= 0) break
-            length += count.toInt()
+        while (true) {
+            val count = bytes.usePinned { read(descriptor, it.addressOf(0), bytes.size.toULong()) }
+            if (count <= 0) return output.toString()
+            output.append(bytes.decodeToString(0, count.toInt()))
         }
-        return bytes.decodeToString(0, length)
     }
 
     @Test
-    fun aBadAccessAnAbortOrATrapWritesTheRefusalAndExitsWithItsCode() {
-        listOf(SIGSEGV, SIGABRT, SIGTRAP).forEach { signal ->
+    fun everyCrashSignalWritesTheRefusalOnceAndExitsWithItsCode() {
+        listOf(SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT, SIGTRAP, SIGSYS).forEach { signal ->
             val crash = crashed { raise(signal) }
             assertEquals(CODE, crash.code, "signal $signal")
             assertEquals(OUT + ERR, crash.output, "signal $signal")
@@ -106,7 +110,7 @@ class CrashExitPosixTest {
         const val OUT = "{\"decision\":\"deny\"}\n"
         const val ERR = "Ostrom: denied.\n"
         const val LIMIT = 4096
-        const val BUFFER = 8192
+        const val BUFFER = 1024
         const val NOT_SET = 70
         const val NOT_CRASHED = 71
         const val SIGNAL_MASK = 0x7f

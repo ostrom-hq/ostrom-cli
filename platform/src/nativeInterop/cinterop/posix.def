@@ -160,7 +160,8 @@ static inline int ostrom_write(int fd, const unsigned char *bytes, int length) {
     int offset = 0;
     while (offset < length) {
         ssize_t written = write(fd, bytes + offset, (size_t)(length - offset));
-        if (written < 0 && errno == EINTR) continue;
+        /* a full non-blocking pipe: wait for the reader, the refusal is what this process has left to do */
+        if (written < 0 && (errno == EINTR || errno == EAGAIN)) continue;
         if (written <= 0) return -1;
         offset += (int)written;
     }
@@ -563,7 +564,6 @@ static inline int ostrom_exit_on_crash(int code, const char *out, const char *er
     ostrom_crash_stdout_length = (size_t)out_length;
     ostrom_crash_stderr_length = (size_t)err_length;
     ostrom_crash_code = code;
-    signal(SIGPIPE, SIG_IGN);
     stack_t alternate;
     memset(&alternate, 0, sizeof alternate);
     alternate.ss_sp = ostrom_crash_stack;
@@ -579,5 +579,6 @@ static inline int ostrom_exit_on_crash(int code, const char *out, const char *er
     for (size_t i = 0; i < sizeof crashes / sizeof crashes[0]; i++) {
         if (sigaction(crashes[i], &action, NULL) != 0) return -1;
     }
+    signal(SIGPIPE, SIG_IGN);
     return 0;
 }

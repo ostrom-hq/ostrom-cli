@@ -103,9 +103,10 @@ object GateTexts {
 
     /**
      * The gate crashed on this tool call (a stack overflow, an abort): refused, never let through (M1). It says
-     * nothing of whether the tool ran: after a tool call (PostToolUse) it already had.
+     * nothing of whether the tool ran (after a tool call, PostToolUse, it already had), so it never asks for a retry:
+     * that would repeat a deployment that already went through.
      */
     const val GATE_CRASHED =
-        "Ostrom: denied. The gate stopped on this tool call and refuses it. Try again; if it stops again, tell the " +
-            "user to run `ostrom doctor`."
+        "Ostrom: denied. The gate stopped on this tool call and refuses it. Do not run it again on your own: tell " +
+            "the user, who can run `ostrom doctor`."
 }
