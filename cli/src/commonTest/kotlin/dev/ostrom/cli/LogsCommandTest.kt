@@ -101,7 +101,7 @@ class LogsCommandTest : CliKit() {
         val pending = """{"gate":{"id":"g_7d1e","label":"Push to main","status":"pending",""" +
             """"at":"2026-10-30T14:05:41Z"}}"""
         val api = turns(listOf(running, "503", "down", running, ended), listOf(pending, gate, gate))
-        assertEquals(0, cli(environment = withServer, api = api).run(arrayOf("logs", "ses_41b2", "--follow")))
+        assertEquals(0, cli(environment = withServer, api = api).run(arrayOf("logs", "ses_41b2", "-f")))
         val out = console.out.toString()
         assertEquals(1, out.split("session started").size - 1, "each line once")
         assertEquals(1, out.split("waiting for a yes").size - 1, "the request once, answered or not")
@@ -151,8 +151,11 @@ class LogsCommandTest : CliKit() {
         signIn("/home/maya/.config/ostrom")
         assertEquals(66, serving(emptyMap()).run(arrayOf("logs", "ses_none")))
         assertTrue(console.err.contains("No session ses_none on https://ostrom.example."), console.err.toString())
-        assertEquals(66, serving(emptyMap()).run(arrayOf("logs")))
-        assertTrue(console.err.contains("No sessions on https://ostrom.example."), console.err.toString())
+        assertEquals(69, serving(emptyMap()).run(arrayOf("logs")), "a server without the reads of sessions")
+        val said = "ostrom: https://ostrom.example does not serve the sessions yet: update it."
+        assertTrue(console.err.contains(said), console.err.toString())
+        val failing = mapOf("GET /api/v1/sessions?dev=maya" to (503 to "{}"))
+        assertEquals(69, serving(failing).run(arrayOf("logs")))
         assertEquals(65, cli(environment = mapOf("HOME" to "/home/omar", "OSTROM_URL" to "https://x.example"))
             .run(arrayOf("logs")))
     }
@@ -163,8 +166,12 @@ class LogsCommandTest : CliKit() {
         val odd = """{"session":{$started,"gates":["g_gone",{"not":"an id"}]}}"""
         assertEquals(0, serving(mapOf("GET $session" to (200 to odd))).run(arrayOf("logs", "ses_41b2")))
         assertOut("          asked for a yes    g_gone\n")
-        val refused = mapOf("GET $session" to (200 to odd), "GET /api/v1/gates/g_gone" to (403 to "{}"))
-        assertEquals(77, serving(refused).run(arrayOf("logs", "ses_41b2")), "a refusal is not a gate gone")
+        console.out.clear()
+        val unread = mapOf("GET $session" to (200 to odd), "GET /api/v1/gates/g_gone" to (403 to "{}"))
+        assertEquals(0, serving(unread).run(arrayOf("logs", "ses_41b2")), "a token without gates:read reads the rest")
+        assertOut("          asked for a yes    g_gone\n")
+        val refused = mapOf("GET $session" to (200 to odd), "GET /api/v1/gates/g_gone" to (401 to "{}"))
+        assertEquals(65, serving(refused).run(arrayOf("logs", "ses_41b2")), "a token refused is not a gate gone")
         console.out.clear()
         val blank = mapOf("GET $session" to (200 to odd), "GET /api/v1/gates/g_gone" to (200 to "{}"))
         assertEquals(0, serving(blank).run(arrayOf("logs", "ses_41b2")))

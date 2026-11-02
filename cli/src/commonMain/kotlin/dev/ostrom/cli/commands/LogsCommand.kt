@@ -9,6 +9,7 @@ import com.github.ajalt.clikt.parameters.arguments.optional
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import dev.ostrom.cli.CliDependencies
+import dev.ostrom.cli.ExitCode
 import dev.ostrom.cli.launcher.Routes
 import dev.ostrom.cli.launcher.ServerAnswer
 import dev.ostrom.cli.launcher.child
@@ -33,8 +34,11 @@ private val FINAL = setOf("rejected", "consumed", "shadow", "ungated")
 /** `--json` when there is no session: the keys of a session's thread, nothing in them. */
 private const val NO_SESSION = """{"session":null,"receipt":null,"gates":[]}"""
 
-/** 401 and 403: a refusal of the server, never a gate it could not give. */
-private val REFUSED = setOf(401, 403)
+/** 401: the token itself is refused, so the gates are not read either. */
+private const val UNAUTHORIZED = 401
+
+/** The status of a route the server does not serve. */
+private const val NOT_FOUND = 404
 
 /** From this status on, the server failed: `--follow` asks again at the next turn. */
 private const val SERVER_ERROR = 500
@@ -48,7 +52,7 @@ internal class LogsCommand(private val dependencies: CliDependencies) : CliktCom
     override fun help(context: Context) = "The thread of a session: tools, rules, requests"
 
     val session by argument("session", help = "The session's id (else your last one)").optional()
-    val follow by option("--follow", help = "Follow live, until the session ends").flag()
+    val follow by option("--follow", "-f", help = "Follow live, until the session ends").flag()
     val json by option("--json", help = "Machine-readable output").flag()
     val server by option("--server", help = "Ostrom server URL (else OSTROM_URL, else the one of ostrom login)")
 
@@ -121,7 +125,12 @@ private suspend fun readOf(signed: SignedIn, id: String, answer: ServerAnswer, k
 /** The id of the developer's newest session (the latest start of the first page), or null when there is none. */
 private suspend fun lastSession(signed: SignedIn): String? {
     val path = "$SESSIONS?dev=${Routes.encode(signed.login)}"
-    val body = signed.server.get(path, signed.token).orStop(signed.serverUrl, "No sessions on ${signed.serverUrl}.")
+    val answer = signed.server.get(path, signed.token)
+    // a list answers 200, empty or not: a 404 is a server without the reads of sessions
+    if (answer is ServerAnswer.Failed && answer.status == NOT_FOUND) {
+        throw stopWith(ExitCode.UNREACHABLE, "ostrom: ${signed.serverUrl} does not serve the sessions yet: update it.")
+    }
+    val body = answer.orStop(signed.serverUrl, "")
     val started = body.list("items").filterIsInstance<JsonObject>().mapNotNull { session ->
         session.text("id")?.let { it to session.text("startedAt").orEmpty() }
     }
@@ -129,11 +138,12 @@ private suspend fun lastSession(signed: SignedIn): String? {
 }
 
 /**
- * The request of gate [id] as the server keeps it, or only its id when the server does not give it (gone, failing);
- * a refusal (401, 403) stops with its code.
+ * The request of gate [id] as the server keeps it, or only its id when the server does not give it: gone, failing, or
+ * a token without the reading of gates (403: the token of `ostrom login` does not hold `gates:read` yet). A token
+ * refused (401) stops with 65.
  */
 private suspend fun gate(signed: SignedIn, id: String): JsonObject {
     val answer = signed.server.get("$GATES/${Routes.encode(id)}", signed.token)
-    if (answer is ServerAnswer.Failed && answer.status in REFUSED) answer.orStop(signed.serverUrl, "")
+    if (answer is ServerAnswer.Failed && answer.status == UNAUTHORIZED) answer.orStop(signed.serverUrl, "")
     return (answer as? ServerAnswer.Ok)?.let { it.body.child("gate") } ?: JsonObject(mapOf("id" to JsonPrimitive(id)))
 }
