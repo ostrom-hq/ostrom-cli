@@ -70,7 +70,8 @@ internal class StatusCommand(private val dependencies: CliDependencies) : CliktC
     }
 
     private fun said(failed: ServerAnswer.Failed, what: String): Nothing {
-        val why = failed.status?.let { "answers HTTP $it" } ?: "is unreachable"
+        val status = failed.status
+        val why = if (status == null) "is unreachable" else "answers HTTP $status"
         dependencies.console.err("! Ostrom $why: $what.\n")
         throw ProgramResult(ExitCode.UNREACHABLE.code)
     }
@@ -91,7 +92,7 @@ internal class StatusCommand(private val dependencies: CliDependencies) : CliktC
         val answer = server.get("$PACKAGE${Routes.encode(repository)}", token)
         // a revoked package is one the launcher refuses: no harness is in force
         val live = (answer as? ServerAnswer.Ok)?.let { ok -> ok.body.takeIf { it["revoked"] != JsonPrimitive(true) } }
-        val none = (answer as? ServerAnswer.Failed)?.status == NOT_FOUND
+        val none = answer is ServerAnswer.Failed && answer.status == NOT_FOUND
         return Read(live?.text("version"), known = answer is ServerAnswer.Ok || none, down = failing(answer))
     }
 
@@ -103,7 +104,8 @@ internal class StatusCommand(private val dependencies: CliDependencies) : CliktC
         do {
             val before = cursor?.let { "&before=${Routes.encode(it)}" }.orEmpty()
             val answer = server.get("$INBOX$before", token)
-            val body = (answer as? ServerAnswer.Ok)?.body ?: return Read(null, known = false, down = failing(answer))
+            if (answer !is ServerAnswer.Ok) return Read(null, known = false, down = failing(answer))
+            val body = answer.body
             count += body.list("items").size
             cursor = body.text("next")?.takeIf { it.isNotEmpty() }
             page++
@@ -149,7 +151,7 @@ private class Facts(
     val waiting: Read<Waiting> = Read(null, known = false),
 ) {
     fun text(): String {
-        val where = org?.let { "${it.name} (${device.host})" } ?: device.host
+        val where = if (org == null) device.host else "${org.name} (${device.host})"
         val who = listOfNotNull("@$login", where, org?.role).joinToString(" · ")
         val repo = when {
             repository == null -> "not in a git repository"
