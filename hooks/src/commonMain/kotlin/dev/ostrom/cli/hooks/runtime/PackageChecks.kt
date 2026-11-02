@@ -47,7 +47,8 @@ data class CheckPorts(
  * Before an action, each check that guards it runs in the package's order. A script whose SHA-256 no longer matches
  * the package is not run and the action is refused. An enforced check that guards a push tests each commit the push
  * sends, never the working tree: in place when it is HEAD and the tree is clean, refused when HEAD has uncommitted
- * changes, otherwise in a detached worktree under `<tmp>/sbx`, removed afterwards. A push it cannot tie to commits is
+ * changes, otherwise (or when the configuration declares a filter other than LFS's) in a detached clone under
+ * `<tmp>/sbx` (it shares the objects, not the configuration), removed afterwards. A push it cannot tie to commits is
  * refused. A check in shadow is only reported; every other mode blocks, and an enforced check whose script is not in
  * the package refuses the action. A failure or a timeout refuses the action. A package changed since the launch
  * refuses every action (S2-33).
@@ -189,7 +190,8 @@ class PackageChecks(
                     null
                 }
                 sha == null -> verified(hook, script, repository, head, null)
-                here != sha -> inCheckout(hook, script, sha)
+                // a filter the configuration declares would run in a status, outside the sandbox: a clone runs none
+                here != sha || ports.checkouts.filtered(repository) -> inCheckout(hook, script, sha)
                 ports.checkouts.clean(repository) -> verified(hook, script, repository, head, key)
                 else -> {
                     val notRun = Report(null, FAILED, "not run: uncommitted changes", NOT_RUN, head)
@@ -199,20 +201,21 @@ class PackageChecks(
             }
         }
 
-        /** Another commit than HEAD: tested in a detached worktree of its own, removed afterwards whatever happens. */
+        /** Another commit than HEAD: tested in a detached clone of its own, removed afterwards whatever happens. */
         private fun inCheckout(hook: CompiledHook, script: CompiledScript, sha: String): String? {
             val path = "$sandbox/wt-${sha.take(SHORT_SHA)}"
             ports.checkouts.remove(repository, path)
-            return if (ports.checkouts.add(repository, path, sha)) {
-                try {
+            // removed afterwards even when the clone stopped half-way
+            return try {
+                if (ports.checkouts.add(repository, path, sha)) {
                     verified(hook, script, path, sha, "${script.id}:commit:$sha")
-                } finally {
-                    ports.checkouts.remove(repository, path)
+                } else {
+                    val why = "cannot check out $sha to test it"
+                    report(hook, script, script.sha256, Report(null, FAILED, why, NOT_RUN, sha))
+                    CheckTexts.noCheckout(script.label, why)
                 }
-            } else {
-                val why = "cannot check out $sha to test it"
-                report(hook, script, script.sha256, Report(null, FAILED, why, NOT_RUN, sha))
-                CheckTexts.noCheckout(script.label, why)
+            } finally {
+                ports.checkouts.remove(repository, path)
             }
         }
 

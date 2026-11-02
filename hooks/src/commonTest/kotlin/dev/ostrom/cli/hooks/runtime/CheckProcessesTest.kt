@@ -130,39 +130,92 @@ class CheckProcessesTest {
         }
     }
 
+    /** `git` as GitCheckouts checks a commit out: in an environment of its own, without any configuration. */
+    private fun configless(arguments: List<String>, path: List<String> = emptyList()) =
+        listOf("/usr/bin/env", "-i") + path +
+            listOf("GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_NO_REPLACE_OBJECTS=1", "git") +
+            hooksOff + arguments
+
+    private fun git(vararg arguments: String) = listOf("git") + arguments.toList()
+
+    private val hooksOff = listOf("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false")
+
+    private val status = git(
+        *(
+            safe + listOf("--no-replace-objects", "-C", "/w", "status", "--porcelain", "--untracked-files=all") +
+                "--ignore-submodules=dirty"
+            ).toTypedArray(),
+    )
+    private val filters = git("-C", "/w", "config", "--name-only", "--get-regexp", "^filter\\.")
+
     @Test
-    fun aCleanTreeHasNothingModifiedStagedOrUntracked() {
-        fun clean(result: CaptureResult) = GitCheckouts(Capture(result), "/usr/bin/git").clean("/w")
+    fun aCleanTreeHasNothingModifiedStagedOrUntrackedNorAFilterDeclaredMeanwhile() {
+        val none = CaptureResult.Exited(1, "")
+        fun clean(status: CaptureResult, after: CaptureResult = none) =
+            GitCheckouts(Capture(status, after), "git").clean("/w")
         assertTrue(clean(CaptureResult.Exited(0, "")))
         assertFalse(clean(CaptureResult.Exited(0, "?? new.txt\n")))
         assertFalse(clean(CaptureResult.Exited(128, "")))
         assertFalse(clean(CaptureResult.TimedOut))
-        val capture = Capture(CaptureResult.Exited(0, ""))
-        GitCheckouts(capture, "/usr/bin/git").clean("/w")
-        val status = listOf("/usr/bin/git") + safe +
-            listOf("-C", "/w", "status", "--porcelain", "--untracked-files=all")
-        assertEquals(status to 5_000, capture.captured.single())
+        // a filter declared while the status ran may have made the tree look clean
+        assertFalse(clean(CaptureResult.Exited(0, ""), CaptureResult.Exited(0, "filter.x.clean\n")))
+        val capture = Capture(CaptureResult.Exited(0, ""), none)
+        GitCheckouts(capture, "git").clean("/w")
+        assertEquals(listOf(status to 5_000, filters to 5_000), capture.captured, "submodules by their commit only")
     }
 
     @Test
-    fun aCommitIsCheckedOutDetachedAndRemovedAfterwards() {
-        val capture = Capture(CaptureResult.Exited(0, ""))
+    fun aRepositoryIsFilteredByAnyFilterButLfsOrWhenItsFiltersCannotBeRead() {
+        fun filtered(listed: CaptureResult) = GitCheckouts(Capture(listed), "git").filtered("/w")
+        assertFalse(filtered(CaptureResult.Exited(1, "")), "none declared")
+        // git lfs install declares LFS's filter, which the status runs switched off
+        assertFalse(filtered(CaptureResult.Exited(0, "filter.lfs.smudge\nfilter.lfs.process\nfilter.lfs.required\n")))
+        assertTrue(filtered(CaptureResult.Exited(0, "filter.lfs.smudge\nfilter.x=y.clean\n")))
+        // a driver whose name starts with lfs. is another driver, which OFF does not switch off
+        assertTrue(filtered(CaptureResult.Exited(0, "filter.lfs.x.smudge\n")))
+        assertTrue(filtered(CaptureResult.Exited(128, "")))
+        assertTrue(filtered(CaptureResult.TimedOut))
+        val capture = Capture(CaptureResult.Exited(1, ""))
         val checkouts = GitCheckouts(capture, "git")
+        assertFalse(checkouts.filtered("/w"))
+        assertFalse(checkouts.filtered("/w"))
+        // never kept: a check may write the configuration before the next one runs
+        assertEquals(listOf(filters to 5_000, filters to 5_000), capture.captured)
+    }
+
+    @Test
+    fun aCommitIsCheckedOutInACloneOfItsOwnAndRemovedAfterwards() {
+        // a clone shares the objects, not the configuration: no filter, hook or fsmonitor of anyone's applies
+        val capture = Capture(CaptureResult.Exited(0, ""))
+        val checkouts = GitCheckouts(capture, "git", searchPath = "/usr/bin:/bin")
         assertTrue(checkouts.add("/w", "/t/sbx/wt-M", "M"))
         checkouts.remove("/w", "/t/sbx/wt-M")
+        val path = listOf("PATH=/usr/bin:/bin")
         assertEquals(
             listOf(
-                git("worktree", "add", "--detach", "--force", "/t/sbx/wt-M", "M") to 60_000,
-                git("worktree", "remove", "--force", "/t/sbx/wt-M") to 60_000,
-                git("worktree", "prune") to 5_000,
+                configless(listOf("clone", "--quiet", "--shared", "--no-checkout", "--", "/w", "/t/sbx/wt-M"), path) to
+                    60_000,
+                configless(listOf("-C", "/t/sbx/wt-M", "checkout", "--quiet", "--detach", "M"), path) to 60_000,
+                listOf("/bin/rm", "-rf", "--", "/t/sbx/wt-M") to 60_000,
             ),
             capture.captured,
         )
-        assertFalse(GitCheckouts(Capture(CaptureResult.Exited(128, "")), "git").add("/w", "/p", "M"))
+        // a folder a check left closed is opened, then removed; a removal that timed out is not tried again
+        val stuck = Capture(CaptureResult.Exited(1, ""), CaptureResult.Exited(0, ""))
+        GitCheckouts(stuck, "git").remove("/w", "/p")
+        val rm = listOf("/bin/rm", "-rf", "--", "/p") to 60_000
+        assertEquals(listOf(rm, listOf("/bin/chmod", "-R", "u+rwx", "--", "/p") to 60_000, rm), stuck.captured)
+        val slow = Capture(CaptureResult.TimedOut)
+        GitCheckouts(slow, "git").remove("/w", "/p")
+        assertEquals(listOf(rm), slow.captured)
+        val noClone = Capture(CaptureResult.Exited(128, ""))
+        assertFalse(GitCheckouts(noClone, "git").add("/w", "/p", "M"))
+        assertEquals(1, noClone.captured.size, "nothing more once the clone failed")
         assertFalse(GitCheckouts(Capture(CaptureResult.NotFound), "git").add("/w", "/p", "M"))
+        val noCommit = Capture(CaptureResult.Exited(0, ""), CaptureResult.Exited(128, ""))
+        assertFalse(GitCheckouts(noCommit, "git").add("/w", "/p", "M"), "a commit the clone cannot check out")
+        assertEquals(configless(listOf("-C", "/p", "checkout", "--quiet", "--detach", "M")), noCommit.captured[1].first)
     }
-
-    private fun git(vararg arguments: String) = listOf("git") + safe + listOf("-C", "/w") + arguments
 
     @Test
     fun gitIsCutToTheHookBudgetAndNotRunOnceItIsSpent() {
@@ -170,11 +223,12 @@ class CheckProcessesTest {
         val capture = Capture(CaptureResult.Exited(0, ""))
         val checkouts = GitCheckouts(capture, "git", HookBudget(4_000) { now })
         assertTrue(checkouts.add("/w", "/p", "M"))
-        assertEquals(3_000, capture.captured.single().second, "the checkout ends a second before the agent's limit")
+        assertEquals(3_000, capture.captured.first().second, "the clone ends a second before the agent's limit")
         now = 3_000
+        assertTrue(checkouts.filtered("/w"), "no time to read the filters: the commit is checked in a clone")
         assertFalse(checkouts.clean("/w"), "no time to read the tree: it is not taken as clean")
         assertFalse(checkouts.add("/w", "/p", "M"))
         checkouts.remove("/w", "/p")
-        assertEquals(1, capture.captured.size, "nothing is run once the budget is spent")
+        assertEquals(2, capture.captured.size, "nothing is run once the budget is spent")
     }
 }
