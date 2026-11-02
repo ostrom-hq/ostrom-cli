@@ -170,7 +170,8 @@ def main():
     harmless = {**base, "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "ls -la"}}
     runs = int(os.environ.get("E2E_TIMED_RUNS", "0"))
     timing = timed(hooks["PreToolUse"], harmless, runs) if runs else []
-    measured = perf(hooks["PreToolUse"], base, int(os.environ["E2E_PERF"])) if int(os.environ.get("E2E_PERF") or 0) > 0 else None
+    perf_runs = int(os.environ.get("E2E_PERF") or 0)
+    measured = perf(hooks["PreToolUse"], base, perf_runs) if perf_runs > 0 else None
     tool = {"tool_name": "Bash", "tool_input": {"command": "ls -la"}, "tool_response": {"stdout": ""}}
     fired.append(fire(hooks["PostToolUse"], {**base, "hook_event_name": "PostToolUse", **tool}))
     package = os.environ.get("OSTROM_PACKAGE")

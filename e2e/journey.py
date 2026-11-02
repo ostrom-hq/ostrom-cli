@@ -633,8 +633,8 @@ class Journey:
         elif yes_at is not None and waited.get("code") == 0:
             # ostrom wait was already waiting (Ostrom holds its read): the yes reaches it, not the next poll
             answered, passed = (waited["at"] - yes_at) * 1000, (retry["at"] - yes_at) * 1000
-            print(f"  from the yes sent: ostrom wait answers in {answered:.0f} ms, the action passes in {passed:.0f} ms",
-                  flush=True)
+            print(f"  from the yes sent: ostrom wait answers in {answered:.0f} ms, "
+                  f"the action passes in {passed:.0f} ms", flush=True)
             self.step["yes_to_action_ms"] = {"wait": round(answered), "action": round(passed)}
             self.check(passed < self.options.max_yes_to_action_ms,
                        f"the action passes {passed:.0f} ms after the yes < {self.options.max_yes_to_action_ms:.0f}")
@@ -736,7 +736,7 @@ def main():
     parser.add_argument("--perf-runs", type=int, default=100, help="calls per latency series in 5.8 (0: none)")
     parser.add_argument("--max-local-p95-ms", type=float, default=20, help="5.8: a local decision, at p95")
     # 75 ms, not the 150 first proposed: the journey measured 13.7 ms (policy asked) and 25.1 ms (gated) at p95 (run
-    # 41500895660); 150 would let a sixfold regression through, 75 keeps three times the gated one for the runner's noise.
+    # 41500895660); 150 would let a sixfold regression through, 75 keeps three times the gated one for the noise.
     parser.add_argument("--max-server-p95-ms", type=float, default=75, help="5.8: a round trip to Ostrom, at p95")
     # a wait already held by Ostrom answers within the yes's own round trip; 5 s leaves the runner its noise, and a
     # wait that polls each second (or misses the yes until its read ends, 30 s) shows here
