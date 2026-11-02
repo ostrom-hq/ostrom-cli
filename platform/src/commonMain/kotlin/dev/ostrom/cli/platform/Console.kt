@@ -34,11 +34,17 @@ sealed interface StandardInput {
  * within milliseconds, and the MCP server must never mix logs into its JSON-RPC stream.
  */
 interface Console {
-    /** Writes [text] to stdout as UTF-8, as is (no newline added). */
+    /** Writes [text] to stdout as UTF-8, as is (no newline added; on a terminal, [terminalSafe]). */
     fun out(text: String)
 
-    /** Writes [text] to stderr as UTF-8, as is (no newline added). */
+    /** Writes [text] to stderr as UTF-8, as is (no newline added; on a terminal, [terminalSafe]). */
     fun err(text: String)
+
+    /**
+     * Writes [text], which the CLI wrote alone (its help, with its colours and links), to stdout as it is, terminal or
+     * not. Nothing another wrote (an argument, a server's answer) goes there.
+     */
+    fun help(text: String) = out(text)
 
     /** True when stdout is a terminal (colours and questions are allowed), false in a pipe, a CI log or an agent. */
     val isInteractive: Boolean
@@ -55,14 +61,32 @@ interface Console {
     fun readStandardInput(maxBytes: Int, timeoutMillis: Int): StandardInput
 }
 
-/** [Console] over the file descriptors (POSIX) or the standard handles (Windows). */
-class ConsoleImpl : Console {
+/**
+ * [Console] over the file descriptors (POSIX) or the standard handles (Windows). What goes to a terminal is cleaned
+ * ([terminalSafe]), `--json` included; what goes to a pipe or a file (a hook's answer, the MCP stream, `--json`
+ * redirected) is written as it is: those streams are for programs, which need the bytes. Output piped on to a
+ * terminal by the user (`| cat`, `| tee`, `| less -R`) is therefore not cleaned.
+ *
+ * @param terminal Whether a descriptor is a terminal, asked once per descriptor.
+ * @param write Writes bytes to a descriptor.
+ */
+class ConsoleImpl(
+    private val terminal: (Int) -> Boolean = ::isTerminal,
+    private val write: (Int, ByteArray) -> Unit = ::writeBytes,
+) : Console {
+    private val stdoutTerminal by lazy { terminal(1) }
+    private val stderrTerminal by lazy { terminal(2) }
+
     override fun out(text: String) = writeTo(1, text)
 
     override fun err(text: String) = writeTo(2, text)
 
+    override fun help(text: String) {
+        if (text.isNotEmpty()) write(1, text.encodeToByteArray())
+    }
+
     override val isInteractive: Boolean
-        get() = isTerminal(1)
+        get() = stdoutTerminal
 
     override fun readStandardInput(maxBytes: Int, timeoutMillis: Int): StandardInput {
         return readGrowing(maxBytes, timeoutMillis, ::readStdin, TimeSource.Monotonic.markNow())
@@ -70,7 +94,9 @@ class ConsoleImpl : Console {
 
     private fun writeTo(descriptor: Int, text: String) {
         if (text.isEmpty()) return
-        writeBytes(descriptor, text.encodeToByteArray())
+        val onTerminal = if (descriptor == 1) stdoutTerminal else stderrTerminal
+        val shown = if (onTerminal) terminalSafe(text) else text
+        write(descriptor, shown.encodeToByteArray())
     }
 }
 
