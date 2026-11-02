@@ -312,7 +312,15 @@ static inline int ostrom_socket_exchange(int fd, const struct sockaddr *address,
 #endif
     fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
     int result = -1;
-    if (connect(fd, address, address_size) != 0) {
+    int connected = connect(fd, address, address_size);
+    /* a Unix listener whose backlog is full answers EAGAIN, never EINPROGRESS: try again until the deadline */
+    while (connected != 0 && errno == EAGAIN) {
+        if (ostrom_elapsed_ms(start) >= timeout_ms) { close(fd); return -2; }
+        struct timespec pause = {0, 10000000L};
+        nanosleep(&pause, NULL);
+        connected = connect(fd, address, address_size);
+    }
+    if (connected != 0) {
         if (errno != EINPROGRESS) { close(fd); return -1; }
         int ready = ostrom_wait_fd(fd, POLLOUT, start, timeout_ms);
         int error = 0;

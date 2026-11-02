@@ -204,6 +204,9 @@ internal actual fun unixExchange(
     }
 } catch (_: IOException) {
     TCP_UNREACHABLE to ByteArray(0)
+} catch (_: IllegalArgumentException) {
+    // a path no socket address can hold
+    TCP_UNREACHABLE to ByteArray(0)
 }
 
 /** The running JVM's command. */

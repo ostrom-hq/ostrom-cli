@@ -50,7 +50,12 @@ class RunnerChecksTest {
     @Test
     fun anAnswerThatCannotBeReadRunsNothing() {
         val unreadable = ScriptRun(null, "the session's runner gave an answer that could not be read", RUNNER, false)
-        for (answer in listOf("", "not json", "[1]", """{"exit":0}""", """{"exit":0,"started":"yes"}""")) {
+        val answers = listOf(
+            "", "not json", "[1]", """{"exit":0}""", """{"exit":0,"started":"true"}""", """{"exit":0,"started":1}""",
+            """{"started":true}""", """{"exit":"0","started":true}""", """{"exit":1.5,"started":true}""",
+            """{"exit":{},"started":true}""",
+        )
+        for (answer in answers) {
             assertEquals(unreadable, ask(answer), answer)
         }
     }

@@ -55,7 +55,7 @@ class UnixSocketsImpl(
 
     private companion object {
         /** A check's answer carries the tail of its output: a few kilobytes. */
-        const val MAX_ANSWER_BYTES = 1 shl 20
+        const val MAX_ANSWER_BYTES = 1 shl 18
     }
 }
 

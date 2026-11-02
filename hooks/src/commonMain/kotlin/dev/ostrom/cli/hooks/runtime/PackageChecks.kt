@@ -27,7 +27,8 @@ import okio.ByteString.Companion.encodeUtf8
  * @property runner The cloud session's runner (`OSTROM_RUNNER_CHECKS`), or null on a workstation. When there is one,
  *     every check is asked of it and never run here, and the hook reports none of the runs: the runner reports them,
  *     attested `isolated_runner`, and a later report of the hook's would replace that proof in the receipt. A check
- *     the hook could not ask (script missing, uncommitted changes, no checkout) is still reported here as not run.
+ *     the hook does not ask (script missing or changed here, uncommitted changes, no checkout) is refused and still
+ *     reported here as not run: a changed script is run nowhere.
  */
 data class CheckPorts(
     val files: HookFiles,
@@ -226,11 +227,13 @@ class PackageChecks(
             val text = ports.files.read("${view.tmp}/${script.path}")
             val sha = text?.let { it.encodeUtf8().sha256().hex() }.orEmpty()
             val runner = ports.runner
-            if (runner != null && text != null) {
+            // a script changed here is sent nowhere: refused and reported below, as on a workstation
+            if (runner != null && text != null && sha == script.sha256) {
                 val sessionId = ids.of(event.string("session_id"))
-                val check =
-                    RunnerCheck(sessionId, view.digest, hook.nodeId, script.id, text, at, head, timeoutOf(script))
-                return onRunner(runner.run(check), script, sha == script.sha256, head, key)
+                val check = RunnerCheck(
+                    sessionId, view.digest, hook.nodeId, script.id, text, at, head, timeoutOf(script),
+                )
+                return onRunner(runner.run(check), script, head, key)
             }
             val copy = "$sandbox/${script.id}.sh"
             val why = when {
@@ -273,13 +276,9 @@ class PackageChecks(
             }
         }
 
-        /**
-         * What the runner made of a check. A script changed on this machine is refused whatever the runner answered:
-         * it ran the text it was sent, and recorded it as `tampered`.
-         */
-        private fun onRunner(run: ScriptRun, script: CompiledScript, intact: Boolean, head: String, key: String?) =
+        /** What the runner made of a check: a pass, or the refusal. */
+        private fun onRunner(run: ScriptRun, script: CompiledScript, head: String, key: String?) =
             when {
-                !intact -> CheckTexts.couldNotRun(script.label, "script ${script.id} is not the package's")
                 !run.started -> CheckTexts.couldNotRun(script.label, run.output)
                 run.exit == 0 -> {
                     key?.let(passes::add)

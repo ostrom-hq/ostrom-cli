@@ -3,6 +3,8 @@ package dev.ostrom.cli.hooks.runtime
 
 import dev.ostrom.cli.platform.UnixSockets
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -81,15 +83,21 @@ class RunnerSocketChecks(
         } catch (_: IllegalArgumentException) {
             null
         }
-        val started = (answer?.get("started") as? JsonPrimitive)?.booleanOrNull
-        val exit = answer?.get("exit") as? JsonPrimitive
+        val started = literal(answer?.get("started"))?.booleanOrNull
+        val exit = answer?.get("exit")
+        // an exit code is a number, or null when the script ran past its limit; a missing one is no answer
+        val code = literal(exit)?.intOrNull
         val output = answer?.string("outputTail").orEmpty()
         return when {
-            answer == null || started == null -> ScriptRun(null, UNREADABLE, ISOLATED, started = false)
+            started == null -> ScriptRun(null, UNREADABLE, ISOLATED, started = false)
             !started -> ScriptRun(null, output.ifEmpty { "the session's runner could not run it" }, ISOLATED, false)
-            else -> ScriptRun(exit?.intOrNull, output, ISOLATED)
+            code == null && exit !is JsonNull -> ScriptRun(null, UNREADABLE, ISOLATED, started = false)
+            else -> ScriptRun(code, output, ISOLATED)
         }
     }
+
+    /** A JSON number or boolean, never a string that would read as one (`"0"`, `"true"`). */
+    private fun literal(element: JsonElement?): JsonPrimitive? = (element as? JsonPrimitive)?.takeIf { !it.isString }
 
     /** How a check asked of the runner is confined, for the refusal and the hook's own records. */
     companion object {
