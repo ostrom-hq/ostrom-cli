@@ -147,7 +147,7 @@ without the session, 77 for a session the caller may not read (a gate it may not
   (exit 69); one approved by another person than the device's is kept, and said.
   Made with a CLI token (the admin token or the device's), a governance write is held by the server until an owner or
   an admin confirms it on the console, from a session signed in less than 5 minutes ago (audit H1, decision of
-  02/11/2026): the write answers 202
+  02/11/2026; coming soon: ostrom-server does not hold these writes yet): the write answers 202
   `GovernanceConfirmationPending` and nothing is written. Any write answered so is waited on (`ConfirmationWait`): the
   CLI says the link (`confirmUrl`, else `<console>/confirm/<id>`) on stderr and polls
   `GET /api/v1/confirmations/{id}?wait=30` with the token that asked; a pending answer that came at once is asked again
