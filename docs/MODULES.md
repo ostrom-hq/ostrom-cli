@@ -36,6 +36,14 @@ Rules that keep the binary fast and the modules apart:
   the convenience). Tests build `CliDependencies` with fakes.
 - Output goes through `Console` (unbuffered, UTF-8 on Windows consoles). Commands never call `println`.
 
+## The organisation of a launch
+
+`ostrom <agent>` (and `--cloud`, and `ostrom attach`) acts in one organisation: `--org`, else `OSTROM_ORG`, else the
+one `ostrom init` kept. It is looked up among the caller's (`GET /api/v1/orgs`, by id or short name) and its id is sent
+as `Ostrom-Org` on every call (`ApiServerTransport`); one the person is not a member of stops with 66. With none named,
+nothing is looked up, the header is left out and the server takes the person's only organisation; a member of several
+gets 409 `org_required` from the policy check, and the launch stops with 64 and the way to name one.
+
 ## The local relay
 
 While `ostrom <agent>` runs, the launcher starts a `LocalRelay`
@@ -83,13 +91,48 @@ alternative: a second private file for `ostrom wait`, which a command of the age
 
 ## Exit codes
 
-`cli/.../ExitCode.kt`, from the spec (`CLI.md` § 2.3). A command declared but not built exits with 70
-(`NOT_IMPLEMENTED`) and says so on stderr; it disappears once every command is built. An option of a built command
-that this version does not have yet is a usage error instead: 64 (`USAGE`); none is in that state since `--cloud` was
-built. `ostrom <agent> --cloud` and `ostrom attach` end with the session: 0 when it ends or the developer detaches,
-64 for agent arguments (before any sign-in is read) or a `--repo` not on GitHub, 65 to sign in again, 66 for no such
-session, 69 when Ostrom or the connection is lost (the session keeps running: `ostrom attach <id>`), 77 for a session
-of someone else.
+`cli/.../ExitCode.kt`, from the spec (`CLI.md` § 2.3), printed by `ostrom help exit-codes`. The table below is the
+same, line for line (`ExitCodesTest` fails otherwise). `ostrom <agent>` returns the agent's own code once it has
+started.
+
+| Code | Name | Meaning |
+|---:|---|---|
+| 0 | `OK` | Done. |
+| 1 | `FAILED` | The check asked for failed: verify found the receipt invalid, doctor found a problem. |
+| 2 | `INCOMPLETE` | Incomplete, cancelled, or a no. |
+| 64 | `USAGE` | Bad usage: an unknown command, option or agent, an option not in this version, a question with no terminal. |
+| 65 | `SIGN_IN_REQUIRED` | Sign-in required: run ostrom login. |
+| 66 | `NOT_FOUND` | Not found: a receipt, a gate, a harness, or not a git repository. |
+| 69 | `UNREACHABLE` | The server is unreachable, or the secret store did not answer. |
+| 70 | `NOT_IMPLEMENTED` | The command is not implemented in this version yet. |
+| 73 | `CANNOT_WRITE` | A local file could not be written. |
+| 75 | `STILL_WAITING` | Still waiting: wait reached its deadline. |
+| 77 | `REFUSED` | Refused: the policy, your role, a self-approval, another organisation. |
+| 78 | `SIGNATURE_REFUSED` | A signature or a package was refused. |
+| 127 | `AGENT_MISSING` | The agent is not installed. |
+
+A command declared but not built exits with 70 (`NOT_IMPLEMENTED`) and says so on stderr; it disappears once every
+command is built. An option of a built command that this version does not have yet is a usage error instead: 64
+(`USAGE`); none is in that state since `--cloud` was built. `ostrom <agent> --cloud` and `ostrom attach` end with the
+session: 0 when it ends or the developer detaches, 64 for agent arguments (before any sign-in is read) or a `--repo`
+not on GitHub, 65 to sign in again, 66 for no such session, 69 when Ostrom or the connection is lost (the session
+keeps running: `ostrom attach <id>`), 77 for a session of someone else.
+
+## What every command does the same way
+
+- **Help**: `ostrom <command> --help` ends with examples and the page of the docs (`cli/.../help/CommandGuide.kt`,
+  one entry per command: `HelpTest` fails for a command without one). A usage error ends with the
+  `--help` to run.
+- **Colours**: only on a terminal. `--no-color`, `NO_COLOR` (set and not empty, as no-color.org says) or
+  `ostrom config set color never` turn them off, `TERM=dumb` too; `color always` forces them
+  (`cli/.../help/Colours.kt`). Whether stdout is a terminal decides for help; a usage error, on stderr, never has colours.
+- **`--json`**: one JSON document on stdout, then a newline, never a colour nor a line for humans; keys are only
+  added, never renamed or removed, like the API contract. `ostrom doctor --json` is
+  `{"checks":[{"status":"ok|warning|problem","message":"…"}],"problems":0,"warnings":0}`; `ostrom verify --json` is
+  `{"checks":[{"check":"…","detail":"…","result":"…"}],"result":"verified|invalid|incomplete","title":"…"}`;
+  `ostrom inbox --json` and `ostrom receipts list --json` are an array of the server's items as they are (the
+  `items` of their route in the API contract). `JsonOutputTest` and `ReceiptCommandsTest` hold these shapes.
+- **Errors**: say what happened and the command that gets you out (`ostrom login`, `ostrom doctor`, `--server`).
 
 ## Add a command
 
@@ -100,7 +143,8 @@ of someone else.
    `XxxUseCaseImpl`) in the module it belongs to, or in a `cli/.../<topic>/` package when it only assembles others
    (`doctor/Doctor.kt` is the example).
 3. In `pendingCommands(...)` replace the declaration with `named("<name>")` and add the instance to the
-   `implemented` list in `OstromCli.tree()`.
+   `implemented` list in `OstromCli.tree()`. A new command adds its examples and docs page in
+   `cli/.../help/CommandGuide.kt`.
 4. Exit codes: throw `ProgramResult(ExitCode.X.code)`; messages to the user through `dependencies.console`, in
    English, with the wording of the spec (`CLI.md` § 2.2).
 5. Tests first, in `cli/src/commonTest` with `OstromCliTest`'s fakes (console, environment, `FakeFileSystem`, API).
@@ -169,7 +213,14 @@ to the hooks, the binary reads `OSTROM_URL` (server), `OSTROM_HOME` (the CLI fol
 TeamCode's credential envelopes with its key file (`aesGcmOpen` of `launcher`: AES-256-GCM, `v1:` then base64url of
 nonce, ciphertext and tag, bound to `variant:<team>:<id>[:<member>]` or `<team>:<account>`), maps the members to
 Ostrom's by e-mail then login, and sends the plan to `POST /api/v1/import/teamcode?dryRun=true` (ostrom-server#28).
-It imports only with `--yes`, and prints no secret.
+It imports only with `--yes`, and prints no secret. A normal pass refreshes no token: a shared account TeamCode still
+uses is reported `revive_at_cutover`, and the CLI says how many wait. `--cutover` is the owner's final pass once
+TeamCode is stopped (ostrom-server#86): the plan with `?dryRun=true&cutover=true`, then, only once the owner typed
+`cutover` (or passed `--confirm cutover` without a terminal; `--cutover --yes` is a usage error), the same export
+with `?cutover=true` (10 minutes at most: a token rotation per account at its provider), which rotates those accounts'
+tokens and revives them. A plan with no account to revive asks nothing. Accounts left as they were are listed with
+their reason and end the command with 2; a lost answer says the cutover may have run in part, and the same command
+shows what still waits.
 
 ## Usage statistics (opt-in)
 

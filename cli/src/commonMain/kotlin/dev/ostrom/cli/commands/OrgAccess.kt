@@ -4,20 +4,13 @@ package dev.ostrom.cli.commands
 import com.github.ajalt.clikt.core.PrintMessage
 import dev.ostrom.cli.CliDependencies
 import dev.ostrom.cli.ExitCode
-import dev.ostrom.cli.api.OstromApi
-import dev.ostrom.cli.api.ServerRequest
-import dev.ostrom.cli.api.ServerUnreachableException
+import dev.ostrom.cli.launch.ApiServerTransport
 import dev.ostrom.cli.launcher.LaunchVariables
 import dev.ostrom.cli.launcher.ServerAnswer
-import dev.ostrom.cli.launcher.ServerCall
 import dev.ostrom.cli.launcher.ServerJson
-import dev.ostrom.cli.launcher.ServerReply
-import dev.ostrom.cli.launcher.ServerTransport
 import dev.ostrom.cli.launcher.list
 import dev.ostrom.cli.launcher.text
 import dev.ostrom.cli.platform.CaptureResult
-import dev.ostrom.cli.platform.ConfigKey
-import dev.ostrom.cli.platform.ConfigStoreImpl
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 
@@ -88,16 +81,6 @@ internal class OrgAccess(
     }
 }
 
-/** The server for an organisation: [org] in `Ostrom-Org` on every call; an unreachable server, no status. */
-internal class OrgTransport(private val api: OstromApi, private val org: String?) : ServerTransport {
-    override suspend fun send(call: ServerCall): ServerReply = try {
-        val response = api.send(ServerRequest(call.method, call.path, call.body, call.token, call.timeoutMillis, org))
-        ServerReply(response.status, response.body)
-    } catch (e: ServerUnreachableException) {
-        ServerReply(null, e.reason)
-    }
-}
-
 /**
  * The signed-in device and the organisation it acts in: [wanted] (`--org`), else `OSTROM_ORG`, else the one `ostrom
  * init` kept, else the person's only organisation. [choose] picks among several (`ostrom init` asks); without it,
@@ -109,21 +92,28 @@ internal fun CliDependencies.orgAccess(
     choose: ((List<Org>) -> Org)? = null,
 ): OrgAccess {
     val signed = signedIn(serverOption)
-    val kept = wanted ?: environment["OSTROM_ORG"]?.takeIf { it.isNotEmpty() }
-        ?: ConfigStoreImpl(files, configFile(directory())).get(ConfigKey.ORG)
-    val body = runBlocking { signed.server.get(ORGS, signed.token) }.orStop(signed.serverUrl, "No organisations here.")
-    val orgs = body.list("items").filterIsInstance<JsonObject>().mapNotNull(::orgOf)
+    val kept = keptOrg(wanted)
+    val orgs = memberOrgs(signed.server, signed.serverUrl, signed.token)
     val console = consoleOf(this, signed.serverUrl)
     val org = if (kept == null) {
         onlyOrChosen(orgs, choose, "@${signed.login} is not a member of an organisation on ${signed.serverUrl} yet. " +
             "Create one on the console ($console), or ask an admin of your team to run: ostrom invite <your e-mail>")
     } else {
-        orgs.firstOrNull { it.id == kept || it.slug == kept } ?: throw unknownOrg(kept, orgs)
+        named(orgs, kept)
     }
     val consoleToken = environment[LaunchVariables.LAUNCH_ID].isNullOrEmpty() &&
         !environment[LaunchVariables.DEVICE_TOKEN].isNullOrEmpty()
-    return OrgAccess(signed, org, ServerJson(OrgTransport(api(signed.serverUrl), org.id)), console, consoleToken)
+    return OrgAccess(signed, org, ServerJson(ApiServerTransport(api(signed.serverUrl), org.id)), console, consoleToken)
 }
+
+/** The organisations the caller is a member of (`GET /api/v1/orgs`). */
+internal fun memberOrgs(server: ServerJson, serverUrl: String, token: String): List<Org> =
+    runBlocking { server.get(ORGS, token) }.orStop(serverUrl, "No organisations here.")
+        .list("items").filterIsInstance<JsonObject>().mapNotNull(::orgOf)
+
+/** The organisation [kept] names, by id or short name, among [orgs]; one the person is not in is not found (66). */
+internal fun named(orgs: List<Org>, kept: String): Org =
+    orgs.firstOrNull { it.id == kept || it.slug == kept } ?: throw unknownOrg(kept, orgs)
 
 /**
  * The only organisation in [orgs], else the one [choose] picks. None stops with [noneMessage] (66); several without
