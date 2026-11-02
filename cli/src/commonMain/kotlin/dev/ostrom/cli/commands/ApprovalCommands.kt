@@ -37,24 +37,13 @@ private fun failure(status: Int, message: String, serverUrl: String, notFound: S
     when (status) {
         UNANSWERED -> stop(ExitCode.UNREACHABLE, "Ostrom is unreachable at $serverUrl. $CHECK_NETWORK")
         UNAUTHORIZED -> stop(ExitCode.SIGN_IN_REQUIRED, "ostrom: not signed in to $serverUrl: run `ostrom login`")
-        FORBIDDEN -> stop(ExitCode.REFUSED, message + readRightHint(message))
+        FORBIDDEN -> stop(ExitCode.REFUSED, message)
         NOT_FOUND -> stop(ExitCode.NOT_FOUND, notFound)
         // a request already decided or expired (409, 410) is the spec's 64; another refusal of Ostrom is not an outage
         CONFLICT, GONE -> stop(ExitCode.USAGE, message)
         in CLIENT_ERRORS -> stop(ExitCode.FAILED, "Ostrom refused: $message")
         else -> stop(ExitCode.UNREACHABLE, "Ostrom could not answer: $message")
     }
-
-/**
- * What to do about a read right the token lacks: a token of `ostrom login` made before the server added a read right
- * to it (rules:read, 02/11/2026) gets it by signing in again. A write right never comes from that: none is said.
- */
-private fun readRightHint(message: String): String =
-    if (LACKS_READ_RIGHT.matches(message)) "\n$SIGN_IN_AGAIN" else ""
-
-/** The server's refusal of a scope the credential lacks (`TokenAuthentication.requireScope`). */
-private val LACKS_READ_RIGHT = Regex("This credential does not allow [a-z_-]+:read\\.")
-private const val SIGN_IN_AGAIN = "Your token may be older than this right: run `ostrom login` again for a new one."
 
 /** No HTTP status: the server was not reached. */
 private const val UNANSWERED = 0

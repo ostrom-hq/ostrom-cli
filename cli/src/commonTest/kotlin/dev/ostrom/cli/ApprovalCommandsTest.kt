@@ -92,25 +92,6 @@ class ApprovalCommandsTest : CliKit() {
     }
 
     @Test
-    fun aReadRightTheTokenLacksSaysToSignInAgainOnlyForAReadRight() {
-        signIn("/home/maya/.config/ostrom")
-        val inbox = "GET /api/v1/approvals?mine=true&status=pending"
-        val refused = { scope: String ->
-            val error = """{"error":{"message":"This credential does not allow $scope."}}"""
-            cli(environment = withServer, api = serverOf(mapOf(inbox to (403 to error)))).run(arrayOf("inbox"))
-        }
-        // a token made before the server gave ostrom login's token this read right (rules:read, 02/11/2026)
-        assertEquals(77, refused("rules:read"))
-        val again = "This credential does not allow rules:read.\nYour token may be older than this right: run " +
-            "`ostrom login` again for a new one.\n"
-        assertTrue(console.err.endsWith(again), console.err.toString())
-        // a write right is never a matter of signing in again: the console or ostrom login --admin give it
-        console.err.clear()
-        assertEquals(77, refused("rules:write"))
-        assertEquals("This credential does not allow rules:write.\n", console.err.toString())
-    }
-
-    @Test
     fun approveShowsTheRequestThenOpensItsPageNeverAnswersItself() {
         signIn("/home/maya/.config/ostrom")
         assertEquals(0, answering().run(arrayOf("approve", "g1")))
