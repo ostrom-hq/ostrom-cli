@@ -90,6 +90,7 @@ import kotlin.time.TimeSource
  * path never calls it.
  * @property postHogKey The usage statistics destination of this build; blank means none.
  * @property sendStatistics Posts usage statistics (opt-in only).
+ * @property clock The time, in milliseconds since the epoch (the expiry of `ostrom login --admin`'s token).
  */
 @Suppress("LongParameterList") // The composition root: one parameter per dependency, each replaced in tests.
 class CliDependencies(
@@ -118,6 +119,7 @@ class CliDependencies(
     val postHogKey: String,
     val sendStatistics: suspend (url: String, body: String) -> Unit,
     val secrets: () -> SecretStore = { systemSecretStore(environment, files) },
+    val clock: () -> Long = SessionHooks::epochMillis,
 ) {
     /** The opt-in usage statistics. */
     val usage: UsageStatistics by lazy {

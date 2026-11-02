@@ -94,9 +94,10 @@ internal class PolicySetCommand(private val dependencies: CliDependencies) : Cli
         }
         val access = dependencies.orgAccess(server, org)
         if (key == SELF) {
-            access.write("PUT", GATE_POLICY, objectOf("selfApproval" to value), "No gate policy here.")
+            val policy = objectOf("selfApproval" to value)
+            access.write("PUT", GATE_POLICY, policy, "No gate policy here.", governance = true)
         } else {
-            access.write("PUT", MODELS, models(access), "No model policy in ${access.org.slug}.")
+            access.write("PUT", MODELS, models(access), "No model policy in ${access.org.slug}.", governance = true)
         }
         dependencies.console.out("✓ $key = $value in ${access.org.name}\n")
     }
