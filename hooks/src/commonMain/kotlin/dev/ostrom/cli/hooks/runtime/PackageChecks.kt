@@ -47,10 +47,11 @@ data class CheckPorts(
  * Before an action, each check that guards it runs in the package's order. A script whose SHA-256 no longer matches
  * the package is not run and the action is refused. An enforced check that guards a push tests each commit the push
  * sends, never the working tree: in place when it is HEAD and the tree is clean, refused when HEAD has uncommitted
- * changes, otherwise in a detached worktree under `<tmp>/sbx`, removed afterwards. A push it cannot tie to commits is
- * refused. A check in shadow is only reported; every other mode blocks, and an enforced check whose script is not in
- * the package refuses the action. A failure or a timeout refuses the action. A package changed since the launch
- * refuses every action (S2-33).
+ * changes (or the configuration declares a filter other than LFS's), otherwise in a detached clone under `<tmp>/sbx`
+ * (it shares the objects, not the configuration), removed afterwards. A push it cannot tie to commits is refused. A
+ * check in shadow is only reported; every other mode blocks, and an enforced check whose script is not in the package
+ * refuses the action. A failure or a timeout refuses the action. A package changed since the launch refuses every
+ * action (S2-33).
  *
  * A pass is kept per script and commit in this object's memory only, never on disk: every file the hook could keep
  * it in (`<tmp>`, the relay's token file the key of an HMAC would come from) is readable and writable by the agent's
@@ -199,7 +200,7 @@ class PackageChecks(
             }
         }
 
-        /** Another commit than HEAD: tested in a detached worktree of its own, removed afterwards whatever happens. */
+        /** Another commit than HEAD: tested in a detached clone of its own, removed afterwards whatever happens. */
         private fun inCheckout(hook: CompiledHook, script: CompiledScript, sha: String): String? {
             val path = "$sandbox/wt-${sha.take(SHORT_SHA)}"
             ports.checkouts.remove(repository, path)
