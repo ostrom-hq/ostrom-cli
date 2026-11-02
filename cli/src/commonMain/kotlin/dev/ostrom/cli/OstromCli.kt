@@ -13,6 +13,7 @@ import dev.ostrom.cli.api.STATISTICS_TIMEOUT_MILLIS
 import dev.ostrom.cli.commands.AgentCommand
 import dev.ostrom.cli.commands.ApproveCommand
 import dev.ostrom.cli.commands.AttachCommand
+import dev.ostrom.cli.commands.CompletionCommand
 import dev.ostrom.cli.commands.ConfigCommand
 import dev.ostrom.cli.commands.DenyCommand
 import dev.ostrom.cli.commands.DoctorCommand
@@ -29,6 +30,7 @@ import dev.ostrom.cli.commands.ReceiptsListCommand
 import dev.ostrom.cli.commands.ReceiptsPullCommand
 import dev.ostrom.cli.commands.ReceiptsShowCommand
 import dev.ostrom.cli.commands.RootCommand
+import dev.ostrom.cli.commands.StatusCommand
 import dev.ostrom.cli.commands.TelemetryCommand
 import dev.ostrom.cli.commands.UpdateCommand
 import dev.ostrom.cli.commands.VerifyCommand
@@ -40,10 +42,18 @@ import dev.ostrom.cli.help.colourLevel
 import dev.ostrom.cli.launcher.Agent
 import dev.ostrom.cli.platform.ConfigKey
 import dev.ostrom.cli.platform.SecretStoreException
+import dev.ostrom.cli.telemetry.UsageStatistics
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
+import okio.IOException
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
+
+/**
+ * Commands after which no update notice is said: the plumbing the statistics do not measure either, `update` itself
+ * and help (nor after `ostrom` alone or a line that names no known command).
+ */
+private val QUIET_COMMANDS = UsageStatistics.NOT_MEASURED + setOf(OstromCli.UPDATE_COMMAND, OstromCli.HELP_COMMAND)
 
 /** The `ostrom` command tree (spec CLI.md § 2.1) and the mapping of every outcome to an exit code (§ 2.3). */
 class OstromCli(private val dependencies: CliDependencies) {
@@ -61,12 +71,45 @@ class OstromCli(private val dependencies: CliDependencies) {
         // A failed line is named from the parser's context; a line that ran, by the subcommand the root invoked.
         val failed = failure
         val command = if (failed == null) root.invoked else failedCommand(failed)
-        runBlocking {
-            withTimeoutOrNull(STATISTICS_TIMEOUT) {
-                dependencies.usage.commandRun(command, known, code, started.elapsedNow())
+        // the notice's own refresh, started detached: plumbing nobody typed, so no statistic
+        val refresh = failed == null && command == UPDATE_COMMAND &&
+            root.registeredSubcommands().filterIsInstance<UpdateCommand>().single().recordLatest
+        if (!refresh) {
+            runBlocking {
+                withTimeoutOrNull(STATISTICS_TIMEOUT) {
+                    dependencies.usage.commandRun(command, known, code, started.elapsedNow())
+                }
             }
         }
+        if (!command.isNullOrEmpty() && command !in QUIET_COMMANDS && noticeAllowed()) {
+            sayNotice()
+        }
         return code
+    }
+
+    /**
+     * The notice is a courtesy: a file it cannot read or write, a path the platform refuses, never changes the
+     * command's code.
+     */
+    private fun sayNotice() {
+        try {
+            dependencies.updateNotice?.after(dependencies.console::err)
+        } catch (_: IllegalArgumentException) {
+            // a path the file system refuses: nothing to say, the next command tries again
+        } catch (_: IOException) {
+            // a file or a probe that failed: nothing to say, the next command tries again
+        }
+    }
+
+    /**
+     * The update notice is for a person at a terminal: stderr, where it is said, and stdout both terminals; never in a
+     * pipe, a file or a CI log, never in an agent's session (the agent cannot update the ostrom of its own hooks,
+     * S2-39).
+     */
+    private fun noticeAllowed(): Boolean {
+        val environment = dependencies.environment
+        val off = listOf("CI", "OSTROM_LAUNCH_ID").any { !environment[it].isNullOrEmpty() }
+        return dependencies.stderrIsTerminal() && dependencies.console.isInteractive && !off
     }
 
     private fun execute(root: RootCommand, args: Array<String>, failed: (CliktError) -> Unit): Int {
@@ -132,6 +175,7 @@ class OstromCli(private val dependencies: CliDependencies) {
             ),
             VerifyCommand(dependencies),
             LogsCommand(dependencies),
+            StatusCommand(dependencies),
             AttachCommand(dependencies),
             LoginCommand(dependencies),
             UpdateCommand(dependencies),
@@ -145,7 +189,8 @@ class OstromCli(private val dependencies: CliDependencies) {
         val plumbing = listOf(WaitCommand(dependencies), HookCommand(dependencies), McpCommand(dependencies))
         // The root always has a help screen: no null to handle.
         val help = HelpCommand(dependencies) { "${root.getFormattedHelp()}" }
-        return root.subcommands(agents + pendingCommands(implemented) + plumbing + help)
+        val completion = CompletionCommand(dependencies)
+        return root.subcommands(agents + pendingCommands(implemented) + plumbing + completion + help)
     }
 
     internal companion object {
@@ -153,6 +198,9 @@ class OstromCli(private val dependencies: CliDependencies) {
         val STATISTICS_TIMEOUT = STATISTICS_TIMEOUT_MILLIS.milliseconds
 
         const val HELP_COMMAND = "help"
+
+        /** The self-update command. */
+        const val UPDATE_COMMAND = "update"
 
         /** Not a command name: the statistics report it as `unknown`. */
         const val UNKNOWN_COMMAND = ""

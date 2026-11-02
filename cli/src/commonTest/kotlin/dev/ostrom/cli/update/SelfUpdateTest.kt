@@ -13,6 +13,7 @@ import okio.Path.Companion.toPath
 import okio.fakefilesystem.FakeFileSystem
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -60,6 +61,17 @@ class SelfUpdateTest {
         UpdateRequest(current, "linux-x64", binary, "https://releases.example/", version, checkOnly)
 
     private fun text(path: String) = fake.read(path.toPath()) { readUtf8() }
+
+    @Test
+    fun theLatestVersionIsTheSignedOneAndSaysNothing() = runTest {
+        assertEquals("9.9.9", updater().latest(request(version = "1.2.3")), "always the latest, whatever is asked")
+        serve(latest, "LATEST", signature = "SAME")
+        assertNull(updater().latest(request()), "a signature that does not match: unknown")
+        routes.remove(latest)
+        assertNull(updater().latest(request()), "no manifest: unknown")
+        assertTrue(said.isEmpty())
+        assertEquals("old", text(binary), "nothing installed")
+    }
 
     @Test
     fun aNewerSignedReleaseReplacesTheBinaryAndKeepsThePreviousOne() = runTest {

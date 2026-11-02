@@ -137,14 +137,14 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
         }
         val expires = (credential?.get("expiresAtMillis") as? JsonPrimitive)?.longOrNull
         val fields = listOf(
-            row["provider"],
+            row["provider"]?.trim(),
             row["provider_account_id"],
             credential?.text("accessToken"),
             credential?.text("refreshToken"),
         )
         if (expires == null || fields.any { it.isNullOrEmpty() }) return null
         return mapOf(
-            "provider" to fields[0],
+            "provider" to providerOf(fields[0].toString()),
             "providerAccountId" to fields[1],
             "label" to label,
             "email" to row["email"],
@@ -162,6 +162,17 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
     companion object {
         private fun unreadablePolicy(variant: Row) = "MCP server ${variant["target"]} (${variant["name"]}): its " +
             "tool policy is not a list of tool names in TeamCode."
+
+        /**
+         * Ostrom's provider (`claude` or `codex`, the contract's `TeamCodeAccount.provider`) of TeamCode's: TeamCode
+         * names the company (`anthropic`, `openai`). Any other name goes as it is, and the server says it does not
+         * pool it.
+         */
+        internal fun providerOf(teamCode: String): String =
+            teamCode.trim().lowercase().let { PROVIDERS[it] ?: it }
+
+        private val PROVIDERS =
+            mapOf("anthropic" to "claude", "claude" to "claude", "openai" to "codex", "codex" to "codex")
 
         private const val INCOMPLETE = "no provider, account id, tokens or expiry in TeamCode: it could never sign in."
 

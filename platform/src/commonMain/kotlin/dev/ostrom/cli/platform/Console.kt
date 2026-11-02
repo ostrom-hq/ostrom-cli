@@ -115,6 +115,9 @@ internal fun standardInputOf(buffer: ByteArray, count: Int): StandardInput = whe
     else -> StandardInput.Unavailable(StandardInputFailure.ERROR)
 }
 
+/** True when stderr is a terminal: what is said there for a person alone (the update notice) needs it. */
+fun stderrIsTerminal(): Boolean = isTerminal(2)
+
 /** Writes [bytes] to the file descriptor or standard handle [descriptor] (1 or 2). */
 internal expect fun writeBytes(descriptor: Int, bytes: ByteArray)
 

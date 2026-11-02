@@ -84,27 +84,32 @@ class ImportTeamCodeUseCase(
     }
 
     /**
-     * The cutover: its plan (no token tested, nothing written), the owner's confirmation, then the cutover. Without an
-     * account to revive it stops at the plan; an account left as it was ends it with [ExitCode.INCOMPLETE].
+     * The cutover: its plan (no token tested, nothing written), the owner's confirmation, then the cutover. Its plan
+     * says `planned` for each account the cutover writes, a waiting one it revives as a new one: its `reviveAtCutover`
+     * is 0 (ostrom-server#86). Without an account to write it stops at the plan; an account left as it was ends it
+     * with [ExitCode.INCOMPLETE].
      */
     private suspend fun cutover(body: JsonObject): Int {
         val asked = ok(import("?dryRun=true&cutover=true", body), cutover = true)
         val plan = report("Cutover plan (nothing changed yet):", asked)
-        val waiting = count(plan, REVIVE)
-        if (waiting == 0) {
+        // a server before ostrom-server#86's last shape said revive_at_cutover in this plan too
+        val writes = accounts(plan, PLANNED) + count(plan, REVIVE)
+        if (writes == 0) {
+            val refused = accounts(plan, SKIPPED)
+            if (refused > 0) {
+                throw Stop(ExitCode.INCOMPLETE, "${shared(refused)} cannot be imported, for the reasons above.")
+            }
             say("No shared account waits for the cutover: nothing to do.\n")
             return ExitCode.OK.code
         }
         say(
-            "The cutover tests and rotates the tokens of ${shared(waiting)} at their provider: TeamCode must be " +
-                "stopped, it would keep using the old ones.\n",
+            "The cutover writes ${shared(writes)}, testing and rotating at their provider the tokens of those that " +
+                "wait for a reconnection: TeamCode must be stopped, it would keep using the old ones.\n",
         )
         if (!confirmCutover()) throw Stop(ExitCode.INCOMPLETE, "No cutover: nothing was changed.")
         val done = ok(import("?cutover=true", body, CUTOVER_MILLIS), cutover = true)
         report("Cutover:", done, waiting = false)
-        val left = done.list("items").count {
-            (it as? JsonObject)?.let { item -> item.text("kind") == ACCOUNT && item.text("action") == SKIPPED } == true
-        }
+        val left = accounts(done, SKIPPED)
         if (left > 0) {
             say(
                 "! ${shared(left)} left as before, for the reasons above (tokens refused, provider unreachable): " +
@@ -114,14 +119,26 @@ class ImportTeamCodeUseCase(
         return if (left == 0) ExitCode.OK.code else ExitCode.INCOMPLETE.code
     }
 
-    /** Every page of Ostrom's members (`next` is the cursor of the following one), up to [MAX_PAGES]. */
+    /**
+     * Every page of Ostrom's members (`next` is the cursor of the following one), up to [MAX_PAGES]. A server that does
+     * not serve the list (`GET /api/v1/members` of the contract, not served by ostrom-server main: its router answers
+     * 404 "Not found.") matches no one: the import goes on, every assignment skipped, as for a member Ostrom does not
+     * have.
+     */
     private suspend fun members(): List<JsonObject> {
         val members = mutableListOf<JsonObject>()
         var cursor: String? = null
         var page = 0
         do {
             val before = cursor?.let { "?before=${Routes.encode(it)}" }.orEmpty()
-            val body = ok(server.get("$MEMBERS$before", token))
+            val answer = server.get("$MEMBERS$before", token)
+            // only the router's own 404: a route this server does not serve, never a member list it refused
+            val unserved = answer is ServerAnswer.Failed && answer.status == NOT_FOUND && answer.message == UNSERVED
+            if (page == 0 && unserved) {
+                say("! Ostrom does not list its members here: every assignment is skipped.\n")
+                return emptyList()
+            }
+            val body = ok(answer)
             members += body.list("items").mapNotNull { it as? JsonObject }
             cursor = body.text("next")?.takeIf { it.isNotEmpty() }
             page++
@@ -226,10 +243,12 @@ class ImportTeamCodeUseCase(
         private const val MAX_PAGES = 20
         private const val UNAUTHORIZED = 401
         private const val FORBIDDEN = 403
+        private const val NOT_FOUND = 404
+        private const val UNSERVED = "Not found."
         private const val UNAVAILABLE = 503
         private const val REVIVE = "reviveAtCutover"
-        private const val ACCOUNT = "account"
         private const val SKIPPED = "skipped"
+        private const val PLANNED = "planned"
 
         /** The cutover tests and rotates each shared account's tokens at its provider, one after another. */
         private const val CUTOVER_MILLIS = 600_000L
@@ -242,3 +261,8 @@ private fun shared(count: Int) = if (count == 1) "1 shared account" else "$count
 
 /** The count [name] of an import report, 0 when absent or not a number. */
 private fun count(body: JsonObject, name: String) = (body[name] as? JsonPrimitive)?.intOrNull ?: 0
+
+/** How many account lines of [body] have [action]. */
+private fun accounts(body: JsonObject, action: String) = body.list("items").count {
+    (it as? JsonObject)?.let { item -> item.text("kind") == "account" && item.text("action") == action } == true
+}

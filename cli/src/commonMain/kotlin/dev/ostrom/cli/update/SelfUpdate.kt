@@ -53,6 +53,9 @@ private class Stop(val code: ExitCode, val text: String) : Exception(text)
 /** Stops [SelfUpdate] with [code], saying [text]. */
 private fun stop(code: ExitCode, text: String): Nothing = throw Stop(code, text)
 
+/** A release manifest that does not read as one. */
+private fun unreadable(): Nothing = stop(ExitCode.FAILED, "✗ The release manifest cannot be read. $UNCHANGED")
+
 /** Stops [SelfUpdate] when an agent's session runs (S2-39): the agent never updates the ostrom of its own hooks. */
 private fun refuseIn(sessions: AgentSessions) {
     sessions.running()?.let {
@@ -122,6 +125,16 @@ class SelfUpdate(
     } catch (stopped: Stop) {
         say(stopped.text)
         stopped.code.code
+    }
+
+    /**
+     * The version of the latest signed release, or null when it cannot be read or its signature does not match: what
+     * the update notice is told, never more (nothing is said, nothing is installed).
+     */
+    suspend fun latest(request: UpdateRequest): String? = try {
+        manifest(request.copy(version = null)).version
+    } catch (_: Stop) {
+        null
     }
 
     /**
@@ -208,8 +221,6 @@ class SelfUpdate(
         if (url == null || sha256 == null || size == null) unreadable()
         return Asset(version, url, sha256, size, floor)
     }
-
-    private fun unreadable(): Nothing = stop(ExitCode.FAILED, "✗ The release manifest cannot be read. $UNCHANGED")
 
     /** Installs [asset] when the latest release's floor allows it (S2-39). */
     private suspend fun install(request: UpdateRequest, asset: Asset): Int {
