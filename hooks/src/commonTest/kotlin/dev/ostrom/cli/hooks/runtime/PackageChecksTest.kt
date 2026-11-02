@@ -23,6 +23,12 @@ import kotlin.test.assertTrue
 class PackageChecksTest {
     private class Checkouts(var clean: Boolean = true, var adds: Boolean = true) : CommitCheckouts {
         val log = mutableListOf<String>()
+        var filtered = false
+
+        override fun filtered(repository: String): Boolean {
+            log += "filtered $repository"
+            return filtered
+        }
 
         override fun clean(repository: String): Boolean {
             log += "clean $repository"
@@ -161,7 +167,7 @@ class PackageChecksTest {
     fun aPassingCheckOfAPushTestsTheCommitInPlaceAndKeepsItsPass() {
         val checks = checks()
         assertNull(checks.before("git push origin main"))
-        assertEquals(listOf("clean /w"), checkouts.log)
+        assertEquals(listOf("filtered /w", "clean /w"), checkouts.log)
         val request = ScriptRequest("s-test", "/t/sbx/s-test.sh", "/w", "/t/sbx", "/t", network = false, 30_000)
         assertEquals(listOf(request), scripts.requests)
         assertEquals(test, texts["/t/sbx/s-test.sh"], "the verified copy runs, not the file the agent can rewrite")
@@ -293,6 +299,17 @@ class PackageChecksTest {
         )
         assertEquals("not run: uncommitted changes", reports().single().text("outputTail"))
         assertEquals(emptyList(), scripts.requests)
+    }
+
+    @Test
+    fun theHeadOfARepositoryWithAFilterIsTestedInAClone() {
+        // its status would run the filter outside the sandbox: a clone runs none
+        checkouts.filtered = true
+        checkouts.clean = false
+        assertNull(checks(listOf(tests)).before("git push origin main"))
+        val path = "/t/sbx/wt-M"
+        assertEquals(listOf("filtered /w", "remove /w $path", "add /w $path M", "remove /w $path"), checkouts.log)
+        assertEquals(path, scripts.requests.single().directory)
     }
 
     @Test

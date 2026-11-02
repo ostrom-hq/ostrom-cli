@@ -89,12 +89,14 @@ class SandboxedScripts(
  * checks judge:
  * - a commit is checked out in a clone of its own (`clone --shared`: its objects, none of its configuration), with the
  *   user's and the system's configuration left out too: no filter driver, hook or fsmonitor of anyone's applies, and
- *   nothing has to be named in advance (a name with `=` in it, a filter added during the hook);
- * - the filters are listed from every configuration (the user's and the system's too, which the agent can write);
- * - the working tree is read with the repository's hooks, fsmonitor and LFS filters off; a repository that declares
- *   any other filter is not read, and not taken as clean (its `git status` would run the filter, which would answer
- *   for the tree). A filter added between that reading and the status is not seen: the agent would need a process
- *   of its own, timed to that window.
+ *   nothing has to be named in advance (a name with `=` in it, a filter added during the hook). The clone then takes
+ *   every ref of the repository (its branches and tags, as a worktree saw them);
+ * - the working tree is read in place only when no configuration declares a filter driver other than Git LFS's
+ *   ([filtered]: its `git status` would run it, and it would answer for the tree), with hooks, fsmonitor, LFS's
+ *   filter and submodules left out. A filter added between that reading and the status is not seen: the agent would
+ *   need a process of its own, timed to that window.
+ *
+ * POSIX only, as the check scripts are (`/usr/bin/env`, `/bin/rm`).
  *
  * @param git The `git` the launcher resolved (`OSTROM_GIT`).
  * @param budget What is left of the agent's limit on the hook: a command it leaves no time for is not run, and fails.
@@ -104,24 +106,31 @@ class GitCheckouts(
     private val git: String,
     private val budget: HookBudget = HookBudget.NONE,
 ) : CommitCheckouts {
+    override fun filtered(repository: String): Boolean {
+        // every configuration, the user's and the system's too (the agent can write them); reading runs nothing
+        val listed = run(listOf("-C", repository, "config", "--name-only", "--get-regexp", "^filter\\."), SHORT_MILLIS)
+        return !noFilter(listed)
+    }
+
     override fun clean(repository: String): Boolean {
-        // read before the status, which is not run at all when it would run a filter (reading runs nothing)
-        val filters = run(listOf("-C", repository, "config", "--name-only", "--get-regexp", "^filter\\."), SHORT_MILLIS)
-        if (!noFilter(filters)) return false
-        val status = run(OFF + listOf("-C", repository, "status", "--porcelain", "--untracked-files=all"), SHORT_MILLIS)
+        val read = listOf("-C", repository, "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=all")
+        val status = run(OFF + read, SHORT_MILLIS)
         return status is CaptureResult.Exited && status.code == 0 && status.output.isEmpty()
     }
 
     override fun add(repository: String, path: String, sha: String): Boolean {
+        // the user's safe.directory is left out with their configuration: this repository is the one the agent works in
+        val own = HOOKS_OFF + listOf("-c", "safe.directory=$repository")
         val clone = listOf("clone", "--quiet", "--shared", "--no-checkout", "--", repository, path)
-        val checkout = listOf("-C", path, "checkout", "--quiet", "--detach", sha)
-        return succeeded(configless(HOOKS_OFF + clone)) && succeeded(configless(HOOKS_OFF + checkout))
+        if (!succeeded(configless(own + clone))) return false
+        // every ref, as a worktree saw them; without them the commit is still there
+        configless(own + listOf("-C", path, "fetch", "--quiet", "--update-head-ok", "origin", "+refs/*:refs/*"))
+        return succeeded(configless(own + listOf("-C", path, "checkout", "--quiet", "--detach", sha)))
     }
 
     override fun remove(repository: String, path: String) {
-        bounded(listOf(RM, "-rf", "--", path), SHORT_MILLIS)
-        // the worktrees an older ostrom registered there
-        run(listOf("-C", repository, "worktree", "prune"), SHORT_MILLIS)
+        // what a check built in it (node_modules, target) can take long to delete
+        bounded(listOf(RM, "-rf", "--", path), CHECKOUT_MILLIS)
     }
 
     private fun succeeded(result: CaptureResult) = result is CaptureResult.Exited && result.code == 0
@@ -130,7 +139,8 @@ class GitCheckouts(
     private fun noFilter(listed: CaptureResult): Boolean = listed is CaptureResult.Exited &&
         (listed.code == NONE_DECLARED || listed.code == 0 && listed.output.lines().none(::otherFilter))
 
-    private fun otherFilter(line: String) = line.startsWith(FILTER) && !line.startsWith(LFS)
+    /** A filter's key that is not one of Git LFS's own (`filter.lfs.x.smudge` is another driver). */
+    private fun otherFilter(line: String) = line.startsWith(FILTER) && line !in LFS_KEYS
 
     /** `git` with [arguments], with every configuration (the user's ignored files make a tree clean or not). */
     private fun run(arguments: List<String>, timeoutMillis: Int): CaptureResult =
@@ -149,7 +159,6 @@ class GitCheckouts(
         const val ENV = "/usr/bin/env"
         const val RM = "/bin/rm"
         const val FILTER = "filter."
-        const val LFS = "filter.lfs."
 
         /** What `git config --get-regexp` exits with when nothing matches. */
         const val NONE_DECLARED = 1
@@ -170,3 +179,6 @@ private val OFF = listOf(
     "-c", "filter.lfs.smudge=", "-c", "filter.lfs.process=", "-c", "filter.lfs.clean=",
     "-c", "filter.lfs.required=false",
 )
+
+/** The keys of Git LFS's filter driver, which [OFF] switches off. */
+private val LFS_KEYS = setOf("filter.lfs.smudge", "filter.lfs.clean", "filter.lfs.process", "filter.lfs.required")

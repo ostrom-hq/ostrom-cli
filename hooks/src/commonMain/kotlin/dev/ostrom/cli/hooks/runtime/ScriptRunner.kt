@@ -40,6 +40,12 @@ fun interface ScriptRunner {
 
 /** The git operations a check needs whose exit status matters, not only their output. */
 interface CommitCheckouts {
+    /**
+     * Whether reading the working tree of [repository] in place would run a filter driver of its configuration (one
+     * other than Git LFS's), or that cannot be told: its commits are then checked in a checkout of their own.
+     */
+    fun filtered(repository: String): Boolean
+
     /** Whether the working tree of [repository] holds exactly its commit: nothing modified, staged or untracked. */
     fun clean(repository: String): Boolean
 
@@ -50,6 +56,6 @@ interface CommitCheckouts {
      */
     fun add(repository: String, path: String, sha: String): Boolean
 
-    /** Removes the checkout at [path], if any, and prunes the worktrees of [repository]. */
+    /** Removes the checkout at [path], if any. */
     fun remove(repository: String, path: String)
 }

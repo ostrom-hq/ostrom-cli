@@ -47,11 +47,11 @@ data class CheckPorts(
  * Before an action, each check that guards it runs in the package's order. A script whose SHA-256 no longer matches
  * the package is not run and the action is refused. An enforced check that guards a push tests each commit the push
  * sends, never the working tree: in place when it is HEAD and the tree is clean, refused when HEAD has uncommitted
- * changes (or the configuration declares a filter other than LFS's), otherwise in a detached clone under `<tmp>/sbx`
- * (it shares the objects, not the configuration), removed afterwards. A push it cannot tie to commits is refused. A
- * check in shadow is only reported; every other mode blocks, and an enforced check whose script is not in the package
- * refuses the action. A failure or a timeout refuses the action. A package changed since the launch refuses every
- * action (S2-33).
+ * changes, otherwise (or when the configuration declares a filter other than LFS's) in a detached clone under
+ * `<tmp>/sbx` (it shares the objects, not the configuration), removed afterwards. A push it cannot tie to commits is
+ * refused. A check in shadow is only reported; every other mode blocks, and an enforced check whose script is not in
+ * the package refuses the action. A failure or a timeout refuses the action. A package changed since the launch
+ * refuses every action (S2-33).
  *
  * A pass is kept per script and commit in this object's memory only, never on disk: every file the hook could keep
  * it in (`<tmp>`, the relay's token file the key of an HMAC would come from) is readable and writable by the agent's
@@ -190,7 +190,8 @@ class PackageChecks(
                     null
                 }
                 sha == null -> verified(hook, script, repository, head, null)
-                here != sha -> inCheckout(hook, script, sha)
+                // a filter the configuration declares would run in a status, outside the sandbox: a clone runs none
+                here != sha || ports.checkouts.filtered(repository) -> inCheckout(hook, script, sha)
                 ports.checkouts.clean(repository) -> verified(hook, script, repository, head, key)
                 else -> {
                     val notRun = Report(null, FAILED, "not run: uncommitted changes", NOT_RUN, head)
