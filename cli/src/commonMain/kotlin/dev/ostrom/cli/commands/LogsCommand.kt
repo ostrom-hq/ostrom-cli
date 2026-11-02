@@ -41,6 +41,9 @@ private const val NO_SESSION = """{"session":null,"receipt":null,"gates":[]}"""
  */
 private const val SIGNED_OUT = 401
 
+/** A gate gone (404) or that this token may not read (403): shown by its id, never asked again. */
+private val FOR_GOOD = setOf(403, 404)
+
 /** From this status on, the server failed: `--follow` asks again at the next turn. */
 private const val SERVER_ERROR = 500
 
@@ -136,22 +139,31 @@ private fun served(signed: SignedIn, list: ServerAnswer) {
 
 private fun mine(signed: SignedIn) = "$SESSIONS?dev=${Routes.encode(signed.login)}"
 
-/** [read] for a turn of `--follow`: null when the server fails or cannot be reached, so the next turn asks again. */
+/**
+ * [read] for a turn of `--follow`: null when the server fails or cannot be reached, so the next turn asks again. The
+ * first read already told a served list from a server without the sessions' reads: a 404 now is a session gone (66).
+ */
 private suspend fun poll(signed: SignedIn, id: String, kept: MutableMap<String, JsonObject>): SessionRead? {
-    val answer = sessionAnswer(signed, id)
+    val answer = signed.server.get(sessionPath(id), signed.token)
     val failing = ((answer as? ServerAnswer.Failed)?.let { it.status ?: SERVER_ERROR } ?: 0) >= SERVER_ERROR
     return if (failing) null else readOf(signed, id, answer, kept)
 }
 
 private fun sessionPath(id: String) = "$SESSIONS/${Routes.encode(id)}"
 
-/** The session of [answer], with its gates' requests ([kept]: the gates the server keeps for good, asked once). */
+/**
+ * The session of [answer], with its gates' requests ([kept]: the gates asked once, those the server keeps for good and
+ * those this token may not read or that are gone).
+ */
 private suspend fun readOf(signed: SignedIn, id: String, answer: ServerAnswer, kept: MutableMap<String, JsonObject>) =
     answer.orStop(signed.serverUrl, "No session $id on ${signed.serverUrl}.").let { response ->
         val session = response.child("session") ?: JsonObject(emptyMap())
         val ids = session.list("gates").mapNotNull { (it as? JsonPrimitive)?.content }
         val gates = ids.map { gate ->
-            kept[gate] ?: gate(signed, gate).also { if (it.text("status") in FINAL) kept[gate] = it }
+            kept[gate] ?: gate(signed, gate).let { read ->
+                if (read.final) kept[gate] = read.request
+                read.request
+            }
         }
         SessionRead(response, session, gates)
     }
@@ -165,12 +177,20 @@ private suspend fun lastSession(signed: SignedIn): String? {
     return sessions.maxByOrNull { it.text("startedAt").orEmpty() }?.text("id")
 }
 
+/** A gate's request as read, and whether it is [final]: never asked again by `--follow`. */
+private class GateRead(val request: JsonObject, val final: Boolean)
+
 /**
- * The request of gate [id] as the server keeps it, or only its id when the server does not give it (gone, failing,
- * or not to this token); a device signed out stops with 65.
+ * The request of gate [id] as the server keeps it, or only its id when the server does not give it: gone (404) or not
+ * to this token (403), both for good, or failing, asked again at the next turn. A device signed out stops with 65.
  */
-private suspend fun gate(signed: SignedIn, id: String): JsonObject {
+private suspend fun gate(signed: SignedIn, id: String): GateRead {
     val answer = signed.server.get("$GATES/${Routes.encode(id)}", signed.token)
-    if (answer is ServerAnswer.Failed && answer.status == SIGNED_OUT) answer.orStop(signed.serverUrl, "")
-    return (answer as? ServerAnswer.Ok)?.body?.child("gate") ?: JsonObject(mapOf("id" to JsonPrimitive(id)))
+    val bare = JsonObject(mapOf("id" to JsonPrimitive(id)))
+    if (answer is ServerAnswer.Failed) {
+        if (answer.status == SIGNED_OUT) answer.orStop(signed.serverUrl, "")
+        return GateRead(bare, answer.status in FOR_GOOD)
+    }
+    val request = (answer as ServerAnswer.Ok).body.child("gate") ?: bare
+    return GateRead(request, request.text("status") in FINAL)
 }

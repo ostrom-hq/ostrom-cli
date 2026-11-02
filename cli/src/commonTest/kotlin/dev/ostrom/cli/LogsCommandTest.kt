@@ -89,7 +89,10 @@ class LogsCommandTest : CliKit() {
                     requests += it to request
                     val body = if (request.path == session) sessionAnswers.removeFirst() else gateAnswers.removeFirst()
                     if (body == "down") throw ServerUnreachableException(it, Exception("refused"))
-                    return if (body == "503") ServerResponse(503, "{}", 1) else ServerResponse(200, body, 1)
+                    return when (body) {
+                        "503", "403" -> ServerResponse(body.toInt(), "{}", 1)
+                        else -> ServerResponse(200, body, 1)
+                    }
                 }
             }
         }
@@ -134,6 +137,22 @@ class LogsCommandTest : CliKit() {
             }
         }
         assertEquals(66, cli(environment = withServer, api = vanishing).run(arrayOf("logs", "ses_41b2", "--follow")))
+    }
+
+    @Test
+    fun aGateThisTokenMayNotReadIsAskedOnceAndAFailingOneAgain() {
+        signIn("/home/maya/.config/ostrom")
+        // a second read of the 403 gate would find no answer left and fail the test
+        val refused = turns(listOf(running, running, ended), listOf("403"))
+        assertEquals(0, cli(environment = withServer, api = refused).run(arrayOf("logs", "ses_41b2", "-f")))
+        assertEquals(1, requests.count { it.second.path == "/api/v1/gates/g_7d1e" })
+        assertOut("          asked for a yes    g_7d1e\n")
+        requests.clear()
+        console.out.clear()
+        val failing = turns(listOf(running, ended), listOf("503", gate))
+        assertEquals(0, cli(environment = withServer, api = failing).run(arrayOf("logs", "ses_41b2", "-f")))
+        assertEquals(2, requests.count { it.second.path == "/api/v1/gates/g_7d1e" }, "a failing gate is asked again")
+        assertOut("14:07:02  approved           @lena\n")
     }
 
     @Test
@@ -212,7 +231,7 @@ class LogsCommandTest : CliKit() {
         assertEquals("          session started", bare.single().render())
         val response = json(
             """{"session":{"startedAt":"yesterday","endedAt":"2026-10-30T15:00:00Z","exitCode":"x"},""" +
-                """"receipt":{"nodes":[{"label":"lint"},"not a node",{"label":"lint"}]}}""",
+                """"receipt":{"nodes":[{"label":"lint"},"not a node",{"label":"lint"},{"kind":"gate","label":"g"}]}}""",
         )
         val decided = json("""{"id":"g1","status":"rejected","decidedAt":"2026-10-30T14:30:00Z"}""")
         val unanswered = json("""{"id":"g2","decidedAt":"2026-10-30T14:40:00Z","decidedBy":"omar"}""")
@@ -236,5 +255,9 @@ class LogsCommandTest : CliKit() {
         assertEquals("Session ?", heading(json("""{"startedAt":"yesterday"}""")))
         val unsaid = json("""{"session":{"endedAt":"2026-10-30T15:00:00Z"}}""")
         assertEquals("15:00:00  session ended", thread(unsaid, emptyList()).last().render())
+        // a fraction of a second sorts as time, not as text ('.' is before 'Z')
+        val late = json("""{"id":"g3","status":"approved","decidedAt":"2026-10-30T15:00:00.5Z"}""")
+        val order = thread(unsaid, listOf(late)).map(ThreadLine::event)
+        assertEquals(listOf("start", "end", "answer:g3", "gate:g3"), order)
     }
 }

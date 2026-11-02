@@ -9,7 +9,8 @@ the run then points OSTROM_URL at the real server and keeps every assertion.
         [--without-session-reads]
 
 It keeps the sessions the hooks start, their gates and their end, and serves them back to `ostrom logs` with the
-device's token (`GET /api/v1/sessions`, `GET /api/v1/sessions/{id}`, `GET /api/v1/gates/{id}`).
+device's token (`GET /api/v1/sessions`, `GET /api/v1/sessions/{id}`); a gate, as ostrom-server, it does not give that
+token (403).
 `--without-session-reads` plays an older server that does not serve those reads.
 """
 import argparse
@@ -134,6 +135,7 @@ def make_handler(state):
             if (method, path) == ("GET", "/api/v1/gates/catalog"):
                 return self._answer(200, CATALOGUE)
             if (method, path) == ("POST", "/api/v1/sessions"):
+                # the id this server gives the session: the hooks name it so afterwards (gates, end)
                 session = body.get("sessionId") or "seg-1"
                 with state["lock"]:
                     fields = {"id": session, "agent": body.get("agent"), "dev": "maya", "repo": body.get("repo"),
@@ -143,9 +145,9 @@ def make_handler(state):
                 return self._answer(201, {"session": {"id": session}, "context": "[Ostrom] e2e rules"})
             if method == "POST" and path == "/api/v1/gates":
                 with state["lock"]:
-                    for session in state["sessions"].values():
-                        if session["id"] == body.get("sessionId") or len(state["sessions"]) == 1:
-                            session["gates"].append("G-e2e")
+                    session = state["sessions"].get(body.get("sessionId"))
+                    if session is not None and "G-e2e" not in session["gates"]:
+                        session["gates"].append("G-e2e")
                 return self._answer(201, {"gate": {"id": "G-e2e", "status": "pending", "receiptId": None}})
             if (method, path) == ("GET", "/api/v1/gates/G-e2e"):
                 return self._answer(200, {"gate": GATE})
@@ -184,8 +186,9 @@ def make_handler(state):
                 return 200, {"session": session, "receipt": {"id": "R-e2e", "nodes": [
                     {"id": "n1", "workflowId": "w1", "kind": "check", "label": "Run the tests", "outcome": "passed",
                      "attestation": "workstation_declared"}]}}
-            if path == "/api/v1/gates/G-e2e":
-                return 200, {"gate": GATE}
+            if path.startswith("/api/v1/gates/"):
+                # as ostrom-server: the token of `ostrom login` (CLI_SCOPES) may not read gates
+                return 403, {"error": {"type": "forbidden", "message": "Missing scope."}}
             return None
 
         def do_GET(self):

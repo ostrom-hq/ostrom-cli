@@ -166,9 +166,10 @@ def logs(binary, server, work, home):
     said = "\n".join(lines)
     check("session started" in said and "check" in said and "Run the tests · passed" in said,
           "the thread has the start and the receipt's checks")
-    check("deploy to production · G-e2e" in said and re.search(r"approved +@lena", said) is not None,
-          "and the request for a yes with its answer")
-    check(lines[-1:] and "session ended" in lines[-1] and "exit 3" in lines[-1], f"and the end, last ({lines[-1:]})")
+    # the token of `ostrom login` may not read gates on ostrom-server (CLI_SCOPES): the request shows by its id
+    check(re.search(r"asked for a yes +G-e2e", said) is not None, "and the request for a yes, by its id")
+    ended = [line for line in lines if "session ended" in line]
+    check(len(ended) == 1 and "exit 3" in ended[0], f"and the end, with the agent's code ({ended})")
     session = lines[0].split(" ")[1] if lines else ""
     followed = ostrom_on(binary, server, work, home, "logs", session, "-f")
     check(followed.returncode == 0 and followed.stdout == thread.stdout,
