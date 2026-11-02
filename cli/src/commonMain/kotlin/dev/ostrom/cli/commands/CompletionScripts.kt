@@ -49,14 +49,12 @@ private fun bash(paths: List<Pair<String, List<String>>>, valued: List<String>):
     val skip = if (valued.isEmpty()) "" else """
         |        case ${DOLLAR}word in
         |            ${valued.joinToString("|") { shQuoted(it) }}) ((i++)); continue ;;
-        |        esac
-        |""".trimMargin() + "\n"
+        |        esac""".trimMargin() + "\n"
     val known = paths.drop(1).joinToString("|") { shQuoted(it.first) }
     val descend = if (known.isEmpty()) "" else """
         |        case ${DOLLAR}next in
         |            $known) at=${DOLLAR}next ;;
-        |        esac
-        |""".trimMargin() + "\n"
+        |        esac""".trimMargin() + "\n"
     val cases = paths.joinToString("\n") { (path, words) ->
         "        ${shQuoted(path)}) candidates=${shQuoted(words.joinToString(" "))} ;;"
     }
@@ -79,8 +77,7 @@ private fun bash(paths: List<Pair<String, List<String>>>, valued: List<String>):
 private fun zsh(paths: List<Pair<String, List<String>>>, valued: List<String>) = """
     |# ostrom completion for zsh. Load it from ~/.zshrc: source <(ostrom completion zsh)
     |(( ${DOLLAR}+functions[compdef] )) || { autoload -U +X compinit && compinit }
-    |autoload -U +X bashcompinit && bashcompinit
-    |""".trimMargin() + "\n" + bash(paths, valued)
+    |autoload -U +X bashcompinit && bashcompinit""".trimMargin() + "\n" + bash(paths, valued)
 
 private fun fish(paths: List<Pair<String, List<String>>>, valued: List<String>): String {
     val skip = if (valued.isEmpty()) "" else """
@@ -88,15 +85,13 @@ private fun fish(paths: List<Pair<String, List<String>>>, valued: List<String>):
         |            case ${valued.joinToString(" ") { fishQuoted(it) }}
         |                set skip 1
         |                continue
-        |        end
-        |""".trimMargin() + "\n"
+        |        end""".trimMargin() + "\n"
     val known = paths.drop(1).joinToString(" ") { fishQuoted(it.first) }
     val descend = if (known.isEmpty()) "" else """
         |        switch ${DOLLAR}next
         |            case $known
         |                set at ${DOLLAR}next
-        |        end
-        |""".trimMargin() + "\n"
+        |        end""".trimMargin() + "\n"
     val cases = paths.filter { it.second.isNotEmpty() }.joinToString("\n") { (path, words) ->
         "        case ${fishQuoted(path)}\n            printf '%s\\n' ${words.joinToString(" ") { fishQuoted(it) }}"
     }
