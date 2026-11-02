@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.launcher
 
-import dev.ostrom.cli.platform.CaptureResult
 import dev.ostrom.cli.platform.ProcessCapture
 import dev.ostrom.cli.platform.RemoteUrls
 
@@ -16,11 +15,9 @@ import dev.ostrom.cli.platform.RemoteUrls
  * @return `owner/name`, or the folder's name.
  */
 internal fun launchRepository(top: String, capture: ProcessCapture, say: (String) -> Unit): String {
-    val result = capture.capture(listOf("git", "-C", top, "remote", "get-url", "origin"), ORIGIN_MILLIS)
-    val url = if (result is CaptureResult.Exited && result.code == 0) result.output else ""
-    val origin = RemoteUrls.ownerName(url)
+    val origin = RemoteUrls.origin(top, capture)
     if (origin != null) return origin
-    val name = top.trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\')
+    val name = RemoteUrls.folderName(top)
     // never the URL itself: it may carry a token
     say(
         "ostrom: no origin with an owner/name here: the session is registered for \"$name\", this folder's name, and " +
@@ -28,6 +25,3 @@ internal fun launchRepository(top: String, capture: ProcessCapture, say: (String
     )
     return name
 }
-
-/** How long git may take to name the remote. */
-private const val ORIGIN_MILLIS = 3_000

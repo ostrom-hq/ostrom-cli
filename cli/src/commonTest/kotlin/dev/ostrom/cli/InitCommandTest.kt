@@ -122,6 +122,18 @@ class InitCommandTest : SetupKit() {
     }
 
     @Test
+    fun aCloneIsTheOwnerAndNameOfItsOriginForInit() {
+        val git = gitTop("/work/api", CaptureResult.Exited(0, "https://github.com/acme/api.git\n"))
+        val harness = "GET /api/v1/workflows?repo=acme%2Fapi" to (200 to """{"items":[]}""")
+        for (listed in listOf("acme/api", "api")) {
+            console.out.clear()
+            val repos = "GET /api/v1/repos?limit=100" to (200 to """{"items":[{"name":"$listed"}]}""")
+            assertEquals(0, run(mapOf(repos, harness), "init", environment = zsh, capture = git), listed)
+            assertOut("  Repository  acme/api · covered\n")
+        }
+    }
+
+    @Test
     fun outsideARepositoryInitSetsUpTheDevice() {
         val empty = mapOf(
             "GET /api/v1/workflows?repo=acme-api" to (200 to """{"items":[]}"""),

@@ -156,10 +156,7 @@ private fun CliDependencies.gitTopName(): String? {
     val top = capture.capture(listOf("git", "-C", workingDirectory(), "rev-parse", "--show-toplevel"), GIT_MILLIS)
     if (top !is CaptureResult.Exited || top.code != 0) return null
     val folder = top.output.trim()
-    val origin = capture.capture(listOf("git", "-C", folder, "remote", "get-url", "origin"), GIT_MILLIS)
-    val url = if (origin is CaptureResult.Exited && origin.code == 0) origin.output else ""
-    return RemoteUrls.ownerName(url)
-        ?: folder.trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\').ifEmpty { null }
+    return RemoteUrls.origin(folder, capture) ?: RemoteUrls.folderName(folder).ifEmpty { null }
 }
 
 /** The longest `git rev-parse` may take. */

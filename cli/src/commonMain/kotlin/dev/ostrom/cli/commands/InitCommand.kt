@@ -186,11 +186,12 @@ internal class InitCommand(private val dependencies: CliDependencies) : CliktCom
 }
 
 /**
- * True when the page of repositories lists [name] (by itself or as `owner/name`), false when it does not and is the
- * last page, null when more pages follow: not found there, it is not known to be missing.
+ * True when the page of repositories lists [name] (by itself, as `owner/name`, or by the name part of an
+ * `owner/name`), false when it does not and is the last page, null when more pages follow: not found there, it is not
+ * known to be missing.
  */
 private fun coverage(page: JsonObject, name: String): Boolean? {
     val found = page.list("items").filterIsInstance<JsonObject>().mapNotNull { it.text("name") }
-        .any { it == name || it.endsWith("/$name") }
+        .any { it == name || it.endsWith("/$name") || name.endsWith("/$it") }
     return found.takeIf { it || page.text("next").isNullOrEmpty() }
 }

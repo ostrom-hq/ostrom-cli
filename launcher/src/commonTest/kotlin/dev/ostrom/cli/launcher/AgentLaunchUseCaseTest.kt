@@ -422,6 +422,18 @@ class AgentLaunchUseCaseTest {
     }
 
     @Test
+    fun aRepositoryNamedOrInTheEnvironmentComesBeforeTheOrigin() = runTest {
+        originAnswer = CaptureResult.Exited(0, "git@github.com:acme/api.git\n")
+        serveALaunch()
+        start(repo = "given")
+        assertEquals("given", environments.last()[LaunchVariables.REPO])
+        serveALaunch()
+        variables["OSTROM_REPO"] = "from-env"
+        start()
+        assertEquals("from-env", environments.last()[LaunchVariables.REPO])
+    }
+
+    @Test
     fun withoutAnOwnerAndANameTheFolderIsTakenAndSaid() = runTest {
         val origins = listOf(
             CaptureResult.Exited(2, "error: No such remote 'origin'\n"),

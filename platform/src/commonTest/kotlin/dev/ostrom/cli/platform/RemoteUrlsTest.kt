@@ -20,6 +20,7 @@ class RemoteUrlsTest {
         assertEquals("", RemoteUrls.slug("https://host"))
         assertEquals("a/b", RemoteUrls.slug("host:x/a/b"))
         assertEquals("x:y", RemoteUrls.slug("dir/x:y"), "a colon after a slash is part of a path")
+        assertEquals("api", RemoteUrls.slug("file:///srv/git/acme/api.git"), "file:// is a local path")
     }
 
     @Test
@@ -37,6 +38,7 @@ class RemoteUrlsTest {
             "ssh://git@github.com:22/acme/api.git",
             "git://github.com/acme/api.git",
             "  https://gitlab.example/group/acme/api.git\n",
+            "https://github.com/acme/api.git\r\n",
         )
         for (url in urls) assertEquals("acme/api", RemoteUrls.ownerName(url), url)
     }
@@ -44,8 +46,34 @@ class RemoteUrlsTest {
     @Test
     fun aLocalPathOrAUrlWithoutOwnerAndNameHasNoOwnerName() {
         for (url in listOf("", " ", "/srv/git/api.git", "../api", "C:\\git\\api.git", "\\\\server\\git\\a:b",
-            "dir/x:y", ":acme/api", "https://host", "https://host/solo", "git@host:solo")) {
+            "dir/x:y", ":acme/api", "https://host", "https://host/solo", "git@host:solo",
+            "file:///srv/git/acme/api.git", "FILE:///srv/git/acme/api")) {
             assertNull(RemoteUrls.ownerName(url), url)
         }
+    }
+
+    @Test
+    fun theOriginOfARepositoryIsAskedOfGit() {
+        val asked = mutableListOf<List<String>>()
+        fun git(answer: CaptureResult) = object : ProcessCapture {
+            override fun capture(command: List<String>, timeoutMillis: Int): CaptureResult {
+                asked += command
+                return answer
+            }
+
+            override fun detach(command: List<String>) = false
+        }
+        assertEquals("acme/api", RemoteUrls.origin("/w/api", git(CaptureResult.Exited(0, "git@github.com:acme/api\n"))))
+        assertEquals(listOf("git", "-C", "/w/api", "remote", "get-url", "origin"), asked.single())
+        assertNull(RemoteUrls.origin("/w/api", git(CaptureResult.Exited(2, "error: No such remote 'origin'\n"))))
+        assertNull(RemoteUrls.origin("/w/api", git(CaptureResult.Exited(0, "/srv/git/api.git\n"))), "a local origin")
+        assertNull(RemoteUrls.origin("/w/api", git(CaptureResult.NotFound)), "no git")
+    }
+
+    @Test
+    fun aFolderIsNamedByItsLastPart() {
+        assertEquals("api", RemoteUrls.folderName("/work/api/"))
+        assertEquals("api", RemoteUrls.folderName("C:\\work\\api\\"))
+        assertEquals("", RemoteUrls.folderName("/"))
     }
 }
