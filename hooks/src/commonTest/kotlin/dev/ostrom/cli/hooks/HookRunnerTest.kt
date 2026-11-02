@@ -41,6 +41,29 @@ class HookRunnerTest {
         override fun decide(event: HookEvent) = GateDecision.Deny("no")
     })
 
+    private val failing = object : HookProcessor {
+        override fun process(kind: HookKind, input: ByteArray?, dialect: String): HookReply =
+            throw IllegalStateException("a case the gate never met")
+    }
+
+    @Test
+    fun aGateThatFailsRefusesTheActionInTheAgentsDialect() {
+        // exit 2 is the only code every agent reads as "do not run": a crash (any other code) let the tool run
+        val console = FakeConsole(StandardInput.Read("{}".encodeToByteArray()))
+        val environment = FakeEnvironment(mapOf("OSTROM_HOOK_DIALECT" to "hermes"))
+        assertEquals(2, HookRunnerImpl(console, environment, failing).run(listOf("gate")))
+        assertEquals("""{"decision":"block","reason":"${GateTexts.GATE_FAILED}"}""" + "\n", console.out.toString())
+        assertEquals(GateTexts.GATE_FAILED + "\n", console.err.toString())
+    }
+
+    @Test
+    fun aSessionHookThatFailsSaysSoWithoutStoppingTheSession() {
+        val console = FakeConsole(StandardInput.Read("{}".encodeToByteArray()))
+        assertEquals(1, HookRunnerImpl(console, FakeEnvironment(), failing).run(listOf("session")))
+        assertEquals("", console.out.toString())
+        assertEquals("ostrom hook session failed (IllegalStateException)\n", console.err.toString())
+    }
+
     @Test
     fun anUnknownKindIsAUsageError() {
         val console = FakeConsole(StandardInput.Unavailable(StandardInputFailure.TERMINAL))
