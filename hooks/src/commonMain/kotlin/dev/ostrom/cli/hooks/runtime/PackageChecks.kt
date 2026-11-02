@@ -24,6 +24,10 @@ import okio.ByteString.Companion.encodeUtf8
  * @property checkouts The git operations whose exit status matters (clean tree, detached checkouts).
  * @property scripts Runs a check script.
  * @property now The current time in milliseconds since the epoch, for a run's duration.
+ * @property runner The cloud session's runner (`OSTROM_RUNNER_CHECKS`), or null on a workstation. When there is one,
+ *     every check is asked of it and never run here, and the hook reports none of the runs: the runner reports them,
+ *     attested `isolated_runner`, and a later report of the hook's would replace that proof in the receipt. A check
+ *     the hook could not ask (script missing, uncommitted changes, no checkout) is still reported here as not run.
  */
 data class CheckPorts(
     val files: HookFiles,
@@ -32,6 +36,7 @@ data class CheckPorts(
     val checkouts: CommitCheckouts,
     val scripts: ScriptRunner,
     val now: () -> Long,
+    val runner: RunnerChecks? = null,
 )
 
 /**
@@ -175,8 +180,11 @@ class PackageChecks(
             val head = sha ?: here
             return when {
                 key != null && key in passes -> {
-                    val passed = Report(0, PASSED, "passed earlier on the same commit", CACHED, head)
-                    report(hook, script, script.sha256, passed)
+                    // the runner's report of that pass stays the last run of the check
+                    if (ports.runner == null) {
+                        val passed = Report(0, PASSED, "passed earlier on the same commit", CACHED, head)
+                        report(hook, script, script.sha256, passed)
+                    }
                     null
                 }
                 sha == null -> verified(hook, script, repository, head, null)
@@ -217,6 +225,13 @@ class PackageChecks(
         ): String? {
             val text = ports.files.read("${view.tmp}/${script.path}")
             val sha = text?.let { it.encodeUtf8().sha256().hex() }.orEmpty()
+            val runner = ports.runner
+            if (runner != null && text != null) {
+                val sessionId = ids.of(event.string("session_id"))
+                val check =
+                    RunnerCheck(sessionId, view.digest, hook.nodeId, script.id, text, at, head, timeoutOf(script))
+                return onRunner(runner.run(check), script, sha == script.sha256, head, key)
+            }
             val copy = "$sandbox/${script.id}.sh"
             val why = when {
                 text == null -> "script ${script.id} is missing"
@@ -237,8 +252,7 @@ class PackageChecks(
         private fun execute(hook: CompiledHook, script: CompiledScript, target: ScriptTarget): String? {
             val started = ports.now()
             val request = ScriptRequest(
-                script.id, target.copy, target.directory, sandbox, view.tmp, script.network,
-                script.timeoutSec * MILLIS_PER_SECOND,
+                script.id, target.copy, target.directory, sandbox, view.tmp, script.network, timeoutOf(script),
             )
             val run = ports.scripts.run(request)
             val outcome = when {
@@ -258,6 +272,21 @@ class PackageChecks(
                 else -> CheckTexts.failed(script, run.exit, target.key?.let { target.head }, run.output)
             }
         }
+
+        /**
+         * What the runner made of a check. A script changed on this machine is refused whatever the runner answered:
+         * it ran the text it was sent, and recorded it as `tampered`.
+         */
+        private fun onRunner(run: ScriptRun, script: CompiledScript, intact: Boolean, head: String, key: String?) =
+            when {
+                !intact -> CheckTexts.couldNotRun(script.label, "script ${script.id} is not the package's")
+                !run.started -> CheckTexts.couldNotRun(script.label, run.output)
+                run.exit == 0 -> {
+                    key?.let(passes::add)
+                    null
+                }
+                else -> CheckTexts.failed(script, run.exit, key?.let { head }, run.output)
+            }
 
         private fun report(hook: CompiledHook, script: CompiledScript, scriptSha: String, report: Report) {
             val agentSession = event.string("session_id")
@@ -294,6 +323,9 @@ class PackageChecks(
     private companion object {
         /** The label of a check whose script is not in the package. */
         fun labelOf(script: CompiledScript?): String = if (script == null) "check" else script.label
+
+        /** The script's time limit. */
+        fun timeoutOf(script: CompiledScript): Int = script.timeoutSec * MILLIS_PER_SECOND
 
         const val REPORT_MILLIS = 3_000
         const val MILLIS_PER_SECOND = 1_000

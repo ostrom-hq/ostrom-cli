@@ -226,6 +226,29 @@ class AdaptersTest {
             assertEquals(sandboxed, "/usr/bin/sandbox-exec" in run, "$system")
             assertEquals(Routes.CHECKS, http.sent.last().second.path)
         }
+        // a cloud session asks its runner over the socket, and never runs the check here when it does not answer
+        val fileSystem = FakeFileSystem()
+        fileSystem.createDirectories("/t/scripts".toPath())
+        fileSystem.write("/t/package.json".toPath()) { writeUtf8(view) }
+        fileSystem.write("/t/scripts/s.sh".toPath()) { writeUtf8(script) }
+        val capture = Capture()
+        val http = answer(200, signed.toString())
+        val cloud = Variables(
+            mapOf(
+                "OSTROM_RELAY_URL" to "http://127.0.0.1:4100",
+                "OSTROM_INSTANCE_KEYS" to PolicyVectors.KEYS,
+                "OSTROM_REPO" to "r",
+                "OSTROM_PACKAGE" to "/t/package.json",
+                "OSTROM_RUNNER_CHECKS" to "/nonexistent/ostrom/checks.sock",
+            ),
+            OperatingSystem.LINUX,
+        )
+        val processor = SessionHooks.processor(cloud, fileSystem, capture, http) { PolicyVectors.NOW }
+        val test = """{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"npm test"}}"""
+        val refusal = processor.process(HookKind.GATE, test.encodeToByteArray(), "claude").stderr
+        assertTrue(refusal.contains("could not run (the session's runner did not answer"), refusal)
+        assertTrue(capture.captured.none { it.first() == "/usr/bin/env" }, "never run on the agent's host")
+        assertTrue(http.sent.none { it.second.path == Routes.CHECKS }, "the runner reports, the hook does not")
     }
 
     @Test

@@ -30,6 +30,7 @@ import dev.ostrom.cli.platform.interop.ostrom_spawn_wait
 import dev.ostrom.cli.platform.interop.ostrom_tcp_exchange
 import dev.ostrom.cli.platform.interop.ostrom_terminal_read
 import dev.ostrom.cli.platform.interop.ostrom_terminal_size
+import dev.ostrom.cli.platform.interop.ostrom_unix_exchange
 import dev.ostrom.cli.platform.interop.ostrom_write
 
 internal actual fun spawnAndWait(command: List<String>, environment: Map<String, String?>): ProcessResult = memScoped {
@@ -87,6 +88,28 @@ internal actual fun tcpExchange(
         response.usePinned { received ->
             ostrom_tcp_exchange(
                 port,
+                sent.addressOf(0).reinterpret(),
+                request.size,
+                received.addressOf(0).reinterpret(),
+                capacity,
+                timeoutMillis,
+            )
+        }
+    }
+    return count to response
+}
+
+internal actual fun unixExchange(
+    path: String,
+    request: ByteArray,
+    capacity: Int,
+    timeoutMillis: Int,
+): Pair<Int, ByteArray> {
+    val response = ByteArray(capacity)
+    val count = request.usePinned { sent ->
+        response.usePinned { received ->
+            ostrom_unix_exchange(
+                path,
                 sent.addressOf(0).reinterpret(),
                 request.size,
                 received.addressOf(0).reinterpret(),
