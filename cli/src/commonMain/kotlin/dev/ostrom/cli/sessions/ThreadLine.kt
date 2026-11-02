@@ -40,7 +40,8 @@ private const val NANOS = 9
 internal data class ThreadLine(val at: String, val what: String, val detail: String, val event: String) {
     /** `14:02:11  session started   Claude Code · harness 2026.10.30-3`, the time in UTC as the server keeps it. */
     fun render(): String {
-        val clock = INSTANT.find(at)?.let { it.groupValues[2] } ?: at
+        val match = INSTANT.find(at)
+        val clock = if (match == null) at else match.groupValues[2]
         return "${clock.padEnd(CLOCK)}  ${what.padEnd(WHAT)}  $detail".trimEnd()
     }
 }

@@ -149,9 +149,9 @@ class LogsCommandTest : CliKit() {
         assertOut("          asked for a yes    g_7d1e\n")
         requests.clear()
         console.out.clear()
-        val failing = turns(listOf(running, ended), listOf("503", gate))
+        val failing = turns(listOf(running, running, ended), listOf("down", "503", gate))
         assertEquals(0, cli(environment = withServer, api = failing).run(arrayOf("logs", "ses_41b2", "-f")))
-        assertEquals(2, requests.count { it.second.path == "/api/v1/gates/g_7d1e" }, "a failing gate is asked again")
+        assertEquals(3, requests.count { it.second.path == "/api/v1/gates/g_7d1e" }, "a failing gate is asked again")
         assertOut("14:07:02  approved           @lena\n")
     }
 
@@ -176,6 +176,8 @@ class LogsCommandTest : CliKit() {
         assertTrue(console.err.contains("No session ses_none on https://ostrom.example."), console.err.toString())
         assertEquals(65, cli(environment = mapOf("HOME" to "/home/omar", "OSTROM_URL" to "https://x.example"))
             .run(arrayOf("logs")))
+        val expired = mapOf("GET /api/v1/sessions?dev=maya" to (401 to "{}"))
+        assertEquals(65, serving(expired).run(arrayOf("logs")), "a refused list is not a list not served")
     }
 
     @Test
