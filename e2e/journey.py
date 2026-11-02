@@ -4,7 +4,9 @@
     5.1 ostrom login (the device flow, approved from a browser session)  2.1 ostrom init
     2.6 ostrom invite, 2.7 the invitation accepted, ostrom members        3.4 and 3.3 ostrom policy
     3.1 ostrom policy rules                                               3.2 and 4.1 ostrom harness
-    5.2 ostrom claude (a fake Claude Code plays the hooks)
+    5.2 ostrom claude (a fake Claude Code plays the hooks)                5.3 the deployment it tries is held
+    5.6 the asker's own yes refused, 5.4 the second person's yes          5.5 ostrom wait lets it through
+    5.7 the signed receipt, pulled and verified
 
     python3 e2e/journey.py --binary ostrom --server http://127.0.0.1:4600 --mail-dir /tmp/mail \\
         --seed "docker run --rm --network host --env-file server.env ghcr.io/ostrom-hq/ostrom-server:edge \\
@@ -52,6 +54,7 @@ class Journey:
         self.stamp = f"{int(time.time()):x}{os.getpid() % 4096:03x}"
         self.org_resolved = False
         self.invitee = None
+        self.owner = None
         self.temporary = options.work is None
 
     # ---- what the run says -------------------------------------------------------------------------------------
@@ -257,6 +260,7 @@ class Journey:
             return
         seeded = self.seed(owner_email)
         owner_email = seeded.get("email", owner_email)
+        maya["email"] = owner_email
         maya["token"] = seeded["token"]
         if not self.login(maya, owner_email):
             return
@@ -315,6 +319,7 @@ class Journey:
             self.check(done.returncode == 0 and len(members) == 2, f"members list shows the two of them "
                                                                    f"({done.returncode}, {len(members)})")
             tom_login = next((m.get("login") for m in members if m.get("role") != "owner"), None)
+            self.owner = next((m.get("login") for m in members if m.get("role") == "owner"), None)
             self.invitee = tom_login
             if tom_login:
                 done = self.ostrom(maya, "members", "role", tom_login, "admin", console=True)
@@ -349,10 +354,22 @@ class Journey:
         if self.needs(("GET", "/api/v1/workflows"), ("POST", "/api/v1/workflows"), on_main=True, org=True):
             self.harness(maya)
 
+        gated = None
+        if self.invitee and self.owner:
+            self.begin("5.3", "a workflow gates the deployment: the two of them its approvers")
+            if self.needs(("POST", "/api/v1/workflows"), on_main=True, org=True):
+                gated = self.gate_workflow(maya)
+
         self.begin("5.2", "ostrom claude: the launch, the session, the hooks")
+        seen = None
         if self.needs(("GET", "/api/v1/policy/agents"), ("POST", "/api/v1/launches"), ("POST", "/api/v1/sessions"),
                       org=True):
-            self.claude(maya)
+            seen = self.claude(maya)
+        if gated:
+            self.gate(maya, tom_email, seen)
+            self.begin("5.3", "the gating workflow, removed")
+            done = self.ostrom(maya, "harness", "remove", gated, "--yes", console=True)
+            self.check(done.returncode == 0, f"harness remove ({done.returncode}): {done.stderr.strip()[:300]}")
 
         if self.invitee:
             self.begin("2.6", "ostrom members remove")
@@ -419,6 +436,103 @@ class Journey:
         self.check(start.get("code") == 0, f"the session starts on the server (hook exit {start.get('code')})")
         harmless = hooks.get(("PreToolUse", "ls -la")) or {}
         self.check(harmless.get("code") == 0, f"a harmless tool runs (hook exit {harmless.get('code')})")
+        return seen
+
+    def gate_workflow(self, maya):
+        """An enforced workflow whose gate covers a deployment, with the owner and the invitee as its approvers."""
+        name = f"prod-{self.stamp}"
+        document = {
+            "id": name, "name": name, "domain": "deploy", "status": "proposed", "foundAt": "2026-10-30T00:00:00Z",
+            "start": "deploy",
+            "nodes": [{"id": "deploy", "kind": "trigger", "label": "kubectl apply to production"},
+                      {"id": "yes", "kind": "gate", "label": "Deploy to production",
+                       "approvers": [self.owner, self.invitee],
+                       "actions": [{"class": "deploy", "label": "Deploy to production", "patterns": [],
+                                    "repos": []}]}],
+            "edges": [{"from": "deploy", "to": "yes"}, {"from": "yes", "to": None}],
+        }
+        path = os.path.join(maya["home"], f"{name}.json")
+        with open(path, "w") as handle:
+            json.dump(document, handle)
+        done = self.ostrom(maya, "harness", "add", path, "--yes", console=True)
+        if not self.check(done.returncode == 0, f"harness add ({done.returncode}): {done.stderr.strip()[:300]}"):
+            return None
+        listed = self.ostrom(maya, "harness", "list", "--all", "--json")
+        workflow = next((w for w in (read_json(listed.stdout) or {}).get("items", []) if w.get("name") == name), None)
+        if not self.check(workflow is not None, f"harness list shows it ({listed.returncode})"):
+            return None
+        done = self.ostrom(maya, "harness", "enforce", workflow["id"], console=True)
+        self.check(done.returncode == 0, f"harness enforce ({done.returncode}): {done.stderr.strip()[:300]}")
+        return workflow["id"]
+
+    def gate(self, maya, tom_email, seen):
+        """5.3 to 5.7: the deployment held, the asker's yes refused, the second person's yes, the wait, the receipt."""
+        self.begin("5.3", "the deployment the agent tries: the gate opens and holds it")
+        fired = (seen or {}).get("hooks", [])
+        deploy = next((h for h in fired if h["event"] == "PreToolUse" and h["tool"] == "kubectl apply -f prod.yaml"),
+                      {})
+        said = (deploy.get("stdout", "") + deploy.get("stderr", "")).strip()
+        self.check(deploy.get("code") not in (None, 0), f"the hook holds the deployment (exit {deploy.get('code')})"
+                                                        f": {said[-300:]}")
+        waited = next((h for h in fired if h["event"] == "wait"), None)
+        if not self.check(waited is not None, "the hook names the request (ostrom wait <id>)"):
+            return
+        gate = waited["tool"]
+        self.check(waited["code"] == 75, f"ostrom wait, in the session, is still waiting (exit {waited['code']}): "
+                                         f"{(waited['stdout'] + waited['stderr']).strip()[-300:]}")
+
+        self.begin("5.4", "the second person sees the request (ostrom inbox)")
+        tom = self.machine("tom")
+        tom_session = self.sign_in(tom_email)
+        if self.login(tom, tom_email):
+            inbox = self.ostrom(tom, "inbox", "--json")
+            items = read_json(inbox.stdout) or []
+            self.check(inbox.returncode == 0 and len(items) >= 1, f"ostrom inbox lists the request "
+                                                                 f"({inbox.returncode}, {len(items)}): "
+                                                                 f"{inbox.stderr.strip()[:300]}")
+        if tom_session is None:
+            return
+        status, body, _ = self.call("GET", "/api/v1/approvals?mine=true&status=pending", session=tom_session)
+        pending = (body or {}).get("items", []) if isinstance(body, dict) else []
+        if not self.check(status == 200 and pending, f"the console lists it for {who(tom_email)} ({status}, "
+                                                     f"{len(pending)}): {error_of(body)[:200]}"):
+            return
+        approval = pending[0]
+        answer = {"answer": "approve", "shownDigest": approval.get("shownDigest", ""), "note": "go"}
+
+        self.begin("5.6", "the asker's own yes is refused (self-approval never)")
+        owner_session = self.sign_in(maya["email"])
+        if owner_session:
+            status, body, _ = self.call("POST", f"/api/v1/approvals/{approval['id']}/answer", answer,
+                                        session=owner_session)
+            self.check(status == 403, f"the server refuses it ({status}): {error_of(body)[:200]}")
+
+        self.begin("5.4", "the second person says yes")
+        status, body, _ = self.call("POST", f"/api/v1/approvals/{approval['id']}/answer", answer, session=tom_session)
+        self.check(status in (200, 201), f"{who(tom_email)}'s yes is taken ({status}): {error_of(body)[:200]}")
+
+        self.begin("5.5", "the action passes: ostrom wait answers yes")
+        done = self.ostrom(maya, "wait", gate, "--timeout", "10")
+        self.check(done.returncode == 0, f"ostrom wait exits 0 ({done.returncode}): "
+                                         f"{(done.stdout + done.stderr).strip()[-300:]}")
+
+        self.begin("5.7", "the signed receipt: listed, pulled, verified")
+        for console in (False, True):
+            listed = self.ostrom(maya, "receipts", "list", "--json", console=console)
+            receipts = read_json(listed.stdout) or []
+            token = "a console token" if console else "the device's token"
+            if self.check(listed.returncode == 0 and receipts, f"receipts list with {token} ({listed.returncode}, "
+                                                               f"{len(receipts)}): {listed.stderr.strip()[:300]}"):
+                break
+        if not receipts:
+            return
+        receipt = next((r for r in receipts if gate in json.dumps(r)), receipts[0])
+        done = self.ostrom(maya, "receipts", "pull", receipt["id"], console=console)
+        self.check(done.returncode == 0, f"receipts pull {receipt['id']} ({done.returncode}): "
+                                         f"{done.stderr.strip()[:300]}")
+        done = self.ostrom(maya, "verify", receipt["id"], "--json")
+        self.check(done.returncode == 0, f"ostrom verify, offline ({done.returncode}): "
+                                         f"{(done.stdout + done.stderr).strip()[-300:]}")
 
     def report(self):
         counts = {status: sum(1 for s in self.steps if s["status"] == status) for status in ("ok", "skipped", "failed")}
