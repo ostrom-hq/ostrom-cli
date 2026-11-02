@@ -12,6 +12,9 @@ import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.ptr
 import kotlinx.cinterop.usePinned
 import kotlinx.cinterop.value
+import platform.posix.F_GETFL
+import platform.posix.F_SETFL
+import platform.posix.O_NONBLOCK
 import platform.posix.SIGABRT
 import platform.posix.SIGBUS
 import platform.posix.SIGFPE
@@ -24,11 +27,13 @@ import platform.posix.STDOUT_FILENO
 import platform.posix._exit
 import platform.posix.close
 import platform.posix.dup2
+import platform.posix.fcntl
 import platform.posix.fork
 import platform.posix.pipe
 import platform.posix.raise
 import platform.posix.read
 import platform.posix.waitpid
+import platform.posix.write
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -72,15 +77,23 @@ class CrashExitPosixTest {
         Crash(if (signal == 0) (status.value shr EXIT_SHIFT) and EXIT_MASK else SIGNALLED + signal, output)
     }
 
-    /** Everything the child wrote, to the end of the pipe: a refusal written twice shows. */
+    /** Everything the child wrote, to the end of the pipe, decoded once: a refusal written twice shows. */
     private fun readAll(descriptor: Int): String {
-        val output = StringBuilder()
+        var output = ByteArray(0)
         val bytes = ByteArray(BUFFER)
         while (true) {
             val count = bytes.usePinned { read(descriptor, it.addressOf(0), bytes.size.toULong()) }
-            if (count <= 0) return output.toString()
-            output.append(bytes.decodeToString(0, count.toInt()))
+            if (count <= 0) return output.decodeToString()
+            output += bytes.copyOf(count.toInt())
         }
+    }
+
+    /** Points the child's stdout at a pipe of its own, which [ready] prepares (no reader, or full). */
+    private fun stdoutTo(ready: (Int, Int) -> Unit) = memScoped {
+        val ends = allocArray<IntVar>(2)
+        check(pipe(ends) == 0)
+        ready(ends[0], ends[1])
+        dup2(ends[1], STDOUT_FILENO)
     }
 
     @Test
@@ -97,6 +110,31 @@ class CrashExitPosixTest {
         val crash = crashed { deeper(0) }
         assertEquals(CODE, crash.code)
         assertEquals(OUT + ERR, crash.output)
+    }
+
+    @Test
+    fun aReaderGoneDoesNotKillTheHandlerOnSigpipe() {
+        val crash = crashed {
+            stdoutTo { reader, _ -> close(reader) }
+            raise(SIGSEGV)
+        }
+        assertEquals(CODE, crash.code)
+        assertEquals(ERR, crash.output)
+    }
+
+    @Test
+    fun aFullNonBlockingPipeIsWaitedForThenTheCodeGoesOutAlone() {
+        val crash = crashed {
+            stdoutTo { _, writer ->
+                fcntl(writer, F_SETFL, fcntl(writer, F_GETFL) or O_NONBLOCK)
+                val block = ByteArray(BUFFER)
+                var room = true
+                while (room) room = block.usePinned { write(writer, it.addressOf(0), block.size.toULong()) } > 0
+            }
+            raise(SIGSEGV)
+        }
+        assertEquals(CODE, crash.code)
+        assertEquals(ERR, crash.output)
     }
 
     @Test

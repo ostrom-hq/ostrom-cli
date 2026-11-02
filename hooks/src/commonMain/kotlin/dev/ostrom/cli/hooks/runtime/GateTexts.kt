@@ -116,6 +116,6 @@ object GateTexts {
      * that would repeat a deployment that already went through.
      */
     const val GATE_CRASHED =
-        "Ostrom: denied. The gate stopped on this tool call and refuses it. Do not run it again on your own: tell " +
-            "the user, who can run `ostrom doctor`."
+        "Ostrom: the gate stopped on this tool call. Before the tool, that refuses it; after it, the tool had " +
+            "already run. Do not run it again on your own: tell the user, who can run `ostrom doctor`."
 }
