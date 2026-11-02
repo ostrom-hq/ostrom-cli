@@ -55,25 +55,28 @@ class TerminalChannels(
     /** How the CLI opens a terminal on any server. */
     companion object {
         /**
-         * Opens a terminal on the server of the call, `(serverUrl, path, token)`, with [userAgent]. Each open has a
-         * client of its own, released with the process: one terminal is opened per `ostrom attach`, which ends with it.
+         * Opens a terminal on the server of the call, `(serverUrl, path, token, org)`, with [userAgent]. Each open
+         * has a client of its own, released with the process: one terminal is opened per `ostrom attach`, which ends
+         * with it.
          */
-        fun opener(userAgent: String): suspend (String, String, String) -> TerminalChannel =
-            { url, path, token -> TerminalChannels(url, userAgent).open(path, token) }
+        fun opener(userAgent: String): suspend (String, String, String, String?) -> TerminalChannel =
+            { url, path, token, org -> TerminalChannels(url, userAgent).open(path, token, org) }
     }
 
     /**
      * @param path The terminal's path (`/api/v1/cloud/sessions/<id>/terminal`).
      * @param token The device token, sent on the upgrade.
+     * @param org The id of the organisation the session is in (`Ostrom-Org`), or null: the person's only one.
      * @throws ServerUnreachableException When the socket cannot be opened (network, TLS, a refused upgrade).
      */
-    suspend fun open(path: String, token: String): TerminalChannel {
+    suspend fun open(path: String, token: String, org: String? = null): TerminalChannel {
         val url = baseUrl.trimEnd('/').replaceFirst(Regex("^http"), "ws") + path
         var failure: Exception = IllegalStateException("not opened")
         val session = try {
             client.webSocketSession(url) {
                 header(HttpHeaders.UserAgent, userAgent)
                 header(HttpHeaders.Authorization, "Bearer $token")
+                org?.let { header(ORG_HEADER, it) }
             }
         } catch (e: CancellationException) {
             // a cancellation is an IllegalStateException too: it goes on as it is, before the catch below

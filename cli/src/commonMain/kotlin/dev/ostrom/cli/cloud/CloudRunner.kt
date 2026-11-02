@@ -27,8 +27,9 @@ import okio.IOException
  * @property serverUrl The Ostrom server, without a trailing slash.
  * @property token The device token.
  * @property cwd The folder `ostrom` runs in, read for the repository when none is named.
+ * @property org The id of the organisation the calls act in (`Ostrom-Org`), or null: the person's only one.
  */
-data class CloudSite(val serverUrl: String, val token: String, val cwd: String)
+data class CloudSite(val serverUrl: String, val token: String, val cwd: String, val org: String? = null)
 
 /** `ostrom <agent> --cloud` and `ostrom attach`; each returns the exit code. */
 interface CloudRunner {
@@ -42,12 +43,12 @@ interface CloudRunner {
 /**
  * [CloudRunner] over the API client.
  *
- * @param channels Opens a terminal WebSocket: server URL, path, token.
+ * @param channels Opens a terminal WebSocket: server URL, path, token, organisation.
  */
 class CloudRunnerImpl(
     private val console: Console,
     private val api: (String) -> OstromApi,
-    private val channels: suspend (String, String, String) -> TerminalChannel,
+    private val channels: suspend (String, String, String, String?) -> TerminalChannel,
     private val terminal: RawTerminal,
     private val capture: ProcessCapture,
 ) : CloudRunner {
@@ -60,10 +61,10 @@ class CloudRunnerImpl(
         api(site.serverUrl).use { useCase(it, site).attach(id, site.token) }
 
     private fun useCase(client: OstromApi, site: CloudSite) = CloudSessionUseCase(
-        ServerJson(ApiServerTransport(client)),
+        ServerJson(ApiServerTransport(client, site.org)),
         TerminalConnector { path, token ->
             try {
-                ChannelSocket(channels(site.serverUrl, path, token))
+                ChannelSocket(channels(site.serverUrl, path, token, site.org))
             } catch (e: ServerUnreachableException) {
                 throw IOException(e.reason, e)
             }
