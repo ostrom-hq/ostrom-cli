@@ -54,6 +54,7 @@ class RuleCommandsTest : SetupKit() {
             refusedFor("audit:read") to withServer,
             refusedFor("rules:write") to withServer,
             refusedFor("rules:read") to withServer + ("OSTROM_TOKEN" to "ost_console"),
+            refusedFor("rules:read") to inSession,
             mapOf("GET /api/v1/rules" to (403 to """{"error":{"message":"not a member of acme"}}""")) to withServer,
         )
         for ((routes, environment) in alone) {
