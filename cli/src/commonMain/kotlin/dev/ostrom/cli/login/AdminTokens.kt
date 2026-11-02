@@ -40,11 +40,9 @@ class AdminTokens(
     /** The admin token of [server] while it is valid; one that expired is forgotten, and null is the answer. */
     fun valid(server: String): String? {
         val expiresAt = (all()[server] as? JsonPrimitive)?.longOrNull ?: return null
-        if (expiresAt <= clock()) {
-            forget(server)
-            return null
-        }
-        return store.read(nameOf(server))
+        val expired = expiresAt <= clock()
+        if (expired) forget(server)
+        return if (expired) null else store.read(nameOf(server))
     }
 
     /**

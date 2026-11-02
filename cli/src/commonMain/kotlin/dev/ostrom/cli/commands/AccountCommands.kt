@@ -205,7 +205,8 @@ internal class LogoutCommand(private val dependencies: CliDependencies) : CliktC
             store.forget(serverUrl)
             refuseInClear(serverUrl, "the token")
         }
-        val api = ServerJson(ApiServerTransport(dependencies.api(serverUrl)))
+        // made only when there is something to revoke
+        val api by lazy { ServerJson(ApiServerTransport(dependencies.api(serverUrl))) }
         if (admin != null) runBlocking { api.post(LOGOUT_PATH, objectOf(), admin) }
         tokens.forget(serverUrl)
         if (credentials == null) {
