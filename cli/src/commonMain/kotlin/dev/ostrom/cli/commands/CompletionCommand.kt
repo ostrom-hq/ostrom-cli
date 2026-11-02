@@ -7,6 +7,9 @@ import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.types.choice
 import dev.ostrom.cli.CliDependencies
 
+/** The shells `ostrom completion` writes a script for. */
+private val SHELLS = listOf("bash", "zsh", "fish", "powershell")
+
 /**
  * `ostrom completion bash|zsh|fish|powershell`: the tab completion script of a shell, on stdout, generated from the
  * command tree by [completionScript]: the four shells offer the same words, and never a hidden command or option.
@@ -18,9 +21,5 @@ class CompletionCommand(private val dependencies: CliDependencies) : CliktComman
 
     override fun run() {
         dependencies.console.out(completionScript(currentContext.findRoot().command, shell))
-    }
-
-    private companion object {
-        val SHELLS = listOf("bash", "zsh", "fish", "powershell")
     }
 }
