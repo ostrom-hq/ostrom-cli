@@ -85,6 +85,9 @@ open class CliKit {
 
     /** False: a device with no CLI folder, so no update notice. */
     protected var noticeKept = true
+
+    /** Whether stderr is a terminal; null: as stdout is. */
+    protected var stderrTerminal: Boolean? = null
     protected val noRelay = object : LoopbackHttp {
         override fun exchange(port: Int, request: LoopbackRequest, timeoutMillis: Int): Result<LoopbackResponse> =
             Result.failure(IllegalStateException("nothing listens"))
@@ -166,6 +169,7 @@ open class CliKit {
             updateNotice = UpdateNotice(FileStoreImpl(fileSystem), NOTICE, "1.0.0", { now }, { noticeAdvice() }) {
                 true.also { refreshes++ }
             }.takeIf { noticeKept },
+            stderrIsTerminal = { stderrTerminal ?: console.isInteractive },
             capture = capture,
             cloud = object : CloudRunner {
                 override suspend fun start(start: CloudStart, site: CloudSite) = 5.also { clouds += start to site }

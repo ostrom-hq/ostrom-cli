@@ -44,8 +44,9 @@ internal class UpdateCommand(private val dependencies: CliDependencies) : CliktC
             checkOnly = check,
         )
         if (recordLatest) {
-            val latest = runBlocking { updates.latest(request) }
-            dependencies.updateNotice?.record(latest)
+            // without a CLI folder there is nothing to record: the release is not even asked for
+            val notice = dependencies.updateNotice ?: throw ProgramResult(ExitCode.OK.code)
+            notice.record(runBlocking { updates.latest(request) })
             throw ProgramResult(ExitCode.OK.code)
         }
         val code = runBlocking { if (rollback) updates.rollback(request) else updates.update(request) }

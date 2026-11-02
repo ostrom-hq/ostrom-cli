@@ -42,6 +42,7 @@ import dev.ostrom.cli.platform.ProcessLauncherImpl
 import dev.ostrom.cli.platform.RawTerminalImpl
 import dev.ostrom.cli.platform.SecretStore
 import dev.ostrom.cli.platform.currentExecutable
+import dev.ostrom.cli.platform.stderrIsTerminal
 import dev.ostrom.cli.platform.systemSecretStore
 import dev.ostrom.cli.relay.LocalRelayStarterImpl
 import dev.ostrom.cli.telemetry.UsageStatistics
@@ -83,6 +84,7 @@ import kotlin.time.TimeSource
  * @property cloud Runs `ostrom <agent> --cloud` and `ostrom attach`.
  * @property selfUpdate `ostrom update`.
  * @property updateNotice The once-a-day update notice, kept in the CLI folder; null when there is none.
+ * @property stderrIsTerminal Whether stderr is a terminal, where the update notice is said.
  * @property secrets Opens the secret store of this device (system store, or encrypted file). Each call chooses and
  * probes the store again (up to a second on Linux): a command calls it once and keeps the store; the hook's fast
  * path never calls it.
@@ -112,6 +114,7 @@ class CliDependencies(
     val cloud: CloudRunner,
     val selfUpdate: SelfUpdate,
     val updateNotice: UpdateNotice? = null,
+    val stderrIsTerminal: () -> Boolean,
     val postHogKey: String,
     val sendStatistics: suspend (url: String, body: String) -> Unit,
     val secrets: () -> SecretStore = { systemSecretStore(environment, files) },
@@ -182,6 +185,7 @@ class CliDependencies(
                 cloud = cloudRunner(console, api),
                 selfUpdate = selfUpdate(environment, console, sessions),
                 updateNotice = updateNotice(environment, files, self, sessions),
+                stderrIsTerminal = ::stderrIsTerminal,
                 postHogKey = BuildInfo.POSTHOG_KEY,
                 secrets = secrets,
                 sendStatistics = { url, body -> statistics.send(url, body) },

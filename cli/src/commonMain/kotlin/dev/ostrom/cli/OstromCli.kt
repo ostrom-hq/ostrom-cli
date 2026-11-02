@@ -37,11 +37,18 @@ import dev.ostrom.cli.commands.pendingCommands
 import dev.ostrom.cli.commands.setupCommands
 import dev.ostrom.cli.launcher.Agent
 import dev.ostrom.cli.platform.SecretStoreException
+import dev.ostrom.cli.telemetry.UsageStatistics
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import okio.IOException
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
+
+/**
+ * Commands after which no update notice is said: the plumbing the statistics do not measure either, `update` itself
+ * and help (nor after `ostrom` alone or a line that names no known command).
+ */
+private val QUIET_COMMANDS = UsageStatistics.NOT_MEASURED + setOf(OstromCli.UPDATE_COMMAND, OstromCli.HELP_COMMAND)
 
 /** The `ostrom` command tree (spec CLI.md § 2.1) and the mapping of every outcome to an exit code (§ 2.3). */
 class OstromCli(private val dependencies: CliDependencies) {
@@ -60,7 +67,9 @@ class OstromCli(private val dependencies: CliDependencies) {
         val failed = failure
         val command = if (failed == null) root.invoked else failedCommand(failed)
         // the notice's own refresh, started detached: plumbing nobody typed, so no statistic
-        if (!(command == UPDATE_COMMAND && RECORD_LATEST in args)) {
+        val refresh = failed == null && command == UPDATE_COMMAND &&
+            root.registeredSubcommands().filterIsInstance<UpdateCommand>().single().recordLatest
+        if (!refresh) {
             runBlocking {
                 withTimeoutOrNull(STATISTICS_TIMEOUT) {
                     dependencies.usage.commandRun(command, known, code, started.elapsedNow())
@@ -88,13 +97,14 @@ class OstromCli(private val dependencies: CliDependencies) {
     }
 
     /**
-     * The update notice is for a person at a terminal: never in a pipe or a CI log, never in an agent's session (the
-     * agent cannot update the ostrom of its own hooks, S2-39).
+     * The update notice is for a person at a terminal: stderr, where it is said, and stdout both terminals; never in a
+     * pipe, a file or a CI log, never in an agent's session (the agent cannot update the ostrom of its own hooks,
+     * S2-39).
      */
     private fun noticeAllowed(): Boolean {
         val environment = dependencies.environment
         val off = listOf("CI", "OSTROM_LAUNCH_ID").any { !environment[it].isNullOrEmpty() }
-        return dependencies.console.isInteractive && !off
+        return dependencies.stderrIsTerminal() && dependencies.console.isInteractive && !off
     }
 
     private fun execute(root: RootCommand, args: Array<String>, failed: (CliktError) -> Unit): Int {
@@ -177,17 +187,8 @@ class OstromCli(private val dependencies: CliDependencies) {
 
         const val HELP_COMMAND = "help"
 
-        /**
-         * Commands after which no update notice is said: the plumbing, and `update` itself (nor after `ostrom` alone
-         * or a line that names no known command).
-         */
-        val QUIET_COMMANDS = setOf("hook", "mcp", "wait", "check", "update", HELP_COMMAND)
-
         /** The self-update command. */
         const val UPDATE_COMMAND = "update"
-
-        /** Its hidden option that makes it the notice's detached refresh. */
-        const val RECORD_LATEST = "--record-latest"
 
         /** Not a command name: the statistics report it as `unknown`. */
         const val UNKNOWN_COMMAND = ""

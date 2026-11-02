@@ -33,26 +33,36 @@ class UpdateNotice(
     private val advice: () -> String?,
     private val refresh: () -> Boolean,
 ) {
-    /** After a command: says the notice when it is due, and starts a refresh when the last one is a day old. */
+    /**
+     * After a command: says the notice when it is due, and starts a refresh when the last one is a day old. Both are
+     * stamped in the file first, under its lock: a folder that cannot be written says nothing and starts nothing, or
+     * it would say the notice after every command and start a refresh each time.
+     */
     fun after(say: (String) -> Unit) {
+        val due = stamped() ?: return
+        due.notice?.let(say)
+        if (due.check) refresh()
+    }
+
+    /** What is due now, stamped in the file under its lock; null when nothing is or the file cannot be written. */
+    private fun stamped(): Due? = try {
+        files.exclusive(path) { stamp(now()) }
+    } catch (_: FileWriteException) {
+        null
+    }
+
+    /** What is due at [time], stamped in the file; null when nothing is. @throws FileWriteException */
+    private fun stamp(time: Long): Due? {
         val state = parseObject(files.read(path)) ?: JsonObject(emptyMap())
         val latest = state.text(LATEST)
-        val time = now()
-        val newer = latest != null && newer(latest, current) && due(state.millis(NOTIFIED), time)
+        val fresh = latest != null && newer(latest, current) && due(state.millis(NOTIFIED), time)
         // asked only when there is something to say: it may look for a running session
-        val todo = if (newer) advice() else null
-        val show = todo != null
+        val notice = if (fresh) advice()?.let { "! ostrom $latest is available. $it\n" } else null
         val check = due(state.millis(CHECKED), time)
-        if (show) say("! ostrom $latest is available. $todo\n")
-        if (!show && !check) return
-        val next = JsonObject(
-            state + listOfNotNull(
-                (NOTIFIED to JsonPrimitive(time)).takeIf { show },
-                (CHECKED to JsonPrimitive(time)).takeIf { check },
-            ),
-        )
-        // written before the refresh starts, so that two commands at the same time start one refresh, not two
-        if (write(next) && check) refresh()
+        if (notice == null && !check) return null
+        val stamps = listOfNotNull(NOTIFIED.takeIf { notice != null }, CHECKED.takeIf { check })
+        files.write(path, JsonObject(state + stamps.associateWith { JsonPrimitive(time) }).toString())
+        return Due(notice, check)
     }
 
     /**
@@ -60,18 +70,16 @@ class UpdateNotice(
      * (offline, a captive portal) is tried again an hour later, not the next day.
      */
     fun record(latest: String?) {
-        val state = parseObject(files.read(path)) ?: JsonObject(emptyMap())
-        val time = now()
-        val checked = if (latest == null) time - DAY_MILLIS + RETRY_MILLIS else time
-        write(JsonObject(state + objectOf(LATEST to latest, CHECKED to checked)))
-    }
-
-    private fun write(state: JsonObject): Boolean = try {
-        files.write(path, state.toString())
-        true
-    } catch (_: FileWriteException) {
-        // a folder that cannot be written: no notice is worth an error, and no refresh starts again and again
-        false
+        try {
+            files.exclusive(path) {
+                val state = parseObject(files.read(path)) ?: JsonObject(emptyMap())
+                val time = now()
+                val checked = if (latest == null) time - DAY_MILLIS + RETRY_MILLIS else time
+                files.write(path, JsonObject(state + objectOf(LATEST to latest, CHECKED to checked)).toString())
+            }
+        } catch (_: FileWriteException) {
+            // a folder that cannot be written: nothing is said after a command either
+        }
     }
 
     private fun JsonObject.millis(key: String): Long? = (this[key] as? JsonPrimitive)?.longOrNull
@@ -129,3 +137,6 @@ internal fun noticeAdvice(executable: String?, sessions: AgentSessions): () -> S
 /** The refresh of the notice: this binary, [self], started detached as `ostrom update --record-latest`. */
 internal fun detachedRefresh(self: String?, capture: ProcessCapture): () -> Boolean =
     { self != null && capture.detach(listOf(self, "update", "--record-latest")) }
+
+/** What [UpdateNotice.after] does: the [notice] to say, if any, and whether to [check] for a newer release. */
+private class Due(val notice: String?, val check: Boolean)

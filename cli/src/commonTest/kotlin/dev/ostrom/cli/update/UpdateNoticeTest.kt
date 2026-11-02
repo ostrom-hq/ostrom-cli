@@ -4,10 +4,13 @@ package dev.ostrom.cli.update
 import dev.ostrom.cli.BuildInfo
 import dev.ostrom.cli.launcher.parseObject
 import dev.ostrom.cli.platform.CaptureResult
+import dev.ostrom.cli.platform.FileStore
 import dev.ostrom.cli.platform.FileStoreImpl
+import dev.ostrom.cli.platform.FileWriteException
 import dev.ostrom.cli.platform.ProcessCapture
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.longOrNull
+import okio.IOException
 import okio.Path.Companion.toPath
 import okio.fakefilesystem.FakeFileSystem
 import kotlin.test.Test
@@ -126,12 +129,22 @@ class UpdateNoticeTest {
     }
 
     @Test
-    fun aFolderThatCannotBeWrittenSaysTheNoticeButStartsNoRefresh() {
+    fun aFolderThatCannotBeWrittenSaysNothingAndStartsNoRefresh() {
         fileSystem.write("/blocked".toPath()) { writeUtf8("a file, not a folder") }
         notice(at = "/blocked/update-check.json").after { said += it }
         assertEquals(0, refreshes)
         notice(at = "/blocked/update-check.json").record("2.0.0")
         assertTrue(said.isEmpty())
+        // a file that reads but cannot be written: the notice could not be said once a day only, so it is not said
+        val readOnly = object : FileStore by FileStoreImpl(fileSystem) {
+            override fun read(path: String) = """{"latest":"2.0.0","checkedAt":$time}"""
+
+            override fun write(path: String, text: String) {
+                throw FileWriteException(path, IOException("read-only"))
+            }
+        }
+        repeat(2) { UpdateNotice(readOnly, path, "1.0.0", { time }, { advice }) { true }.after { said += it } }
+        assertTrue(said.isEmpty(), said.toString())
     }
 
     @Test

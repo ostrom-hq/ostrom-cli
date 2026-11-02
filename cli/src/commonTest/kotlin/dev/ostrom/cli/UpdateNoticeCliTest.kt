@@ -21,7 +21,16 @@ class UpdateNoticeCliTest : CliKit() {
         for (quiet in listOf("CI", "OSTROM_LAUNCH_ID")) {
             assertEquals(0, cli(environment = mapOf("HOME" to "/home/maya", quiet to "1")).run(arrayOf("version")))
         }
+        stderrTerminal = false
+        assertEquals(0, cli().run(arrayOf("version")), "stderr in a file: not where a person reads")
+        stderrTerminal = true
+        console.isInteractive = false
+        assertEquals(0, cli().run(arrayOf("version")), "stdout in a pipe")
+        stderrTerminal = null
+        console.isInteractive = true
         assertEquals(0, cli().run(arrayOf("hook", "gate")), "never after plumbing")
+        assertEquals(0, cli().run(arrayOf("telemetry", "status")), "nor after the statistics' own command")
+        console.out.clear()
         assertEquals(0, cli().run(arrayOf("--help")), "nor after a help screen")
         console.out.clear()
         assertTrue(console.err.isEmpty(), console.err.toString())
@@ -51,6 +60,9 @@ class UpdateNoticeCliTest : CliKit() {
         for (other in listOf("--rollback", "--check", "--version=1.2.0")) {
             assertEquals(64, cli().run(arrayOf("update", "--record-latest", other)), other)
         }
+        val typed = statistics.size
+        cli(postHogKey = "phc").run(arrayOf("update", "--version", "--record-latest"))
+        assertEquals(typed + 1, statistics.size, "--record-latest as --version's value: an update typed, counted")
     }
 
     @Test
@@ -79,5 +91,6 @@ class UpdateNoticeCliTest : CliKit() {
         assertEquals(0, cli().run(arrayOf("update", "--record-latest")))
         assertTrue(console.err.isEmpty(), console.err.toString())
         assertTrue(!fileSystem.exists(NOTICE.toPath()))
+        assertTrue(releaseUrls.isEmpty(), "nothing to record: the release is not asked for")
     }
 }
