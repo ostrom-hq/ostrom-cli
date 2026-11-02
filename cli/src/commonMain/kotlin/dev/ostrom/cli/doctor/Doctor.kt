@@ -38,6 +38,7 @@ interface RunDoctorUseCase {
  * @param configDirectory The CLI folder, or null when no home folder is known.
  * @param config The device configuration, or null with no CLI folder.
  * @param api Builds the client of a server URL.
+ * @param contractVersion `info.version` of the API contract this build speaks, blank when unknown.
  * @param secrets Opens the secret store, where the device token is kept.
  */
 @Suppress("LongParameterList") // Each check reads one dependency; grouping them would only hide which.
@@ -49,6 +50,7 @@ class RunDoctorUseCaseImpl(
     private val configDirectory: String?,
     private val config: ConfigStore?,
     private val api: (String) -> OstromApi,
+    private val contractVersion: String,
     private val secrets: () -> SecretStore,
 ) : RunDoctorUseCase {
     override suspend fun invoke(): List<DoctorCheck> = listOf(
@@ -93,15 +95,7 @@ class RunDoctorUseCaseImpl(
             ?: return DoctorCheck(CheckStatus.WARNING, "No server yet: ostrom login sets it.")
         val host = url.substringAfter("://").substringBefore('/')
         return try {
-            val response = api(url).use { it.get(HEALTH_ROUTE) }
-            if (response.status < SERVER_ERROR) {
-                DoctorCheck(CheckStatus.OK, "$host reachable (${response.millis} ms)")
-            } else {
-                DoctorCheck(
-                    CheckStatus.PROBLEM,
-                    "$host answers ${response.status}: the server is in trouble, try again later.",
-                )
-            }
+            healthCheck(host, url, api(url).use { it.get(HEALTH_ROUTE) }, contractVersion)
         } catch (_: ServerUnreachableException) {
             DoctorCheck(CheckStatus.PROBLEM, "$host unreachable: check your network, or the server URL ($url).")
         }
@@ -125,9 +119,6 @@ class RunDoctorUseCaseImpl(
         return DoctorCheck(CheckStatus.OK, "Agents found: ${found.joinToString(", ") { it.command }}")
     }
 }
-
-/** The first HTTP status that means the server itself failed. */
-private const val SERVER_ERROR = 500
 
 /** The liveness route of the API contract (ostrom-core `api/openapi.yaml`), which the doctor probes. */
 internal const val HEALTH_ROUTE = "/api/v1/health"
