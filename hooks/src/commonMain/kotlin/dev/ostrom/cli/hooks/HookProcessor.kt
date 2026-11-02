@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.hooks
 
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
+import dev.ostrom.cli.hooks.runtime.HookReplies
 
 /** The hooks an agent calls, `ostrom hook <kind>` (spec CLI.md § 2.4). */
 enum class HookKind(val command: String) {
@@ -71,20 +70,6 @@ class HookProcessorImpl(private val gate: GateHandler) : HookProcessor {
         HookKind.SESSION -> HookReply()
     }
 
-    /**
-     * A refusal in the agent's dialect, as the prototype writes it (`deny` in `mvp/launcher/src/main.rs`): Hermes
-     * reads `{"decision":"block"}`, Grok and Gemini `{"decision":"deny"}` on stdout; every agent gets the reason on
-     * stderr and exit code 2.
-     */
-    private fun deny(reason: String, dialect: String): HookReply {
-        val stdout = when (dialect) {
-            "hermes" -> decisionJson("block", reason)
-            "grok", "gemini" -> decisionJson("deny", reason)
-            else -> ""
-        }
-        return HookReply(stdout = stdout, stderr = "$reason\n", exitCode = 2)
-    }
-
-    private fun decisionJson(decision: String, reason: String): String =
-        JsonObject(mapOf("decision" to JsonPrimitive(decision), "reason" to JsonPrimitive(reason))).toString() + "\n"
+    /** A refusal in the agent's dialect ([HookReplies.deny]): exit 2, the reason on stderr. */
+    private fun deny(reason: String, dialect: String): HookReply = HookReplies(dialect).deny(reason)
 }
