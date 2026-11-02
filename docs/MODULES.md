@@ -139,8 +139,9 @@ without the session, 77 for a session the caller may not read (a gate it may not
 
 ## Add a command
 
-1. Find its declaration in `cli/.../commands/PendingCommands.kt` (every command of the spec is declared there with
-   its options and arguments, as `PendingCommand` or `GroupCommand`).
+1. Find its declaration: a command of the spec not built yet extends `PendingCommand`, with its options and
+   arguments (`cli/.../commands/CheckCommand.kt` is the last one); `pendingCommands()` in `PendingCommands.kt` places
+   it in the help.
 2. Move it to its own file in `cli/.../commands/`, extend `CliktCommand` instead of `PendingCommand`, take
    `CliDependencies` in the constructor, and write `run()`. Put the logic in a use case (`XxxUseCase` /
    `XxxUseCaseImpl`) in the module it belongs to, or in a `cli/.../<topic>/` package when it only assembles others
