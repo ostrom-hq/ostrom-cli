@@ -118,6 +118,9 @@ def make_handler(state):
                 read = self._session_read(path, query)
                 if read is not None:
                     return self._answer(*read)
+            if method == "GET" and device and path.startswith("/api/v1/sessions"):
+                # an older server: the route does not exist, whoever asks (never the agent token's 401 below)
+                return self._error(404, "not_found", f"no GET {path} on this server")
             if (method, path) == ("GET", "/api/v1/policy/agents") and device:
                 return self._answer(200, {"allowed": True, "note": "e2e policy"})
             if (method, path) == ("POST", "/api/v1/launches") and device:
