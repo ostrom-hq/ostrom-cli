@@ -29,6 +29,7 @@ class AgentLaunchUseCaseTest {
     private val said = mutableListOf<String>()
     private val variables = mutableMapOf("PATH" to "/usr/bin")
     private var gitAnswer: CaptureResult = CaptureResult.Exited(0, "/work/acme-api\n")
+    private var originAnswer: CaptureResult = CaptureResult.Exited(2, "error: No such remote 'origin'\n")
     private var installed = mutableMapOf("claude" to "/usr/bin/claude", "codex" to "/usr/bin/codex")
     private var agentResult: ProcessResult = ProcessResult.Exited(3)
     private val commands = mutableListOf<List<String>>()
@@ -51,7 +52,8 @@ class AgentLaunchUseCaseTest {
     }
 
     private val capture = object : ProcessCapture {
-        override fun capture(command: List<String>, timeoutMillis: Int) = gitAnswer
+        override fun capture(command: List<String>, timeoutMillis: Int) =
+            if ("get-url" in command) originAnswer else gitAnswer
 
         override fun detach(command: List<String>) = false
     }
@@ -394,6 +396,49 @@ class AgentLaunchUseCaseTest {
         assertEquals("ostrom: the embedded plugin changed shape", said.last())
         assertTrue(relayClosed, "the relay is closed")
         assertEquals(listOf(temporary), files.deleted)
+    }
+
+    @Test
+    fun theRepositoryIsOwnerAndNameOfTheOriginInHttpsAsInSsh() = runTest {
+        val urls = listOf(
+            "https://github.com/acme/api.git",
+            "https://github.com/acme/api",
+            "https://x-access-token:secret@github.com/acme/api.git",
+            "git@github.com:acme/api.git",
+            "ssh://git@github.com/acme/api.git",
+            "ssh://git@github.com:22/acme/api",
+        )
+        for (url in urls) {
+            serveALaunch()
+            said.clear()
+            originAnswer = CaptureResult.Exited(0, "$url\n")
+            start()
+            assertEquals("acme/api", environments.last()[LaunchVariables.REPO], url)
+            val created = server.sent("POST ${Routes.LAUNCHES}").last()
+            assertEquals("""{"repo":"acme/api","agent":"claude-code"}""", created.body)
+            assertTrue(said.none { it.startsWith("ostrom: no origin") }, said.toString())
+            assertTrue(said.none { "secret" in it }, "the origin's URL, which may carry a token, is never said")
+        }
+    }
+
+    @Test
+    fun withoutAnOwnerAndANameTheFolderIsTakenAndSaid() = runTest {
+        val origins = listOf(
+            CaptureResult.Exited(2, "error: No such remote 'origin'\n"),
+            CaptureResult.Exited(0, "/srv/git/acme-api.git\n"),
+            CaptureResult.NotFound,
+        )
+        for (origin in origins) {
+            serveALaunch()
+            said.clear()
+            originAnswer = origin
+            start()
+            assertEquals("acme-api", environments.last()[LaunchVariables.REPO], "$origin")
+            val warning = "ostrom: no origin with an owner/name here: the session is registered for \"acme-api\", " +
+                "this folder's name, and a gate set on owner/name does not cover it " +
+                "(--repo owner/name names the repository)"
+            assertTrue(warning in said, said.toString())
+        }
     }
 
     @Test

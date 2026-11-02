@@ -11,6 +11,7 @@ import dev.ostrom.cli.launcher.ServerJson
 import dev.ostrom.cli.launcher.list
 import dev.ostrom.cli.launcher.text
 import dev.ostrom.cli.platform.CaptureResult
+import dev.ostrom.cli.platform.RemoteUrls
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 
@@ -145,8 +146,8 @@ private fun orgOf(view: JsonObject): Org? {
 }
 
 /**
- * The repository the working folder is in, named as `ostrom <agent>` names it: `OSTROM_REPO`, else the folder of the
- * git top; null outside a git repository.
+ * The repository the working folder is in, named as `ostrom <agent>` names it: `OSTROM_REPO`, else `owner/name` of its
+ * `origin`, else the folder of the git top; null outside a git repository.
  */
 internal fun CliDependencies.currentRepo(): String? =
     environment[LaunchVariables.REPO]?.takeIf { it.isNotEmpty() } ?: gitTopName()
@@ -154,7 +155,11 @@ internal fun CliDependencies.currentRepo(): String? =
 private fun CliDependencies.gitTopName(): String? {
     val top = capture.capture(listOf("git", "-C", workingDirectory(), "rev-parse", "--show-toplevel"), GIT_MILLIS)
     if (top !is CaptureResult.Exited || top.code != 0) return null
-    return top.output.trim().trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\').ifEmpty { null }
+    val folder = top.output.trim()
+    val origin = capture.capture(listOf("git", "-C", folder, "remote", "get-url", "origin"), GIT_MILLIS)
+    val url = if (origin is CaptureResult.Exited && origin.code == 0) origin.output else ""
+    return RemoteUrls.ownerName(url)
+        ?: folder.trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\').ifEmpty { null }
 }
 
 /** The longest `git rev-parse` may take. */

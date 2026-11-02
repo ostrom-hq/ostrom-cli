@@ -1,26 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.hooks.gate
 
-/** Names a repository from a git remote URL, the way the approver reads it. */
-object RemoteUrls {
-    /**
-     * @param url `git@host:o/n.git`, `https://host/o/n(.git)`, `ssh://…`, or a local path.
-     * @return `owner/name`, or the last part of a local path, or an empty string.
-     */
-    fun slug(url: String): String {
-        val trimmed = url.trim().trimEnd('/').removeSuffix(".git")
-        val scheme = trimmed.indexOf("://")
-        val colon = trimmed.indexOf(':')
-        val path = when {
-            scheme >= 0 -> trimmed.substring(scheme + "://".length).substringAfter('/', "")
-            colon > 0 && '/' !in trimmed.substring(0, colon) && !ShellPaths.isAbsolute(trimmed) ->
-                trimmed.substring(colon + 1)
-            else -> return ShellPaths.fileName(trimmed)
-        }
-        val parts = path.split('/').filter { it.isNotEmpty() }
-        return parts.takeLast(2).joinToString("/")
-    }
-}
+import dev.ostrom.cli.platform.RemoteUrls
 
 /**
  * The repository a command really runs in.
