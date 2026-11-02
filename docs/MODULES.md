@@ -82,8 +82,8 @@ alternative: a second private file for `ostrom wait`, which a command of the age
   one, S2-20 and S2-38), `POST /mcp/{server}` for the launch's servers (to `/api/v1/mcp/{server}`, streamed, 401/403 from
   Ostrom become 502), and with inference `/v1/messages`, `/v1/chat/completions`, `/v1/models` (to
   `/api/v1/inference/…`, 4 MiB, the response streamed, only the provider headers forwarded). Coming soon on the
-  server: ostrom-server `main` does not serve `POST /api/v1/sessions`, `/api/v1/notifications` nor
-  `GET /api/v1/gates/catalog/signed` yet (ostrom-core's `api/contract/served-routes.txt`).
+  server: ostrom-server `main` does not serve `/api/v1/notifications` nor `/api/v1/checks` yet (ostrom-core's
+  `api/contract/served-routes.txt`); the sessions and the signed policy are served since ostrom-server d9301e4.
 - Ostrom unreachable or too slow: 502 with `{"error":{"type":"unreachable","message":"Ostrom is unreachable (…)"}}`,
   and one line for the user per outage through the starter's `report`; Ktor's own logger is silenced.
 - `hooks` never depends on `relay`: it speaks plain HTTP to the loopback URL and capability the launcher hands it

@@ -32,6 +32,7 @@ import dev.ostrom.cli.platform.SecretStore
 import dev.ostrom.cli.platform.StandardInput
 import dev.ostrom.cli.update.AgentSessionsImpl
 import dev.ostrom.cli.update.SelfUpdate
+import dev.ostrom.cli.update.UpdateNotice
 import okio.Path.Companion.toPath
 import okio.fakefilesystem.FakeFileSystem
 import kotlin.test.assertTrue
@@ -76,6 +77,17 @@ open class CliKit {
     protected val bridged = mutableListOf<BridgeTarget>()
     protected var browser = true
     protected val releaseUrls = mutableListOf<String>()
+    protected var now = 10 * UpdateNotice.DAY_MILLIS
+    protected var refreshes = 0
+
+    /** What the update notice tells to do. */
+    protected var noticeAdvice: () -> String? = { "Run ostrom update." }
+
+    /** False: a device with no CLI folder, so no update notice. */
+    protected var noticeKept = true
+
+    /** Whether stderr is a terminal; null: as stdout is. */
+    protected var stderrTerminal: Boolean? = null
     protected val noRelay = object : LoopbackHttp {
         override fun exchange(port: Int, request: LoopbackRequest, timeoutMillis: Int): Result<LoopbackResponse> =
             Result.failure(IllegalStateException("nothing listens"))
@@ -154,6 +166,10 @@ open class CliKit {
                 say = { console.out("$it\n") },
                 sessions = AgentSessionsImpl(FakeEnvironment(environment), fileSystem, "/tmp", noRelay),
             ),
+            updateNotice = UpdateNotice(FileStoreImpl(fileSystem), NOTICE, "1.0.0", { now }, { noticeAdvice() }) {
+                true.also { refreshes++ }
+            }.takeIf { noticeKept },
+            stderrIsTerminal = { stderrTerminal ?: console.isInteractive },
             capture = capture,
             cloud = object : CloudRunner {
                 override suspend fun start(start: CloudStart, site: CloudSite) = 5.also { clouds += start to site }
@@ -191,5 +207,11 @@ open class CliKit {
             writeUtf8("""{"$server":{"login":"maya"}}""")
         }
         secretsKept[server] = "ost_1"
+    }
+
+    /** The constants the command tests share. */
+    companion object {
+        /** The update notice's file of the faked device. */
+        const val NOTICE = "/home/maya/.config/ostrom/update-check.json"
     }
 }
