@@ -14,8 +14,9 @@ import kotlin.time.Instant
  * A governance write made with a CLI token is held by the server until an owner or an admin confirms it on the
  * console, from a session signed in less than 5 minutes ago (audit H1, decision of 02/11/2026): the write answers
  * 202 `GovernanceConfirmationPending` and nothing is written. The CLI shows where it is confirmed, then waits on
- * `GET /confirmations/{id}` (long polling) until it is answered. The server says when it has expired; the CLI only stops waiting a minute past the
- * confirmation's 15 minutes by its own clock, so a clock ahead of the server's never cuts a valid wait short.
+ * `GET /confirmations/{id}` (long polling) until it is answered. The server says when it has expired; the CLI only
+ * stops waiting a minute past the confirmation's 15 minutes by its own clock, so a clock ahead of the server's never
+ * cuts a valid wait short.
  *
  * @property access The organisation the write was made in.
  * @property token The token the write went with: its requester reads the confirmation with it.
