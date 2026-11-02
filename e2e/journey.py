@@ -6,7 +6,8 @@
     3.1 ostrom policy rules                                               3.2 and 4.1 ostrom harness
     5.2 ostrom claude (a fake Claude Code plays the hooks)                5.3 the deployment it tries is held
     5.6 the asker's own yes refused, 5.4 the second person's yes          5.5 ostrom wait lets it through
-    5.7 the signed receipt, pulled and verified
+    5.7 the signed receipt, pulled and verified                           6.1 ostrom logs
+    6.6 ostrom import teamcode: plan, import, the owner's cutover (e2e/teamcode_import.py, with the fake TeamCode team)
 
     python3 e2e/journey.py --binary ostrom --server http://127.0.0.1:4600 --mail-dir /tmp/mail \\
         --seed "docker run --rm --network host --env-file server.env ghcr.io/ostrom-hq/ostrom-server:edge \\
@@ -37,6 +38,8 @@ import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
+
+from teamcode_import import TeamCodeImport
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GENERIC_404 = "Not found."
@@ -304,6 +307,7 @@ class Journey:
         if self.needs(("GET", "/api/v1/auth/me"), ("GET", "/api/v1/orgs"), on_main=True):
             self.guarded(self.status, maya, org)
         self.team(maya, tom_email, org)
+        TeamCodeImport(self, maya).run()
 
     def status(self, maya, org):
         # who is signed in, as the server says it: not read back from what status printed
@@ -833,6 +837,14 @@ def main():
     # a wait already held by Ostrom answers within the yes's own round trip; 5 s leaves the runner its noise, and a
     # wait that polls each second (or misses the yes until its read ends, 30 s) shows here
     parser.add_argument("--max-yes-to-action-ms", type=float, default=5_000, help="5.5: from the yes to the action")
+    # 6.6: the fake TeamCode team of ostrom-helm (compose/demo/teamcode), the fake provider token endpoint the server's
+    # OSTROM_SHARING_CLAUDE_TOKEN_URL names, and the superuser of the run's throwaway database; without them 6.6 skips
+    parser.add_argument("--teamcode-db", help="6.6: mysql://teamcode_ro@host:port/teamcode, the fake TeamCode team")
+    parser.add_argument("--teamcode-password", default=os.environ.get("OSTROM_E2E_TEAMCODE_PASSWORD"),
+                        help="6.6: the password of the TeamCode database's read-only user (MYSQL_PWD)")
+    parser.add_argument("--teamcode-key-file", help="6.6: the key file of the fake TeamCode team (fake, public)")
+    parser.add_argument("--fake-tokens-port", type=int, help="6.6: where the fake provider token endpoint listens")
+    parser.add_argument("--database-admin-url", help="6.6: the superuser of the run's throwaway database")
     parser.add_argument("--report", help="write every step as JSON there")
     parser.add_argument("--work", help="the folder of the machines (default: a new temporary one)")
     options = parser.parse_args()
