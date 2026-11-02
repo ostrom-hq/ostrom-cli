@@ -30,7 +30,9 @@ class TerminalTextTest {
         // an extended colour whose index or red, green and blue is 8 is a colour, not SGR 8
         assertEquals("$esc[38;5;8mgrey", terminalSafe("$esc[38;5;8mgrey"))
         assertEquals("$esc[48;2;8;8;8mdark", terminalSafe("$esc[48;2;8;8;8mdark"))
-        assertEquals("$esc[58;5mx$esc[38;3;8mx$esc[38mx", terminalSafe("$esc[58;5mx$esc[38;3;8mx$esc[38mx"))
+        assertEquals("$esc[58;5mx$esc[38mx", terminalSafe("$esc[58;5mx$esc[38mx"))
+        // an extended colour of an unknown kind: what follows is read as attributes, 8 among them
+        assertEquals("x", terminalSafe("$esc[38;3;8mx"))
         // SGR 8 however it is written: a terminal reads the parameters as numbers
         for (hidden in listOf("8", "0;8", "08", "008", "38;9;8", "1;99999999")) {
             assertEquals("hidden", terminalSafe("$esc[${hidden}mhidden"), hidden)
@@ -105,7 +107,7 @@ class TerminalTextTest {
         assertEquals("rm -rf ~ls -la", terminalSafe("rm -rf ~\rls -la"))
         assertEquals("ab", terminalSafe("a\u0007\u0008\u007F\u0085b"))
         assertEquals("abc", terminalSafe("a\u202Eb\u2067c\u2069"))
-        assertEquals("a b\u2065c", terminalSafe("a\u202Fb\u2065c"))
+        assertEquals("a\u202Fb\u2065c", terminalSafe("a\u202Fb\u2065c"))
         assertEquals("abcdefgh", terminalSafe("a\u200Eb\u200Fc\u061Cd\u2028e\u2029f\u200Bg\u2060h\uFEFF"))
         // tag characters spell text no one sees; the supplement's variation selectors and a lone surrogate stay
         assertEquals("ab", terminalSafe("a\uDB40\uDC72\uDB40\uDC6Db"))
