@@ -87,12 +87,14 @@ class TerminalTextTest {
     fun otherControlCharactersAndCharactersThatReorderOrHideTextAreDropped() {
         // a carriage return would print the second half over the first
         assertEquals("rm -rf ~ls -la", terminalSafe("rm -rf ~\rls -la"))
-        assertEquals("ab", terminalSafe("a\u0007\u0008\u007F\u0085b"))
+        assertEquals("ab", terminalSafe("a\u0007\u0008\u007F\u009Fb"))
+        // a break between words stays a space: the words are not glued into another command
+        assertEquals("rm -rf build curl evil.sh a b", terminalSafe("rm -rf build\u2028curl evil.sh\u2029a\u0085b"))
         assertEquals("abc", terminalSafe("a\u202Eb\u2067c\u2069"))
         assertEquals("a\u202Fb\u2065c", terminalSafe("a\u202Fb\u2065c"))
-        assertEquals("abcdefgh", terminalSafe("a\u200Eb\u200Fc\u061Cd\u2028e\u2029f\u200Bg\u2060h\uFEFF"))
+        assertEquals("abcdefgh", terminalSafe("a\u200Eb\u200Fc\u061Cde\u2060f\u200Bg\u2060h\uFEFF"))
         // every invisible character, one by one
-        val invisible = "\u00AD\u061C\u180E\u200B\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E\u2060" +
+        val invisible = "\u00AD\u061C\u180E\u200B\u200E\u200F\u202A\u202B\u202C\u202D\u202E\u2060" +
             "\u2061\u2062\u2063\u2064\u2066\u2067\u2068\u2069\u206A\u206B\u206C\u206D\u206E\u206F\u3164\uFEFF" +
             "\uFFA0\uFFF9\uFFFA\uFFFB"
         assertEquals(emptyList(), invisible.filter { terminalSafe("a${it}b") != "ab" }.toList())

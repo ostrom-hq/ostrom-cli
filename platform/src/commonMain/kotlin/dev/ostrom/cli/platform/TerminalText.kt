@@ -6,8 +6,9 @@ package dev.ostrom.cli.platform
  * the agent, a server's message, the names of an organisation), and none of it may drive the terminal. Lines and tabs
  * stay; every escape sequence goes whole, colours included (CSI, OSC, DCS and the others, nF, with their 7-bit and
  * 8-bit introducers), and so do the other control characters (a carriage return prints over the line) and the
- * characters that reorder or hide text (bidi marks, embeddings, overrides and isolates, line and paragraph
- * separators, zero-width characters, tags). The CLI's own colours and links go through [Console.help].
+ * characters that reorder or hide text (bidi marks, embeddings, overrides and isolates, zero-width characters,
+ * tags). Next line and the line and paragraph separators become a space. The CLI's own colours and links go through
+ * [Console.help]. Not covered: a name made of blank or invisible characters this list does not hold (audit L10).
  *
  * One pass, linear in the length of [text] whatever it holds. A surrogate pair split across two writes is not seen.
  */
@@ -34,6 +35,11 @@ private class TerminalScan(private val text: String) {
             c == C1_CSI -> control(at + 1)
             c in C1_STRINGS -> string(at + 1)
             tag(at) -> at + 2
+            // a break between words stays one, on the same line: "build<LS>curl" is not "buildcurl"
+            c in BREAKS -> {
+                out.append(' ')
+                at + 1
+            }
             else -> {
                 if (shown(c)) out.append(c)
                 at + 1
@@ -101,6 +107,9 @@ private const val BEL = '\u0007'
 private const val C1_CSI = '\u009B'
 private const val C1_ST = '\u009C'
 
+/** Next line, line separator, paragraph separator: shown as a space. */
+private const val BREAKS = "\u0085\u2028\u2029"
+
 /** The 8-bit introducers of DCS, SOS, OSC, PM and APC. */
 private const val C1_STRINGS = "\u0090\u0098\u009D\u009E\u009F"
 
@@ -114,13 +123,13 @@ private const val TAG_HIGH = '\uDB40'
 private val TAG_LOW = '\uDC00'..'\uDC7F'
 
 /**
- * Soft hyphen, ALM, the Mongolian vowel separator, zero-width space, LRM, RLM, line and paragraph separators, the
+ * Soft hyphen, ALM, the Mongolian vowel separator, zero-width space, LRM, RLM, the
  * embeddings and overrides, word joiner, the invisible operators, the isolates, the deprecated format controls, the
  * Hangul compatibility fillers (a name made of them reads as nothing), the byte order mark and the interlinear
  * annotations. Characters a script needs stay, even when they show nothing alone: the zero-width (non-)joiners, the
  * variation selectors, the combining grapheme joiner, the Hangul choseong and jungseong fillers that compose a
  * syllable, and the blank Braille pattern, a Braille text's space.
  */
-private const val HIDDEN = "\u00AD\u061C\u180E\u200B\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E" +
+private const val HIDDEN = "\u00AD\u061C\u180E\u200B\u200E\u200F\u202A\u202B\u202C\u202D\u202E" +
     "\u2060\u2061\u2062\u2063\u2064\u2066\u2067\u2068\u2069\u206A\u206B\u206C\u206D\u206E\u206F\u3164" +
     "\uFEFF\uFFA0\uFFF9\uFFFA\uFFFB"
