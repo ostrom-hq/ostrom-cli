@@ -187,14 +187,16 @@ class AdaptersTest {
         assertTrue(SessionHooks.epochMillis() > 1_700_000_000_000)
     }
 
+    private val script = "npm test\n"
+    private val view = """{"digest":"sha256:p","tmp":"/t","hooks":[{"id":"h","nodeId":"n","kind":"check",
+        "event":"PreToolUse","tools":["Bash"],"patterns":["npm test"],"mode":"enforce","scriptId":"s"}],
+        "scripts":[{"id":"s","label":"Tests","path":"scripts/s.sh","command":"npm test","timeoutSec":5,
+        "sha256":"${script.encodeUtf8().sha256().hex()}"}]}"""
+    private val signed =
+        PolicyVectors.envelope(payload = PolicyVectors.PAYLOAD_R, signature = PolicyVectors.SIGNATURE_R)
+
     @Test
     fun aLaidPackageRunsItsChecksThroughTheRealWiring() {
-        val script = "npm test\n"
-        val view = """{"digest":"sha256:p","tmp":"/t","hooks":[{"id":"h","nodeId":"n","kind":"check",
-            "event":"PreToolUse","tools":["Bash"],"patterns":["npm test"],"mode":"enforce","scriptId":"s"}],
-            "scripts":[{"id":"s","label":"Tests","path":"scripts/s.sh","command":"npm test","timeoutSec":5,
-            "sha256":"${script.encodeUtf8().sha256().hex()}"}]}"""
-        val signed = PolicyVectors.envelope(payload = PolicyVectors.PAYLOAD_R, signature = PolicyVectors.SIGNATURE_R)
         for ((system, sandboxed) in listOf(
             OperatingSystem.LINUX to false,
             OperatingSystem.MACOS to true,
@@ -226,7 +228,10 @@ class AdaptersTest {
             assertEquals(sandboxed, "/usr/bin/sandbox-exec" in run, "$system")
             assertEquals(Routes.CHECKS, http.sent.last().second.path)
         }
-        // a cloud session asks its runner over the socket, and never runs the check here when it does not answer
+    }
+
+    @Test
+    fun aCloudSessionAsksItsRunnerAndNeverRunsTheCheckHere() {
         val fileSystem = FakeFileSystem()
         fileSystem.createDirectories("/t/scripts".toPath())
         fileSystem.write("/t/package.json".toPath()) { writeUtf8(view) }
@@ -245,6 +250,7 @@ class AdaptersTest {
         )
         val processor = SessionHooks.processor(cloud, fileSystem, capture, http) { PolicyVectors.NOW }
         val test = """{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"npm test"}}"""
+        // nothing listens on the socket: the action is refused, never run here
         val refusal = processor.process(HookKind.GATE, test.encodeToByteArray(), "claude").stderr
         assertTrue(refusal.contains("could not run (the session's runner did not answer"), refusal)
         assertTrue(capture.captured.none { it.first() == "/usr/bin/env" }, "never run on the agent's host")
