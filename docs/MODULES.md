@@ -213,14 +213,16 @@ to the hooks, the binary reads `OSTROM_URL` (server), `OSTROM_HOME` (the CLI fol
 TeamCode's credential envelopes with its key file (`aesGcmOpen` of `launcher`: AES-256-GCM, `v1:` then base64url of
 nonce, ciphertext and tag, bound to `variant:<team>:<id>[:<member>]` or `<team>:<account>`), maps the members to
 Ostrom's by e-mail then login (a server that does not list its members matches no one, and every
-assignment is skipped), and sends the plan to `POST /api/v1/import/teamcode?dryRun=true` (ostrom-server#28).
+assignment is skipped), names an account's provider as Ostrom does (TeamCode's `anthropic` and `openai` are `claude`
+and `codex`), and sends the plan to `POST /api/v1/import/teamcode?dryRun=true` (ostrom-server#28).
 It imports only with `--yes`, and prints no secret. A normal pass refreshes no token: a shared account TeamCode still
 uses is reported `revive_at_cutover`, and the CLI says how many wait. `--cutover` is the owner's final pass once
-TeamCode is stopped (ostrom-server#86): the plan with `?dryRun=true&cutover=true`, then, only once the owner typed
+TeamCode is stopped (ostrom-server#86): the plan with `?dryRun=true&cutover=true` (its account lines say `planned` for
+the accounts the cutover writes, revived ones included), then, only once the owner typed
 `cutover` (or passed `--confirm cutover` without a terminal; `--cutover --yes` is a usage error), the same export
 with `?cutover=true` (10 minutes at most: a token rotation per account at its provider), which rotates those accounts'
-tokens and revives them. A plan with no account to revive asks nothing. Accounts left as they were are listed with
-their reason and end the command with 2; a lost answer says the cutover may have run in part, and the same command
+tokens and revives them. A plan with no account to write asks nothing (2 when its accounts cannot be imported).
+Accounts left as they were are listed with their reason and end the command with 2; a lost answer says the cutover may have run in part, and the same command
 shows what still waits.
 
 ## Usage statistics (opt-in)

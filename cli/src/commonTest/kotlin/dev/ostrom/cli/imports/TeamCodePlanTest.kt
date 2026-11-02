@@ -138,7 +138,7 @@ class TeamCodePlanTest {
     @Test
     fun teamCodesProviderNamesBecomeOstroms() {
         // TeamCode names the company; the contract's TeamCodeAccount.provider is claude or codex
-        val names = listOf("anthropic", " Anthropic ", "claude", "openai", "codex", "mistral")
+        val names = listOf("anthropic", " Anthropic ", "claude", "openai", "codex", " Mistral ")
         val ostroms = listOf("claude", "claude", "claude", "codex", "codex", "mistral")
         assertEquals(ostroms, names.map(TeamCodePlan::providerOf))
     }

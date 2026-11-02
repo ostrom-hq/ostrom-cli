@@ -137,7 +137,7 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
         }
         val expires = (credential?.get("expiresAtMillis") as? JsonPrimitive)?.longOrNull
         val fields = listOf(
-            row["provider"],
+            row["provider"]?.trim(),
             row["provider_account_id"],
             credential?.text("accessToken"),
             credential?.text("refreshToken"),
@@ -169,7 +169,7 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
          * pool it.
          */
         internal fun providerOf(teamCode: String): String =
-            PROVIDERS[teamCode.trim().lowercase()] ?: teamCode
+            teamCode.trim().lowercase().let { PROVIDERS[it] ?: it }
 
         private val PROVIDERS =
             mapOf("anthropic" to "claude", "claude" to "claude", "openai" to "codex", "codex" to "codex")

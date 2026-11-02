@@ -231,10 +231,21 @@ class ImportTeamCodeUseCaseTest {
 
     @Test
     fun aCutoverWithNoAccountToReviveAsksNothing() = runTest {
-        replies["POST /api/v1/import/teamcode?dryRun=true&cutover=true"] = ServerReply(200, """{"items":[]}""")
+        val plan = "POST /api/v1/import/teamcode?dryRun=true&cutover=true"
+        replies[plan] = ServerReply(200, """{"items":[]}""")
         assertEquals(0, import(cutover = { error("never asked") }))
         assertTrue(said.endsWith("No shared account waits for the cutover: nothing to do.\n"), said.toString())
         assertEquals("/api/v1/import/teamcode?dryRun=true&cutover=true", calls.last().path)
+        // accounts the server cannot import are no nothing-to-do
+        val notPooled = """{"items":[{"kind":"account","name":"mistral/M","action":"skipped","reason":"not pooled"}]}"""
+        replies[plan] = ServerReply(200, notPooled)
+        assertEquals(2, import(cutover = { error("never asked") }))
+        assertTrue(failed.endsWith("1 shared account cannot be imported, for the reasons above.\n"), failed.toString())
+        // a server before ostrom-server#86's last shape counted its revivals in reviveAtCutover
+        replies[plan] = ServerReply(200, WAITING)
+        replies["POST /api/v1/import/teamcode?cutover=true"] = ServerReply(200, """{"items":[],"updated":2}""")
+        assertEquals(0, import(cutover = { true }))
+        assertTrue(said.contains("The cutover writes 2 shared accounts"), said.toString())
     }
 
     @Test
@@ -277,12 +288,19 @@ class ImportTeamCodeUseCaseTest {
     fun aServerThatListsNoMembersMatchesNoOneAndTheImportGoesOn() = runTest {
         replies["GET /api/v1/members"] = ServerReply(404, """{"error":{"type":"not_found","message":"Not found."}}""")
         assertEquals(0, import())
-        assertTrue(said.startsWith("! Ostrom did not list its members (Not found.): every assignment is skipped.\n"))
+        assertTrue(said.startsWith("! Ostrom does not list its members here: every assignment is skipped.\n"))
         assertEquals(parseObject("{}"), parseObject(calls.last().body)?.child("memberMap"), "no one matched")
         assertEquals("/api/v1/import/teamcode?dryRun=true", calls.last().path)
-        // a later page that is gone is a failure, never a shorter list
+        // with --yes too: the import is written, its assignments left out
+        assertEquals(0, import(apply = true))
+        assertEquals("/api/v1/import/teamcode", calls.last().path)
+        // a later page that is gone, or a 404 of the server's own (not its router's), is a failure, never fewer members
+        replies["GET /api/v1/members?before=p%2F2"] = ServerReply(404, """{"error":{"message":"Not found."}}""")
         replies["GET /api/v1/members"] = ServerReply(200, """{"items":[],"next":"p/2"}""")
         assertEquals(1, import())
+        replies["GET /api/v1/members"] = ServerReply(404, """{"error":{"message":"Organization not found."}}""")
+        assertEquals(1, import())
+        assertTrue(failed.endsWith("ostrom import teamcode: Ostrom answered 404: Organization not found.\n"))
     }
 
     private companion object {

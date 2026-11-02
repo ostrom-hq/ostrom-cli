@@ -92,8 +92,13 @@ class ImportTeamCodeUseCase(
     private suspend fun cutover(body: JsonObject): Int {
         val asked = ok(import("?dryRun=true&cutover=true", body), cutover = true)
         val plan = report("Cutover plan (nothing changed yet):", asked)
-        val writes = accounts(plan, PLANNED)
+        // a server before ostrom-server#86's last shape said revive_at_cutover in this plan too
+        val writes = accounts(plan, PLANNED) + count(plan, REVIVE)
         if (writes == 0) {
+            val refused = accounts(plan, SKIPPED)
+            if (refused > 0) {
+                throw Stop(ExitCode.INCOMPLETE, "${shared(refused)} cannot be imported, for the reasons above.")
+            }
             say("No shared account waits for the cutover: nothing to do.\n")
             return ExitCode.OK.code
         }
@@ -116,8 +121,9 @@ class ImportTeamCodeUseCase(
 
     /**
      * Every page of Ostrom's members (`next` is the cursor of the following one), up to [MAX_PAGES]. A server that does
-     * not list them (`GET /api/v1/members` of the contract, not served by ostrom-server main) matches no one: the
-     * import goes on, every assignment skipped, as for a member Ostrom does not have.
+     * not serve the list (`GET /api/v1/members` of the contract, not served by ostrom-server main: its router answers
+     * 404 "Not found.") matches no one: the import goes on, every assignment skipped, as for a member Ostrom does not
+     * have.
      */
     private suspend fun members(): List<JsonObject> {
         val members = mutableListOf<JsonObject>()
@@ -126,8 +132,10 @@ class ImportTeamCodeUseCase(
         do {
             val before = cursor?.let { "?before=${Routes.encode(it)}" }.orEmpty()
             val answer = server.get("$MEMBERS$before", token)
-            if (page == 0 && answer is ServerAnswer.Failed && answer.status == NOT_FOUND) {
-                say("! Ostrom did not list its members (${answer.message}): every assignment is skipped.\n")
+            // only the router's own 404: a route this server does not serve, never a member list it refused
+            val unserved = answer is ServerAnswer.Failed && answer.status == NOT_FOUND && answer.message == UNSERVED
+            if (page == 0 && unserved) {
+                say("! Ostrom does not list its members here: every assignment is skipped.\n")
                 return emptyList()
             }
             val body = ok(answer)
@@ -236,6 +244,7 @@ class ImportTeamCodeUseCase(
         private const val UNAUTHORIZED = 401
         private const val FORBIDDEN = 403
         private const val NOT_FOUND = 404
+        private const val UNSERVED = "Not found."
         private const val UNAVAILABLE = 503
         private const val REVIVE = "reviveAtCutover"
         private const val SKIPPED = "skipped"
