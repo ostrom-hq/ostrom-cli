@@ -40,11 +40,13 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
             model?.let { "&model=${Routes.encode(it)}" }.orEmpty()
         val answer = dependencies.server.get("${Routes.POLICY}?$query", site.credentials.token, POLICY_MILLIS)
         if (answer is ServerAnswer.Failed) {
-            val (code, message) = when (answer.status) {
-                UNAUTHORIZED -> SIGN_IN_REQUIRED to "not signed in to ${site.serverUrl}: run `ostrom login`"
-                FORBIDDEN -> REFUSED to "refused by your organisation's policy: ${answer.message}"
-                // a member of several organisations names the one the agent works for
-                CONFLICT -> USAGE to "${answer.message}: choose the organisation with `ostrom init`, or set OSTROM_ORG"
+            val (code, message) = when {
+                answer.status == UNAUTHORIZED ->
+                    SIGN_IN_REQUIRED to "not signed in to ${site.serverUrl}: run `ostrom login`"
+                answer.status == FORBIDDEN -> REFUSED to "refused by your organisation's policy: ${answer.message}"
+                // a member of several organisations who named none: the server cannot choose for them
+                answer.type == ORG_REQUIRED -> USAGE to
+                    "you are a member of several organisations: add --org <name>, set OSTROM_ORG, or run `ostrom init`"
                 else -> UNREACHABLE to
                     "your organisation's policy could not be checked (${answer.message}): the agent is not started"
             }
@@ -122,8 +124,8 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
         private const val SIGNATURE_REFUSED = 78
         private const val UNAUTHORIZED = 401
         private const val FORBIDDEN = 403
-        private const val CONFLICT = 409
         private const val USAGE = 64
+        private const val ORG_REQUIRED = "org_required"
         private const val POLICY_MILLIS = 5_000L
         private const val LAUNCH_MILLIS = 10_000L
         private const val MCP_MILLIS = 5_000L

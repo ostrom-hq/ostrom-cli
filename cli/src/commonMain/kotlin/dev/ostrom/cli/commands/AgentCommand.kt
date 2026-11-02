@@ -36,6 +36,7 @@ internal class AgentCommand(private val agent: Agent, private val dependencies: 
         .flag()
     val dryRun by option("--dry-run", help = "Check the launch and show the harness that would apply, then exit").flag()
     val server by option("--server", help = "Ostrom server URL (else OSTROM_URL, else the one of ostrom login)")
+    val org by option("--org", help = "Organisation to act in (else OSTROM_ORG, else the one of ostrom init)")
     val agentArguments by argument("agent-args", help = "Passed to the agent as they are").multiple()
 
     override fun run() {
@@ -57,7 +58,10 @@ internal class AgentCommand(private val agent: Agent, private val dependencies: 
         refuseInClear(serverUrl, "the device's token")
         val credentials = dependencies.credentials(directory).load(serverUrl)
             ?: throw stop(ExitCode.SIGN_IN_REQUIRED, "not signed in to $serverUrl: run `ostrom login`")
-        if (cloud) throw ProgramResult(runBlocking { inTheCloud(CloudSite(serverUrl, credentials.token, cwd())) })
+        val orgId = dependencies.launchOrg(serverUrl, credentials.token, org)
+        if (cloud) {
+            throw ProgramResult(runBlocking { inTheCloud(CloudSite(serverUrl, credentials.token, cwd(), orgId)) })
+        }
         val site = LaunchSite(
             serverUrl = serverUrl,
             credentials = credentials,
@@ -68,8 +72,7 @@ internal class AgentCommand(private val agent: Agent, private val dependencies: 
             home = environment.homeDirectory.orEmpty(),
             pathSeparator = environment.pathListSeparator,
             variable = { environment[it] },
-            org = environment["OSTROM_ORG"]?.takeIf { it.isNotEmpty() }
-                ?: config.get(ConfigKey.ORG),
+            org = orgId,
         )
         val request = LaunchRequest(agent, agentArguments, repo, model, dryRun)
         throw ProgramResult(runBlocking { dependencies.agents.run(request, site) })

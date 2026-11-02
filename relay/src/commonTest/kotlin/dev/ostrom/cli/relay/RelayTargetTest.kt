@@ -17,6 +17,7 @@ class RelayTargetTest {
             // a reopened session's segment (ostrom-server SessionSegments)
             "/api/v1/sessions/s-1~r2/reopen",
             "/api/v1/sessions/s-1~r2/seen",
+            "/api/v1/sessions/ses.a:b/seen",
             "/api/v1/gates",
             "/api/v1/notifications",
             "/api/v1/checks",
@@ -53,6 +54,8 @@ class RelayTargetTest {
             HttpMethod.Post to "/api/v1/sessions/",
             HttpMethod.Get to "/api/v1/gates",
             HttpMethod.Get to "/api/v1/gates/../launches",
+            HttpMethod.Post to "/api/v1/sessions/../seen",
+            HttpMethod.Post to "/api/v1/sessions/./reopen",
             HttpMethod.Get to "/api/v1/gates/g-1/consume",
             HttpMethod.Get to "/api/v1/sessions",
             HttpMethod.Put to "/api/v1/sessions",
