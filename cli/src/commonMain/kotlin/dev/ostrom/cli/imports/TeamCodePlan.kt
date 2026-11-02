@@ -144,7 +144,7 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
         )
         if (expires == null || fields.any { it.isNullOrEmpty() }) return null
         return mapOf(
-            "provider" to providerOf(fields[0].orEmpty()),
+            "provider" to providerOf(fields[0].toString()),
             "providerAccountId" to fields[1],
             "label" to label,
             "email" to row["email"],
