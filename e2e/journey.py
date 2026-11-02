@@ -364,13 +364,13 @@ class Journey:
                 gated = self.gate_workflow(maya)
 
         self.begin("5.2", "ostrom claude: the launch, the session, the hooks")
-        seen = None
         if self.needs(("GET", "/api/v1/policy/agents"), ("POST", "/api/v1/launches"), ("POST", "/api/v1/sessions"),
                       org=True):
-            seen = self.claude(maya)
+            if gated:
+                self.gated_session(maya, tom_email)
+            else:
+                self.claude_ended(self.claude(maya))
         if gated:
-            if seen is not None:
-                self.gate(maya, tom_email, seen)
             self.begin("5.3 cleanup", "the gating workflow, removed on the console")
             status, body, _ = self.call("DELETE", f"/api/v1/workflows/{gated}", session=self.owner_signed_in(maya),
                                         org=self.org_id)
@@ -419,7 +419,22 @@ class Journey:
         done = self.ostrom(maya, "harness", "remove", workflow["id"], "--yes", console=True)
         self.check(done.returncode == 0, f"harness remove ({done.returncode}): {done.stderr.strip()[:300]}")
 
-    def claude(self, maya):
+    def gated_session(self, maya, tom_email):
+        """5.2 to 5.7 with the session alive: held at the gate, answered on the console, then let through in it."""
+        hold = os.path.join(self.work, "hold")
+        started = self.claude(maya, hold)
+        held = wait_for(hold + ".held", started["process"], 120)
+        try:
+            gate = self.gate(maya, tom_email, held) if held else None
+        finally:
+            # whatever became of the yes, the session goes on and ends
+            open(hold, "w").close()
+        seen = self.claude_ended(started)
+        if gate and seen is not None:
+            self.passed(maya, gate, seen)
+
+    def claude(self, maya, hold=None):
+        """Starts `ostrom claude` with the fake agent; [claude_ended] waits for it and checks what it saw."""
         agents = os.path.join(self.work, "agents")
         os.makedirs(agents, exist_ok=True)
         script = os.path.join(agents, "claude.py")
@@ -430,12 +445,36 @@ class Journey:
         os.chmod(os.path.join(agents, "claude"), 0o755)
         report = os.path.join(self.work, "claude-report.json")
         extra = {"PATH": agents + os.pathsep + os.environ["PATH"], "E2E_REPORT": report, "E2E_EXIT": "0",
-                 "E2E_OSTROM": self.binary}
-        done = self.ostrom(maya, "claude", "-p", "hello", extra=extra, timeout=180)
-        self.check(done.returncode == 0, f"ostrom claude runs the agent and hands back its exit 0 ({done.returncode})"
-                                         f": {done.stderr.strip()[-300:]}")
+                 "E2E_OSTROM": self.binary, **({"E2E_HOLD": hold} if hold else {})}
+        # files, not pipes: nobody reads them while the session waits for its yes
+        out, err = (open(os.path.join(self.work, f"claude.{name}"), "w+") for name in ("out", "err"))
+        process = subprocess.Popen([self.binary, "claude", "-p", "hello"], cwd=maya["repo"],
+                                   env=self.environment(maya, False, extra), stdin=subprocess.DEVNULL,
+                                   stdout=out, stderr=err, text=True)
+        return {"process": process, "step": self.step, "report": report, "maya": maya, "out": out, "err": err}
+
+    def claude_ended(self, started):
+        """The end of `ostrom claude`, checked in its own step (5.2); the agent's report, or None."""
+        current, self.step = self.step, started["step"]
+        try:
+            return self.claude_checks(started)
+        finally:
+            self.step = current
+
+    def claude_checks(self, started):
+        maya, report, process = started["maya"], started["report"], started["process"]
+        try:
+            process.wait(timeout=420)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+        stdout, stderr = (said(started[name]) for name in ("out", "err"))
+        self.step["commands"].append({"who": maya["name"], "command": "ostrom claude -p hello",
+                                      "exit": process.returncode, "stdout": stdout, "stderr": stderr})
+        self.check(process.returncode == 0, f"ostrom claude runs the agent and hands back its exit 0 "
+                                            f"({process.returncode}): {stderr.strip()[-300:]}")
         if not self.check(os.path.exists(report), "the agent was started with Ostrom's harness"):
-            return
+            return None
         with open(report) as handle:
             seen = json.load(handle)
         self.check("OSTROM_TOKEN" not in seen["environment"] and
@@ -542,10 +581,18 @@ class Journey:
         status, body, _ = self.call("POST", f"/api/v1/approvals/{approval['id']}/answer", answer, session=tom_session)
         self.check(status in (200, 201), f"{who(tom_email)}'s yes is taken ({status}): {error_of(body)[:200]}")
 
-        self.begin("5.5", "the action passes: ostrom wait answers yes")
-        done = self.ostrom(maya, "wait", gate, "--timeout", "10")
-        self.check(done.returncode == 0, f"ostrom wait exits 0 ({done.returncode}): "
-                                         f"{(done.stdout + done.stderr).strip()[-300:]}")
+        return gate
+
+    def passed(self, maya, gate, seen):
+        """5.5 and 5.7, once the session that was held has ended."""
+        self.begin("5.5", "the action passes: ostrom wait answers yes, in the session")
+        fired = seen.get("hooks", [])
+        waited = next((h for h in fired if h["event"] == "wait-after"), {})
+        self.check(waited.get("code") == 0, f"ostrom wait, in the session, exits 0 ({waited.get('code')}): "
+                                            f"{(waited.get('stdout', '') + waited.get('stderr', '')).strip()[-300:]}")
+        retry = next((h for h in fired if h["event"] == "retry"), {})
+        self.check(retry.get("code") == 0, f"the same deployment, again, passes the hook ({retry.get('code')}): "
+                                           f"{(retry.get('stdout', '') + retry.get('stderr', '')).strip()[-300:]}")
 
         self.begin("5.7", "the signed receipt: listed, pulled, verified")
         # the device's token reads receipts once it has receipts:read (server#83); until then, a console token
@@ -591,6 +638,24 @@ class Journey:
 
 CODE = re.compile(r"one-time code: (\S+)")
 ORG_HEADER = "Ostrom-Org (the organisation of a token bound to none, server#64)"
+
+
+def said(handle):
+    """All a finished process wrote to [handle], closed after."""
+    with handle:
+        handle.seek(0)
+        return handle.read()
+
+
+def wait_for(path, process, seconds):
+    """The JSON a running agent writes at [path], or None when it ends, or [seconds] pass, before."""
+    deadline = time.monotonic() + seconds
+    while not os.path.exists(path):
+        if process.poll() is not None or time.monotonic() > deadline:
+            return None
+        time.sleep(0.2)
+    with open(path) as handle:
+        return json.load(handle)
 
 
 def read_json(raw):
