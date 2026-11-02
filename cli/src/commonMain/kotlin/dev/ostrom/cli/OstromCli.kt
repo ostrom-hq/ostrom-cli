@@ -157,8 +157,12 @@ class OstromCli(private val dependencies: CliDependencies) {
     /** Writes the help or the error message of [error], to stdout or stderr as Clikt decides; nothing without one. */
     internal fun report(root: RootCommand, error: CliktError) {
         val text = (root.getFormattedHelp(error) ?: return).trimEnd() + "\n"
-        // help is the CLI's own text: its colours and links stay; an error may quote an argument, so it is cleaned
-        if (error.printError) dependencies.console.err(text) else dependencies.console.help(text)
+        // only help is the CLI's own text, whose colours and links stay: any other message may quote what others wrote
+        when {
+            error.printError -> dependencies.console.err(text)
+            error is PrintHelpMessage -> dependencies.console.help(text)
+            else -> dependencies.console.out(text)
+        }
     }
 
     /** The full tree, in the order of the help screen. */

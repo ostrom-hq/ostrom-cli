@@ -3,6 +3,7 @@ package dev.ostrom.cli
 
 import com.github.ajalt.clikt.core.Abort
 import com.github.ajalt.clikt.core.PrintHelpMessage
+import com.github.ajalt.clikt.core.PrintMessage
 import com.github.ajalt.clikt.core.ProgramResult
 import com.github.ajalt.clikt.core.UsageError
 import dev.ostrom.cli.api.Download
@@ -424,6 +425,22 @@ class OstromCliTest : CliKit() {
             assertEquals(0, cli().run(arrayOf("config", subcommand, "--help")))
             assertOut("Usage: ostrom config $subcommand")
         }
+    }
+
+    @Test
+    fun onlyHelpIsWrittenAsTheClisOwnTextAnyOtherMessageIsCleaned() {
+        val asked = listOf(listOf("--help"), listOf("help"), listOf("help", "plumbing"), listOf("logs", "--help"))
+        for (arguments in asked) {
+            console.help.clear()
+            assertEquals(0, cli().run(arguments.toTypedArray()))
+            assertTrue(console.help.isNotEmpty(), arguments.joinToString(" "))
+        }
+        // a message that is not help, written to stdout, may quote a server's text: it goes through out()
+        console.help.clear()
+        console.out.clear()
+        val cli = cli()
+        cli.report(cli.tree(), PrintMessage("from the server"))
+        assertEquals("" to "from the server\n", console.help.toString() to console.out.toString())
     }
 
     @Test

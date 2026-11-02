@@ -23,7 +23,7 @@ internal class OstromHelpFormatter(context: Context) : MordantHelpFormatter(cont
     ): String {
         val command = context.commandNameWithParents()
         if (error != null) {
-            // on stderr, which may not be the terminal stdout is: never a colour there
+            // it quotes the arguments: nothing in it may drive a terminal, whatever stderr is (a file included)
             val help = terminalSafe(super.formatHelp(error, prolog, epilog, parameters, programName)).trimEnd()
             return "$help\n\nRun '${command.joinToString(" ")} --help' for usage.\n"
         }

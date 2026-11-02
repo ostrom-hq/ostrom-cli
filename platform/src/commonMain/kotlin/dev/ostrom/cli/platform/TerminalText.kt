@@ -6,8 +6,8 @@ package dev.ostrom.cli.platform
  * the agent, a server's message, the names of an organisation), and none of it may drive the terminal. Lines and tabs
  * stay; every escape sequence goes whole, colours included (CSI, OSC, DCS and the others, nF, with their 7-bit and
  * 8-bit introducers), and so do the other control characters (a carriage return prints over the line) and the
- * characters that reorder, hide or blank text (bidi marks, embeddings, overrides and isolates, line and paragraph
- * separators, zero-width and blank characters, tags). The CLI's own colours and links go through [Console.help].
+ * characters that reorder or hide text (bidi marks, embeddings, overrides and isolates, line and paragraph
+ * separators, zero-width characters, tags). The CLI's own colours and links go through [Console.help].
  *
  * One pass, linear in the length of [text] whatever it holds. A surrogate pair split across two writes is not seen.
  */
@@ -94,7 +94,7 @@ private class TerminalScan(private val text: String) {
 private fun shown(c: Char): Boolean = c == '\n' || c == '\t' || !hidden(c)
 
 /** A control character (C0, DEL, C1), or a character that reorders, breaks or hides text. */
-private fun hidden(c: Char): Boolean = c < ' ' || c in '\u007F'..'\u009F' || c in HIDDEN
+private fun hidden(c: Char): Boolean = c < ' ' || c in '\u007F'..'\u009F' || c >= '\u00AD' && c in HIDDEN
 
 private const val ESC = '\u001B'
 private const val BEL = '\u0007'
@@ -114,11 +114,12 @@ private const val TAG_HIGH = '\uDB40'
 private val TAG_LOW = '\uDC00'..'\uDC7F'
 
 /**
- * Soft hyphen, combining grapheme joiner, ALM, the Hangul fillers, the Mongolian variation selectors and vowel
- * separator, zero-width space, LRM, RLM, line and paragraph separators, the embeddings and overrides, word joiner, the
- * invisible operators, the isolates, the blank Braille pattern, the byte order mark and the interlinear annotations.
- * The zero-width (non-)joiners stay: scripts and emoji need them.
+ * Soft hyphen, ALM, zero-width space, LRM, RLM, line and paragraph separators, the embeddings and overrides, word
+ * joiner, the invisible operators, the isolates, the deprecated format controls, the byte order mark and the
+ * interlinear annotations. Characters a script needs stay, even when they show nothing alone: the zero-width
+ * (non-)joiners, the variation selectors, the combining grapheme joiner, the Hangul fillers. Blank characters stay
+ * too, as spaces do: they pad, they do not hide.
  */
-private const val HIDDEN = "\u00AD\u034F\u061C\u115F\u1160\u180B\u180C\u180D\u180E\u200B\u200E\u200F" +
-    "\u2028\u2029\u202A\u202B\u202C\u202D\u202E\u2060\u2061\u2062\u2063\u2064\u2066\u2067\u2068\u2069" +
-    "\u2800\u3164\uFEFF\uFFA0\uFFF9\uFFFA\uFFFB"
+private const val HIDDEN = "\u00AD\u061C\u200B\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E\u2060" +
+    "\u2061\u2062\u2063\u2064\u2066\u2067\u2068\u2069\u206A\u206B\u206C\u206D\u206E\u206F\uFEFF\uFFF9" +
+    "\uFFFA\uFFFB"

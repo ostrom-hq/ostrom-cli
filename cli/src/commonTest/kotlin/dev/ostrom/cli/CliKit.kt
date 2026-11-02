@@ -45,7 +45,15 @@ open class CliKit {
     protected class FakeConsole : Console {
         val out = StringBuilder()
         val err = StringBuilder()
+
+        /** What was written as the CLI's own help (also in [out]): its colours and links are kept. */
+        val help = StringBuilder()
         override fun out(text: String) {
+            out.append(text)
+        }
+
+        override fun help(text: String) {
+            help.append(text)
             out.append(text)
         }
 
