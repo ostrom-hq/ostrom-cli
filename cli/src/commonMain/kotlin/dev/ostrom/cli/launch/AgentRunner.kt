@@ -49,7 +49,7 @@ class AgentRunnerImpl(
 ) : AgentRunner {
     override suspend fun run(request: LaunchRequest, site: LaunchSite): Int {
         val dependencies = LaunchDependencies(
-            server = ServerJson(ApiServerTransport(api(site.serverUrl))),
+            server = ServerJson(ApiServerTransport(api(site.serverUrl), site.org)),
             files = files,
             finder = finder,
             processes = processes,

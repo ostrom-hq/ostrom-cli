@@ -29,7 +29,7 @@ class TerminalChannelTest {
     @Test
     fun anUnreachableServerIsUnreachable() = runBlocking {
         assertFailsWith<ServerUnreachableException> {
-            TerminalChannels.opener("ostrom/1")("http://127.0.0.1:1", "/t", "device")
+            TerminalChannels.opener("ostrom/1")("http://127.0.0.1:1", "/t", "device", null)
         }
         Unit
     }

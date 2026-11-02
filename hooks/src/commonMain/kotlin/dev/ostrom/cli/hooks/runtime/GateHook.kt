@@ -153,7 +153,8 @@ class GateHook(
 
     private fun reportSeen(event: JsonObject, subject: ToolSubject) {
         val (kind, name) = Seen.of(event, subject.text) ?: return
-        val body = jsonOf("kind" to kind, "name" to name, "via" to event["tool_name"])
+        // `via` is how Ostrom learnt it (`hook` or `mcp`, ostrom-server `SeenRequest`), not the agent's tool
+        val body = jsonOf("kind" to kind, "name" to name, "via" to "hook")
         val agentSession = event.string("session_id")
         writes.send(ids.of(agentSession), agentSession, SEEN_MILLIS) { session -> Routes.seen(session) to body }
     }
