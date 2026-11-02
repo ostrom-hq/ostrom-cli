@@ -134,6 +134,7 @@ class ReceiptCommandsTest {
                 override suspend fun attach(id: String, site: CloudSite) = 0
             },
             selfUpdate = SelfUpdate({ _, _ -> Download.Missing(404) }, fileSystem, { _, _ -> false }, {}, noSessions),
+            stderrIsTerminal = { false },
             postHogKey = "",
             sendStatistics = { _, _ -> },
         ),

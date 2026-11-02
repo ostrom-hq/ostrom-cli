@@ -261,7 +261,7 @@ class OstromCliTest : CliKit() {
         assertEquals(0, cli().run(arrayOf("help")))
         assertTrue(console.out.contains("Commands:"), console.out.toString())
         assertEquals(64, cli().run(arrayOf("help", "nope")))
-        assertTrue(console.err.contains("Unknown help topic \"nope\". Topics: plumbing."))
+        assertTrue(console.err.contains("Unknown help topic \"nope\". Topics: plumbing, exit-codes."))
     }
 
     @Test
@@ -612,6 +612,7 @@ class OstromCliTest : CliKit() {
                 override suspend fun attach(id: String, site: CloudSite) = 0
             },
             selfUpdate = SelfUpdate({ _, _ -> Download.Missing(404) }, fileSystem, { _, _ -> false }, {}, noSessions),
+            stderrIsTerminal = { false },
             postHogKey = "",
             sendStatistics = { _, _ -> },
         )

@@ -141,7 +141,8 @@ class UsageStatistics(
         private const val ON = "on"
         private const val OFF = "off"
         private val DISABLING_VALUES = setOf("0", "false", "off", "no")
-        private val NOT_MEASURED = setOf("hook", "mcp", "wait", "check", "telemetry")
+        /** The plumbing, and `telemetry` itself: never measured. */
+        internal val NOT_MEASURED = setOf("hook", "mcp", "wait", "check", "telemetry")
         private const val USAGE = 64
         private val BUCKETS = listOf(10L, 30L, 100L, 300L, 1_000L, 3_000L, 10_000L)
 
