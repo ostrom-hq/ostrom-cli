@@ -15,7 +15,7 @@ import dev.ostrom.cli.platform.RemoteUrls
  * @return `owner/name`, or the folder's name.
  */
 internal fun launchRepository(top: String, capture: ProcessCapture, say: (String) -> Unit): String {
-    val origin = RemoteUrls.origin(top, capture)
+    val origin = RemoteUrls.origin(top, capture, GIT_MILLIS)
     if (origin != null) return origin
     val name = RemoteUrls.folderName(top)
     // never the URL itself: it may carry a token
@@ -25,3 +25,5 @@ internal fun launchRepository(top: String, capture: ProcessCapture, say: (String
     )
     return name
 }
+
+private const val GIT_MILLIS = 5_000

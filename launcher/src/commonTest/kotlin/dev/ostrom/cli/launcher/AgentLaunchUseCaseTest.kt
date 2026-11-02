@@ -442,6 +442,7 @@ class AgentLaunchUseCaseTest {
         val origins = listOf(
             CaptureResult.Exited(2, "error: No such remote 'origin'\n"),
             CaptureResult.Exited(0, "/srv/git/acme-api.git\n"),
+            CaptureResult.Exited(0, "https://x-access-token:secret@git.example/solo.git\n"),
             CaptureResult.NotFound,
         )
         for (origin in origins) {

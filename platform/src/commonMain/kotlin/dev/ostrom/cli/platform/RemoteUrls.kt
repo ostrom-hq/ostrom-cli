@@ -22,7 +22,10 @@ object RemoteUrls {
      *     an owner and a name, or no URL.
      */
     fun ownerName(url: String): String? {
-        val path = remotePath(clean(url)) ?: return null
+        val trimmed = clean(url)
+        // a file:// remote is a folder on this machine: its path names no owner (slug, the gate's label, keeps it)
+        if (trimmed.startsWith(FILE, ignoreCase = true)) return null
+        val path = remotePath(trimmed) ?: return null
         val parts = path.split('/').filter { it.isNotEmpty() }
         return if (parts.size < 2) null else parts.takeLast(2).joinToString("/")
     }
@@ -32,10 +35,11 @@ object RemoteUrls {
      *
      * @param top The repository's top-level folder.
      * @param capture Runs git.
+     * @param timeoutMillis How long git may take.
      * @return `owner/name`, or null: no origin, a local one, or no git.
      */
-    fun origin(top: String, capture: ProcessCapture): String? {
-        val result = capture.capture(listOf("git", "-C", top, "remote", "get-url", "origin"), GIT_MILLIS)
+    fun origin(top: String, capture: ProcessCapture, timeoutMillis: Int): String? {
+        val result = capture.capture(listOf("git", "-C", top, "remote", "get-url", "origin"), timeoutMillis)
         return ownerName(if (result is CaptureResult.Exited && result.code == 0) result.output else "")
     }
 
@@ -47,12 +51,11 @@ object RemoteUrls {
 
     private fun clean(url: String) = url.trim().trimEnd('/').removeSuffix(".git")
 
-    /** The path of a remote on a host, or null for a local path (`file://` included). */
+    /** The path of a remote on a host, or null for a local path. */
     private fun remotePath(trimmed: String): String? {
         val scheme = trimmed.indexOf("://")
         val colon = trimmed.indexOf(':')
         return when {
-            trimmed.startsWith(FILE, ignoreCase = true) -> null
             scheme >= 0 -> trimmed.substring(scheme + "://".length).substringAfter('/', "")
             colon > 0 && '/' !in trimmed.substring(0, colon) && !isWindowsPath(trimmed) -> trimmed.substring(colon + 1)
             else -> null
@@ -64,7 +67,6 @@ object RemoteUrls {
         path.startsWith("\\\\") || WINDOWS_DRIVE.matches(path.take(DRIVE))
 
     private const val DRIVE = 3 // `C:\`
-    private const val FILE = "file:"
-    private const val GIT_MILLIS = 3_000
+    private const val FILE = "file://"
     private val WINDOWS_DRIVE = Regex("[A-Za-z]:[\\\\/]")
 }
