@@ -11,6 +11,7 @@ import dev.ostrom.cli.cloud.CloudRunner
 import dev.ostrom.cli.cloud.CloudRunnerImpl
 import dev.ostrom.cli.hooks.HookRunner
 import dev.ostrom.cli.hooks.HookRunnerImpl
+import dev.ostrom.cli.hooks.LazyHookProcessor
 import dev.ostrom.cli.hooks.runtime.GateWait
 import dev.ostrom.cli.hooks.runtime.RelayCalls
 import dev.ostrom.cli.hooks.runtime.SessionHooks
@@ -234,13 +235,16 @@ class CliDependencies(
 
         /** The hook runner alone, for the fast path of `main` (nothing else is built). */
         fun hookRunner(console: Console, environment: Environment): HookRunner {
-            val processor = SessionHooks.processor(
-                environment,
-                FileSystem.SYSTEM,
-                ProcessCaptureImpl(),
-                LoopbackHttpImpl(),
-                SessionHooks::epochMillis,
-            )
+            // built inside the runner's guard: a failure to build it refuses the tool too
+            val processor = LazyHookProcessor {
+                SessionHooks.processor(
+                    environment,
+                    FileSystem.SYSTEM,
+                    ProcessCaptureImpl(),
+                    LoopbackHttpImpl(),
+                    SessionHooks::epochMillis,
+                )
+            }
             return HookRunnerImpl(console, environment, processor)
         }
     }

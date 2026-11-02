@@ -46,14 +46,28 @@ class HookRunnerTest {
             error("a case the gate never met")
     }
 
+    private val failed = "${GateTexts.GATE_FAILED} (IllegalStateException)"
+
     @Test
     fun aGateThatFailsRefusesTheActionInTheAgentsDialect() {
         // exit 2 is the only code every agent reads as "do not run": a crash (any other code) let the tool run
         val console = FakeConsole(StandardInput.Read("{}".encodeToByteArray()))
         val environment = FakeEnvironment(mapOf("OSTROM_HOOK_DIALECT" to "hermes"))
         assertEquals(2, HookRunnerImpl(console, environment, failing).run(listOf("gate")))
-        assertEquals("""{"decision":"block","reason":"${GateTexts.GATE_FAILED}"}""" + "\n", console.out.toString())
-        assertEquals(GateTexts.GATE_FAILED + "\n", console.err.toString())
+        assertEquals("""{"decision":"block","reason":"$failed"}""" + "\n", console.out.toString())
+        assertEquals("$failed\n", console.err.toString())
+        val claude = FakeConsole(StandardInput.Read("""{"hook_event_name":"PreToolUse"}""".encodeToByteArray()))
+        assertEquals(2, HookRunnerImpl(claude, FakeEnvironment(), failing).run(listOf("gate")))
+        assertEquals("" to "$failed\n", claude.out.toString() to claude.err.toString())
+    }
+
+    @Test
+    fun aGateThatFailsAfterTheToolRanRefusesNothing() {
+        // the tool ran already: "it was not run, try again" would make the agent run it twice
+        val console = FakeConsole(StandardInput.Read("""{"hook_event_name":"PostToolUse"}""".encodeToByteArray()))
+        assertEquals(1, HookRunnerImpl(console, FakeEnvironment(), failing).run(listOf("gate")))
+        val said = console.out.toString() to console.err.toString()
+        assertEquals("" to "ostrom hook gate failed (IllegalStateException)\n", said)
     }
 
     @Test
@@ -62,6 +76,32 @@ class HookRunnerTest {
         assertEquals(1, HookRunnerImpl(console, FakeEnvironment(), failing).run(listOf("session")))
         assertEquals("", console.out.toString())
         assertEquals("ostrom hook session failed (IllegalStateException)\n", console.err.toString())
+    }
+
+    @Test
+    fun aProcessorThatCannotBeBuiltOrAnInputThatCannotBeReadRefusesTheTool() {
+        val unbuilt = FakeConsole(StandardInput.Read("{}".encodeToByteArray()))
+        val processor = LazyHookProcessor { error("the relay's token file cannot be read") }
+        assertEquals(2, HookRunnerImpl(unbuilt, FakeEnvironment(), processor).run(listOf("gate")))
+        assertEquals("$failed\n", unbuilt.err.toString())
+        val built = FakeConsole(StandardInput.Read("{}".encodeToByteArray()))
+        assertEquals(0, HookRunnerImpl(built, FakeEnvironment(), LazyHookProcessor { passThrough }).run(listOf("gate")))
+        val unread = ThrowingConsole(onRead = true)
+        assertEquals(2, HookRunnerImpl(unread, FakeEnvironment(), passThrough).run(listOf("gate")))
+    }
+
+    @Test
+    fun aReplyThatCannotBeWrittenKeepsItsExitCode() {
+        assertEquals(2, HookRunnerImpl(ThrowingConsole(onRead = false), FakeEnvironment(), deny).run(listOf("gate")))
+    }
+
+    /** A console whose stdin read, or else every write, fails (an agent that closed its pipes). */
+    private class ThrowingConsole(private val onRead: Boolean) : Console {
+        override fun out(text: String) = error("stdout is closed")
+        override fun err(text: String) = error("stderr is closed")
+        override val isInteractive = false
+        override fun readStandardInput(maxBytes: Int, timeoutMillis: Int): StandardInput =
+            if (onRead) error("stdin failed") else StandardInput.Read("{}".encodeToByteArray())
     }
 
     @Test

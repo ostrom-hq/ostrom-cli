@@ -19,6 +19,17 @@ interface HookRunner {
 }
 
 /**
+ * [HookProcessor] built on its first event, inside [HookRunnerImpl]'s guard: building the session's processor reads
+ * files and the environment, and a failure there must refuse the tool like any other failure of the gate.
+ */
+class LazyHookProcessor(build: () -> HookProcessor) : HookProcessor {
+    private val built by lazy(build)
+
+    override fun process(kind: HookKind, input: ByteArray?, dialect: String): HookReply =
+        built.process(kind, input, dialect)
+}
+
+/**
  * [HookRunner] built for start-up time: it is called before every tool call of every agent, so `main` reaches it
  * before building the command tree, it reads stdin with a deadline, and writes without buffering. With
  * `OSTROM_HOOK_TIMING=1` it reports its own time on stderr (from entering the runner to the reply written).
@@ -35,32 +46,53 @@ class HookRunnerImpl(
             console.err("usage: ostrom hook gate|session (stdin: the hook event)\n")
             return USAGE
         }
-        // an event that is too large, late or unreadable is passed on as null: the gate then refuses (S2-30)
-        val input = (console.readStandardInput(MAX_EVENT_BYTES, READ_TIMEOUT_MILLIS) as? StandardInput.Read)?.bytes
         val dialect = environment["OSTROM_HOOK_DIALECT"] ?: "claude"
-        val reply = replyOf(kind, input, dialect)
-        console.out(reply.stdout)
-        console.err(reply.stderr)
-        if (environment["OSTROM_HOOK_TIMING"] == "1") {
-            console.err("ostrom hook ${kind.command}: ${milliseconds(start.elapsedNow().inWholeMicroseconds)} ms\n")
+        val reply = replyOf(kind, dialect)
+        // a reply that cannot be written still exits with its code: 2 refuses even with stdout closed
+        written {
+            console.out(reply.stdout)
+            console.err(reply.stderr)
+            if (environment["OSTROM_HOOK_TIMING"] == "1") {
+                console.err("ostrom hook ${kind.command}: ${milliseconds(start.elapsedNow().inWholeMicroseconds)} ms\n")
+            }
         }
         return reply.exitCode
     }
 
     /**
-     * The processor's reply; when it fails, a refusal for the gate (an agent runs the tool on any exit code but 2, a
-     * crash's included) and a line on stderr for the session hook, which never blocks.
+     * The processor's reply to the event on stdin. When anything fails on the way (the read, the processor, a
+     * [LazyHookProcessor] that cannot be built), an agent would run the tool on the crash's exit code, which is not 2.
+     * So the gate refuses the tool before it runs, and says what failed. After the tool ran, or for the session hook,
+     * nothing is refused (the tool ran already, a session is never refused): a line on stderr and exit 1.
+     *
+     * [Throwable], not [Exception]: a stack overflow on a hostile command must not let the tool through either. A
+     * process out of memory may fail again while it refuses, as it would have crashed anyway.
      */
-    @Suppress("TooGenericExceptionCaught") // whatever the failure, the gate must not let the tool through
-    private fun replyOf(kind: HookKind, input: ByteArray?, dialect: String): HookReply = try {
-        processor.process(kind, input, dialect)
-    } catch (failure: Throwable) {
-        when (kind) {
-            HookKind.GATE -> HookReplies(dialect).deny(GateTexts.GATE_FAILED)
-            HookKind.SESSION -> {
-                val said = "ostrom hook session failed (${failure::class.simpleName})\n"
-                HookReply(stderr = said, exitCode = FAILED)
+    @Suppress("TooGenericExceptionCaught")
+    private fun replyOf(kind: HookKind, dialect: String): HookReply {
+        // an event that is too large, late or unreadable is passed on as null: the gate then refuses (S2-30)
+        var input: ByteArray? = null
+        return try {
+            input = (console.readStandardInput(MAX_EVENT_BYTES, READ_TIMEOUT_MILLIS) as? StandardInput.Read)?.bytes
+            processor.process(kind, input, dialect)
+        } catch (failure: Throwable) {
+            val what = failure::class.simpleName
+            val before = kind == HookKind.GATE && HookEvent.parse(input).name != POST_TOOL_USE
+            if (before) {
+                HookReplies(dialect).deny("${GateTexts.GATE_FAILED} ($what)")
+            } else {
+                HookReply(stderr = "ostrom hook ${kind.command} failed ($what)\n", exitCode = FAILED)
             }
+        }
+    }
+
+    /** Runs [write]; a stream that cannot be written (closed by the agent) changes nothing to the exit code. */
+    @Suppress("TooGenericExceptionCaught", "SwallowedException")
+    private fun written(write: () -> Unit) {
+        try {
+            write()
+        } catch (_: Throwable) {
+            // nothing more can be said: the exit code says it
         }
     }
 
@@ -81,8 +113,11 @@ class HookRunnerImpl(
         /** An agent pipes its event at once; past this, the hook answers without it (the gate then refuses). */
         const val READ_TIMEOUT_MILLIS = 1_000
 
-        /** A session hook that failed: any code but 2, which an agent never reads as a refusal of the session. */
+        /** A hook that failed and refuses nothing: any code but 2, which an agent reads as a refusal. */
         const val FAILED = 1
+
+        /** The event after a tool ran, whatever the agent's name for it ([HookEvent.parse] normalises it). */
+        const val POST_TOOL_USE = "PostToolUse"
 
         /** sysexits EX_USAGE, as in the CLI's exit code table. */
         const val USAGE = 64
