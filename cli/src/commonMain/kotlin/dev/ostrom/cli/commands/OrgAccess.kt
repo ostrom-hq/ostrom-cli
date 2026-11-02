@@ -37,8 +37,8 @@ internal data class Org(val id: String, val slug: String, val name: String, val 
  * @property server The server's JSON API, every call carrying `Ostrom-Org`.
  * @property console The console of the server, where what the CLI cannot do is done.
  * @property consoleToken True when the token is `OSTROM_TOKEN` (a token made on the console), not the device's.
- * @property admin The tokens of `ostrom login --admin`, read only by a governance write.
- * @param dependencies The clock, the terminal and the pause a governance confirmation is waited on with.
+ * @param dependencies The tokens of `ostrom login --admin`, and the clock, the terminal and the pause a governance
+ *   confirmation is waited on with.
  */
 internal class OrgAccess(
     val signed: SignedIn,
@@ -46,9 +46,11 @@ internal class OrgAccess(
     val server: ServerJson,
     val console: String,
     val consoleToken: Boolean,
-    val admin: AdminTokens,
     private val dependencies: CliDependencies,
 ) {
+    /** The tokens of `ostrom login --admin`, read only by a governance write. */
+    val admin: AdminTokens = dependencies.adminTokens(dependencies.directory())
+
     /** The time, in milliseconds since the epoch. */
     val clock: () -> Long get() = dependencies.clock
 
@@ -152,7 +154,7 @@ internal fun CliDependencies.orgAccess(
     val consoleToken = environment[LaunchVariables.LAUNCH_ID].isNullOrEmpty() &&
         !environment[LaunchVariables.DEVICE_TOKEN].isNullOrEmpty()
     val server = ServerJson(ApiServerTransport(api(signed.serverUrl), org.id))
-    return OrgAccess(signed, org, server, console, consoleToken, adminTokens(directory()), this)
+    return OrgAccess(signed, org, server, console, consoleToken, this)
 }
 
 /** The organisations the caller is a member of (`GET /api/v1/orgs`). */

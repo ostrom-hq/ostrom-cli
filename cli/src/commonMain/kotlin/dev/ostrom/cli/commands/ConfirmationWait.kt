@@ -84,17 +84,19 @@ internal class ConfirmationWait(
 
     private fun answered(view: JsonObject, where: String): JsonObject {
         val by = view.child("answeredBy")?.text("login")?.let { " by @$it" } ?: ""
-        val (code, message) = when (val status = view.text("status")) {
-            CONFIRMED -> {
+        // a when on each status, not on the string: its hash switch would hold a branch no answer reaches
+        val status = view.text("status")
+        val (code, message) = when {
+            status == CONFIRMED -> {
                 access.terminal.err("✓ Confirmed$by on the console.\n")
                 return view.child("result") ?: JsonObject(emptyMap())
             }
-            REFUSED -> ExitCode.REFUSED to "Refused$by on the console: nothing was changed."
-            EXPIRED -> ExitCode.STILL_WAITING to
+            status == REFUSED -> ExitCode.REFUSED to "Refused$by on the console: nothing was changed."
+            status == EXPIRED -> ExitCode.STILL_WAITING to
                 "Nobody confirmed it in time: nothing was changed. Run the command again to ask again."
-            PENDING -> ExitCode.STILL_WAITING to "No answer yet, and the CLI stops waiting. $where"
+            status == PENDING -> ExitCode.STILL_WAITING to "No answer yet, and the CLI stops waiting. $where"
             // confirmed, but the write was refused (what it changes moved meanwhile, a version conflict)
-            FAILED -> {
+            status == FAILED -> {
                 val why = view.child("error")?.text("message") ?: "the server did not say why."
                 ExitCode.REFUSED to "Confirmed$by, but not written: $why"
             }
