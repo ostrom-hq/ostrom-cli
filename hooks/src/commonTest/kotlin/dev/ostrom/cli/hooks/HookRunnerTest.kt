@@ -43,7 +43,7 @@ class HookRunnerTest {
 
     private val failing = object : HookProcessor {
         override fun process(kind: HookKind, input: ByteArray?, dialect: String): HookReply =
-            throw IllegalStateException("a case the gate never met")
+            error("a case the gate never met")
     }
 
     @Test
