@@ -716,7 +716,9 @@ def main():
     parser.add_argument("--pace", type=float, default=0, help="seconds to wait before each step (the film)")
     parser.add_argument("--perf-runs", type=int, default=100, help="calls per latency series in 5.8 (0: none)")
     parser.add_argument("--max-local-p95-ms", type=float, default=20, help="5.8: a local decision, at p95")
-    parser.add_argument("--max-server-p95-ms", type=float, default=150, help="5.8: a round trip to Ostrom, at p95")
+    # 75 ms, not the 150 first proposed: the journey measured 13.7 ms (policy asked) and 25.1 ms (gated) at p95 (run
+    # 41500895660); 150 would let a sixfold regression through, 75 keeps three times the gated one for the runner's noise.
+    parser.add_argument("--max-server-p95-ms", type=float, default=75, help="5.8: a round trip to Ostrom, at p95")
     parser.add_argument("--report", help="write every step as JSON there")
     parser.add_argument("--work", help="the folder of the machines (default: a new temporary one)")
     options = parser.parse_args()

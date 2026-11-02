@@ -20,6 +20,9 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK_BUDGET_MS = 15
+# A local decision at p95, in a session: the journey measured 8.1 ms against the real server (5.8, run 41500895660);
+# 20 ms leaves the shared runner its noise.
+HOOK_P95_BUDGET_MS = 20
 START_BUDGET_MS = 30
 failures = []
 
@@ -96,7 +99,7 @@ def scenario_claude(binary, work):
     try:
         home, agents, repo = setup(work)
         done, report = launch(binary, server, home, agents, repo, work, "claude", ["-p", "hello"],
-                              {"E2E_TIMED_RUNS": "30"})
+                              {"E2E_TIMED_RUNS": "60"})
         check(done.returncode == 3, f"the agent's exit code is ostrom's (got {done.returncode})")
         environment = report["environment"]
         check("OSTROM_TOKEN" not in environment, "the device token never reaches the agent")
@@ -118,6 +121,8 @@ def scenario_claude(binary, work):
         check(timing["median"] < HOOK_BUDGET_MS,
               f"in a session, ostrom hook gate on a harmless tool (relay asked, signed policy checked): median "
               f"{timing['median']:.1f} ms (p95 {timing['p95']:.1f}) < {HOOK_BUDGET_MS} ms")
+        check(timing["p95"] < HOOK_P95_BUDGET_MS,
+              f"in a session, the same harmless tool at p95: {timing['p95']:.1f} ms < {HOOK_P95_BUDGET_MS} ms")
         tampered = hooks[("PreToolUse", "echo after-tampering")]
         check(tampered["code"] == 2 and "not the one Ostrom signed and laid down" in tampered["stderr"],
               f"a package rewritten by the agent holds every action (exit {tampered['code']}: "
