@@ -34,10 +34,10 @@ sealed interface StandardInput {
  * within milliseconds, and the MCP server must never mix logs into its JSON-RPC stream.
  */
 interface Console {
-    /** Writes [text] to stdout as UTF-8, as is (no newline added). */
+    /** Writes [text] to stdout as UTF-8, as is (no newline added; on a terminal, [terminalSafe]). */
     fun out(text: String)
 
-    /** Writes [text] to stderr as UTF-8, as is (no newline added). */
+    /** Writes [text] to stderr as UTF-8, as is (no newline added; on a terminal, [terminalSafe]). */
     fun err(text: String)
 
     /** True when stdout is a terminal (colours and questions are allowed), false in a pipe, a CI log or an agent. */
@@ -55,8 +55,13 @@ interface Console {
     fun readStandardInput(maxBytes: Int, timeoutMillis: Int): StandardInput
 }
 
-/** [Console] over the file descriptors (POSIX) or the standard handles (Windows). */
-class ConsoleImpl : Console {
+/**
+ * [Console] over the file descriptors (POSIX) or the standard handles (Windows). What goes to a terminal is cleaned
+ * ([terminalSafe]); what goes to a pipe or a file (a hook's answer, the MCP stream, `--json`) is written as it is.
+ *
+ * @param terminal Whether a descriptor is a terminal.
+ */
+class ConsoleImpl(private val terminal: (Int) -> Boolean = ::isTerminal) : Console {
     override fun out(text: String) = writeTo(1, text)
 
     override fun err(text: String) = writeTo(2, text)
@@ -70,7 +75,8 @@ class ConsoleImpl : Console {
 
     private fun writeTo(descriptor: Int, text: String) {
         if (text.isEmpty()) return
-        writeBytes(descriptor, text.encodeToByteArray())
+        val shown = if (terminal(descriptor)) terminalSafe(text) else text
+        writeBytes(descriptor, shown.encodeToByteArray())
     }
 }
 
