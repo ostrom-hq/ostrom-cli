@@ -5,6 +5,8 @@ import dev.ostrom.cli.api.Download
 import dev.ostrom.cli.api.OstromApi
 import dev.ostrom.cli.api.ServerRequest
 import dev.ostrom.cli.api.ServerResponse
+import dev.ostrom.cli.cloud.CloudRunner
+import dev.ostrom.cli.cloud.CloudSite
 import dev.ostrom.cli.hooks.HookRunner
 import dev.ostrom.cli.hooks.runtime.GateWait
 import dev.ostrom.cli.imports.FakeMysql
@@ -13,6 +15,7 @@ import dev.ostrom.cli.launcher.FileCredentialStore
 import dev.ostrom.cli.launcher.LaunchFilesImpl
 import dev.ostrom.cli.launcher.LaunchRequest
 import dev.ostrom.cli.launcher.LaunchSite
+import dev.ostrom.cli.launcher.cloud.CloudStart
 import dev.ostrom.cli.mcp.BridgeTarget
 import dev.ostrom.cli.mcp.McpServer
 import dev.ostrom.cli.platform.Console
@@ -65,6 +68,8 @@ open class CliKit {
     protected val statistics = mutableListOf<String>()
     protected val withServer = mapOf("HOME" to "/home/maya", "OSTROM_URL" to "https://ostrom.example")
     protected val launches = mutableListOf<Pair<LaunchRequest, LaunchSite>>()
+    protected val clouds = mutableListOf<Pair<CloudStart, CloudSite>>()
+    protected val attached = mutableListOf<Pair<String, CloudSite>>()
     protected val waits = mutableListOf<Long>()
     protected val typed = ArrayDeque<String>()
     protected val opened = mutableListOf<String>()
@@ -150,6 +155,11 @@ open class CliKit {
                 sessions = AgentSessionsImpl(FakeEnvironment(environment), fileSystem, "/tmp", noRelay),
             ),
             capture = capture,
+            cloud = object : CloudRunner {
+                override suspend fun start(start: CloudStart, site: CloudSite) = 5.also { clouds += start to site }
+
+                override suspend fun attach(id: String, site: CloudSite) = 6.also { attached += id to site }
+            },
             postHogKey = postHogKey,
             sendStatistics = { _, body -> statistics += body },
             secrets = secrets,

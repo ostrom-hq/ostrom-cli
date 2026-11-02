@@ -5,7 +5,10 @@ import dev.ostrom.cli.api.DownloadsImpl
 import dev.ostrom.cli.api.OstromApi
 import dev.ostrom.cli.api.OstromApiImpl
 import dev.ostrom.cli.api.StatisticsSender
+import dev.ostrom.cli.api.TerminalChannels
 import dev.ostrom.cli.api.TraceContext
+import dev.ostrom.cli.cloud.CloudRunner
+import dev.ostrom.cli.cloud.CloudRunnerImpl
 import dev.ostrom.cli.hooks.HookRunner
 import dev.ostrom.cli.hooks.HookRunnerImpl
 import dev.ostrom.cli.hooks.runtime.GateWait
@@ -36,6 +39,7 @@ import dev.ostrom.cli.platform.LoopbackHttpImpl
 import dev.ostrom.cli.platform.ProcessCapture
 import dev.ostrom.cli.platform.ProcessCaptureImpl
 import dev.ostrom.cli.platform.ProcessLauncherImpl
+import dev.ostrom.cli.platform.RawTerminalImpl
 import dev.ostrom.cli.platform.SecretStore
 import dev.ostrom.cli.platform.currentExecutable
 import dev.ostrom.cli.platform.systemSecretStore
@@ -71,6 +75,7 @@ import kotlin.time.TimeSource
  * @property capture Runs short child processes and reads their output (`mysql` for `ostrom import teamcode`).
  * @property readLine Reads a line the developer typed, or null at the end of the input.
  * @property openUrl Opens a page in the developer's browser; false when it could not.
+ * @property cloud Runs `ostrom <agent> --cloud` and `ostrom attach`.
  * @property selfUpdate `ostrom update`.
  * @property secrets Opens the secret store of this device (system store, or encrypted file). Each call chooses and
  * probes the store again (up to a second on Linux): a command calls it once and keeps the store; the hook's fast
@@ -98,6 +103,7 @@ class CliDependencies(
     val capture: ProcessCapture,
     val readLine: () -> String?,
     val openUrl: (String) -> Boolean,
+    val cloud: CloudRunner,
     val selfUpdate: SelfUpdate,
     val postHogKey: String,
     val sendStatistics: suspend (url: String, body: String) -> Unit,
@@ -164,6 +170,13 @@ class CliDependencies(
                 capture = ProcessCaptureImpl(),
                 readLine = ::readlnOrNull,
                 openUrl = BrowserOpener(ProcessLauncherImpl(), environment.operatingSystem)::open,
+                cloud = CloudRunnerImpl(
+                    console = console,
+                    api = api,
+                    channels = TerminalChannels.opener(USER_AGENT),
+                    terminal = RawTerminalImpl(),
+                    capture = ProcessCaptureImpl(),
+                ),
                 selfUpdate = selfUpdate(environment, console, temporary),
                 postHogKey = BuildInfo.POSTHOG_KEY,
                 secrets = secrets,
