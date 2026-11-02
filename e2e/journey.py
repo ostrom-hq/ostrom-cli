@@ -430,7 +430,10 @@ class Journey:
             # whatever became of the yes, the session goes on and ends
             open(hold, "w").close()
         seen = self.claude_ended(started)
-        if gate and seen is not None:
+        if held is None and seen is not None:
+            # never held: 5.3 says why from what the agent saw
+            self.gate(maya, tom_email, seen)
+        elif gate and seen is not None:
             self.passed(maya, gate, seen)
 
     def claude(self, maya, hold=None):
