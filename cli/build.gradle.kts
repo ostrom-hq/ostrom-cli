@@ -93,6 +93,14 @@ kotlin {
                     reason = "Clikt 5.1.0 duplicate selfAndAncestors symbol in Linux static caches",
                 )
             }
+            if (buildType.name == "RELEASE") {
+                // the shipped binary (perf pass, 15 MB budget): Kotlin/Native's size-first optimisation, and no symbol table
+                binaryOption("smallBinary", "true")
+                val family = konanTarget.family
+                if (family == org.jetbrains.kotlin.konan.target.Family.LINUX || family == org.jetbrains.kotlin.konan.target.Family.MINGW) {
+                    linkerOpts("-s")
+                }
+            }
         }
     }
     sourceSets {
