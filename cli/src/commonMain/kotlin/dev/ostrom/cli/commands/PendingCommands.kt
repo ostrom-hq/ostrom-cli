@@ -11,16 +11,7 @@ import com.github.ajalt.clikt.parameters.options.option
 // The commands of the spec (CLI.md § 2.1 and § 2.2) that are declared but not built yet. Each keeps the options and
 // arguments of the spec so that `--help` already documents it; its behaviour lands with the agent that owns it.
 
-/** Options shared by the commands that read from the server. */
-private fun CliktCommand.serverOption() =
-    option("--server", help = "Ostrom server URL (else OSTROM_URL, else the one of ostrom login)")
-
 private fun CliktCommand.jsonOption() = option("--json", help = "Machine-readable output").flag()
-
-internal class StatusCommand : PendingCommand("status", "Everything about you, this repository and this device") {
-    val json by jsonOption()
-    val server by serverOption()
-}
 
 internal class LogsCommand : PendingCommand("logs", "The thread of a session: tools, rules, requests") {
     val session by argument("session").optional()
@@ -39,7 +30,7 @@ internal class CheckCommand : PendingCommand("check", "Run a workflow check (use
 fun pendingCommands(implemented: List<CliktCommand>): List<CliktCommand> {
     fun named(name: String) = implemented.first { it.commandName == name }
     return listOf(
-        StatusCommand(),
+        named("status"),
         named("inbox"),
         named("approve"),
         named("deny"),

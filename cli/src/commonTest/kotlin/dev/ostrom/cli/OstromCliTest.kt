@@ -124,7 +124,7 @@ class OstromCliTest : CliKit() {
         }
         // Help may wrap: compare with every run of spaces and line breaks made one space.
         val flat = help.replace(Regex("""\s+"""), " ")
-        assertTrue(flat.contains(" status Everything about you, this repository and this device (coming soon) "), flat)
+        assertTrue(flat.contains(" status Everything about you, this repository and this device inbox "), flat)
         val harness = " harness The workflows your agents start with: rules, checks, approvals login "
         assertTrue(flat.contains(harness), flat)
         assertTrue(flat.contains(" config Settings of this device doctor "), flat)
@@ -150,9 +150,8 @@ class OstromCliTest : CliKit() {
 
     @Test
     fun aDeclaredCommandNotBuiltYetExitsWith70() {
-        assertEquals(70, cli().run(arrayOf("status", "--json")))
-        assertEquals("ostrom status: not implemented yet.\n", console.err.toString())
-        assertEquals(70, cli().run(arrayOf("logs")))
+        assertEquals(70, cli().run(arrayOf("logs", "--json")))
+        assertEquals("ostrom logs: not implemented yet.\n", console.err.toString())
         assertEquals(64, cli().run(arrayOf("approve")))
     }
 
