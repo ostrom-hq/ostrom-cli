@@ -27,6 +27,9 @@ class AgentLaunchUseCaseTest {
     private val server = FakeServer()
     private val files = MemoryFiles()
     private val said = mutableListOf<String>()
+
+    /** What is said about the repository's name, kept apart so the other tests read the rest as before. */
+    private val warned = mutableListOf<String>()
     private val variables = mutableMapOf("PATH" to "/usr/bin")
     private var gitAnswer: CaptureResult = CaptureResult.Exited(0, "/work/acme-api\n")
     private var originAnswer: CaptureResult = CaptureResult.Exited(2, "error: No such remote 'origin'\n")
@@ -411,12 +414,13 @@ class AgentLaunchUseCaseTest {
         for (url in urls) {
             serveALaunch()
             said.clear()
+            warned.clear()
             originAnswer = CaptureResult.Exited(0, "$url\n")
             start()
             assertEquals("acme/api", environments.last()[LaunchVariables.REPO], url)
             val created = server.sent("POST ${Routes.LAUNCHES}").last()
             assertEquals("""{"repo":"acme/api","agent":"claude-code"}""", created.body)
-            assertTrue(said.none { it.startsWith("ostrom: no origin") }, said.toString())
+            assertEquals(emptyList(), warned, url)
             assertTrue(said.none { "secret" in it }, "the origin's URL, which may carry a token, is never said")
         }
     }
@@ -442,14 +446,14 @@ class AgentLaunchUseCaseTest {
         )
         for (origin in origins) {
             serveALaunch()
-            said.clear()
+            warned.clear()
             originAnswer = origin
             start()
             assertEquals("acme-api", environments.last()[LaunchVariables.REPO], "$origin")
             val warning = "ostrom: no origin with an owner/name here: the session is registered for \"acme-api\", " +
                 "this folder's name, and a gate set on owner/name does not cover it " +
                 "(--repo owner/name names the repository)"
-            assertTrue(warning in said, said.toString())
+            assertEquals(listOf(warning), warned)
         }
     }
 
@@ -570,7 +574,7 @@ class AgentLaunchUseCaseTest {
             capture = capture,
             relays = relays,
             clock = clock,
-            say = { said += it },
+            say = { if (it.startsWith(NO_ORIGIN)) warned += it else said += it },
             blocking = UnconfinedTestDispatcher(testScheduler),
             userAgent = "ostrom/test",
         )
@@ -600,6 +604,7 @@ class AgentLaunchUseCaseTest {
     }
 
     private companion object {
+        const val NO_ORIGIN = "ostrom: no origin with an owner/name here"
         const val KEYS = """{"keys":[{"keyId":"k1","algorithm":"ed25519","publicKeyPem":"pem"}]}"""
     }
 }
