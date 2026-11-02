@@ -192,7 +192,7 @@ class ImportTeamCodeUseCaseTest {
 
     @Test
     fun theCutoverShowsItsPlanAndRunsOnlyOnceConfirmed() = runTest {
-        replies["POST /api/v1/import/teamcode?dryRun=true&cutover=true"] = ServerReply(200, WAITING)
+        replies["POST /api/v1/import/teamcode?dryRun=true&cutover=true"] = ServerReply(200, CUTOVER_PLAN)
         replies["POST /api/v1/import/teamcode?cutover=true"] = ServerReply(200, CUT)
         val asked = mutableListOf<String>()
         val declined = {
@@ -200,11 +200,12 @@ class ImportTeamCodeUseCaseTest {
             false
         }
         assertEquals(2, import(cutover = declined))
+        // the cutover's plan says planned for the accounts it writes: its reviveAtCutover is 0 (ostrom-server#86)
         val plan = "Cutover plan (nothing changed yet):\n" +
-            "  revive_at_cutover  account  Team Max (TeamCode still uses it)\n" +
-            "0 created, 1 updated, 0 unchanged, 0 skipped, 2 to revive at the cutover.\n" +
-            "The cutover tests and rotates the tokens of 2 shared accounts at their provider: " +
-            "TeamCode must be stopped, it would keep using the old ones.\n"
+            "  planned  account  Team Max\n  planned  account  Team Bo\n  planned  server  grafana\n" +
+            "0 created, 0 updated, 0 unchanged, 0 skipped.\n" +
+            "The cutover writes 2 shared accounts, testing and rotating at their provider the tokens of those that " +
+            "wait for a reconnection: TeamCode must be stopped, it would keep using the old ones.\n"
         assertTrue(asked.single().endsWith(plan), "the plan comes before the question: ${asked.single()}")
         assertTrue(failed.endsWith("ostrom import teamcode: No cutover: nothing was changed.\n"), failed.toString())
         assertEquals("/api/v1/import/teamcode?dryRun=true&cutover=true", calls.last().path, "nothing run")
@@ -248,7 +249,7 @@ class ImportTeamCodeUseCaseTest {
         replies[route] = ServerReply(500, "{}")
         assertEquals(1, import(cutover = { true }))
         // the answer lost after the cutover started: it may have run in part
-        replies[route] = ServerReply(200, WAITING)
+        replies[route] = ServerReply(200, CUTOVER_PLAN)
         replies["POST /api/v1/import/teamcode?cutover=true"] = ServerReply(null, "timeout")
         assertEquals(69, import(cutover = { true }))
         // a normal pass never says the cutover's reasons
@@ -290,6 +291,9 @@ class ImportTeamCodeUseCaseTest {
             """"created":2,"unchanged":1,"skipped":1,"updated":"many"}"""
         const val WAITING = """{"items":[{"kind":"account","name":"Team Max","action":"revive_at_cutover",""" +
             """"reason":"TeamCode still uses it"}],"updated":1,"reviveAtCutover":2}"""
+        const val CUTOVER_PLAN = """{"items":[{"kind":"account","name":"Team Max","action":"planned"},""" +
+            """{"kind":"account","name":"Team Bo","action":"planned"},""" +
+            """{"kind":"server","name":"grafana","action":"planned"},"x"],"reviveAtCutover":0}"""
         const val CUT = """{"items":[{"kind":"account","name":"Team Max","action":"updated"},""" +
             """{"kind":"account","name":"Team Bo","action":"skipped","reason":"tokens refused"},""" +
             """{"kind":"mcp_server","name":"grafana","action":"skipped","reason":"no url"},""" +
