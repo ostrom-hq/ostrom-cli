@@ -51,19 +51,20 @@ def fire(command, event):
 
 def timed(command, event, runs):
     """The wall time of [runs] calls of a hook, started without a shell as the agent starts it: milliseconds each."""
-    return [sample[0] for sample in sampled(command, lambda _: (event, None), runs)]
+    return [sample[0] for sample in sampled(command, lambda _: (event, None), runs, inside=False)]
 
 
-def sampled(command, case, runs):
+def sampled(command, case, runs, inside=True):
     """
     [runs] calls of a hook as the agent starts it (no shell), [case] giving the i-th call its event and extra
-    environment: (milliseconds, exit code, milliseconds the hook says it spent inside, or None) each.
+    environment: (milliseconds, exit code, milliseconds the hook says it spent inside, or None) each. Without [inside],
+    the hook runs as an agent runs it, without OSTROM_HOOK_TIMING.
     """
     argv, samples = shlex.split(command), []
     for i in range(runs):
         event, extra = case(i)
         # OSTROM_HOOK_TIMING: the hook says on stderr how long it took from its runner to its reply
-        environment = {**os.environ, "OSTROM_HOOK_TIMING": "1", **(extra or {})}
+        environment = {**os.environ, **({"OSTROM_HOOK_TIMING": "1"} if inside else {}), **(extra or {})}
         started = time.perf_counter()
         done = subprocess.run(argv, input=json.dumps(event), capture_output=True, text=True, timeout=60,
                               env=environment)
@@ -89,8 +90,10 @@ def perf(hook, base, runs):
     """
     The hook's latency in this session, by what it waits on (E2E_PERF):
     - local: a harmless tool, the relay answering the signed policy from its memory (the decision is the hook's);
-    - miss: the same, each call for another repository than the last, so the relay asks Ostrom for the policy;
-    - gated: a command under the gate, each a new request to Ostrom (POST /gates through the relay).
+    - miss: the same, each call for another repository than the last (the relay keeps one policy), so the relay asks
+      Ostrom for the policy every time, the first call included;
+    - gated: one command under the gate, each call a request to Ostrom (POST /gates through the relay) that finds the
+      gate the first one opened: one gate and one mail to the approver, not [runs].
     """
     def tool(command):
         return {**base, "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": command}}
@@ -98,8 +101,8 @@ def perf(hook, base, runs):
     return {
         "local": percentiles(sampled(hook, lambda _: (tool("ls -la"), None), runs)),
         "miss": percentiles(sampled(hook, lambda i: (tool("ls -la"),
-                                                     {"OSTROM_REPO": repository + ("-perf" if i % 2 else "")}), runs)),
-        "gated": percentiles(sampled(hook, lambda i: (tool(f"kubectl apply -f perf-{i}.yaml"), None), runs)),
+                                                     {"OSTROM_REPO": repository + ("" if i % 2 else "-perf")}), runs)),
+        "gated": percentiles(sampled(hook, lambda i: (tool("kubectl apply -f perf.yaml"), None), runs)),
     }
 
 
@@ -143,7 +146,7 @@ def main():
     harmless = {**base, "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "ls -la"}}
     runs = int(os.environ.get("E2E_TIMED_RUNS", "0"))
     timing = timed(hooks["PreToolUse"], harmless, runs) if runs else []
-    measured = perf(hooks["PreToolUse"], base, int(os.environ["E2E_PERF"])) if os.environ.get("E2E_PERF") else None
+    measured = perf(hooks["PreToolUse"], base, int(os.environ["E2E_PERF"])) if int(os.environ.get("E2E_PERF") or 0) > 0 else None
     tool = {"tool_name": "Bash", "tool_input": {"command": "ls -la"}, "tool_response": {"stdout": ""}}
     fired.append(fire(hooks["PostToolUse"], {**base, "hook_event_name": "PostToolUse", **tool}))
     package = os.environ.get("OSTROM_PACKAGE")

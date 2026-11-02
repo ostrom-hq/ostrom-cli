@@ -450,9 +450,14 @@ class Journey:
         for label, row in rows:
             print(f"  {label:52} {row['p50']:7.1f} {row['p95']:7.1f} {row['p99']:7.1f} {row['max']:7.1f}  "
                   f"{row['inside_p50']}/{row['inside_p95']}  {row['runs']:4}  {row['codes']}", flush=True)
-        print(f"  first call of the session (cold): {first.get('millis')} ms", flush=True)
+        print(f"  first harmless call of the session, through sh as Claude Code runs it: {first.get('millis')} ms",
+              flush=True)
         self.step["latency"] = {**measured, "first": first.get("millis")}
         local, server = self.options.max_local_p95_ms, self.options.max_server_p95_ms
+        # a series that failed fast would pass any budget: each must have taken the path it times
+        for name, code in (("local", 0), ("miss", 0), ("gated", 2)):
+            self.check(measured[name]["codes"] == [code], f"every call of the {name} series exits {code} "
+                                                          f"(got {measured[name]['codes']})")
         self.check(measured["local"]["p95"] < local, f"a local decision: p95 {measured['local']['p95']} ms < {local}")
         for name in ("miss", "gated"):
             self.check(measured[name]["p95"] < server, f"a round trip to Ostrom ({name}): p95 "
