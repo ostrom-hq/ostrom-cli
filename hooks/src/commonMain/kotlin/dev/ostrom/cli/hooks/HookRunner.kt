@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.hooks
 
+import dev.ostrom.cli.hooks.runtime.GateTexts
+import dev.ostrom.cli.hooks.runtime.HookReplies
 import dev.ostrom.cli.platform.Console
 import dev.ostrom.cli.platform.Environment
 import dev.ostrom.cli.platform.StandardInput
@@ -35,13 +37,31 @@ class HookRunnerImpl(
         }
         // an event that is too large, late or unreadable is passed on as null: the gate then refuses (S2-30)
         val input = (console.readStandardInput(MAX_EVENT_BYTES, READ_TIMEOUT_MILLIS) as? StandardInput.Read)?.bytes
-        val reply = processor.process(kind, input, environment["OSTROM_HOOK_DIALECT"] ?: "claude")
+        val dialect = environment["OSTROM_HOOK_DIALECT"] ?: "claude"
+        val reply = replyOf(kind, input, dialect)
         console.out(reply.stdout)
         console.err(reply.stderr)
         if (environment["OSTROM_HOOK_TIMING"] == "1") {
             console.err("ostrom hook ${kind.command}: ${milliseconds(start.elapsedNow().inWholeMicroseconds)} ms\n")
         }
         return reply.exitCode
+    }
+
+    /**
+     * The processor's reply; when it fails, a refusal for the gate (an agent runs the tool on any exit code but 2, a
+     * crash's included) and a line on stderr for the session hook, which never blocks.
+     */
+    @Suppress("TooGenericExceptionCaught") // whatever the failure, the gate must not let the tool through
+    private fun replyOf(kind: HookKind, input: ByteArray?, dialect: String): HookReply = try {
+        processor.process(kind, input, dialect)
+    } catch (failure: Throwable) {
+        when (kind) {
+            HookKind.GATE -> HookReplies(dialect).deny(GateTexts.GATE_FAILED)
+            HookKind.SESSION -> {
+                val said = "ostrom hook session failed (${failure::class.simpleName})\n"
+                HookReply(stderr = said, exitCode = FAILED)
+            }
+        }
     }
 
     /** [micros] as milliseconds with three decimals, without floating point. */
@@ -60,6 +80,9 @@ class HookRunnerImpl(
 
         /** An agent pipes its event at once; past this, the hook answers without it (the gate then refuses). */
         const val READ_TIMEOUT_MILLIS = 1_000
+
+        /** A session hook that failed: any code but 2, which an agent never reads as a refusal of the session. */
+        const val FAILED = 1
 
         /** sysexits EX_USAGE, as in the CLI's exit code table. */
         const val USAGE = 64
