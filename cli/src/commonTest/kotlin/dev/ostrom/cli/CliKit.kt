@@ -30,6 +30,7 @@ import dev.ostrom.cli.platform.ProcessCapture
 import dev.ostrom.cli.platform.SecretBackend
 import dev.ostrom.cli.platform.SecretStore
 import dev.ostrom.cli.platform.StandardInput
+import dev.ostrom.cli.platform.terminalSafe
 import dev.ostrom.cli.update.AgentSessionsImpl
 import dev.ostrom.cli.update.SelfUpdate
 import dev.ostrom.cli.update.UpdateNotice
@@ -42,6 +43,7 @@ import kotlin.test.assertTrue
  * and runs `cli().run(…)`; what a command says is in [console], what it asked the server in [requests].
  */
 open class CliKit {
+    /** Cleans what is written for a person, as [dev.ostrom.cli.platform.ConsoleImpl] does, and keeps the rest. */
     protected class FakeConsole : Console {
         val out = StringBuilder()
         val err = StringBuilder()
@@ -49,7 +51,7 @@ open class CliKit {
         /** What was written as the CLI's own help (also in [out]): its colours and links are kept. */
         val help = StringBuilder()
         override fun out(text: String) {
-            out.append(text)
+            out.append(terminalSafe(text))
         }
 
         override fun help(text: String) {
@@ -57,8 +59,12 @@ open class CliKit {
             out.append(text)
         }
 
+        override fun data(text: String) {
+            out.append(text)
+        }
+
         override fun err(text: String) {
-            err.append(text)
+            err.append(terminalSafe(text))
         }
 
         override var isInteractive = false

@@ -43,6 +43,22 @@ class ApprovalCommandsTest : CliKit() {
     }
 
     @Test
+    fun aPersonReadsTheInboxCleanedEvenThroughAPipeAndAProgramReadsTheServersBytes() {
+        // L8: `ostrom inbox | cat` shows a person the title later; `--json` is for a program, which needs it whole
+        signIn("/home/maya/.config/ostrom")
+        val inbox = "GET /api/v1/approvals?mine=true&status=pending"
+        val title = "Push\\u001b[2K to\u202E main"
+        val routes = mapOf(inbox to (200 to """{"items":[{"id":"g1","title":"$title"}]}"""))
+        console.isInteractive = false
+        assertEquals(0, serving(routes).run(arrayOf("inbox")))
+        assertOut("  g1  Push to main\n")
+        assertTrue('\u001B' !in console.out && '\u202E' !in console.out, console.out.toString())
+        console.out.clear()
+        assertEquals(0, serving(routes).run(arrayOf("inbox", "--json")))
+        assertEquals("""[{"id":"g1","title":"$title"}]""" + "\n", console.out.toString())
+    }
+
+    @Test
     fun theInboxReadsEveryPageAndNeverPrintsAMissingField() {
         signIn("/home/maya/.config/ostrom")
         val inbox = "GET /api/v1/approvals?mine=true&status=pending"

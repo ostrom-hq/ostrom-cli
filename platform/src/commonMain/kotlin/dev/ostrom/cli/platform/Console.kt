@@ -46,6 +46,12 @@ interface Console {
      */
     fun help(text: String) = out(text)
 
+    /** Writes [text] for a program to stdout as it is (`--json`, a hook's answer, the MCP stream). */
+    fun data(text: String) = out(text)
+
+    /** Writes [text] for a program to stderr as it is (a hook's reason, which the agent reads). */
+    fun dataErr(text: String) = err(text)
+
     /** True when stdout is a terminal (colours and questions are allowed), false in a pipe, a CI log or an agent. */
     val isInteractive: Boolean
 
