@@ -12,8 +12,10 @@ import dev.ostrom.cli.platform.Environment
 import dev.ostrom.cli.platform.OperatingSystem
 import dev.ostrom.cli.platform.StandardInput
 import dev.ostrom.cli.platform.StandardInputFailure
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import kotlin.time.TimeSource
 
@@ -93,6 +95,21 @@ class HookRunnerTest {
     @Test
     fun aReplyThatCannotBeWrittenKeepsItsExitCode() {
         assertEquals(2, HookRunnerImpl(ThrowingConsole(onRead = false), FakeEnvironment(), deny).run(listOf("gate")))
+    }
+
+    @Test
+    fun aCancellationIsNeverTakenForAFailure() {
+        val cancelled = object : HookProcessor {
+            override fun process(kind: HookKind, input: ByteArray?, dialect: String) =
+                throw CancellationException("cancelled")
+        }
+        val console = FakeConsole(StandardInput.Read("{}".encodeToByteArray()))
+        val runner = HookRunnerImpl(console, FakeEnvironment(), cancelled)
+        assertFailsWith<CancellationException> { runner.run(listOf("gate")) }
+        val writing = object : Console by FakeConsole(StandardInput.Read("{}".encodeToByteArray())) {
+            override fun out(text: String) = throw CancellationException("cancelled")
+        }
+        assertFailsWith<CancellationException> { HookRunnerImpl(writing, FakeEnvironment(), deny).run(listOf("gate")) }
     }
 
     /** A console whose stdin read, or else every write, fails (an agent that closed its pipes). */

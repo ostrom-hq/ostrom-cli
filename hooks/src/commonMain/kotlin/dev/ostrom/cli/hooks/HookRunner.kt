@@ -6,6 +6,7 @@ import dev.ostrom.cli.hooks.runtime.HookReplies
 import dev.ostrom.cli.platform.Console
 import dev.ostrom.cli.platform.Environment
 import dev.ostrom.cli.platform.StandardInput
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.TimeSource
 
 /** Runs `ostrom hook <kind>` as a process: reads the event, writes the reply, returns the exit code. */
@@ -75,6 +76,9 @@ class HookRunnerImpl(
         return try {
             input = (console.readStandardInput(MAX_EVENT_BYTES, READ_TIMEOUT_MILLIS) as? StandardInput.Read)?.bytes
             processor.process(kind, input, dialect)
+        } catch (e: CancellationException) {
+            // a cancellation is no failure of the gate (section 4.1); no one cancels a hook process today
+            throw e
         } catch (failure: Throwable) {
             val what = failure::class.simpleName
             val before = kind == HookKind.GATE && HookEvent.parse(input).name != POST_TOOL_USE
@@ -91,6 +95,8 @@ class HookRunnerImpl(
     private fun written(write: () -> Unit) {
         try {
             write()
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Throwable) {
             // nothing more can be said: the exit code says it
         }
