@@ -67,7 +67,7 @@ internal class InboxCommand(private val dependencies: CliDependencies) : CliktCo
         val items = pages(signed)
         val console = dependencies.console
         when {
-            json -> console.out(JsonArray(items).toString() + "\n")
+            json -> console.data(JsonArray(items).toString() + "\n")
             items.isEmpty() -> console.out("Nothing waits for you.\n")
             else -> {
                 val requests = if (items.size == 1) "1 request waits" else "${items.size} requests wait"

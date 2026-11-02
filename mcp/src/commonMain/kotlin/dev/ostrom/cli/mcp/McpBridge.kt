@@ -90,7 +90,7 @@ class McpBridge(
             onSuccess = { messagesOf(it, id) },
             onFailure = { failure -> listOfNotNull(id?.let { error(it, failure.message) }) },
         )
-        answer.forEach { console.out(it + "\n") }
+        answer.forEach { console.data(it + "\n") }
     }
 
     /** The messages of an answer: a JSON body, or the `data:` lines of an event stream; an error for a request. */

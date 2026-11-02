@@ -88,7 +88,7 @@ private fun CliDependencies.listReceipts(server: String?, json: Boolean, local: 
     val keptIds = kept.mapNotNull { it.text("id") }.toSet()
     val items = if (local) kept else remoteReceipts(server, kept.size)
     when {
-        json -> console.out(JsonArray(items).toString() + "\n")
+        json -> console.data(JsonArray(items).toString() + "\n")
         items.isEmpty() -> console.out(if (local) "No receipt is kept on this device.\n" else "No receipts yet.\n")
         else -> items.forEach { console.out(line(it, it.text("id") in keptIds) + "\n") }
     }
@@ -244,7 +244,7 @@ internal class VerifyCommand(private val dependencies: CliDependencies) : CliktC
         val input = inputOf(directory, read)
         val trusted = TrustedKeys.pinned(read(ServerKeyPins.path(directory))) + keys.flatMap { given(it) }
         val report = VerifyReceiptUseCaseImpl(KeptCopiesImpl(read, directory))(input, trusted)
-        dependencies.console.out(if (json) report.toJson() + "\n" else report.render())
+        if (json) dependencies.console.data(report.toJson() + "\n") else dependencies.console.out(report.render())
         if (report.code != ExitCode.OK.code) throw ProgramResult(report.code)
     }
 
