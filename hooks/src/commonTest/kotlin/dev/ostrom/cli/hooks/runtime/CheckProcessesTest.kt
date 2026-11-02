@@ -119,7 +119,43 @@ class CheckProcessesTest {
         GitCheckouts(capture, "/usr/bin/git").clean("/w")
         val status = listOf("/usr/bin/git") + safe +
             listOf("-C", "/w", "status", "--porcelain", "--untracked-files=all")
-        assertEquals(status to 5_000, capture.captured.single())
+        assertEquals(listOf(filters("/usr/bin/git") to 5_000, status to 5_000), capture.captured)
+    }
+
+    @Test
+    fun aFilterTheRepositoryDeclaresNeverRunsInTheCheckout() {
+        // a smudge filter of .git/config (the agent writes it) would run, unsandboxed, as the commit is checked out
+        val declared = "filter.x.smudge\nfilter.x.clean\nfilter.lfs.process\nfilter.a.b.process\n"
+        val capture = Capture(CaptureResult.Exited(0, declared), CaptureResult.Exited(0, ""))
+        val checkouts = GitCheckouts(capture, "git")
+        assertTrue(checkouts.add("/w", "/p", "M"))
+        assertTrue(checkouts.clean("/w"))
+        val off = listOf("x", "a.b").flatMap { driver ->
+            listOf("smudge=", "clean=", "process=", "required=false").flatMap { listOf("-c", "filter.$driver.$it") }
+        }
+        assertEquals(
+            listOf(
+                filters() to 5_000,
+                listOf("git") + safe + off + listOf("-C", "/w", "worktree", "add", "--detach", "--force", "/p", "M") to
+                    60_000,
+                listOf("git") + safe + off + listOf("-C", "/w", "status", "--porcelain", "--untracked-files=all") to
+                    5_000,
+            ),
+            capture.captured,
+            "the filters are read once per repository, then switched off in every command",
+        )
+    }
+
+    @Test
+    fun aRepositoryWhoseFiltersCannotBeReadIsNotCheckedOut() {
+        // exit 1: no filter declared
+        val none = Capture(CaptureResult.Exited(1, ""), CaptureResult.Exited(0, ""))
+        assertTrue(GitCheckouts(none, "git").add("/w", "/p", "M"))
+        for (failed in listOf(CaptureResult.Exited(128, ""), CaptureResult.TimedOut, CaptureResult.NotFound)) {
+            val capture = Capture(failed, CaptureResult.Exited(0, ""))
+            assertFalse(GitCheckouts(capture, "git").add("/w", "/p", "M"), "$failed")
+            assertEquals(1, capture.captured.size, "nothing is checked out without knowing its filters ($failed)")
+        }
     }
 
     @Test
@@ -130,6 +166,7 @@ class CheckProcessesTest {
         checkouts.remove("/w", "/t/sbx/wt-M")
         assertEquals(
             listOf(
+                filters() to 5_000,
                 git("worktree", "add", "--detach", "--force", "/t/sbx/wt-M", "M") to 60_000,
                 git("worktree", "remove", "--force", "/t/sbx/wt-M") to 60_000,
                 git("worktree", "prune") to 5_000,
@@ -142,17 +179,20 @@ class CheckProcessesTest {
 
     private fun git(vararg arguments: String) = listOf("git") + safe + listOf("-C", "/w") + arguments
 
+    private fun filters(git: String = "git") =
+        listOf(git, "-C", "/w", "config", "--name-only", "--get-regexp", "^filter\\.")
+
     @Test
     fun gitIsCutToTheHookBudgetAndNotRunOnceItIsSpent() {
         var now = 0L
         val capture = Capture(CaptureResult.Exited(0, ""))
         val checkouts = GitCheckouts(capture, "git", HookBudget(4_000) { now })
         assertTrue(checkouts.add("/w", "/p", "M"))
-        assertEquals(3_000, capture.captured.single().second, "the checkout ends a second before the agent's limit")
+        assertEquals(3_000, capture.captured.last().second, "the checkout ends a second before the agent's limit")
         now = 3_000
         assertFalse(checkouts.clean("/w"), "no time to read the tree: it is not taken as clean")
         assertFalse(checkouts.add("/w", "/p", "M"))
         checkouts.remove("/w", "/p")
-        assertEquals(1, capture.captured.size, "nothing is run once the budget is spent")
+        assertEquals(2, capture.captured.size, "nothing is run once the budget is spent")
     }
 }
