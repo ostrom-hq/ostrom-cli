@@ -99,20 +99,27 @@ class TeamCodePlanTest {
         )
         // a tool list that is not one is never "no tool": a deny list would then deny nothing
         val unreadable = mapOf("id" to "f", "target" to "db", "name" to "z", "config" to "{}")
+        // TeamCode writes ALLOWLIST; a mode Ostrom does not know leaves its server out, its tool list meaning nothing
         val policies = listOf(
-            mapOf("variant_id" to "d", "mode" to "allow", "tools" to """["x","y"]"""),
+            mapOf("variant_id" to "a", "mode" to "DENYLIST", "tools" to "[]"),
+            mapOf("variant_id" to "d", "mode" to "ALLOWLIST", "tools" to """["x","y"]"""),
             mapOf("variant_id" to "f", "mode" to "deny", "tools" to """["x",1,{"y":2}]"""),
             mapOf("variant_id" to "g", "mode" to "deny", "tools" to """{"x":true}"""),
+            mapOf("variant_id" to "h", "mode" to "MIXED", "tools" to """["x"]"""),
         )
-        val all = variants + unreadable + mapOf("id" to "g", "target" to "db", "name" to "w", "config" to "{}")
+        val all = variants + unreadable + mapOf("id" to "g", "target" to "db", "name" to "w", "config" to "{}") +
+            mapOf("id" to "h", "target" to "kb", "name" to "v", "config" to "{}")
         val (body, skipped) = plan(TeamCodeTables(emptyList(), all, emptyList(), policies, emptyList()))
         val servers = body.items("mcpServers")
         assertEquals(listOf("\"d\""), servers.map { it["id"].toString() })
         assertEquals("[\"x\",\"y\"]", servers.single()["tools"].toString())
-        assertEquals(5, skipped.size)
+        assertEquals("\"allow\"", servers.single()["toolMode"].toString())
+        assertEquals(6, skipped.size)
         assertTrue(skipped.first().contains("its command (npx)"), skipped.first())
         assertEquals("MCP server db (z): its tool policy is not a list of tool names in TeamCode.", skipped[3])
-        assertEquals("MCP server db (w): its tool policy is not a list of tool names in TeamCode.", skipped.last())
+        assertEquals("MCP server db (w): its tool policy is not a list of tool names in TeamCode.", skipped[4])
+        val mixed = "MCP server kb (v): its tool policy's mode (MIXED) is neither ALLOWLIST nor DENYLIST in TeamCode."
+        assertEquals(mixed, skipped.last())
         val none = mapOf("id" to "e", "target" to "t", "name" to "n", "config" to """{"transport":"stdio"}""")
         val nothing = plan(TeamCodeTables(emptyList(), listOf(none), emptyList(), emptyList(), emptyList())).skipped
         assertTrue(nothing.single().contains("its command (none)"), nothing.single())
@@ -146,8 +153,8 @@ class TeamCodePlanTest {
     @Test
     fun teamCodesToolModesBecomeOstroms() {
         // TeamCode writes ALLOWLIST or DENYLIST; the contract's TeamCodeMcpServer.toolMode is allow or deny
-        val modes = listOf("ALLOWLIST", " denylist ", "allow", "deny", "Mixed")
-        assertEquals(listOf("allow", "deny", "allow", "deny", "mixed"), modes.map(TeamCodePlan::modeOf))
+        val modes = listOf("ALLOWLIST", " denylist ", "allow", "deny", "Mixed", " ", null)
+        assertEquals(listOf("allow", "deny", "allow", "deny", null, null, null), modes.map(TeamCodePlan::modeOf))
     }
 
     @Test

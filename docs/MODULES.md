@@ -214,8 +214,10 @@ TeamCode's credential envelopes with its key file (`aesGcmOpen` of `launcher`: A
 nonce, ciphertext and tag, bound to `variant:<team>:<id>[:<member>]` or `<team>:<account>`), maps the members to
 Ostrom's by e-mail then login (a server that does not list its members matches no one, and every
 assignment is skipped), names an account's provider as Ostrom does (TeamCode's `anthropic` and `openai` are `claude`
-and `codex`) and an MCP server's tool mode too (TeamCode's `ALLOWLIST` and `DENYLIST` are `allow` and `deny`), and sends the plan to `POST /api/v1/import/teamcode?dryRun=true` (ostrom-server#28).
-It imports only with `--yes`, and prints no secret. A normal pass refreshes no token: a shared account TeamCode still
+and `codex`), and sends the plan to `POST /api/v1/import/teamcode?dryRun=true` (ostrom-server#28).
+An MCP server's tool mode is named as Ostrom does too (TeamCode's `ALLOWLIST` and `DENYLIST`
+are `allow` and `deny`); a server with any other mode is said and left out. It imports only with `--yes`, and prints
+no secret. A normal pass refreshes no token: a shared account TeamCode still
 uses is reported `revive_at_cutover`, and the CLI says how many wait. `--cutover` is the owner's final pass once
 TeamCode is stopped (ostrom-server#86): the plan with `?dryRun=true&cutover=true` (its account lines say `planned` for
 the accounts the cutover writes, revived ones included), then, only once the owner typed
