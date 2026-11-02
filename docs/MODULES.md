@@ -172,9 +172,11 @@ Ostrom's by e-mail then login, and sends the plan to `POST /api/v1/import/teamco
 It imports only with `--yes`, and prints no secret. A normal pass refreshes no token: a shared account TeamCode still
 uses is reported `revive_at_cutover`, and the CLI says how many wait. `--cutover` is the owner's final pass once
 TeamCode is stopped (ostrom-server#86): the plan with `?dryRun=true&cutover=true`, then, only once the owner typed
-`cutover` (or passed `--confirm cutover` without a terminal; `--yes` never runs it), the same export with
-`?cutover=true`, which rotates those accounts' tokens and revives them; the accounts left as they were are listed with
-their reason.
+`cutover` (or passed `--confirm cutover` without a terminal; `--cutover --yes` is a usage error), the same export
+with `?cutover=true` (10 minutes at most: a token rotation per account at its provider), which rotates those accounts'
+tokens and revives them. A plan with no account to revive asks nothing. Accounts left as they were are listed with
+their reason and end the command with 2; a lost answer says the cutover may have run in part, and the same command
+shows what still waits.
 
 ## Usage statistics (opt-in)
 

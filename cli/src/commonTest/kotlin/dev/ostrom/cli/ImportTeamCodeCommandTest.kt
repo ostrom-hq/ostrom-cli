@@ -66,7 +66,10 @@ class ImportTeamCodeCommandTest : CliKit() {
         assertEquals(64, run("--confirm", "cutover"))
         assertTrue("--confirm goes with --cutover" in console.err.toString())
         assertTrue(requests.isEmpty(), "nothing asked of Ostrom")
-        assertEquals(2, run("--cutover", "--yes", "--confirm", "yes"), "--yes or another word is never the cutover")
+        assertEquals(64, run("--cutover", "--yes"))
+        assertTrue("type cutover to confirm --cutover, never --yes" in console.err.toString())
+        assertTrue(requests.isEmpty(), "nothing asked of Ostrom")
+        assertEquals(2, run("--cutover", "--confirm", "yes"), "another word is never the cutover")
         val paths = { requests.map { it.second.path } }
         assertEquals(listOf("/api/v1/members", plan.removePrefix("POST ")), paths())
         assertEquals(0, run("--cutover", "--confirm", "cutover"))

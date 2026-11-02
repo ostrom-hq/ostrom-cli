@@ -18,15 +18,14 @@ import kotlinx.serialization.json.intOrNull
  * @property key TeamCode's credential key (the key file's content), or null when the file could not be read.
  * @property team The TeamCode team id.
  * @property apply False for the plan only (Ostrom's dry run); true to import after it.
- * @property cutover For the final pass once TeamCode is stopped (`--cutover`, ostrom-server#86): what the owner typed
- *   to confirm it, read after the cutover's plan; true runs it. Null for a normal pass.
+ * @property cutover True for the owner's final pass once TeamCode is stopped (`--cutover`, ostrom-server#86).
  */
 data class ImportTeamCodeRequest(
     val db: String,
     val key: String?,
     val team: String,
     val apply: Boolean,
-    val cutover: (() -> Boolean)? = null,
+    val cutover: Boolean = false,
 )
 
 /**
@@ -39,6 +38,7 @@ data class ImportTeamCodeRequest(
  * Ostrom tests and rotates those accounts' tokens at their provider and revives them.
  *
  * @param token An owner's or admin's console token (`import:write`): Ostrom refuses device and agent tokens.
+ * @param confirmCutover Asks the owner to confirm the cutover, after its plan; true runs it.
  * @param say Prints text (each line with its line break) for the developer: the plan, the report.
  * @param fail Prints why the import stopped, apart from the plan (stderr).
  */
@@ -46,6 +46,7 @@ class ImportTeamCodeUseCase(
     private val database: TeamCodeDatabase,
     private val server: ServerJson,
     private val token: String,
+    private val confirmCutover: () -> Boolean,
     private val say: (String) -> Unit,
     private val fail: (String) -> Unit,
 ) {
@@ -57,8 +58,7 @@ class ImportTeamCodeUseCase(
         val map = memberMap(tables, members())
         val (body, skipped) = TeamCodePlan(key, request.team).request(tables, map)
         skipped.forEach { say("! Left out: $it\n") }
-        val confirm = request.cutover
-        if (confirm != null) cutover(body, confirm) else normal(body, request.apply)
+        if (request.cutover) cutover(body) else normal(body, request.apply)
     } catch (e: TeamCodeReadException) {
         fail("ostrom import teamcode: ${e.message}\n")
         ExitCode.FAILED.code
@@ -77,29 +77,44 @@ class ImportTeamCodeUseCase(
         }
         val waiting = count(last, REVIVE)
         if (waiting > 0) {
-            say(
-                "! $waiting shared accounts wait for the final pass: ostrom import teamcode --cutover, " +
-                    "once TeamCode is stopped.\n",
-            )
+            val wait = if (waiting == 1) "waits" else "wait"
+            say("! ${shared(waiting)} $wait for the final pass once TeamCode stops: ostrom import teamcode --cutover\n")
         }
         return ExitCode.OK.code
     }
 
-    /** The cutover: its plan (no token tested, nothing written), the owner's confirmation, then the cutover. */
-    private suspend fun cutover(body: String, confirm: () -> Boolean): Int {
-        val plan = report("Cutover plan (nothing changed yet):", ok(import("?dryRun=true&cutover=true", body), true))
-        say(
-            "The cutover tests and rotates the tokens of ${count(plan, REVIVE)} shared accounts at their provider: " +
-                "TeamCode must be stopped, it would keep the old ones.\n",
-        )
-        if (!confirm()) throw Stop(ExitCode.INCOMPLETE, "No cutover: nothing was changed.")
-        val done = report("Cutover:", ok(import("?cutover=true", body), true))
-        val skipped = count(done, "skipped")
-        if (skipped > 0) {
-            say("! $skipped left as they were, for the reasons above (tokens refused, provider unreachable).\n")
+    /**
+     * The cutover: its plan (no token tested, nothing written), the owner's confirmation, then the cutover. Without an
+     * account to revive it stops at the plan; an account left as it was ends it with [ExitCode.INCOMPLETE].
+     */
+    private suspend fun cutover(body: String): Int {
+        val asked = ok(import("?dryRun=true&cutover=true", body), cutover = true)
+        val plan = report("Cutover plan (nothing changed yet):", asked)
+        val waiting = count(plan, REVIVE)
+        if (waiting == 0) {
+            say("No shared account waits for the cutover: nothing to do.\n")
+            return ExitCode.OK.code
         }
-        return ExitCode.OK.code
+        say(
+            "The cutover tests and rotates the tokens of ${shared(waiting)} at their provider: TeamCode must be " +
+                "stopped, it would keep using the old ones.\n",
+        )
+        if (!confirmCutover()) throw Stop(ExitCode.INCOMPLETE, "No cutover: nothing was changed.")
+        val done = ok(import("?cutover=true", body, CUTOVER_MILLIS), cutover = true)
+        report("Cutover:", done, waiting = false)
+        val left = done.list("items").count {
+            (it as? JsonObject)?.let { item -> item.text("kind") == ACCOUNT && item.text("action") == SKIPPED } == true
+        }
+        if (left == 0) return ExitCode.OK.code
+        say(
+            "! ${shared(left)} left as before, for the reasons above (tokens refused, provider unreachable): " +
+                "the same command tries again.\n",
+        )
+        return ExitCode.INCOMPLETE.code
     }
+
+    /** "1 shared account", "2 shared accounts". */
+    private fun shared(count: Int) = if (count == 1) "1 shared account" else "$count shared accounts"
 
     /** Every page of Ostrom's members (`next` is the cursor of the following one), up to [MAX_PAGES]. */
     private suspend fun members(): List<JsonObject> {
@@ -150,22 +165,24 @@ class ImportTeamCodeUseCase(
         return map
     }
 
-    private fun report(title: String, body: JsonObject): JsonObject {
+    /** Prints a report: its items, its counts and, unless the cutover has run, the accounts it would revive. */
+    private fun report(title: String, body: JsonObject, waiting: Boolean = true): JsonObject {
         say("$title\n")
         for (item in body.list("items").mapNotNull { it as? JsonObject }) {
             val reason = item.text("reason")?.let { " ($it)" }.orEmpty()
             say("  ${item.text("action")}  ${item.text("kind")}  ${item.text("name")}$reason\n")
         }
         val counts = COUNTS.joinToString(", ") { "${count(body, it)} $it" }
-        val waiting = count(body, REVIVE).takeIf { it > 0 }?.let { ", $it to revive at the cutover" }.orEmpty()
-        say("$counts$waiting.\n")
+        val revive = count(body, REVIVE).takeIf { waiting && it > 0 }?.let { ", $it to revive at the cutover" }
+        say("$counts${revive.orEmpty()}.\n")
         return body
     }
 
     private fun count(body: JsonObject, name: String) = (body[name] as? JsonPrimitive)?.intOrNull ?: 0
 
     /** `POST /api/v1/import/teamcode[query]` with the export. */
-    private suspend fun import(query: String, body: String) = server.post("$IMPORT$query", body, token, TIMEOUT_MILLIS)
+    private suspend fun import(query: String, body: String, timeoutMillis: Long = TIMEOUT_MILLIS) =
+        server.post("$IMPORT$query", body, token, timeoutMillis)
 
     private fun ok(answer: ServerAnswer, cutover: Boolean = false): JsonObject = when (answer) {
         is ServerAnswer.Ok -> answer.body
@@ -173,6 +190,12 @@ class ImportTeamCodeUseCase(
     }
 
     private fun stopOf(failed: ServerAnswer.Failed, cutover: Boolean): Stop = when {
+        // the cutover may have rotated tokens before the answer was lost: its plan says what still waits
+        failed.status == null && cutover -> Stop(
+            ExitCode.UNREACHABLE,
+            "Ostrom did not answer (${failed.message}): the cutover may have run in part. " +
+                "Run the same command again: its plan shows the accounts that still wait.",
+        )
         failed.status == null -> Stop(ExitCode.UNREACHABLE, "Ostrom is unreachable (${failed.message}).")
         cutover && failed.status == FORBIDDEN -> Stop(
             ExitCode.REFUSED,
@@ -180,7 +203,8 @@ class ImportTeamCodeUseCase(
         )
         cutover && failed.status == UNAVAILABLE -> Stop(
             ExitCode.FAILED,
-            "Ostrom cannot run the cutover (${failed.message}): this server has no audit log or no shared accounts.",
+            "Ostrom cannot run the cutover now (${failed.message}): it needs the server's audit log and " +
+                "shared accounts.",
         )
         failed.status == UNAUTHORIZED || failed.status == FORBIDDEN -> Stop(
             ExitCode.REFUSED,
@@ -202,6 +226,11 @@ class ImportTeamCodeUseCase(
         private const val FORBIDDEN = 403
         private const val UNAVAILABLE = 503
         private const val REVIVE = "reviveAtCutover"
+        private const val ACCOUNT = "account"
+        private const val SKIPPED = "skipped"
+
+        /** The cutover tests and rotates each shared account's tokens at its provider, one after another. */
+        private const val CUTOVER_MILLIS = 600_000L
         private val COUNTS = listOf("created", "updated", "unchanged", "skipped")
     }
 }

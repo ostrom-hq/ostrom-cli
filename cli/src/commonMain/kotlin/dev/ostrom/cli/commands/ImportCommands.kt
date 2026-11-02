@@ -48,6 +48,13 @@ internal class ImportTeamCodeCommand(private val dependencies: CliDependencies) 
     override fun run() {
         // an agent would send every secret of the team, opened, to the server it names (S2-32)
         dependencies.outsideSessions("import teamcode")
+        // a typed word, never --yes: the cutover rotates tokens TeamCode may still be using
+        when {
+            confirm != null && !cutover -> throw stopWith(ExitCode.USAGE, "ostrom: --confirm goes with --cutover")
+            cutover && yes -> throw stopWith(ExitCode.USAGE, "ostrom: type $CUTOVER to confirm --cutover, never --yes")
+            cutover && confirm == null && !dependencies.console.isInteractive ->
+                throw stopWith(ExitCode.USAGE, "ostrom: no terminal to type $CUTOVER: add --confirm $CUTOVER")
+        }
         val directory = dependencies.directory()
         val serverUrl = dependencies.serverOf(server, directory)
         // Ostrom refuses the device token of `ostrom login` for import:write: only a console token imports
@@ -57,25 +64,15 @@ internal class ImportTeamCodeCommand(private val dependencies: CliDependencies) 
             ExitCode.SIGN_IN_REQUIRED.code,
             printError = true,
         )
+        val typed = { (confirm ?: dependencies.ask("Type $CUTOVER to run it: ", "--confirm $CUTOVER")) == CUTOVER }
         val import = ImportTeamCodeUseCase(
             TeamCodeDatabase(dependencies.capture),
             ServerJson(ApiServerTransport(dependencies.api(serverUrl))),
             token,
+            typed,
             { dependencies.console.out(it) },
         ) { dependencies.console.err(it) }
-        if (confirm != null && !cutover) throw stopWith(ExitCode.USAGE, "ostrom: --confirm goes with --cutover")
-        if (cutover && confirm == null && !dependencies.console.isInteractive) {
-            throw stopWith(ExitCode.USAGE, "ostrom: no terminal to type $CUTOVER: add --confirm $CUTOVER")
-        }
-        // a typed word, never --yes: the cutover rotates tokens TeamCode may still be using
-        val typed = { (confirm ?: dependencies.ask("Type $CUTOVER to run it: ", "--confirm $CUTOVER")) == CUTOVER }
-        val request = ImportTeamCodeRequest(
-            db,
-            dependencies.files.read(keyFile),
-            team,
-            yes,
-            typed.takeIf { cutover },
-        )
+        val request = ImportTeamCodeRequest(db, dependencies.files.read(keyFile), team, yes, cutover)
         throw ProgramResult(runBlocking { import(request) })
     }
 }
