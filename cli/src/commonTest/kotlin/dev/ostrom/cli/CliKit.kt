@@ -43,7 +43,7 @@ import kotlin.test.assertTrue
  * and runs `cli().run(…)`; what a command says is in [console], what it asked the server in [requests].
  */
 open class CliKit {
-    /** Cleans what is written for a person, as [dev.ostrom.cli.platform.ConsoleImpl] does, and keeps the rest. */
+    /** Cleans as [dev.ostrom.cli.platform.ConsoleImpl] does: a person's text always, a program's at a terminal only. */
     protected class FakeConsole : Console {
         val out = StringBuilder()
         val err = StringBuilder()
@@ -60,7 +60,7 @@ open class CliKit {
         }
 
         override fun data(text: String) {
-            out.append(text)
+            out.append(if (isInteractive) terminalSafe(text) else text)
         }
 
         override fun err(text: String) {

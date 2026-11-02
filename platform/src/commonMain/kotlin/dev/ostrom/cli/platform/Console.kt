@@ -36,8 +36,9 @@ sealed interface StandardInput {
  * Two kinds of text (security audits M2 and L8). What is written for a person ([out], [err]) holds what others wrote (a
  * commit title, a server's message, an organisation's name) and is cleaned by [terminalSafe] wherever it goes: a
  * terminal, or a pipe or a file a person reads later (`| cat`, `| tee`, `> log`). What is written for a program
- * ([data], [dataErr]: `--json`, a hook's answer, the MCP stream) goes as it is: a program needs the exact bytes, and
- * whoever shows them to a person cleans them.
+ * ([data], [dataErr]: `--json`, a hook's answer, the MCP stream) goes as it is to a pipe or a file: a program needs the
+ * exact bytes, and whoever shows them to a person cleans them. At a terminal no program reads it, a person does
+ * (`ostrom inbox --json` typed at the prompt): it is cleaned there too.
  */
 interface Console {
     /** Writes [text] for a person to stdout as UTF-8 (no newline added), cleaned by [terminalSafe]. */
@@ -52,10 +53,10 @@ interface Console {
      */
     fun help(text: String) = out(text)
 
-    /** Writes [text] for a program to stdout as it is (`--json`, a hook's answer, the MCP stream). */
+    /** Writes [text] for a program to stdout (`--json`, a hook's answer, the MCP stream): raw, but at a terminal. */
     fun data(text: String) = out(text)
 
-    /** Writes [text] for a program to stderr as it is (a hook's reason, which the agent reads). */
+    /** Writes [text] for a program to stderr (a hook's reason, which the agent reads): raw, but at a terminal. */
     fun dataErr(text: String) = err(text)
 
     /** True when stdout is a terminal (colours and questions are allowed), false in a pipe, a CI log or an agent. */
@@ -75,9 +76,9 @@ interface Console {
 
 /**
  * [Console] over the file descriptors (POSIX) or the standard handles (Windows): [out] and [err] are cleaned
- * ([terminalSafe]) wherever they go, [help], [data] and [dataErr] are written as they are.
+ * ([terminalSafe]) wherever they go, [data] and [dataErr] only at a terminal, [help] never.
  *
- * @param terminal Whether a descriptor is a terminal, asked once (stdout, for [isInteractive]).
+ * @param terminal Whether a descriptor is a terminal, asked once per descriptor.
  * @param write Writes bytes to a descriptor.
  */
 class ConsoleImpl(
@@ -85,6 +86,7 @@ class ConsoleImpl(
     private val write: (Int, ByteArray) -> Unit = ::writeBytes,
 ) : Console {
     private val stdoutTerminal by lazy { terminal(1) }
+    private val stderrTerminal by lazy { terminal(2) }
 
     override fun out(text: String) = written(1, terminalSafe(text))
 
@@ -92,9 +94,9 @@ class ConsoleImpl(
 
     override fun help(text: String) = written(1, text)
 
-    override fun data(text: String) = written(1, text)
+    override fun data(text: String) = written(1, if (stdoutTerminal) terminalSafe(text) else text)
 
-    override fun dataErr(text: String) = written(2, text)
+    override fun dataErr(text: String) = written(2, if (stderrTerminal) terminalSafe(text) else text)
 
     override val isInteractive: Boolean
         get() = stdoutTerminal

@@ -43,7 +43,7 @@ class ApprovalCommandsTest : CliKit() {
     }
 
     @Test
-    fun aPersonReadsTheInboxCleanedEvenThroughAPipeAndAProgramReadsTheServersBytes() {
+    fun aPersonReadsTheInboxCleanedEvenThroughAPipeAndAProgramReadsTheServersBytesThroughOne() {
         // L8: `ostrom inbox | cat` shows a person the title later; `--json` is for a program, which needs it whole
         signIn("/home/maya/.config/ostrom")
         val inbox = "GET /api/v1/approvals?mine=true&status=pending"
@@ -56,6 +56,11 @@ class ApprovalCommandsTest : CliKit() {
         console.out.clear()
         assertEquals(0, serving(routes).run(arrayOf("inbox", "--json")))
         assertEquals("""[{"id":"g1","title":"$title"}]""" + "\n", console.out.toString())
+        // typed at the prompt, the JSON is a person's to read (M2): no program needs its bytes there
+        console.out.clear()
+        console.isInteractive = true
+        assertEquals(0, serving(routes).run(arrayOf("inbox", "--json")))
+        assertEquals("""[{"id":"g1","title":"Push\u001b[2K to main"}]""" + "\n", console.out.toString())
     }
 
     @Test

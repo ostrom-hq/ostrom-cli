@@ -108,8 +108,10 @@ class TerminalTextTest {
     }
 
     @Test
-    fun theConsoleCleansWhatAPersonReadsWhereverItGoesAndWritesWhatAProgramReadsAsItIs() {
-        // L8: `ostrom logs | cat`, `| tee` or `> log` shows the text to a person later, through no terminal of ours
+    fun theConsoleCleansWhatAPersonReadsWhereverItGoesAndAProgramsStreamOnlyAtATerminal() {
+        // L8: `ostrom logs | cat`, `| tee` or `> log` shows the text to a person later, through no terminal of ours;
+        // a stream for programs keeps its bytes in a pipe, and is a person's at a terminal (M2)
+        val title = "{\"title\":\"$esc[2K\u202E\"}\n"
         for (terminal in listOf(true, false)) {
             val written = mutableListOf<Pair<Int, String>>()
             val asked = mutableListOf<Int>()
@@ -119,24 +121,23 @@ class TerminalTextTest {
             console.out("$esc[2Kout\n")
             console.err("$esc[2Kerr\n")
             console.out("")
-            // the CLI's own help keeps its links; the streams for programs keep every byte
+            assertEquals(emptyList(), asked, "a person's text is cleaned without asking")
+            // the CLI's own help keeps its links
             console.help("$esc]8;;https://ostrom.dev\u0007docs$esc]8;;\u0007\n")
             console.help("")
-            console.data("{\"title\":\"$esc[2K\u202E\"}\n")
+            console.data(title)
             console.data("")
             console.dataErr("$esc[2Kreason\n")
             console.dataErr("")
-            assertEquals(emptyList(), asked, "writing never asks whether a stream is a terminal")
             assertEquals(terminal, console.isInteractive)
-            assertEquals(terminal, console.isInteractive)
-            assertEquals(listOf(1), asked, "stdout is asked once")
+            assertEquals(listOf(1, 2), asked, "once per descriptor")
             assertEquals(
                 listOf(
                     1 to "out\n",
                     2 to "err\n",
                     1 to "$esc]8;;https://ostrom.dev\u0007docs$esc]8;;\u0007\n",
-                    1 to "{\"title\":\"$esc[2K\u202E\"}\n",
-                    2 to "$esc[2Kreason\n",
+                    1 to if (terminal) "{\"title\":\"\"}\n" else title,
+                    2 to if (terminal) "reason\n" else "$esc[2Kreason\n",
                 ),
                 written,
             )
