@@ -2,7 +2,9 @@
 """A coding agent as `ostrom <agent>` sees one: it reads the harness Ostrom laid down for the session the way Claude
 Code (`--plugin-dir` → hooks/hooks.json) or Codex (`-c hooks.<Event>=[…]`) reads it, then plays the hooks a real
 session fires: session start, a harmless tool, a gated deployment (and, when the gate says so, `ostrom wait` as its own
-command, the way a model obeys the refusal; $E2E_OSTROM names the binary), the after-tool hook, session end. What it
+command, the way a model obeys the refusal; $E2E_OSTROM names the binary), the after-tool hook, session end. With
+$E2E_HOLD, the session waits there for the yes: it writes what it fired to $E2E_HOLD.held, waits for $E2E_HOLD to
+appear, then runs `ostrom wait` again and the same command, as the model does once told it is approved. What it
 saw and what each hook answered go to $E2E_REPORT. With a package, it then rewrites the package's hook view and fires
 one more tool, which the hooks must hold (S2-33); it exits with $E2E_EXIT (3 by default), which `ostrom` must hand
 back.
@@ -56,6 +58,22 @@ def timed(command, event, runs):
     return times
 
 
+def after_the_yes(hook, event, gate, fired):
+    """The session held while the journey answers; then `ostrom wait` in it again, and the same command again."""
+    hold = os.environ["E2E_HOLD"]
+    with open(hold + ".tmp", "w") as handle:
+        json.dump({"hooks": fired}, handle)
+    os.replace(hold + ".tmp", hold + ".held")
+    deadline = time.monotonic() + 300
+    while not os.path.exists(hold) and time.monotonic() < deadline:
+        time.sleep(0.2)
+    done = subprocess.run([os.environ["E2E_OSTROM"], "wait", gate, "--timeout", "20"], capture_output=True,
+                          text=True, timeout=60)
+    waited = {"event": "wait-after", "tool": gate, "code": done.returncode, "stdout": done.stdout,
+              "stderr": done.stderr}
+    return [waited, {**fire(hook, event), "event": "retry"}]
+
+
 def main():
     name = os.path.basename(sys.argv[0]).split(".")[0]
     arguments = sys.argv[1:]
@@ -73,6 +91,9 @@ def main():
                                   capture_output=True, text=True, timeout=60)
             fired.append({"event": "wait", "tool": asked.group(1), "code": done.returncode, "stdout": done.stdout,
                           "stderr": done.stderr})
+            if os.environ.get("E2E_HOLD"):
+                fired.extend(after_the_yes(hooks["PreToolUse"], {**base, "hook_event_name": "PreToolUse", **tool},
+                                           asked.group(1), fired))
     # the budget of a hook in a real session: the relay asked, Ostrom's signed policy checked, at every tool call
     harmless = {**base, "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "ls -la"}}
     runs = int(os.environ.get("E2E_TIMED_RUNS", "0"))
