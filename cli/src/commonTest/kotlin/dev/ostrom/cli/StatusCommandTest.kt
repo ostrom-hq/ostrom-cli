@@ -146,6 +146,20 @@ class StatusCommandTest : SetupKit() {
         assertEquals(69, status(mapOf(me, payments to (503 to "{}")), environment = named, top = null))
         assertOut("Repository  acme-payments · harness unknown\n")
         console.out.clear()
+        val served = serverOf(mapOf(me))
+        val packageDown: (String) -> OstromApi = { url ->
+            object : OstromApi {
+                override suspend fun get(path: String) = send(ServerRequest("GET", path))
+                override suspend fun send(request: ServerRequest) =
+                    if (request.path == payments.drop(4)) throw ServerUnreachableException(url, Exception("reset"))
+                    else served(url).send(request)
+            }
+        }
+        val run = cli(environment = named, api = packageDown, capture = FakeMysql(CaptureResult.Exited(128, "")))
+        assertEquals(69, run.run(arrayOf("status")), "the package lookup cut off")
+        assertOut("Repository  acme-payments · harness unknown\n")
+        assertTrue(console.err.endsWith("! Ostrom is unreachable: some lines are unknown.\n"), console.err.toString())
+        console.out.clear()
         assertEquals(0, status(mapOf(me), environment = withServer + ("OSTROM_REPO" to "")))
         assertOut("Repository  acme · no harness yet\n")
     }
