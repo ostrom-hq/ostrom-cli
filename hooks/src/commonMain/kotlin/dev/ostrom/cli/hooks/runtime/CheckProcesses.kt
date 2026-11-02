@@ -70,7 +70,7 @@ class SandboxedScripts(
         const val NO_SANDBOX = "none on this OS (clean environment and time limit only)"
 
         /** Why a script was not started: the agent's limit on the hook is reached. */
-        private const val SPENT = "the agent's time limit for a hook is reached, so the script was not started"
+        internal const val SPENT = "the agent's time limit for a hook is reached, so the script was not started"
 
         private val KEPT = listOf("PATH", "HOME", "LANG", "LC_ALL", "USER", "SHELL")
         private val HIDDEN = listOf(
