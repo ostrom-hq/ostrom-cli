@@ -49,7 +49,7 @@ private val HTTPS = Regex("https://.*", RegexOption.IGNORE_CASE)
 /** `http://` to this machine, with or without a port and a path. */
 private val LOCAL_HTTP = Regex("""http://(localhost|127\.0\.0\.1|\[::1])(:\d{1,5})?(/.*)?""", RegexOption.IGNORE_CASE)
 // up to the last @ before the path: a password may hold one
-private val USER_INFO = Regex("//[^/]*@")
+internal val USER_INFO = Regex("//[^/]*@")
 
 /**
  * Refuses an account command inside an agent's session: the agent would sign the developer out, or point the device
