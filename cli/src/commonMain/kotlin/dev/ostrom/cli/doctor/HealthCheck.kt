@@ -47,7 +47,8 @@ internal fun healthCheck(host: String, url: String, response: ServerResponse, co
 private fun failing(body: JsonObject?): String {
     val checks = body?.child("checks") ?: return ""
     val failed = checks.mapNotNull { (name, state) ->
-        val shown = (state as? JsonPrimitive)?.content?.takeIf { PRINTABLE.matches(it) } ?: "?"
+        val text = (state as? JsonPrimitive)?.content.orEmpty()
+        val shown = if (PRINTABLE.matches(text)) text else "?"
         "$name: $shown".takeIf { shown != "ok" && PRINTABLE.matches(name) }
     }
     return if (failed.isEmpty()) "" else " (${failed.joinToString(", ")})"
