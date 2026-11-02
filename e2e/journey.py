@@ -75,6 +75,13 @@ class Journey:
             self.step["status"] = "failed"
         return bool(condition)
 
+    def guarded(self, act, *arguments):
+        """Runs [act]; an error fails the step and the journey goes on (the steps after it still clean up)."""
+        try:
+            act(*arguments)
+        except Exception as error:  # noqa: BLE001 - said in the step, the run goes on
+            self.check(False, f"the step stopped: {type(error).__name__}: {str(error)[:200]}")
+
     def needs(self, *routes, on_main=False, org=False):
         """
         True when the server serves every route (and, with [org], resolves the organisation of a token bound to none
@@ -196,9 +203,18 @@ class Journey:
     def ostrom(self, machine, *arguments, console=False, extra=None, cwd=None, timeout=120):
         shown = "ostrom " + " ".join(shlex.quote(a) for a in arguments)
         prefix = "OSTROM_TOKEN=… " if console else ""
-        done = subprocess.run([self.binary, *arguments], cwd=cwd or machine["repo"], capture_output=True, text=True,
-                              env=self.environment(machine, console, extra), stdin=subprocess.DEVNULL,
-                              timeout=timeout)
+        try:
+            done = subprocess.run([self.binary, *arguments], cwd=cwd or machine["repo"], capture_output=True,
+                                  text=True, env=self.environment(machine, console, extra), stdin=subprocess.DEVNULL,
+                                  timeout=timeout)
+        except subprocess.TimeoutExpired as late:
+            # what it printed before the timeout is the report's only trace of a command that does not return
+            said = [part.decode(errors="replace") if isinstance(part, bytes) else part or ""
+                    for part in (late.stdout, late.stderr)]
+            self.step["commands"].append({"who": machine["name"], "command": prefix + shown,
+                                          "exit": f"still running after {timeout} s", "stdout": said[0],
+                                          "stderr": said[1]})
+            raise
         self.step["commands"].append({"who": machine["name"], "command": prefix + shown, "exit": done.returncode,
                                       "stdout": done.stdout, "stderr": done.stderr})
         if self.options.show:
@@ -283,14 +299,21 @@ class Journey:
             self.init(maya, org)
         self.begin("5.1 status", "ostrom status: who, in which organisation, this repository, this device")
         if self.needs(("GET", "/api/v1/auth/me"), ("GET", "/api/v1/orgs"), on_main=True):
-            self.status(maya, org)
+            self.guarded(self.status, maya, org)
         self.team(maya, tom_email, org)
 
     def status(self, maya, org):
+        # who is signed in, as the server says it: not read back from what status printed
+        me = self.call("GET", "/api/v1/auth/me", token=maya["token"])[1]
+        me = me if isinstance(me, dict) else {}
+        login = (me.get("dev") or {}).get("login") or me.get("login")
         done = self.ostrom(maya, "status", "--json")
-        said = read_json(done.stdout) or {}
+        said = read_json(done.stdout)
+        said = said if isinstance(said, dict) else {}
         self.check(done.returncode == 0, f"ostrom status exits 0 ({done.returncode}): {done.stderr.strip()[:300]}")
-        self.check(said.get("login") not in (None, "unknown"), f"it says who is signed in (@{said.get('login')})")
+        self.check(login and said.get("login") == login, f"it says who is signed in (@{said.get('login')}, @{login})")
+        self.check(org.get("role") and said.get("role") == org.get("role"),
+                   f"with the role the organisation lists ({said.get('role')}, {org.get('role')})")
         self.check(said.get("organization") == org.get("name"),
                    f"in the owner's organisation ({said.get('organization')})")
         self.check(said.get("repository") == "acme-api", f"in this repository ({said.get('repository')})")
@@ -299,7 +322,7 @@ class Journey:
         missing = sorted(STATUS_KEYS - said.keys())
         self.check(not missing, f"with every key, null when unknown (missing: {missing})")
         text = self.ostrom(maya, "status")
-        self.check(text.returncode == 0 and text.stdout.startswith(f"Signed in   @{said.get('login')}"),
+        self.check(text.returncode == 0 and text.stdout.startswith(f"Signed in   @{login}"),
                    f"and says it in words ({text.returncode}): {text.stdout.strip()[:200]}")
 
     def init(self, maya, org):
@@ -383,8 +406,7 @@ class Journey:
                 gated = self.gate_workflow(maya)
 
         self.begin("5.2", "ostrom claude: the launch, the session, the hooks")
-        if self.needs(("GET", "/api/v1/policy/agents"), ("POST", "/api/v1/launches"), ("POST", "/api/v1/sessions"),
-                      org=True):
+        if self.needs(*SESSION_ROUTES, org=True):
             if gated:
                 self.gated_session(maya, tom_email)
             else:
@@ -402,9 +424,8 @@ class Journey:
 
         self.begin("6.1", "ostrom logs: the thread of the session that just ran")
         # the session read is the one ostrom claude just ran: the routes of 5.2 too
-        if self.needs(("GET", "/api/v1/policy/agents"), ("POST", "/api/v1/launches"), ("POST", "/api/v1/sessions"),
-                      ("GET", "/api/v1/sessions"), org=True):
-            self.logs(maya, gated)
+        if self.needs(*SESSION_ROUTES, ("GET", "/api/v1/sessions"), org=True):
+            self.guarded(self.logs, maya, gated)
 
         if self.invitee:
             self.begin("2.6", "ostrom members remove")
@@ -430,6 +451,9 @@ class Journey:
         self.check(any("session started" in line for line in lines), "from its start")
         if gated:
             self.check(any("asked for a yes" in line for line in lines), "through the request for a yes")
+            if not any(gate.get("status") for gate in gates if isinstance(gate, dict)):
+                # a gate the device's token may not read is shown bare: its answer is then not on the thread
+                print(f"  note  no gate of the thread could be read: {gates[:3]}", flush=True)
         # ostrom claude has returned: the session is over, and -f on it must print and return, not wait
         if not self.check(session.get("endedAt") and any("session ended" in line for line in lines),
                           f"to its end ({session.get('endedAt')})"):
@@ -699,6 +723,9 @@ class Journey:
 
 CODE = re.compile(r"one-time code: (\S+)")
 # what ostrom status --json always holds (CLI.md principle 6: null when unknown, never missing)
+# what ostrom claude needs from the server (5.2), and so does the read of the session it ran (6.1)
+SESSION_ROUTES = (("GET", "/api/v1/policy/agents"), ("POST", "/api/v1/launches"), ("POST", "/api/v1/sessions"))
+
 STATUS_KEYS = {"login", "organization", "role", "server", "repository", "harness", "waiting", "waitingComplete",
                "version", "pinnedKey"}
 ORG_HEADER = "Ostrom-Org (the organisation of a token bound to none, server#64)"
