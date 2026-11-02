@@ -86,7 +86,8 @@ class McpCommand(private val dependencies: CliDependencies) : CliktCommand(name 
 }
 
 /**
- * `ostrom help [plumbing]`: the help screen, or the commands agents call that the help screen hides.
+ * `ostrom help [plumbing | exit-codes]`: the help screen, the commands agents call that the help screen hides, or
+ * what each exit code means.
  *
  * @param rootHelp The help screen of `ostrom`.
  */
@@ -94,16 +95,18 @@ class HelpCommand(
     private val dependencies: CliDependencies,
     private val rootHelp: () -> String,
 ) : CliktCommand(name = "help") {
-    private val topic by argument("topic", help = "plumbing").optional()
+    private val topic by argument("topic", help = "plumbing or exit-codes").optional()
 
-    override fun help(context: Context) = "Show help (ostrom help plumbing: the commands agents call)"
+    override fun help(context: Context) =
+        "Show help (ostrom help plumbing: the commands agents call; ostrom help exit-codes: what each code means)"
 
     override fun run() {
         when (topic) {
             null -> dependencies.console.out(rootHelp() + "\n")
             "plumbing" -> dependencies.console.out(PLUMBING)
+            "exit-codes" -> dependencies.console.out(exitCodes())
             else -> {
-                dependencies.console.err("Unknown help topic \"$topic\". Topics: plumbing.\n")
+                dependencies.console.err("Unknown help topic \"$topic\". Topics: plumbing, exit-codes.\n")
                 throw ProgramResult(ExitCode.USAGE.code)
             }
         }
@@ -118,3 +121,12 @@ private val PLUMBING = """
     |  ostrom mcp [workflow]                    the local MCP server, on stdio
     |  ostrom check <node>                      run a workflow check
     |""".trimMargin()
+
+/** The table of `ostrom help exit-codes`, from [ExitCode]: the code, then what it means. */
+internal fun exitCodes(): String = buildString {
+    append("Exit codes of ostrom (ostrom <agent> returns the agent's own once it has started):\n")
+    ExitCode.entries.forEach { append("  ${it.code.toString().padStart(EXIT_CODE_WIDTH)}  ${it.meaning}\n") }
+}
+
+/** The widest exit code, 127. */
+private const val EXIT_CODE_WIDTH = 3

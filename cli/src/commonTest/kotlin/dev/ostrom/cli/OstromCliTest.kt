@@ -262,7 +262,7 @@ class OstromCliTest : CliKit() {
         assertEquals(0, cli().run(arrayOf("help")))
         assertTrue(console.out.contains("Commands:"), console.out.toString())
         assertEquals(64, cli().run(arrayOf("help", "nope")))
-        assertTrue(console.err.contains("Unknown help topic \"nope\". Topics: plumbing."))
+        assertTrue(console.err.contains("Unknown help topic \"nope\". Topics: plumbing, exit-codes."))
     }
 
     @Test

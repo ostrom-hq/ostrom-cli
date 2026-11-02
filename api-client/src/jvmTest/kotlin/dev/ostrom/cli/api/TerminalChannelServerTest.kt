@@ -36,6 +36,7 @@ class TerminalChannelServerTest {
             webSocket("/api/v1/cloud/sessions/s1/terminal") {
                 assertEquals("Bearer device", call.request.headers["Authorization"])
                 assertEquals("ostrom/1", call.request.headers["User-Agent"])
+                assertEquals("o2", call.request.headers["Ostrom-Org"])
                 send(Frame.Text("""{"type":"runner","connected":true}"""))
                 val keys = incoming.receive() as Frame.Binary
                 send(Frame.Binary(true, keys.data.reversedArray()))
@@ -43,7 +44,7 @@ class TerminalChannelServerTest {
                 close(CloseReason(4404, "no such session"))
             }
         }
-        val channel = channels().open("/api/v1/cloud/sessions/s1/terminal", "device")
+        val channel = channels().open("/api/v1/cloud/sessions/s1/terminal", "device", "o2")
         assertEquals(TerminalMessage.Control("""{"type":"runner","connected":true}"""), channel.receive())
         channel.send(byteArrayOf(1, 2, 3))
         assertContentEquals(byteArrayOf(3, 2, 1), (channel.receive() as TerminalMessage.Output).bytes)
@@ -59,6 +60,7 @@ class TerminalChannelServerTest {
         val left = CompletableDeferred<Short?>()
         routing {
             webSocket("/t") {
+                assertNull(call.request.headers["Ostrom-Org"], "no organisation named, no header")
                 incoming.receiveCatching()
                 left.complete(closeReason.await()?.code)
             }

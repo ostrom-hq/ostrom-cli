@@ -434,7 +434,7 @@ class GateHookTest {
         calls = FakeCalls().on("/api/v1/sessions/a1/seen", ok())
         hook().handle(event("Skill", """{"skill":"ostrom-review"}""", after = true))
         assertEquals(
-            """{"kind":"skill","name":"ostrom-review","via":"Skill"}""",
+            """{"kind":"skill","name":"ostrom-review","via":"hook"}""",
             calls.bodyOf("/api/v1/sessions/a1/seen").toString(),
         )
         hook().handle(event("Task", """{"subagent_type":"ostrom-tester"}""", after = true))
