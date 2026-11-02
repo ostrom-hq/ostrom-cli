@@ -144,6 +144,13 @@ class TeamCodePlanTest {
     }
 
     @Test
+    fun teamCodesToolModesBecomeOstroms() {
+        // TeamCode writes ALLOWLIST or DENYLIST; the contract's TeamCodeMcpServer.toolMode is allow or deny
+        val modes = listOf("ALLOWLIST", " denylist ", "allow", "deny", "Mixed")
+        assertEquals(listOf("allow", "deny", "allow", "deny", "mixed"), modes.map(TeamCodePlan::modeOf))
+    }
+
+    @Test
     fun aStdioSecretKeepsOnlyItsPlainValues() {
         val secret = """{"API_KEY":"k","PORT":8080,"OPTIONAL_URL":null,"NESTED":{"a":1}}"""
         assertEquals(mapOf("API_KEY" to "k", "PORT" to "8080"), TeamCodePlan.variablesOf(secret))

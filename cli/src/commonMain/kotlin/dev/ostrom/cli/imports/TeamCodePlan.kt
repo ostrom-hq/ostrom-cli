@@ -83,7 +83,7 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
             "credentialHeader" to (config.text("CREDENTIAL_HEADER") ?: config.text("credentialHeader")),
             "sharedSecret" to secret.takeUnless { stdio },
             "stdio" to launch?.let { stdio(it, secret) },
-            "toolMode" to policy?.get("mode"),
+            "toolMode" to policy?.let { modeOf("${it["mode"]}") },
             "tools" to tools,
         )
     }
@@ -173,6 +173,15 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
 
         private val PROVIDERS =
             mapOf("anthropic" to "claude", "claude" to "claude", "openai" to "codex", "codex" to "codex")
+
+        /**
+         * Ostrom's tool mode (`allow` or `deny`, the contract's `TeamCodeMcpServer.toolMode`) of TeamCode's policy
+         * mode, which TeamCode writes `ALLOWLIST` or `DENYLIST`. Any other mode goes as it is, and the server refuses it.
+         */
+        internal fun modeOf(teamCode: String): String =
+            teamCode.trim().lowercase().let { MODES[it] ?: it }
+
+        private val MODES = mapOf("allowlist" to "allow", "allow" to "allow", "denylist" to "deny", "deny" to "deny")
 
         private const val INCOMPLETE = "no provider, account id, tokens or expiry in TeamCode: it could never sign in."
 
