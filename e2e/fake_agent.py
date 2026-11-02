@@ -107,19 +107,34 @@ def perf(hook, base, runs):
 
 
 def after_the_yes(hook, event, gate, fired):
-    """The session held while the journey answers; then `ostrom wait` in it again, and the same command again."""
+    """
+    The session held while the journey answers. `ostrom wait` starts at once, as a model does once told to, and is
+    already waiting when the yes comes (Ostrom holds its read, ?wait=30); then the same command again. The wall clock
+    of its end and of the retry go to the report: the journey measures from its yes to the action passing (5.5).
+    """
     hold = os.environ["E2E_HOLD"]
     with open(hold + ".tmp", "w") as handle:
         json.dump({"hooks": fired}, handle)
     os.replace(hold + ".tmp", hold + ".held")
-    deadline = time.monotonic() + 300
+    waiting = subprocess.Popen([os.environ["E2E_OSTROM"], "wait", gate, "--timeout", "100"], stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=True)
+    deadline, released = time.monotonic() + 300, None
+    # a journey that ends without a yes releases the session: the wait gets one held read more, then stops
+    while waiting.poll() is None and time.monotonic() < deadline:
+        if released is None and os.path.exists(hold):
+            released = time.monotonic()
+        if released is not None and time.monotonic() - released > 40:
+            break
+        time.sleep(0.02)
+    if waiting.poll() is None:
+        waiting.kill()
+    stdout, stderr = waiting.communicate()
+    waited = {"event": "wait-after", "tool": gate, "code": waiting.returncode, "stdout": stdout, "stderr": stderr,
+              "at": time.time()}
+    retry = {**fire(hook, event), "event": "retry", "at": time.time()}
     while not os.path.exists(hold) and time.monotonic() < deadline:
         time.sleep(0.2)
-    done = subprocess.run([os.environ["E2E_OSTROM"], "wait", gate, "--timeout", "20"], capture_output=True,
-                          text=True, timeout=60)
-    waited = {"event": "wait-after", "tool": gate, "code": done.returncode, "stdout": done.stdout,
-              "stderr": done.stderr}
-    return [waited, {**fire(hook, event), "event": "retry"}]
+    return [waited, retry]
 
 
 def main():

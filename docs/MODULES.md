@@ -57,8 +57,8 @@ opens its MCP servers, its inference and the read of a gate (`GET /api/v1/gates/
 hook route: 403 otherwise (S2-25).
 
 `ostrom wait GATE_ID`, which a gate's refusal tells the agent to run as its own command, reaches Ostrom the same way
-(`GET /api/v1/gates/{id}?wait=`, 55 s at most per read, the relay's 70 s bound): the agent's shell inherits the
-relay's URL and capability, never a token of Ostrom.
+(`GET /api/v1/gates/{id}?wait=30`: Ostrom holds a read 30 s at most, a held read is asked again at once, under the
+relay's 70 s bound): the agent's shell inherits the relay's URL and capability, never a token of Ostrom.
 
 Security decision (30/10/2026 09:45): the agent's capability is exported a second time as `OSTROM_RELAY_CLIENT`,
 because Codex's default shell policy drops every variable named like a token, key or secret, and `ostrom wait` runs in

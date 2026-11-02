@@ -27,9 +27,9 @@ class GateWaitTest {
         )
         assertEquals(WaitOutcome(0, "approved by @lena (receipt R1). Run the same command again now."), await(calls))
         assertEquals(listOf("waiting for a yes from @lena or @omar on \"Push to main\"..."), said)
-        assertEquals(listOf(1_000L), sleeps)
-        assertEquals(List(2) { "/api/v1/gates/g1?wait=55" }, calls.paths(), "Ostrom holds the read 55 s at most")
-        assertEquals(70_000, calls.calls.first().timeoutMillis, "the relay's bound")
+        assertEquals(listOf(1_000L), sleeps, "an answer that came back at once is followed by a pause")
+        assertEquals(List(2) { "/api/v1/gates/g1?wait=30" }, calls.paths(), "Ostrom holds the read 30 s at most")
+        assertEquals(40_000, calls.calls.first().timeoutMillis, "past the 30 s Ostrom holds it")
         assertEquals(null, calls.calls.first().body, "a GET")
     }
 
@@ -97,16 +97,16 @@ class GateWaitTest {
         assertEquals(asked, calls.paths())
         // each ask ends with the wait, a little grace aside, never 15 s after it
         assertEquals(listOf(4_000, 3_000), calls.calls.map { it.timeoutMillis })
-        // the last pause is cut to what is left
+        // the last pause is cut to what is left (an unreachable Ostrom held nothing, so it pauses)
         sleeps.clear()
         now = 0
-        val held = object : OstromCalls {
+        val slow = object : OstromCalls {
             override fun call(path: String, body: JsonElement?, timeoutMillis: Int): CallResult {
                 now += 1_500
-                return request(""""status":"pending"""")
+                return CallResult.Failed("connection refused", CallResult.UNREACHABLE)
             }
         }
-        assertEquals(75, GateWait(held, { now }, { sleeps += it; now += it }) { }.await("g1", 2).exitCode)
+        assertEquals(75, GateWait(slow, { now }, { sleeps += it; now += it }) { }.await("g1", 2).exitCode)
         assertEquals(listOf(500L), sleeps)
     }
 
@@ -125,7 +125,58 @@ class GateWaitTest {
         val outcome = GateWait(slow, { now }, { now += it }) { said += it }.await("g1", 110)
         assertEquals(75, outcome.exitCode)
         assertTrue(now <= 112_000 + 1_000, "ended at $now ms, under the 120 s of Claude Code's shell tool")
-        assertEquals(70_000, slow.timeouts.first())
+        assertEquals(40_000, slow.timeouts.first())
+    }
+
+    @Test
+    fun aReadOstromHeldToItsEndIsAskedAgainAtOnceNeverInATightLoop() {
+        // Ostrom (server#112) holds each read until its wait ends: four asks cover 110 s, with no pause between them
+        val holding = object : OstromCalls {
+            val paths = mutableListOf<String>()
+
+            override fun call(path: String, body: JsonElement?, timeoutMillis: Int): CallResult {
+                paths += path
+                now += path.substringAfter("?wait=").toLong() * 1_000
+                return if (paths.size == 3) {
+                    request(""""status":"approved","decidedBy":"@lena","receiptId":"R1"""")
+                } else {
+                    pending
+                }
+            }
+        }
+        val yes = GateWait(holding, { now }, { sleeps += it; now += it }) { said += it }.await("g1", 110)
+        assertEquals(0, yes.exitCode)
+        assertEquals(List(3) { "/api/v1/gates/g1?wait=30" }, holding.paths, "one ask per 30 s, not one per second")
+        assertEquals(emptyList(), sleeps, "no pause after a held read")
+        // a read answered early but pending (an Ostrom that does not hold it) still pauses: never a tight loop
+        now = 0
+        val early = object : OstromCalls {
+            var asks = 0
+
+            override fun call(path: String, body: JsonElement?, timeoutMillis: Int): CallResult {
+                asks++
+                now += 28_000
+                return pending
+            }
+        }
+        assertEquals(75, GateWait(early, { now }, { sleeps += it; now += it }) { }.await("g1", 60).exitCode)
+        assertEquals(listOf(1_000L, 1_000L), sleeps, "28 s of 30 is not held to its end")
+        assertEquals(3, early.asks)
+        // the last half second is asked with ?wait=0, which nothing holds: it ends the wait, never loops
+        now = 0
+        sleeps.clear()
+        val tail = object : OstromCalls {
+            val paths = mutableListOf<String>()
+
+            override fun call(path: String, body: JsonElement?, timeoutMillis: Int): CallResult {
+                paths += path
+                now += 1_500
+                return pending
+            }
+        }
+        assertEquals(75, GateWait(tail, { now }, { sleeps += it; now += it }) { }.await("g1", 2).exitCode)
+        assertEquals(listOf("?wait=2", "?wait=0").map { "/api/v1/gates/g1$it" }, tail.paths)
+        assertEquals(emptyList(), sleeps)
     }
 
     @Test
