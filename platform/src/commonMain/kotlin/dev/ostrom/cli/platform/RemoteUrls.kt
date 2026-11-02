@@ -24,9 +24,8 @@ object RemoteUrls {
     fun ownerName(url: String): String? {
         val trimmed = clean(url)
         // a file:// remote is a folder on this machine: its path names no owner (slug, the gate's label, keeps it)
-        if (trimmed.startsWith(FILE, ignoreCase = true)) return null
-        val path = remotePath(trimmed) ?: return null
-        val parts = path.split('/').filter { it.isNotEmpty() }
+        val path = if (trimmed.startsWith(FILE, ignoreCase = true)) null else remotePath(trimmed)
+        val parts = path.orEmpty().split('/').filter { it.isNotEmpty() }
         return if (parts.size < 2) null else parts.takeLast(2).joinToString("/")
     }
 
