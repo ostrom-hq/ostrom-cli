@@ -227,7 +227,8 @@ class PackageChecks(
             val text = ports.files.read("${view.tmp}/${script.path}")
             val sha = text?.let { it.encodeUtf8().sha256().hex() }.orEmpty()
             val runner = ports.runner
-            // a script changed here is sent nowhere: refused and reported below, as on a workstation
+            // in a cloud session an intact script goes to the runner, and nothing below runs it here: a missing or
+            // changed one is sent nowhere, only refused and reported below (the cloud tests check nothing runs here)
             if (runner != null && text != null && sha == script.sha256) {
                 val sessionId = ids.of(event.string("session_id"))
                 val check = RunnerCheck(

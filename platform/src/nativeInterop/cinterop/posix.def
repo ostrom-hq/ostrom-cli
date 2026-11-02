@@ -315,8 +315,10 @@ static inline int ostrom_socket_exchange(int fd, const struct sockaddr *address,
     int connected = connect(fd, address, address_size);
     /* a Unix listener whose backlog is full answers EAGAIN, never EINPROGRESS: try again until the deadline */
     while (connected != 0 && errno == EAGAIN) {
-        if (ostrom_elapsed_ms(start) >= timeout_ms) { close(fd); return -2; }
-        struct timespec pause = {0, 10000000L};
+        long left = timeout_ms - ostrom_elapsed_ms(start);
+        if (left <= 0) { close(fd); return -2; }
+        /* 10 ms at most, never past the deadline */
+        struct timespec pause = {0, (left < 10 ? left : 10) * 1000000L};
         nanosleep(&pause, NULL);
         connected = connect(fd, address, address_size);
     }
