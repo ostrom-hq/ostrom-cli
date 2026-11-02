@@ -50,6 +50,8 @@ class LaunchWiringTest {
         assertEquals(ServerReply(201, """{"ok":true}"""), reply)
         assertEquals(ServerRequest("POST", "/api/v1/launches", "{}", "t", 5_000), sent.single())
         assertEquals(ServerReply(null, "connection refused"), transport.send(ServerCall("GET", "/down", null, null, 1)))
+        ApiServerTransport(api, "acme").send(ServerCall("GET", "/api/v1/policy/agents", null, "t", 5_000))
+        assertEquals("acme", sent.last().org, "the organisation of the launch, on every call")
     }
 
     @Test

@@ -221,6 +221,10 @@ class CloudSessionUseCase(
 
     /** The exit code of a refused or failed call, said. */
     private fun refused(answer: ServerAnswer.Failed): Int {
+        if (answer.type == ORG_REQUIRED) {
+            say("ostrom: you are a member of several organisations: $CHOOSE_ORG")
+            return USAGE
+        }
         val code = when (answer.status) {
             UNAUTHORIZED -> SIGN_IN
             FORBIDDEN -> REFUSED
@@ -294,6 +298,8 @@ class CloudSessionUseCase(
         private const val OK = 0
         private const val FAILED = 1
         private const val USAGE = 64
+        private const val ORG_REQUIRED = "org_required"
+        private const val CHOOSE_ORG = "add --org <name>, set OSTROM_ORG, or run `ostrom init`"
         private const val SIGN_IN = 65
         private const val MISSING = 66
         private const val UNREACHABLE = 69

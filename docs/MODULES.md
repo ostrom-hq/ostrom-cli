@@ -36,6 +36,14 @@ Rules that keep the binary fast and the modules apart:
   the convenience). Tests build `CliDependencies` with fakes.
 - Output goes through `Console` (unbuffered, UTF-8 on Windows consoles). Commands never call `println`.
 
+## The organisation of a launch
+
+`ostrom <agent>` (and `--cloud`, and `ostrom attach`) acts in one organisation: `--org`, else `OSTROM_ORG`, else the
+one `ostrom init` kept. It is looked up among the caller's (`GET /api/v1/orgs`, by id or short name) and its id is sent
+as `Ostrom-Org` on every call (`ApiServerTransport`); one the person is not a member of stops with 66. With none named,
+nothing is looked up, the header is left out and the server takes the person's only organisation; a member of several
+gets 409 `org_required` from the policy check, and the launch stops with 64 and the way to name one.
+
 ## The local relay
 
 While `ostrom <agent>` runs, the launcher starts a `LocalRelay`
@@ -205,7 +213,14 @@ to the hooks, the binary reads `OSTROM_URL` (server), `OSTROM_HOME` (the CLI fol
 TeamCode's credential envelopes with its key file (`aesGcmOpen` of `launcher`: AES-256-GCM, `v1:` then base64url of
 nonce, ciphertext and tag, bound to `variant:<team>:<id>[:<member>]` or `<team>:<account>`), maps the members to
 Ostrom's by e-mail then login, and sends the plan to `POST /api/v1/import/teamcode?dryRun=true` (ostrom-server#28).
-It imports only with `--yes`, and prints no secret.
+It imports only with `--yes`, and prints no secret. A normal pass refreshes no token: a shared account TeamCode still
+uses is reported `revive_at_cutover`, and the CLI says how many wait. `--cutover` is the owner's final pass once
+TeamCode is stopped (ostrom-server#86): the plan with `?dryRun=true&cutover=true`, then, only once the owner typed
+`cutover` (or passed `--confirm cutover` without a terminal; `--cutover --yes` is a usage error), the same export
+with `?cutover=true` (10 minutes at most: a token rotation per account at its provider), which rotates those accounts'
+tokens and revives them. A plan with no account to revive asks nothing. Accounts left as they were are listed with
+their reason and end the command with 2; a lost answer says the cutover may have run in part, and the same command
+shows what still waits.
 
 ## Usage statistics (opt-in)
 
