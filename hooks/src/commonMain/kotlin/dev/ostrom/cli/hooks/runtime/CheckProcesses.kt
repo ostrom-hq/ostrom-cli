@@ -154,17 +154,19 @@ class GitCheckouts(
         /** What `git config --get-regexp` exits with when nothing matches. */
         const val NONE_DECLARED = 1
 
-        val HOOKS_OFF = listOf("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false")
-
-        /** No hook, no fsmonitor, no LFS filter (an empty filter command is no filter for git). */
-        val OFF = HOOKS_OFF + listOf(
-            "-c", "filter.lfs.smudge=", "-c", "filter.lfs.process=", "-c", "filter.lfs.clean=",
-            "-c", "filter.lfs.required=false",
-        )
-
         const val SHORT_MILLIS = 5_000
 
         /** A checkout writes the whole tree of a commit. */
         const val CHECKOUT_MILLIS = 60_000
     }
 }
+
+/** No hook and no fsmonitor of the repository's. */
+private val HOOKS_OFF = listOf("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false")
+
+/** No hook, no fsmonitor, no LFS filter (an empty filter command is no filter for git). */
+private val OFF = listOf(
+    "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
+    "-c", "filter.lfs.smudge=", "-c", "filter.lfs.process=", "-c", "filter.lfs.clean=",
+    "-c", "filter.lfs.required=false",
+)
