@@ -109,4 +109,13 @@ object GateTexts {
         "Ostrom: waiting for a yes. Run `ostrom wait ${answer.id}` as its own command, then the exact same command " +
             "again once it says approved. Not run yet: \"${answer.label}\" needs a yes from ${answer.who} (gate " +
             "\"${answer.gateLabel}\"); the request is in the Ostrom console. Do not work around it."
+
+    /**
+     * The gate crashed on this tool call (a stack overflow, an abort): refused, never let through (M1). It says
+     * nothing of whether the tool ran (after a tool call, PostToolUse, it already had), so it never asks for a retry:
+     * that would repeat a deployment that already went through.
+     */
+    const val GATE_CRASHED =
+        "Ostrom: the gate stopped on this tool call. Before the tool, that refuses it; after it, the tool had " +
+            "already run. Do not run it again on your own: tell the user, who can run `ostrom doctor`."
 }

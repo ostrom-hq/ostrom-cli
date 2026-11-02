@@ -509,3 +509,82 @@ static inline void ostrom_unlock_file(int fd) {
     flock(fd, LOCK_UN);
     close(fd);
 }
+
+/*
+ * What a crashing `ostrom hook` says and exits with (security audit CLI n°2, M1): a stack overflow, a bad access, an
+ * abort (an uncaught Kotlin exception, memory exhausted) never leave the agent a code other than the refusal's, which
+ * it would read as "run the tool". Copied here when the handlers are set: the handler only writes and exits.
+ */
+#define OSTROM_CRASH_TEXT 4096
+static char ostrom_crash_stdout[OSTROM_CRASH_TEXT];
+static size_t ostrom_crash_stdout_length = 0;
+static char ostrom_crash_stderr[OSTROM_CRASH_TEXT];
+static size_t ostrom_crash_stderr_length = 0;
+static int ostrom_crash_code = 2;
+/* The handler's own stack: a stack overflow has none left on the thread's. */
+static char ostrom_crash_stack[64 * 1024];
+
+/* Writes all it can; a full non-blocking pipe gets 1 s per wait for its reader, then the code goes out alone. */
+static void ostrom_crash_write(int fd, const char *text, size_t length) {
+    while (length > 0) {
+        ssize_t written = write(fd, text, length);
+        if (written < 0 && errno == EINTR) continue;
+        if (written < 0 && errno == EAGAIN) {
+            struct pollfd writable = {fd, POLLOUT, 0};
+            if (poll(&writable, 1, 1000) > 0) continue;
+            return;
+        }
+        if (written <= 0) return;
+        text += written;
+        length -= (size_t)written;
+    }
+}
+
+static void ostrom_crash_exit(int signal_number) {
+    (void)signal_number;
+    ostrom_crash_write(STDOUT_FILENO, ostrom_crash_stdout, ostrom_crash_stdout_length);
+    ostrom_crash_write(STDERR_FILENO, ostrom_crash_stderr, ostrom_crash_stderr_length);
+    _exit(ostrom_crash_code);
+}
+
+/* Copies `text` whole, or nothing (-1): a refusal cut in the middle would not be valid JSON for the agent. */
+static long ostrom_crash_copy(char *target, const char *text) {
+    size_t length = strlen(text);
+    if (length > OSTROM_CRASH_TEXT) return -1;
+    memcpy(target, text, length);
+    return (long)length;
+}
+
+/*
+ * From here on, a crash of this process (SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT, SIGTRAP, SIGSYS) writes `out` on
+ * stdout and `err` on stderr and exits with `code`. The calling thread gets an alternate stack, for a stack overflow:
+ * call it from the thread that runs the hook (the hook runs on that one thread). SIGPIPE is ignored, so that a
+ * reader gone does not kill the handler on its write. Returns 0, or -1 when a text is over 4 KiB or a handler could
+ * not be set (nothing is set then for the text; errno says why for a handler).
+ */
+static inline int ostrom_exit_on_crash(int code, const char *out, const char *err) {
+    long out_length = ostrom_crash_copy(ostrom_crash_stdout, out);
+    long err_length = ostrom_crash_copy(ostrom_crash_stderr, err);
+    if (out_length < 0 || err_length < 0) return -1;
+    ostrom_crash_stdout_length = (size_t)out_length;
+    ostrom_crash_stderr_length = (size_t)err_length;
+    ostrom_crash_code = code;
+    /* first, so that no handler is ever in place without it */
+    signal(SIGPIPE, SIG_IGN);
+    stack_t alternate;
+    memset(&alternate, 0, sizeof alternate);
+    alternate.ss_sp = ostrom_crash_stack;
+    alternate.ss_size = sizeof ostrom_crash_stack;
+    if (sigaltstack(&alternate, NULL) != 0) return -1;
+    struct sigaction action;
+    memset(&action, 0, sizeof action);
+    action.sa_handler = ostrom_crash_exit;
+    action.sa_flags = SA_ONSTACK;
+    /* every other signal waits while the refusal is written: it is written once */
+    sigfillset(&action.sa_mask);
+    const int crashes[] = {SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT, SIGTRAP, SIGSYS};
+    for (size_t i = 0; i < sizeof crashes / sizeof crashes[0]; i++) {
+        if (sigaction(crashes[i], &action, NULL) != 0) return -1;
+    }
+    return 0;
+}
