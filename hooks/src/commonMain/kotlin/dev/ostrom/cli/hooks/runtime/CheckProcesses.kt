@@ -85,8 +85,9 @@ class SandboxedScripts(
 
 /**
  * [CommitCheckouts] over the real `git`. These commands run in the hook's own process, outside the sandbox, on a
- * repository the agent controls: its hooks (`post-checkout`), its fsmonitor and the Git LFS filters are switched off,
- * so none of the repository's code runs with the hook's rights.
+ * repository the agent controls: its hooks (`post-checkout`), its fsmonitor and every filter its configuration declares
+ * (Git LFS's and any other, security audit M3) are switched off, so none of the repository's code runs with the hook's
+ * rights, nor changes the tree the checks run on.
  *
  * @param git The `git` the launcher resolved (`OSTROM_GIT`).
  * @param budget What is left of the agent's limit on the hook: a command it leaves no time for is not run, and fails.
@@ -111,17 +112,63 @@ class GitCheckouts(
         run(repository, listOf("worktree", "prune"), SHORT_MILLIS)
     }
 
+    /** The filters [repository] declares, read once; a failed read is not kept, and is asked again next time. */
+    private val declared = mutableMapOf<String, List<String>>()
+
     private fun run(repository: String, arguments: List<String>, timeoutMillis: Int): CaptureResult {
-        // no hook, no fsmonitor, no LFS filter (an empty filter command is no filter for git)
-        val command = listOf(
-            git, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "filter.lfs.smudge=",
-            "-c", "filter.lfs.process=", "-c", "filter.lfs.clean=", "-c", "filter.lfs.required=false", "-C", repository,
-        ) + arguments
-        val limit = budget.cap(timeoutMillis) ?: return CaptureResult.TimedOut
-        return capture.capture(command, limit)
+        val known = declared[repository]
+        return when (val read = if (known != null) FiltersRead.Drivers(known) else filtersOf(repository)) {
+            is FiltersRead.Failed -> read.result
+            is FiltersRead.Drivers -> {
+                declared[repository] = read.names
+                // no hook, no fsmonitor, no filter (an empty filter command is no filter for git)
+                val off = (listOf(LFS) + read.names).flatMap { driver ->
+                    FILTER_KEYS.flatMap { listOf("-c", "$FILTER$driver.$it") }
+                }
+                val command = listOf(git, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false") + off +
+                    listOf("-C", repository) + arguments
+                val limit = budget.cap(timeoutMillis)
+                if (limit == null) CaptureResult.TimedOut else capture.capture(command, limit)
+            }
+        }
+    }
+
+    /**
+     * The filter drivers the configuration of [repository] declares (its own, the user's, the system's and what they
+     * include: reading them runs nothing); exit 1 is none. Anything else fails the command, which then never runs.
+     */
+    private fun filtersOf(repository: String): FiltersRead {
+        val limit = budget.cap(SHORT_MILLIS) ?: return FiltersRead.Failed(CaptureResult.TimedOut)
+        val listed = capture.capture(listOf(git, "-C", repository) + LIST_FILTERS, limit)
+        return when {
+            listed is CaptureResult.Exited && (listed.code == 0 || listed.code == NONE_DECLARED) -> {
+                val names = listed.output.lines().filter { it.startsWith(FILTER) }
+                    .map { it.removePrefix(FILTER).substringBeforeLast('.') }
+                FiltersRead.Drivers(names.distinct() - LFS)
+            }
+            else -> FiltersRead.Failed(listed)
+        }
+    }
+
+    /** What reading a repository's filters gave: their drivers, or the result that fails the command. */
+    private sealed interface FiltersRead {
+        class Drivers(val names: List<String>) : FiltersRead
+
+        class Failed(val result: CaptureResult) : FiltersRead
     }
 
     private companion object {
+        const val FILTER = "filter."
+        const val LFS = "lfs"
+
+        /** Every command a filter driver may run, emptied, and the driver made optional. */
+        val FILTER_KEYS = listOf("smudge=", "process=", "clean=", "required=false")
+
+        /** What `git config --get-regexp` exits with when nothing matches. */
+        const val NONE_DECLARED = 1
+
+        val LIST_FILTERS = listOf("config", "--name-only", "--get-regexp", "^filter\\.")
+
         const val SHORT_MILLIS = 5_000
 
         /** A checkout writes the whole tree of a commit. */

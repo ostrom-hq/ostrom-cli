@@ -131,7 +131,7 @@ class CheckProcessesTest {
         assertTrue(checkouts.add("/w", "/p", "M"))
         assertTrue(checkouts.clean("/w"))
         val off = listOf("x", "a.b").flatMap { driver ->
-            listOf("smudge=", "clean=", "process=", "required=false").flatMap { listOf("-c", "filter.$driver.$it") }
+            listOf("smudge=", "process=", "clean=", "required=false").flatMap { listOf("-c", "filter.$driver.$it") }
         }
         assertEquals(
             listOf(
@@ -156,6 +156,9 @@ class CheckProcessesTest {
             assertFalse(GitCheckouts(capture, "git").add("/w", "/p", "M"), "$failed")
             assertEquals(1, capture.captured.size, "nothing is checked out without knowing its filters ($failed)")
         }
+        val spent = Capture(CaptureResult.Exited(0, ""))
+        assertFalse(GitCheckouts(spent, "git", HookBudget(1_000) { 0L }).add("/w", "/p", "M"))
+        assertEquals(0, spent.captured.size, "no time left: not even the filters are read")
     }
 
     @Test
