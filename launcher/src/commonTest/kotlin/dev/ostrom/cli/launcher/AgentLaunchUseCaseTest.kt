@@ -150,7 +150,7 @@ class AgentLaunchUseCaseTest {
         server["GET ${Routes.KEYS}"] = 200 to objectOf(
             "keys" to listOf(mapOf("kid" to PackageVector.KID, "publicKeyPem" to PackageVector.PUBLIC_KEY_PEM)),
         ).toString()
-        server["GET ${Routes.MCP_SERVERS}"] = 200 to
+        server["GET ${Routes.MCP_MINE}"] = 200 to
             """{"items":[{"name":"github"},{"name":"off","enabled":false},{"name":"bad name!"},{"x":1},"s"]}"""
         variables["OSTROM_INFERENCE"] = "on"
         variables["OSTROM_KEEP_PLUGIN"] = "1"
@@ -188,7 +188,7 @@ class AgentLaunchUseCaseTest {
         server["GET ${Routes.KEYS}"] = 200 to objectOf(
             "keys" to listOf(mapOf("kid" to PackageVector.KID, "publicKeyPem" to PackageVector.PUBLIC_KEY_PEM)),
         ).toString()
-        server["GET ${Routes.MCP_SERVERS}"] = 200 to """{"items":[{"name":"linear"}]}"""
+        server["GET ${Routes.MCP_MINE}"] = 200 to """{"items":[{"name":"linear"}]}"""
         val before = files.texts.toMap()
         assertEquals(0, start(model = "opus", dryRun = true))
         assertTrue(said.any { it.startsWith("ostrom: package ") }, said.toString())
@@ -202,7 +202,7 @@ class AgentLaunchUseCaseTest {
         assertEquals(before, files.texts.toMap(), "no file is written: neither the envelope nor a key pinned")
         assertEquals(1, server.sent("GET ${Routes.INSTANCE_KEYS}").size, "the instance's keys are read")
         said.clear()
-        server["GET ${Routes.MCP_SERVERS}"] = 200 to """{"items":[]}"""
+        server["GET ${Routes.MCP_MINE}"] = 200 to """{"items":[]}"""
         assertEquals(0, start(repo = "acme/web", dryRun = true))
         assertEquals("ostrom: MCP servers: none", said[said.size - 2])
         assertTrue(said.last().startsWith("ostrom: dry run for acme/web: the policy"), said.last())
@@ -454,7 +454,7 @@ class AgentLaunchUseCaseTest {
     @Test
     fun whatTheServerCannotListIsSaidAndTheLaunchGoesOn() = runTest {
         serveALaunch()
-        server.unreachable = setOf("GET ${Routes.MCP_SERVERS}")
+        server.unreachable = setOf("GET ${Routes.MCP_MINE}")
         assertEquals(3, start(executable = "ostrom"))
         assertTrue("ostrom: your organisation's MCP servers are not listed (connection refused)" in said)
         assertNull(filesWhileRunning[join(temporary, "plugin", "ostrom", "gates.json")])
@@ -536,7 +536,7 @@ class AgentLaunchUseCaseTest {
     private fun serveALaunch() {
         server["GET ${Routes.POLICY}?agent=claude-code&dev=alice"] = 200 to """{"allowed":true}"""
         server["POST ${Routes.LAUNCHES}"] = 201 to """{"launchId":"L1","agentToken":"agent-token"}"""
-        server["GET ${Routes.MCP_SERVERS}"] = 200 to """{"items":[]}"""
+        server["GET ${Routes.MCP_MINE}"] = 200 to """{"items":[]}"""
         server["GET ${Routes.INFERENCE_MODELS}"] = 200 to """{"data":[]}"""
         server["POST /api/v1/sessions/s1/end"] = 200 to """{"session":{"receiptId":"R1"},"verification":{"ok":true}}"""
         server["GET ${Routes.INSTANCE_KEYS}"] = 200 to KEYS

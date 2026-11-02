@@ -23,6 +23,12 @@ object Routes {
     /** `GET`: the MCP servers of the organisation, relayed by Ostrom. */
     const val MCP_SERVERS = "/api/v1/mcp/servers"
 
+    /**
+     * `GET`: only the MCP servers the session's agent will reach, without secret names, policies or assignments: the
+     * one view a CLI token is given, an owner's or an admin's included (least privilege, JOURNAL 02/11 17:45).
+     */
+    const val MCP_MINE = "$MCP_SERVERS?mine=true"
+
     /** `GET`: the models of the inference gateway; a 2xx with models means the organisation relays inference. */
     const val INFERENCE_MODELS = "/api/v1/inference/v1/models"
 

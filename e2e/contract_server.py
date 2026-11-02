@@ -112,7 +112,8 @@ def make_handler(state):
                 return self._answer(200, instance_keys())
             if (method, path) == ("GET", "/api/v1/receipts/keys"):
                 return self._answer(200, state["package"]["keys"])
-            if (method, path) == ("GET", "/api/v1/mcp/servers") and device:
+            # the CLI asks only for the servers its agent reaches (`mine`), the one view a CLI token is given
+            if (method, path) == ("GET", "/api/v1/mcp/servers") and device and query.get("mine") == ["true"]:
                 return self._answer(200, {"items": []})
             if (method, path) == ("GET", "/api/v1/inference/v1/models"):
                 return self._error(404, "not_found", "no gateway")
