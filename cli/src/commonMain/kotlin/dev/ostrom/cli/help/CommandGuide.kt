@@ -22,6 +22,7 @@ private val AGENT_GUIDES = Agent.entries.associate { agent ->
         "agents",
         "ostrom ${agent.command}" to "start ${agent.command} under your team's harness",
         "ostrom ${agent.command} --dry-run" to "show the harness that would apply, then exit",
+        "ostrom ${agent.command} --cloud" to "run it in Ostrom's cloud, attached here (Ctrl-] detaches)",
         "ostrom ${agent.command} -- --help" to "everything after -- goes to ${agent.command} itself",
     )
 }
@@ -64,6 +65,10 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
         "ostrom verify rcp_8a1d" to "verify a bundle you pulled, offline",
         "ostrom verify receipt.json --key server.pub" to "a file, with a key you trust",
         "ostrom verify rcp_8a1d --json" to "the report, for a script",
+    ),
+    "attach" to guide(
+        "agents",
+        "ostrom attach ses_41b2" to "attach again to a cloud session that kept running",
     ),
     "logs" to guide(
         "agents",

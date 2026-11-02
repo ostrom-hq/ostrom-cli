@@ -62,11 +62,14 @@ alternative: a second private file for `ostrom wait`, which a command of the age
 - Every request needs a capability (`Authorization: Bearer`, `x-api-key` or `x-ostrom-local-token`, compared in
   constant time): 401 otherwise. An `Origin` header or a `Host` that is not the loopback: 403.
 - Only an allow-list is forwarded, everything else is 404 (never an open proxy): the hook routes
-  (`POST /api/v1/sessions`, `/sessions/{id}/reopen|seen`, `/api/v1/gates`, `/api/v1/notifications`, `GET
-  /api/v1/gates/{id}` and `/gates/catalog`, as they are, 2 MiB, 15 s, 70 s for a gate wait; ending a session, its sign
-  of life, the use of a yes and check runs are the launcher's and Ostrom's, never forwarded for the agent, S2-25 and
-  S2-29), the catalogue of the verified package answered from memory when there is one, the organisation's gate
-  policy signed by the instance (`GET /api/v1/gates/catalog/signed`, kept 30 s in memory, a failure never kept; the
+  (`POST /api/v1/sessions`, `/sessions/{id}/reopen|seen`, `/api/v1/gates`, `/api/v1/notifications`,
+  `/api/v1/checks`, `GET /api/v1/gates/{id}` and `/gates/catalog`, as they are, 2 MiB, 15 s, 70 s for a gate wait;
+  ending a session, its sign of life and the use of a yes are the launcher's and Ostrom's, never forwarded, S2-25 and
+  S2-29; reading check runs is the console's, never forwarded). A check run's report is the hooks', which run the
+  package's checks, and takes their capability, not the agent's. It is the developer's machine's word: the hooks'
+  capability file is readable by the agent's own user (S2-20), so a report proves no more than the hooks that sent
+  it. The catalogue of the verified package is answered from memory when there is one. Also forwarded: the
+  organisation's gate policy signed by the instance (`GET /api/v1/gates/catalog/signed`, kept 30 s in memory, a failure never kept; the
   hooks check its signature against `OSTROM_INSTANCE_KEYS` and its expiry at every call, and hold every action without
   one, S2-20 and S2-38), `POST /mcp/{server}` for the launch's servers (to `/api/v1/mcp/{server}`, streamed, 401/403 from
   Ostrom become 502), and with inference `/v1/messages`, `/v1/chat/completions`, `/v1/models` (to
@@ -101,8 +104,11 @@ started.
 | 127 | `AGENT_MISSING` | The agent is not installed. |
 
 A command declared but not built exits with 70 (`NOT_IMPLEMENTED`) and says so on stderr; it disappears once every
-command is built. An option of a built command that this version does not have yet (`ostrom claude --cloud`, coming
-soon) is a usage error instead: 64 (`USAGE`).
+command is built. An option of a built command that this version does not have yet is a usage error instead: 64
+(`USAGE`); none is in that state since `--cloud` was built. `ostrom <agent> --cloud` and `ostrom attach` end with the
+session: 0 when it ends or the developer detaches, 64 for agent arguments (before any sign-in is read) or a `--repo`
+not on GitHub, 65 to sign in again, 66 for no such session, 69 when Ostrom or the connection is lost (the session
+keeps running: `ostrom attach <id>`), 77 for a session of someone else.
 
 ## What every command does the same way
 
@@ -110,8 +116,8 @@ soon) is a usage error instead: 64 (`USAGE`).
   one entry per command: `HelpTest` fails for a command without one). A usage error ends with the
   `--help` to run.
 - **Colours**: only on a terminal. `--no-color`, `NO_COLOR` (set and not empty, as no-color.org says) or
-  `ostrom config set color never` turn them off, `TERM=dumb` too; `color always` forces them (`cli/.../help/Colours.kt`). Whether stdout is a terminal decides
-  for help; a usage error, on stderr, never has colours.
+  `ostrom config set color never` turn them off, `TERM=dumb` too; `color always` forces them
+  (`cli/.../help/Colours.kt`). Whether stdout is a terminal decides for help; a usage error, on stderr, never has colours.
 - **`--json`**: one JSON document on stdout, then a newline, never a colour nor a line for humans; keys are only
   added, never renamed or removed, like the API contract. `ostrom doctor --json` is
   `{"checks":[{"status":"ok|warning|problem","message":"…"}],"problems":0,"warnings":0}`; `ostrom verify --json` is

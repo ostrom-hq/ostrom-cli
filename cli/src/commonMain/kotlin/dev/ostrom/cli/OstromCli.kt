@@ -12,6 +12,7 @@ import com.github.ajalt.clikt.core.subcommands
 import dev.ostrom.cli.api.STATISTICS_TIMEOUT_MILLIS
 import dev.ostrom.cli.commands.AgentCommand
 import dev.ostrom.cli.commands.ApproveCommand
+import dev.ostrom.cli.commands.AttachCommand
 import dev.ostrom.cli.commands.ConfigCommand
 import dev.ostrom.cli.commands.DenyCommand
 import dev.ostrom.cli.commands.DoctorCommand
@@ -129,6 +130,7 @@ class OstromCli(private val dependencies: CliDependencies) {
                 ReceiptsPullCommand(dependencies),
             ),
             VerifyCommand(dependencies),
+            AttachCommand(dependencies),
             LoginCommand(dependencies),
             UpdateCommand(dependencies),
             LogoutCommand(dependencies),

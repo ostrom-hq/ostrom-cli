@@ -193,3 +193,20 @@ internal actual fun tcpExchange(
 // coverage: test-only JVM target; the shipped native actuals are tested by ExecutableTest on each target.
 @ExcludeFromCoverage
 actual fun currentExecutable(): String? = ProcessHandle.current().info().command().orElse(null)
+
+// coverage: test-only JVM target; the shipped native actual is tested in posixTest and mingwTest.
+@ExcludeFromCoverage
+internal actual fun terminalEnterRaw(): Boolean = false
+
+// coverage: test-only JVM target; the shipped native actual is tested in posixTest and mingwTest.
+@ExcludeFromCoverage
+internal actual fun terminalRestore() = Unit
+
+// coverage: test-only JVM target; the shipped native actual is tested in posixTest and mingwTest.
+@ExcludeFromCoverage
+internal actual fun terminalSize(): Long = -1
+
+// coverage: test-only JVM target; the shipped native actual is tested in posixTest and mingwTest.
+@ExcludeFromCoverage
+internal actual fun terminalRead(buffer: ByteArray, timeoutMillis: Int): Int = -1
+
