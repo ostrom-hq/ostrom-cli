@@ -627,7 +627,10 @@ class Journey:
         self.check(retry.get("code") == 0, f"the same deployment, again, passes the hook ({retry.get('code')}): "
                                            f"{(retry.get('stdout', '') + retry.get('stderr', '')).strip()[-300:]}")
         yes_at = getattr(self, "yes_at", None)
-        if yes_at is not None and retry.get("at") and waited.get("at"):
+        timed = retry.get("at") and waited.get("at")
+        if yes_at is not None and waited.get("code") == 0 and not timed:
+            self.check(False, "the session stamps the end of ostrom wait and of the retry (the fake agent's \"at\")")
+        elif yes_at is not None and waited.get("code") == 0:
             # ostrom wait was already waiting (Ostrom holds its read): the yes reaches it, not the next poll
             answered, passed = (waited["at"] - yes_at) * 1000, (retry["at"] - yes_at) * 1000
             print(f"  from the yes sent: ostrom wait answers in {answered:.0f} ms, the action passes in {passed:.0f} ms",

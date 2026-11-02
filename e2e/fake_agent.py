@@ -19,6 +19,7 @@ import shlex
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 
 
@@ -116,8 +117,11 @@ def after_the_yes(hook, event, gate, fired):
     with open(hold + ".tmp", "w") as handle:
         json.dump({"hooks": fired}, handle)
     os.replace(hold + ".tmp", hold + ".held")
-    waiting = subprocess.Popen([os.environ["E2E_OSTROM"], "wait", gate, "--timeout", "100"], stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE, text=True)
+    # files, not pipes: nobody reads them while it waits. Its own limit is the journey's (the steps before the yes
+    # sign two people in), and a journey that ends without a yes releases it below.
+    out, err = (tempfile.TemporaryFile("w+") for _ in range(2))
+    waiting = subprocess.Popen([os.environ["E2E_OSTROM"], "wait", gate, "--timeout", "280"], stdout=out, stderr=err,
+                               text=True)
     deadline, released = time.monotonic() + 300, None
     # a journey that ends without a yes releases the session: the wait gets one held read more, then stops
     while waiting.poll() is None and time.monotonic() < deadline:
@@ -128,10 +132,15 @@ def after_the_yes(hook, event, gate, fired):
         time.sleep(0.02)
     if waiting.poll() is None:
         waiting.kill()
-    stdout, stderr = waiting.communicate()
-    waited = {"event": "wait-after", "tool": gate, "code": waiting.returncode, "stdout": stdout, "stderr": stderr,
-              "at": time.time()}
-    retry = {**fire(hook, event), "event": "retry", "at": time.time()}
+    waiting.wait()
+    answered = time.time()
+    out.seek(0)
+    err.seek(0)
+    waited = {"event": "wait-after", "tool": gate, "code": waiting.returncode, "stdout": out.read(),
+              "stderr": err.read(), "at": answered}
+    # the action passes when the hook lets the command through: its end, the hook's own run included
+    retry = {**fire(hook, event), "event": "retry"}
+    retry["at"] = time.time()
     while not os.path.exists(hold) and time.monotonic() < deadline:
         time.sleep(0.2)
     return [waited, retry]

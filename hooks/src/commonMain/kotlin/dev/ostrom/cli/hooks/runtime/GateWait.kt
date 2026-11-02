@@ -58,9 +58,15 @@ class GateWait(
         return outcome
     }
 
-    /** Whether Ostrom held the read of [seconds] to its end: asked again at once (an ask of 0 s is never held). */
-    private fun heldToItsEnd(answer: CallResult, seconds: Long, asked: Long): Boolean =
-        answer is CallResult.Ok && seconds > 0 && clock() - asked >= seconds * MILLIS - HELD_SLACK_MILLIS
+    /**
+     * Whether Ostrom held the read of [seconds] to its end, so it is asked again at once. The contract says nothing
+     * of it in the answer: the time it took says it, within a slack of a second, half the wait for a short one (an
+     * instant answer is never taken as held, so an Ostrom that does not hold a read is still asked once a second).
+     */
+    private fun heldToItsEnd(answer: CallResult, seconds: Long, asked: Long): Boolean {
+        val slack = minOf(HELD_SLACK_MILLIS, seconds * MILLIS / 2)
+        return answer is CallResult.Ok && seconds > 0 && clock() - asked >= seconds * MILLIS - slack
+    }
 
     private fun decided(id: String, body: JsonObject): WaitOutcome? {
         val request = requestOf(body)
@@ -133,7 +139,7 @@ class GateWait(
         private const val MILLIS = 1_000L
         private const val POLL_MILLIS = 1_000L
         private const val MAX_WAIT_SECONDS = 30L // Ostrom holds a gate read 30 s at most (contract core#43)
-        private const val MARGIN = 10L // past the 30 s Ostrom holds, under the relay's own bound of 70 s
+        private const val MARGIN = 15L // past the 30 s Ostrom holds and a slow relay, under the relay's 70 s
 
         /** A read answered this close to its wait's end was held by Ostrom (clocks and the network round it down). */
         private const val HELD_SLACK_MILLIS = 1_000L

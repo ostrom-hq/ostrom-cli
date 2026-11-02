@@ -29,7 +29,7 @@ class GateWaitTest {
         assertEquals(listOf("waiting for a yes from @lena or @omar on \"Push to main\"..."), said)
         assertEquals(listOf(1_000L), sleeps, "an answer that came back at once is followed by a pause")
         assertEquals(List(2) { "/api/v1/gates/g1?wait=30" }, calls.paths(), "Ostrom holds the read 30 s at most")
-        assertEquals(40_000, calls.calls.first().timeoutMillis, "past the 30 s Ostrom holds it")
+        assertEquals(45_000, calls.calls.first().timeoutMillis, "past the 30 s Ostrom holds it")
         assertEquals(null, calls.calls.first().body, "a GET")
     }
 
@@ -91,6 +91,7 @@ class GateWaitTest {
         val still = "still waiting after 2 s: no answer yet. Run `ostrom wait g1` again, or tell the user."
         assertEquals(WaitOutcome(75, still), await(calls, timeout = 2))
         assertEquals(listOf("waiting for a yes from the gate owner on \"gate\"..."), said, "said once")
+        // the ask of 1 s answered at once is no held read either (the slack is half a short wait): it pauses
         assertEquals(listOf(1_000L, 1_000L), sleeps)
         // the end is checked after the pause: no ask leaves after it
         val asked = listOf("?wait=2", "?wait=1").map { "/api/v1/gates/g1$it" }
@@ -125,7 +126,7 @@ class GateWaitTest {
         val outcome = GateWait(slow, { now }, { now += it }) { said += it }.await("g1", 110)
         assertEquals(75, outcome.exitCode)
         assertTrue(now <= 112_000 + 1_000, "ended at $now ms, under the 120 s of Claude Code's shell tool")
-        assertEquals(40_000, slow.timeouts.first())
+        assertEquals(45_000, slow.timeouts.first())
     }
 
     @Test
