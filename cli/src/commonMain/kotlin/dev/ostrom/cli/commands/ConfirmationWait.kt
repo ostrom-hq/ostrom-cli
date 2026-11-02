@@ -84,7 +84,9 @@ internal class ConfirmationWait(
     }
 
     private fun answered(view: JsonObject, where: String): JsonObject {
-        val by = view.child("answeredBy")?.text("login")?.let { " by @$it" } ?: ""
+        // no `?.let { } ?:` here: the null test of the let's result is a branch no answer reaches
+        val login = view.child("answeredBy")?.text("login")
+        val by = if (login == null) "" else " by @$login"
         // a when on each status, not on the string: its hash switch would hold a branch no answer reaches
         val status = view.text("status")
         val (code, message) = when {
