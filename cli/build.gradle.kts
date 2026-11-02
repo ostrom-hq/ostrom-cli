@@ -8,6 +8,13 @@ plugins {
     id("ostrom.kmp")
 }
 
+// The API contract this build speaks: ostrom-core's, from the checkout next to this one that CI and local builds use
+// (ostrom.core.local, settings.gradle.kts). ContractRoutesTest checks the routes; its version goes in BuildInfo.
+val apiContractFile = rootDir.resolve("../ostrom-core/api/openapi.yaml")
+
+/** `  version: 0.1.0` in the `info:` block, quoted or not, with or without a comment after it. */
+val contractVersionLine = Regex("""^ {2}version: *['"]?([0-9A-Za-z.+-]+)['"]? *(#.*)?$""")
+
 // The version printed by `ostrom version`, written into a generated source at build time.
 val generatedBuildInfo = layout.buildDirectory.dir("generated/build-info")
 val generateBuildInfo by tasks.registering {
@@ -17,12 +24,21 @@ val generateBuildInfo by tasks.registering {
     val postHogKey = providers.gradleProperty("ostromPosthogKey").orElse("").get()
     // Written into a Kotlin string literal: only the characters a PostHog key has, so nothing can break or inject.
     require(Regex("[A-Za-z0-9_-]*").matches(postHogKey)) { "ostromPosthogKey has characters a PostHog key never has" }
+    // `info.version` of the contract, compared by `ostrom doctor` with the server's: blank without the checkout, and a
+    // contract whose version cannot be read fails the build rather than ship a doctor that compares nothing.
+    val contract = apiContractFile.takeIf { it.isFile }?.let { file ->
+        val info = file.readLines().dropWhile { it.trimEnd() != "info:" }.drop(1).takeWhile { it.startsWith(" ") }
+        val versions = info.mapNotNull { contractVersionLine.find(it)?.groupValues?.get(1) }
+        // Written into a Kotlin string literal: only the characters of a version.
+        requireNotNull(versions.singleOrNull()) { "no info.version that reads as a version in $file" }
+    }.orEmpty()
     // The release floor (security audit S2-39) this binary is built with: `ostrom update` never goes below it, even
     // when an old manifest, signed but with a lower floor, is served again.
     // Read when the task runs, not when Gradle configures: a missing or wrong file fails this task alone.
     val floorFile = rootProject.layout.projectDirectory.file("release-floor.txt")
     val output = generatedBuildInfo
     inputs.property("version", version)
+    inputs.property("contractVersion", contract)
     inputs.property("postHogKey", postHogKey)
     inputs.file(floorFile)
     outputs.dir(output)
@@ -45,6 +61,9 @@ val generateBuildInfo by tasks.registering {
             |    /** The usage statistics destination (`-PostromPosthogKey`), blank when the build has none. */
             |    const val POSTHOG_KEY = "$postHogKey"
             |
+            |    /** `info.version` of the API contract this build speaks (ostrom-core), blank without its checkout. */
+            |    const val CONTRACT_VERSION = "$contract"
+            |
             |    /** The lowest version `ostrom update` installs, from `release-floor.txt` at build time (S2-39). */
             |    const val FLOOR = "$floor"
             |}
@@ -53,9 +72,7 @@ val generateBuildInfo by tasks.registering {
     }
 }
 
-// The API contract the routes of the CLI are checked against (ContractRoutesTest): ostrom-core's, from the checkout
-// next to this one that CI and local builds use (ostrom.core.local, settings.gradle.kts).
-val apiContract = rootDir.resolve("../ostrom-core/api/openapi.yaml").absolutePath
+val apiContract = apiContractFile.absolutePath
 tasks.withType<Test>().configureEach {
     systemProperty("ostrom.contract", apiContract)
     // an input of the tests, so that a new contract runs them again (files() accepts a missing file: the test says so)
