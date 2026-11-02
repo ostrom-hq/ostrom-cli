@@ -231,6 +231,7 @@ internal actual fun terminalSize(): Long = -1
 internal actual fun terminalRead(buffer: ByteArray, timeoutMillis: Int): Int = -1
 
 
+/** No signal handler on the JVM: nothing is set. */
 // coverage: test-only JVM target; the shipped native actual is tested in posixTest.
 @ExcludeFromCoverage
 actual fun exitOnCrash(code: Int, stdout: String, stderr: String): Boolean = false

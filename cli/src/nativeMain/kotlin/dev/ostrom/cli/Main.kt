@@ -17,7 +17,8 @@ fun main(args: Array<String>) {
     if (args.firstOrNull() == "hook" && args.getOrNull(1) !in HELP) {
         val environment = EnvironmentImpl()
         if (args.getOrNull(1) == HookKind.GATE.command) {
-            // a crash no catch sees (a stack overflow, an abort) refuses the tool too: any other code lets it run
+            // a crash no catch sees (a stack overflow, an abort) refuses the tool too: any other code lets it run.
+            // Not set on Windows (false): a crash there is a structured exception, not a signal (security audit M1).
             val refusal = HookReplies(environment["OSTROM_HOOK_DIALECT"] ?: "claude").deny(GateTexts.GATE_CRASHED)
             exitOnCrash(refusal.exitCode, refusal.stdout, refusal.stderr)
         }

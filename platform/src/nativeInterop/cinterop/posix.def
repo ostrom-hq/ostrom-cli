@@ -541,22 +541,29 @@ static void ostrom_crash_exit(int signal_number) {
     _exit(ostrom_crash_code);
 }
 
-static size_t ostrom_crash_copy(char *target, const char *text) {
+/* Copies `text` whole, or nothing (-1): a refusal cut in the middle would not be valid JSON for the agent. */
+static long ostrom_crash_copy(char *target, const char *text) {
     size_t length = strlen(text);
-    if (length > OSTROM_CRASH_TEXT) length = OSTROM_CRASH_TEXT;
+    if (length > OSTROM_CRASH_TEXT) return -1;
     memcpy(target, text, length);
-    return length;
+    return (long)length;
 }
 
 /*
- * From here on, a crash of this process (SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT) writes `out` on stdout and `err`
- * on stderr (4 KiB each at most) and exits with `code`, on a stack of its own. Returns 0, or -1 when a handler could
- * not be set (errno says why).
+ * From here on, a crash of this process (SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT, SIGTRAP, SIGSYS) writes `out` on
+ * stdout and `err` on stderr and exits with `code`. The calling thread gets an alternate stack, for a stack overflow:
+ * call it from the thread that runs the hook (the hook runs on that one thread). SIGPIPE is ignored, so that a
+ * reader gone does not kill the handler on its write. Returns 0, or -1 when a text is over 4 KiB or a handler could
+ * not be set (nothing is set then for the text; errno says why for a handler).
  */
 static inline int ostrom_exit_on_crash(int code, const char *out, const char *err) {
-    ostrom_crash_stdout_length = ostrom_crash_copy(ostrom_crash_stdout, out);
-    ostrom_crash_stderr_length = ostrom_crash_copy(ostrom_crash_stderr, err);
+    long out_length = ostrom_crash_copy(ostrom_crash_stdout, out);
+    long err_length = ostrom_crash_copy(ostrom_crash_stderr, err);
+    if (out_length < 0 || err_length < 0) return -1;
+    ostrom_crash_stdout_length = (size_t)out_length;
+    ostrom_crash_stderr_length = (size_t)err_length;
     ostrom_crash_code = code;
+    signal(SIGPIPE, SIG_IGN);
     stack_t alternate;
     memset(&alternate, 0, sizeof alternate);
     alternate.ss_sp = ostrom_crash_stack;
@@ -566,8 +573,9 @@ static inline int ostrom_exit_on_crash(int code, const char *out, const char *er
     memset(&action, 0, sizeof action);
     action.sa_handler = ostrom_crash_exit;
     action.sa_flags = SA_ONSTACK;
-    sigemptyset(&action.sa_mask);
-    const int crashes[] = {SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT};
+    /* every other signal waits while the refusal is written: it is written once */
+    sigfillset(&action.sa_mask);
+    const int crashes[] = {SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT, SIGTRAP, SIGSYS};
     for (size_t i = 0; i < sizeof crashes / sizeof crashes[0]; i++) {
         if (sigaction(crashes[i], &action, NULL) != 0) return -1;
     }

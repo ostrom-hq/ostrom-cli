@@ -4,53 +4,109 @@
 package dev.ostrom.cli.platform
 
 import kotlinx.cinterop.IntVar
+import kotlinx.cinterop.addressOf
+import kotlinx.cinterop.allocArray
 import kotlinx.cinterop.alloc
+import kotlinx.cinterop.get
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.ptr
+import kotlinx.cinterop.usePinned
 import kotlinx.cinterop.value
 import platform.posix.SIGABRT
 import platform.posix.SIGSEGV
+import platform.posix.SIGTRAP
+import platform.posix.STDERR_FILENO
+import platform.posix.STDOUT_FILENO
 import platform.posix._exit
+import platform.posix.close
+import platform.posix.dup2
 import platform.posix.fork
+import platform.posix.pipe
 import platform.posix.raise
+import platform.posix.read
 import platform.posix.waitpid
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+
+/** Written after each call, so that the recursion is not turned into a loop: it really overflows the stack. */
+private var depthReached = 0
+
+private fun deeper(depth: Int): Int {
+    depthReached = depth
+    val below = deeper(depth + 1)
+    depthReached = below
+    return below + 1
+}
 
 /**
- * A crash of `ostrom hook gate` exits with the refusal's code (security audit CLI n°2, M1). Each case crashes a child
- * of the test process, forked, so the test process keeps its own handlers.
+ * A crash of `ostrom hook gate` exits with the refusal's code and writes the refusal (security audit CLI n°2, M1).
+ * Each case crashes a child of the test process, forked, so the test process keeps its own handlers; the child's
+ * stdout and stderr go to one pipe the test reads.
  */
 class CrashExitPosixTest {
-    /** The child's exit code, or 128 + the signal that killed it. */
-    private fun crashed(crash: () -> Unit): Int = memScoped {
+    private class Crash(val code: Int, val output: String)
+
+    /** The child's exit code (or 128 + the signal that killed it) and what it wrote. */
+    private fun crashed(stdout: String = OUT, stderr: String = ERR, crash: () -> Unit): Crash = memScoped {
+        val ends = allocArray<IntVar>(2)
+        check(pipe(ends) == 0)
         val child = fork()
         if (child == 0) {
-            if (!exitOnCrash(CODE, "", "")) _exit(NOT_SET)
+            dup2(ends[1], STDOUT_FILENO)
+            dup2(ends[1], STDERR_FILENO)
+            if (!exitOnCrash(CODE, stdout, stderr)) _exit(NOT_SET)
             crash()
             _exit(NOT_CRASHED)
         }
+        close(ends[1])
+        val output = readAll(ends[0])
+        close(ends[0])
         val status = alloc<IntVar>()
         waitpid(child, status.ptr, 0)
         val signal = status.value and SIGNAL_MASK
-        if (signal == 0) (status.value shr EXIT_SHIFT) and EXIT_MASK else SIGNALLED + signal
+        Crash(if (signal == 0) (status.value shr EXIT_SHIFT) and EXIT_MASK else SIGNALLED + signal, output)
     }
 
-    private fun deeper(depth: Int): Int = if (depth < 0) 0 else deeper(depth + 1) + 1
-
-    @Test
-    fun aBadAccessOrAnAbortExitsWithTheRefusalsCode() {
-        assertEquals(CODE, crashed { raise(SIGSEGV) })
-        assertEquals(CODE, crashed { raise(SIGABRT) })
+    private fun readAll(descriptor: Int): String {
+        val bytes = ByteArray(BUFFER)
+        var length = 0
+        while (length < bytes.size) {
+            val count = bytes.usePinned { read(descriptor, it.addressOf(length), (bytes.size - length).toULong()) }
+            if (count <= 0) break
+            length += count.toInt()
+        }
+        return bytes.decodeToString(0, length)
     }
 
     @Test
-    fun aStackOverflowExitsWithTheRefusalsCodeOnTheHandlersOwnStack() {
-        assertEquals(CODE, crashed { deeper(0) })
+    fun aBadAccessAnAbortOrATrapWritesTheRefusalAndExitsWithItsCode() {
+        listOf(SIGSEGV, SIGABRT, SIGTRAP).forEach { signal ->
+            val crash = crashed { raise(signal) }
+            assertEquals(CODE, crash.code, "signal $signal")
+            assertEquals(OUT + ERR, crash.output, "signal $signal")
+        }
+    }
+
+    @Test
+    fun aStackOverflowWritesTheRefusalOnTheHandlersOwnStack() {
+        val crash = crashed { deeper(0) }
+        assertEquals(CODE, crash.code)
+        assertEquals(OUT + ERR, crash.output)
+    }
+
+    @Test
+    fun aRefusalOver4KiBIsNeverSetCutInTheMiddle() {
+        assertEquals(NOT_SET, crashed(stdout = "x".repeat(LIMIT + 1)) { raise(SIGSEGV) }.code)
+        assertFalse(exitOnCrash(CODE, "", "y".repeat(LIMIT + 1)))
     }
 
     private companion object {
         const val CODE = 2
+        const val OUT = "{\"decision\":\"deny\"}\n"
+        const val ERR = "Ostrom: denied.\n"
+        const val LIMIT = 4096
+        const val BUFFER = 8192
         const val NOT_SET = 70
         const val NOT_CRASHED = 71
         const val SIGNAL_MASK = 0x7f

@@ -101,8 +101,11 @@ object GateTexts {
             "again once it says approved. Not run yet: \"${answer.label}\" needs a yes from ${answer.who} (gate " +
             "\"${answer.gateLabel}\"); the request is in the Ostrom console. Do not work around it."
 
-    /** The gate crashed on this tool call (a stack overflow, an abort): refused, never let through (M1). */
+    /**
+     * The gate crashed on this tool call (a stack overflow, an abort): refused, never let through (M1). It says
+     * nothing of whether the tool ran: after a tool call (PostToolUse) it already had.
+     */
     const val GATE_CRASHED =
-        "Ostrom: denied. The gate stopped on this tool call, so it was not run. Try again; if it stops again, tell " +
-            "the user to run `ostrom doctor`."
+        "Ostrom: denied. The gate stopped on this tool call and refuses it. Try again; if it stops again, tell the " +
+            "user to run `ostrom doctor`."
 }

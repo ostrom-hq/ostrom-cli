@@ -131,5 +131,6 @@ internal actual fun terminalSize(): Long = ostrom_terminal_size()
 internal actual fun terminalRead(buffer: ByteArray, timeoutMillis: Int): Int =
     buffer.usePinned { ostrom_terminal_read(it.addressOf(0).reinterpret(), buffer.size, timeoutMillis) }
 
+/** Sets the crash handler of `posix.def` (`ostrom_exit_on_crash`). */
 actual fun exitOnCrash(code: Int, stdout: String, stderr: String): Boolean =
     ostrom_exit_on_crash(code, stdout, stderr) == 0
