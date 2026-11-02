@@ -14,10 +14,13 @@ object GateTexts {
         "Ostrom: denied. The gate could not read this tool call (too large, too slow or not JSON), so it was not " +
             "run. Split the command or the file, then try again."
 
-    /** The gate failed on this tool call (a case it never met): refused, never let through. */
+    /**
+     * The gate failed on this tool call (a case it never met): refused, never let through. Its causes mostly last (a
+     * file it cannot read, a broken setup), and an unreadable event may come after the tool ran: never "try again".
+     */
     const val GATE_FAILED =
-        "Ostrom: denied. The gate failed on this tool call, so it was not run. Try again; if it fails again, tell " +
-            "the user to run `ostrom doctor`."
+        "Ostrom: denied. The gate failed on this tool call. Do not run it again: tell the user to run " +
+            "`ostrom doctor`, and wait for them."
 
     /**
      * No gate policy to trust (unsigned, expired, the relay or Ostrom unreachable, the package changed): every action

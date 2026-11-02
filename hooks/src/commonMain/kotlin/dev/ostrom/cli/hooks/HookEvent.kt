@@ -25,6 +25,12 @@ data class HookEvent(val name: String, val fields: JsonObject) {
     /** The working folder of the agent, or null. */
     val cwd: String? get() = fields.string("cwd")
 
+    /**
+     * Whether the event comes after a tool ran, whatever the agent's name for it (normalised by [parse]), with its
+     * variants (Claude Code's `PostToolUseFailure`).
+     */
+    val afterTheTool: Boolean get() = name.startsWith("PostToolUse")
+
     /** Parsing and normalisation. */
     companion object {
         /** The event of an empty, unreadable or non-object input: no name, no field. */

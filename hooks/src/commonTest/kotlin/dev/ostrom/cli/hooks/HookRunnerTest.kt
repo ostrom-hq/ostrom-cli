@@ -118,7 +118,7 @@ class HookRunnerTest {
     @Test
     fun anEventWhoseNameCannotBeReadAgainIsTakenAsBeforeTheTool() {
         val console = FakeConsole(StandardInput.Read("""{"hook_event_name":"PostToolUse"}""".encodeToByteArray()))
-        val runner = HookRunnerImpl(console, FakeEnvironment(), failing) { error("the parse failed again") }
+        val runner = HookRunnerImpl(console, FakeEnvironment(), failing) { error("the reading failed again") }
         assertEquals(2, runner.run(listOf("gate")))
         assertEquals("$failed\n", console.err.toString())
     }

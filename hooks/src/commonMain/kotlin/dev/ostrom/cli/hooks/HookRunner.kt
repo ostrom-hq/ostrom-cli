@@ -35,13 +35,14 @@ class LazyHookProcessor(build: () -> HookProcessor) : HookProcessor {
  * before building the command tree, it reads stdin with a deadline, and writes without buffering. With
  * `OSTROM_HOOK_TIMING=1` it reports its own time on stderr (from entering the runner to the reply written).
  *
- * @param eventName The normalised name of an event ([HookEvent.parse]), read again when the processor failed.
+ * @param afterTool Whether an event is the one after a tool ran ([HookEvent.afterTheTool]), read again when the
+ * processor failed.
  */
 class HookRunnerImpl(
     private val console: Console,
     private val environment: Environment,
     private val processor: HookProcessor,
-    private val eventName: (ByteArray?) -> String = { HookEvent.parse(it).name },
+    private val afterTool: (ByteArray?) -> Boolean = { HookEvent.parse(it).afterTheTool },
 ) : HookRunner {
     override fun run(arguments: List<String>): Int {
         val start = TimeSource.Monotonic.markNow()
@@ -66,11 +67,12 @@ class HookRunnerImpl(
      * processor, a [LazyHookProcessor] that cannot be built), an agent would run the tool on the crash's exit code,
      * which is not 2. So the gate refuses the tool, and says what failed. After the tool ran, or for the session hook,
      * nothing is refused (the tool ran already, a session is never refused): a line on stderr and exit 1. An event that
-     * cannot be read is taken as before the tool: refused.
+     * cannot be read is taken as before the tool: refused, with a text that tells the agent not to run it again.
      *
-     * [Throwable], not [Exception]: a stack overflow on a hostile command must not let the tool through either, nor a
-     * cancellation, which nothing above this blocking entry point could receive. A process out of memory may fail
-     * again while it refuses, as it would have crashed anyway.
+     * [Throwable], not [Exception]: an [Error] must not let the tool through either, nor a cancellation, which nothing
+     * above this blocking entry point could receive. A stack overflow is not one on Kotlin/Native (a signal ends the
+     * process); the event's parser does not recurse on nesting (kotlinx.serialization's tree reader). A process out of
+     * memory may fail again while it refuses, as it would have crashed anyway.
      */
     @Suppress("TooGenericExceptionCaught")
     private fun replyOf(kind: HookKind): HookReply {
@@ -91,10 +93,10 @@ class HookRunnerImpl(
         }
     }
 
-    /** Whether [input] is the event after a tool ran; false when it cannot be told (the parse fails again). */
+    /** Whether [input] is the event after a tool ran; false when it cannot be told (its reading fails again). */
     @Suppress("TooGenericExceptionCaught", "SwallowedException")
     private fun afterTheTool(input: ByteArray?): Boolean = try {
-        eventName(input).startsWith(POST_TOOL_USE)
+        afterTool(input)
     } catch (ignored: Throwable) { // not coroutine-reachable: the hook process's blocking entry, its own guard
         false
     }
@@ -131,12 +133,6 @@ class HookRunnerImpl(
 
         /** The agent family when none is said: Claude Code's dialect, also Codex's, OpenCode's and Pi's. */
         const val DEFAULT_DIALECT = "claude"
-
-        /**
-         * The event after a tool ran, whatever the agent's name for it ([HookEvent.parse] normalises it), and its
-         * variants (Claude Code's `PostToolUseFailure`).
-         */
-        const val POST_TOOL_USE = "PostToolUse"
 
         /** sysexits EX_USAGE, as in the CLI's exit code table. */
         const val USAGE = 64
