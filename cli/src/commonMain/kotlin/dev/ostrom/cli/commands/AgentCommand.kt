@@ -30,7 +30,7 @@ internal class AgentCommand(private val agent: Agent, private val dependencies: 
     override fun help(context: Context) = "Start ${agent.displayName} under your team's harness"
 
     override val treatUnknownOptionsAsArgs = true
-    val repo by option("--repo", help = "Repository (else read from origin)")
+    val repo by option("--repo", help = "Repository, owner/name (else read from origin, else the folder's name)")
     val model by option("--model", help = "Model for the agent")
     val cloud by option("--cloud", help = "Run the session in Ostrom's cloud, attached here (Ctrl-] detaches)")
         .flag()

@@ -22,6 +22,7 @@ import dev.ostrom.cli.commands.HookCommand
 import dev.ostrom.cli.commands.ImportTeamCodeCommand
 import dev.ostrom.cli.commands.InboxCommand
 import dev.ostrom.cli.commands.LoginCommand
+import dev.ostrom.cli.commands.LogsCommand
 import dev.ostrom.cli.commands.LogoutCommand
 import dev.ostrom.cli.commands.McpCommand
 import dev.ostrom.cli.commands.ReceiptsCommand
@@ -173,6 +174,7 @@ class OstromCli(private val dependencies: CliDependencies) {
                 ReceiptsPullCommand(dependencies),
             ),
             VerifyCommand(dependencies),
+            LogsCommand(dependencies),
             StatusCommand(dependencies),
             AttachCommand(dependencies),
             LoginCommand(dependencies),

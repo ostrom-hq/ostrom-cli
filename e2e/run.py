@@ -10,6 +10,7 @@ every check holds.
 import argparse
 import json
 import os
+import re
 import shutil
 import statistics
 import subprocess
@@ -143,9 +144,69 @@ def scenario_claude(binary, work):
         check(os.path.exists(os.path.join(home, "receipts", "W-e2e.json")), "the receipt is kept for ostrom verify")
         check(os.path.exists(os.path.join(home, "server-keys.json")), "the server's key is pinned")
         offline(binary, work, home)
+        logs(binary, server, work, home)
         check(not any(name.startswith("ostrom-run-") for name in os.listdir(work)), "the session's files are removed")
     finally:
         server_process.kill()
+
+
+def ostrom_on(binary, server, work, home, *arguments):
+    environment = {"PATH": os.environ["PATH"], "HOME": work, "OSTROM_HOME": home, "OSTROM_URL": server}
+    return subprocess.run([os.path.abspath(binary), *arguments], env=environment, capture_output=True, text=True,
+                          timeout=60)
+
+
+def logs(binary, server, work, home):
+    """`ostrom logs`: the thread of the session the launch just ran, read back with the device's token."""
+    thread = ostrom_on(binary, server, work, home, "logs")
+    lines = thread.stdout.splitlines()
+    check(thread.returncode == 0 and lines[:1] and lines[0].startswith("Session ") and "@maya" in lines[0],
+          f"ostrom logs heads the developer's last session (exit {thread.returncode}: {thread.stdout[:300]} "
+          f"{thread.stderr[:300]})")
+    said = "\n".join(lines)
+    check("session started" in said and "check" in said and "Run the tests · passed" in said,
+          "the thread has the start and the receipt's checks")
+    # the token of `ostrom login` may not read gates on ostrom-server (CLI_SCOPES): the request shows by its id
+    check(re.search(r"asked for a yes +G-e2e", said) is not None, "and the request for a yes, by its id")
+    ended = [line for line in lines if "session ended" in line]
+    check(len(ended) == 1 and "exit 3" in ended[0], f"and the end, with the agent's code ({ended})")
+    session = lines[0].split(" ")[1] if lines else ""
+    followed = ostrom_on(binary, server, work, home, "logs", session, "-f")
+    check(followed.returncode == 0 and followed.stdout == thread.stdout,
+          "-f on an ended session prints the thread once and returns")
+    kept = ostrom_on(binary, server, work, home, "logs", session, "--json")
+    body = json.loads(kept.stdout) if kept.returncode == 0 else {}
+    check(body.get("session", {}).get("id") == session and [g.get("id") for g in body.get("gates", [])] == ["G-e2e"],
+          f"--json is the server's answer with the gate's request (exit {kept.returncode})")
+    missing = ostrom_on(binary, server, work, home, "logs", "no-such-session")
+    check(missing.returncode == 66 and "No session no-such-session" in missing.stderr,
+          f"no such session is 66 (exit {missing.returncode}: {missing.stderr[:200]})")
+
+
+def logs_unserved(binary, work):
+    """`ostrom logs` on a server that does not serve the sessions' reads: said, 69."""
+    print("ostrom logs, on a server without the sessions' reads")
+    log = os.path.join(work, "requests.jsonl")
+    ready = os.path.join(work, "ready.txt")
+    process = subprocess.Popen([sys.executable, os.path.join(HERE, "contract_server.py"), "--log", log,
+                                "--ready", ready, "--without-session-reads"])
+    try:
+        for _ in range(100):
+            if os.path.exists(ready) and open(ready).read():
+                break
+            time.sleep(0.05)
+        server = open(ready).read()
+        home = os.path.join(work, "ostrom-home")
+        os.makedirs(home)
+        with open(os.path.join(home, "credentials.json"), "w") as handle:
+            json.dump({server: {"token": "ost_e2e_device", "login": "maya"}}, handle)
+        for arguments in (["logs"], ["logs", "seg-1", "-f"]):
+            done = ostrom_on(binary, server, work, home, *arguments)
+            check(done.returncode == 69 and "does not serve the sessions' reads" in done.stderr,
+                  f"ostrom {' '.join(arguments)} says the server does not serve them (exit {done.returncode}: "
+                  f"{done.stderr[:200]})")
+    finally:
+        process.kill()
 
 
 def offline(binary, work, home):
@@ -195,7 +256,7 @@ def scenario_codex(binary, work):
         check("--dangerously-bypass-hook-trust" not in report["arguments"], "no package: no hook trust asked")
         waited = hooks.get(("wait", "G-e2e"))
         check(waited is not None and waited["code"] == 0
-              and waited["stdout"].startswith("approved by @lena (receipt R-gate). Run the same command again now."),
+              and waited["stdout"].startswith("approved by lena (receipt R-gate). Run the same command again now."),
               f"ostrom wait reads the yes (got {waited})")
         end = [hook for hook in report["hooks"] if hook["event"] == "SessionEnd"][0]
         check(end["code"] == 0, "the end hook answers")
@@ -238,7 +299,7 @@ def main():
     parser.add_argument("--binary", required=True)
     args = parser.parse_args()
     binary = os.path.abspath(args.binary)
-    for scenario in (scenario_claude, scenario_codex, budgets):
+    for scenario in (scenario_claude, scenario_codex, logs_unserved, budgets):
         with tempfile.TemporaryDirectory(prefix="ostrom-e2e-") as work:
             scenario(binary, work)
     if failures:

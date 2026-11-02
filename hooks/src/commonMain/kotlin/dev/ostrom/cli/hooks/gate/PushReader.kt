@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.hooks.gate
 
+import dev.ostrom.cli.platform.RemoteUrls
+
 /**
  * One ref a push updates.
  *

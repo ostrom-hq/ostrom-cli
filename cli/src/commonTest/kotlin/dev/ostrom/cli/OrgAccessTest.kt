@@ -139,6 +139,20 @@ class OrgAccessTest : SetupKit() {
     }
 
     @Test
+    fun theRepositoryIsOwnerAndNameOfTheOriginElseTheFolder() {
+        val acmeApi = "GET /api/v1/workflows?repo=acme%2Fapi" to (200 to """{"items":[]}""")
+        for (url in listOf("https://github.com/acme/api.git", "git@github.com:acme/api.git")) {
+            val git = gitTop("/work/api", CaptureResult.Exited(0, "$url\n"))
+            assertEquals(0, run(mapOf(acmeApi), "harness", "list", capture = git), url)
+            assertOut("Nothing applies to acme/api yet.")
+        }
+        val folder = "GET /api/v1/workflows?repo=api" to (200 to """{"items":[]}""")
+        for (origin in listOf(CaptureResult.NotFound, CaptureResult.Exited(0, "/srv/git/other.git\n"))) {
+            assertEquals(0, run(mapOf(folder), "harness", "list", capture = gitTop("/work/api", origin)), "$origin")
+        }
+    }
+
+    @Test
     fun theRepositoryIsTheVariableElseTheFolderOfTheGitTop() {
         val list = "GET /api/v1/workflows?repo=acme-api" to (200 to """{"items":[]}""")
         assertEquals(0, run(mapOf(list), "harness", "list", capture = gitTop()))
@@ -156,7 +170,8 @@ class OrgAccessTest : SetupKit() {
             CaptureResult.Exited(0, "/\n"),
         )
         for (result in outside) {
-            assertEquals(0, run(mapOf(all), "harness", "list", capture = FakeMysql(result)), "$result")
+            val git = FakeMysql(result, CaptureResult.Exited(2, ""))
+            assertEquals(0, run(mapOf(all), "harness", "list", capture = git), "$result")
         }
         assertEquals(4, requests.count { it.second.path == "/api/v1/workflows" }, "outside a repository: all of them")
         assertOut("Nothing applies to Acme yet.")

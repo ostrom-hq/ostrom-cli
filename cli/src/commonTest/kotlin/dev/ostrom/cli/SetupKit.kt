@@ -18,9 +18,16 @@ open class SetupKit : CliKit() {
     protected fun orgs(vararg views: String) =
         "GET /api/v1/orgs" to (200 to """{"items":[${views.joinToString(",")}]}""")
 
-    /** `git rev-parse --show-toplevel` printing [top] (exit 0). */
-    protected fun gitTop(top: String = "/work/acme-api"): ProcessCapture =
-        FakeMysql(CaptureResult.Exited(0, "$top\n"))
+    /** git in a repository: `rev-parse --show-toplevel` prints [top], `remote get-url origin` answers [origin]. */
+    protected fun gitTop(
+        top: String = "/work/acme-api",
+        origin: CaptureResult = CaptureResult.Exited(2, "error: No such remote 'origin'\n"),
+    ): ProcessCapture = object : ProcessCapture {
+        override fun capture(command: List<String>, timeoutMillis: Int) =
+            if ("get-url" in command) origin else CaptureResult.Exited(0, "$top\n")
+
+        override fun detach(command: List<String>) = false
+    }
 
     /**
      * Runs `ostrom args` signed in (credentials in [home]) against a server answering [routes], with Acme as the only
