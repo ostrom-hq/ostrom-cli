@@ -80,6 +80,7 @@ class Journey:
         try:
             act(*arguments)
         except Exception as error:  # noqa: BLE001 - said in the step, the run goes on
+            traceback.print_exc()
             self.check(False, f"the step stopped: {type(error).__name__}: {str(error)[:200]}")
 
     def needs(self, *routes, on_main=False, org=False):
@@ -209,20 +210,22 @@ class Journey:
                                   timeout=timeout)
         except subprocess.TimeoutExpired as late:
             # what it printed before the timeout is the report's only trace of a command that does not return
-            said = [part.decode(errors="replace") if isinstance(part, bytes) else part or ""
-                    for part in (late.stdout, late.stderr)]
-            self.step["commands"].append({"who": machine["name"], "command": prefix + shown,
-                                          "exit": f"still running after {timeout} s", "stdout": said[0],
-                                          "stderr": said[1]})
+            out, err = [part.decode(errors="replace") if isinstance(part, bytes) else part or ""
+                        for part in (late.stdout, late.stderr)]
+            self.record(machine, prefix + shown, f"still running after {timeout} s", out, err)
             raise
-        self.step["commands"].append({"who": machine["name"], "command": prefix + shown, "exit": done.returncode,
-                                      "stdout": done.stdout, "stderr": done.stderr})
-        if self.options.show:
-            print(f"  {machine['name']}$ {prefix}{shown}")
-            for line in (done.stdout + done.stderr).rstrip().splitlines():
-                print(f"    {line}")
-            print(f"    (exit {done.returncode})", flush=True)
+        self.record(machine, prefix + shown, done.returncode, done.stdout, done.stderr)
         return done
+
+    def record(self, machine, command, code, out, err):
+        """A command in the step's report, and on the console with --show."""
+        self.step["commands"].append({"who": machine["name"], "command": command, "exit": code, "stdout": out,
+                                      "stderr": err})
+        if self.options.show:
+            print(f"  {machine['name']}$ {command}")
+            for line in (out + err).rstrip().splitlines():
+                print(f"    {line}")
+            print(f"    (exit {code})", flush=True)
 
     def login(self, machine, email):
         """`ostrom login`: the code it shows is approved from [email]'s browser session, as on the console."""
@@ -444,6 +447,9 @@ class Journey:
         gates = thread.get("gates") or []
         if gated:
             self.check(len(gates) > 0, f"with the request for a yes it asked ({len(gates)})")
+        # first, as it depends on nothing below
+        gone = self.ostrom(maya, "logs", f"ses_none_{self.stamp}")
+        self.check(gone.returncode == 66, f"a session that does not exist is 66 ({gone.returncode})")
         shown = self.ostrom(maya, "logs", session["id"])
         lines = shown.stdout.splitlines()
         self.check(shown.returncode == 0 and lines[:1] and lines[0].startswith(f"Session {session['id']}"),
@@ -466,8 +472,6 @@ class Journey:
         tail = followed.stdout.splitlines()
         self.check(followed.returncode == 0 and tail[:1] == lines[:1] and any("session ended" in t for t in tail),
                    f"-f on an ended session prints its thread to the end and returns ({followed.returncode})")
-        gone = self.ostrom(maya, "logs", f"ses_none_{self.stamp}")
-        self.check(gone.returncode == 66, f"a session that does not exist is 66 ({gone.returncode})")
 
     def harness(self, maya):
         name = f"deploy-{self.stamp}"
@@ -750,10 +754,10 @@ class Journey:
 
 
 CODE = re.compile(r"one-time code: (\S+)")
-# what ostrom status --json always holds (CLI.md principle 6: null when unknown, never missing)
 # what ostrom claude needs from the server (5.2), and so does the read of the session it ran (6.1)
 SESSION_ROUTES = (("GET", "/api/v1/policy/agents"), ("POST", "/api/v1/launches"), ("POST", "/api/v1/sessions"))
 
+# what ostrom status --json always holds (CLI.md principle 6: null when unknown, never missing)
 STATUS_KEYS = {"login", "organization", "role", "server", "repository", "harness", "waiting", "waitingComplete",
                "version", "pinnedKey"}
 ORG_HEADER = "Ostrom-Org (the organisation of a token bound to none, server#64)"
