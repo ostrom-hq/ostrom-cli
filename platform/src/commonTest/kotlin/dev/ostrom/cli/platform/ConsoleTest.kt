@@ -30,6 +30,7 @@ class ConsoleTest {
         // Whatever stdin is under the test runner (a pipe, /dev/null, a terminal), the read ends within its deadline.
         assertIs<StandardInput>(console.readStandardInput(maxBytes = 16, timeoutMillis = 50))
         assertIs<Boolean>(console.isInteractive)
+        assertIs<Boolean>(stderrIsTerminal())
     }
 
     private fun now() = TestTimeSource().markNow()

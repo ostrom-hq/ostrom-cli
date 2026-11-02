@@ -42,13 +42,19 @@ import dev.ostrom.cli.platform.ProcessLauncherImpl
 import dev.ostrom.cli.platform.RawTerminalImpl
 import dev.ostrom.cli.platform.SecretStore
 import dev.ostrom.cli.platform.currentExecutable
+import dev.ostrom.cli.platform.stderrIsTerminal
 import dev.ostrom.cli.platform.systemSecretStore
 import dev.ostrom.cli.relay.LocalRelayStarterImpl
 import dev.ostrom.cli.telemetry.UsageStatistics
+import dev.ostrom.cli.update.AgentSessions
 import dev.ostrom.cli.update.AgentSessionsImpl
 import dev.ostrom.cli.update.ReleaseTrust
 import dev.ostrom.cli.update.SelfUpdate
 import dev.ostrom.cli.update.TarUnpacker
+import dev.ostrom.cli.update.UpdateNotice
+import dev.ostrom.cli.update.detachedRefresh
+import dev.ostrom.cli.update.noticeAdvice
+import dev.ostrom.cli.update.updateNoticeOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.delay
@@ -77,6 +83,8 @@ import kotlin.time.TimeSource
  * @property openUrl Opens a page in the developer's browser; false when it could not.
  * @property cloud Runs `ostrom <agent> --cloud` and `ostrom attach`.
  * @property selfUpdate `ostrom update`.
+ * @property updateNotice The once-a-day update notice, kept in the CLI folder; null when there is none.
+ * @property stderrIsTerminal Whether stderr is a terminal, where the update notice is said.
  * @property secrets Opens the secret store of this device (system store, or encrypted file). Each call chooses and
  * probes the store again (up to a second on Linux): a command calls it once and keeps the store; the hook's fast
  * path never calls it.
@@ -105,6 +113,8 @@ class CliDependencies(
     val openUrl: (String) -> Boolean,
     val cloud: CloudRunner,
     val selfUpdate: SelfUpdate,
+    val updateNotice: UpdateNotice? = null,
+    val stderrIsTerminal: () -> Boolean,
     val postHogKey: String,
     val sendStatistics: suspend (url: String, body: String) -> Unit,
     val secrets: () -> SecretStore = { systemSecretStore(environment, files) },
@@ -138,6 +148,8 @@ class CliDependencies(
             val temporary = FileSystem.SYSTEM_TEMPORARY_DIRECTORY.toString()
             val files = FileStoreImpl()
             val secrets = { systemSecretStore(environment, files) }
+            val self = currentExecutable()
+            val sessions = AgentSessionsImpl(environment, FileSystem.SYSTEM, temporary, LoopbackHttpImpl())
             return CliDependencies(
                 console = console,
                 environment = environment,
@@ -152,7 +164,7 @@ class CliDependencies(
                     FileCredentialStore(launchFiles, path, secrets, { console.err("$it\n") }) { environment[it] }
                 },
                 workingDirectory = { FileSystem.SYSTEM.canonicalize(".".toPath()).toString() },
-                executable = currentExecutable(),
+                executable = self,
                 temporaryDirectory = temporary,
                 agents = AgentRunnerImpl(
                     console = console,
@@ -170,14 +182,10 @@ class CliDependencies(
                 capture = ProcessCaptureImpl(),
                 readLine = ::readlnOrNull,
                 openUrl = BrowserOpener(ProcessLauncherImpl(), environment.operatingSystem)::open,
-                cloud = CloudRunnerImpl(
-                    console = console,
-                    api = api,
-                    channels = TerminalChannels.opener(USER_AGENT),
-                    terminal = RawTerminalImpl(),
-                    capture = ProcessCaptureImpl(),
-                ),
-                selfUpdate = selfUpdate(environment, console, temporary),
+                cloud = cloudRunner(console, api),
+                selfUpdate = selfUpdate(environment, console, sessions),
+                updateNotice = updateNotice(environment, files, self, sessions),
+                stderrIsTerminal = ::stderrIsTerminal,
                 postHogKey = BuildInfo.POSTHOG_KEY,
                 secrets = secrets,
                 sendStatistics = { url, body -> statistics.send(url, body) },
@@ -195,14 +203,32 @@ class CliDependencies(
         }
 
         /** `ostrom update`, on this binary and the system's own files. */
-        private fun selfUpdate(environment: Environment, console: Console, temporary: String) = SelfUpdate(
+        private fun selfUpdate(environment: Environment, console: Console, sessions: AgentSessions) = SelfUpdate(
             DownloadsImpl(USER_AGENT),
             FileSystem.SYSTEM,
             TarUnpacker(ProcessLauncherImpl(), environment["SystemRoot"]),
             { console.out("$it\n") },
-            AgentSessionsImpl(environment, FileSystem.SYSTEM, temporary, LoopbackHttpImpl()),
+            sessions,
             ReleaseTrust(floor = BuildInfo.FLOOR),
         )
+
+        /** `ostrom <agent> --cloud` and `ostrom attach`: the session runs in Ostrom's cloud, its terminal here. */
+        private fun cloudRunner(console: Console, api: (String) -> OstromApi) = CloudRunnerImpl(
+            console = console,
+            api = api,
+            channels = TerminalChannels.opener(USER_AGENT),
+            terminal = RawTerminalImpl(),
+            capture = ProcessCaptureImpl(),
+        )
+
+        /** The once-a-day update notice, in the CLI folder: it tells what will work, and refreshes detached. */
+        private fun updateNotice(environment: Environment, files: FileStore, self: String?, sessions: AgentSessions) =
+            updateNoticeOf(
+                environment.configDirectory,
+                files,
+                noticeAdvice(self, sessions),
+                detachedRefresh(self, ProcessCaptureImpl()),
+            )
 
         /** The hook runner alone, for the fast path of `main` (nothing else is built). */
         fun hookRunner(console: Console, environment: Environment): HookRunner {
