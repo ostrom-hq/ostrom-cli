@@ -4,7 +4,9 @@ package dev.ostrom.cli.hooks
 import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /** The normalisation table of the prototype (`normalize`, `mvp/launcher/src/main.rs`), case by case. */
 class HookEventTest {
@@ -36,6 +38,17 @@ class HookEventTest {
             assertEquals(expected, event.name, raw)
             assertEquals(JsonPrimitive(expected), event.fields["hook_event_name"], raw)
         }
+    }
+
+    @Test
+    fun theEventAfterTheToolIsKnownWhateverTheAgentCallsIt() {
+        for (name in listOf("PostToolUse", "post_tool_use", "AfterTool", "post_tool_call", "PostToolUseFailure")) {
+            assertTrue(parse("""{"hook_event_name":"$name"}""").afterTheTool, name)
+        }
+        for (name in listOf("PreToolUse", "BeforeTool", "SessionEnd", "")) {
+            assertFalse(parse("""{"hook_event_name":"$name"}""").afterTheTool, name)
+        }
+        assertFalse(HookEvent.EMPTY.afterTheTool)
     }
 
     @Test

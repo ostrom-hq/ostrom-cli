@@ -9,8 +9,10 @@ import dev.ostrom.cli.api.TerminalChannels
 import dev.ostrom.cli.api.TraceContext
 import dev.ostrom.cli.cloud.CloudRunner
 import dev.ostrom.cli.cloud.CloudRunnerImpl
+import dev.ostrom.cli.hooks.HookProcessor
 import dev.ostrom.cli.hooks.HookRunner
 import dev.ostrom.cli.hooks.HookRunnerImpl
+import dev.ostrom.cli.hooks.LazyHookProcessor
 import dev.ostrom.cli.hooks.runtime.GateWait
 import dev.ostrom.cli.hooks.runtime.RelayCalls
 import dev.ostrom.cli.hooks.runtime.SessionHooks
@@ -232,17 +234,20 @@ class CliDependencies(
                 detachedRefresh(self, ProcessCaptureImpl()),
             )
 
-        /** The hook runner alone, for the fast path of `main` (nothing else is built). */
-        fun hookRunner(console: Console, environment: Environment): HookRunner {
-            val processor = SessionHooks.processor(
-                environment,
-                FileSystem.SYSTEM,
-                ProcessCaptureImpl(),
-                LoopbackHttpImpl(),
-                SessionHooks::epochMillis,
-            )
-            return HookRunnerImpl(console, environment, processor)
-        }
+        /**
+         * The hook runner alone, for the fast path of `main` (nothing else is built).
+         *
+         * @param session Builds the session's processor, on the first event and inside the runner's guard: a failure
+         * to build it refuses the tool too.
+         */
+        fun hookRunner(
+            console: Console,
+            environment: Environment,
+            session: () -> HookProcessor = {
+                val clock = SessionHooks::epochMillis
+                SessionHooks.processor(environment, FileSystem.SYSTEM, ProcessCaptureImpl(), LoopbackHttpImpl(), clock)
+            },
+        ): HookRunner = HookRunnerImpl(console, environment, LazyHookProcessor(session))
     }
 }
 

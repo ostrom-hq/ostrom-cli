@@ -16,11 +16,13 @@ data class WaitOutcome(val exitCode: Int, val line: String)
 /**
  * `ostrom wait GATE_ID`, the command the gate's refusal tells the agent to run (prototype `cmd_wait`). It waits in a
  * normal tool call of the agent, whose shell tool has its own, longer limit, never inside a hook. It asks through
- * the session's relay like the hooks (`GET /api/v1/gates/{id}?wait=`, which Ostrom holds until an answer or the
- * wait's end), so the agent never holds a token that reaches the server.
+ * the session's relay like the hooks (`GET /api/v1/gates/{id}?wait=30`, which Ostrom holds until an answer or the
+ * wait's end, 30 s at most: contract core#43, server#112), so the agent never holds a token that reaches the server.
+ * A read Ostrom held to its end is asked again at once; only an answer that came back early (an Ostrom that does not
+ * hold the read, or a failure) is followed by a pause, so the wait never polls tight.
  *
  * @param clock Milliseconds on a monotonic clock (a clock set back or forward never stretches or cuts the wait).
- * @param sleep Waits the given milliseconds between two asks.
+ * @param sleep Waits the given milliseconds between two asks that Ostrom did not hold.
  * @param say Prints text on stderr for the developer (each line ends with its line break).
  */
 class GateWait(
@@ -40,7 +42,9 @@ class GateWait(
             val seconds = (left / MILLIS).coerceAtMost(MAX_WAIT_SECONDS)
             // a slow relay never keeps the command past its end: the agent's shell tool would kill it unanswered
             val timeout = minOf((seconds + MARGIN) * MILLIS, left + GRACE_MILLIS).toInt()
+            val asked = clock()
             val answer = calls.call("${Routes.GATES}/$id?wait=$seconds", null, timeout)
+            val held = heldToItsEnd(answer, seconds, asked)
             outcome = when (answer) {
                 is CallResult.Ok -> decided(id, answer.body)
                 is CallResult.Failed -> failed(id, answer)
@@ -48,10 +52,20 @@ class GateWait(
             val news = news(answer)
             if (outcome == null && news != said) say("$news\n").also { said = news }
             // the end is checked after the pause, so no ask leaves after it
-            if (outcome == null && clock() < end) sleep(minOf(POLL_MILLIS, end - clock()))
+            if (outcome == null && !held && clock() < end) sleep(minOf(POLL_MILLIS, end - clock()))
             if (outcome == null && clock() >= end) outcome = stillWaiting(id, timeoutSeconds)
         }
         return outcome
+    }
+
+    /**
+     * Whether Ostrom held the read of [seconds] to its end, so it is asked again at once. The contract says nothing
+     * of it in the answer: the time it took says it, within a slack of a second, half the wait for a short one (an
+     * instant answer is never taken as held, so an Ostrom that does not hold a read is still asked once a second).
+     */
+    private fun heldToItsEnd(answer: CallResult, seconds: Long, asked: Long): Boolean {
+        val slack = minOf(HELD_SLACK_MILLIS, seconds * MILLIS / 2)
+        return answer is CallResult.Ok && seconds > 0 && clock() - asked >= seconds * MILLIS - slack
     }
 
     private fun decided(id: String, body: JsonObject): WaitOutcome? {
@@ -124,8 +138,11 @@ class GateWait(
         private val ANY_GATE = Gate(enforce = true, label = null, approvers = emptyList())
         private const val MILLIS = 1_000L
         private const val POLL_MILLIS = 1_000L
-        private const val MAX_WAIT_SECONDS = 55L // Ostrom holds a gate read 60 s at most
-        private const val MARGIN = 15L // the relay's own bound is 70 s
+        private const val MAX_WAIT_SECONDS = 30L // Ostrom holds a gate read 30 s at most (contract core#43)
+        private const val MARGIN = 15L // past the 30 s Ostrom holds and a slow relay, under the relay's 70 s
+
+        /** A read answered this close to its wait's end was held by Ostrom (clocks and the network round it down). */
+        private const val HELD_SLACK_MILLIS = 1_000L
         private const val GRACE_MILLIS = 2_000L
         private const val SHOWN = 40
         private const val REJECTED = 2
