@@ -42,7 +42,7 @@ private class TerminalScan(private val text: String) {
     }
 
     /** ESC at [at] and what it introduces. */
-    private fun escape(at: Int): Int = when (text.getOrElse(at + 1) { NOTHING }) {
+    private fun escape(at: Int): Int = when (if (at + 1 < text.length) text[at + 1] else NOTHING) {
         '[' -> control(at + 2)
         ']', 'P', 'X', '^', '_' -> string(at + 2)
         in ' '..'/' -> withIntermediates(at + 1)

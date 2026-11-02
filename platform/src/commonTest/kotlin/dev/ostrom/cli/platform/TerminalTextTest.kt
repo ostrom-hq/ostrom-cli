@@ -44,6 +44,8 @@ class TerminalTextTest {
         assertEquals("abcd", terminalSafe("a${esc}Xsos$esc\\b$esc^pm$esc\\c${esc}_apc$esc\\d"))
         assertEquals("ab", terminalSafe("a${esc}cb$esc"))
         assertEquals("ab", terminalSafe("a\u009B2Ab"))
+        // a control sequence with intermediate bytes: the cursor's shape, a soft reset
+        assertEquals("abc", terminalSafe("a$esc[2 qb$esc[!pc"))
     }
 
     @Test
