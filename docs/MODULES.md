@@ -146,7 +146,8 @@ without the session, 77 for a session the caller may not read (a gate it may not
   without all three scopes (a server that does not serve `--admin` yet), or already expired, is revoked and not kept
   (exit 69); one approved by another person than the device's is kept, and said.
   Made with a CLI token (the admin token or the device's), a governance write is held by the server until an owner or
-  an admin confirms it with their passkey on the console (audit H1, decision of 02/11/2026): the write answers 202
+  an admin confirms it on the console, from a session signed in less than 5 minutes ago (audit H1, decision of
+  02/11/2026): the write answers 202
   `GovernanceConfirmationPending` and nothing is written. Any write answered so is waited on (`ConfirmationWait`): the
   CLI says the link (`confirmUrl`, else `<console>/confirm/<id>`) on stderr and polls
   `GET /api/v1/confirmations/{id}?wait=30` with the token that asked; a pending answer that came at once is asked again

@@ -11,10 +11,10 @@ import kotlinx.serialization.json.JsonObject
 import kotlin.time.Instant
 
 /**
- * A governance write made with a CLI token is held by the server until an owner or an admin confirms it with their
- * passkey on the console (audit H1, decision of 02/11/2026): the write answers 202 `GovernanceConfirmationPending`
- * and nothing is written. The CLI shows where it is confirmed, then waits on `GET /confirmations/{id}` (long
- * polling) until it is answered. The server says when it has expired; the CLI only stops waiting a minute past the
+ * A governance write made with a CLI token is held by the server until an owner or an admin confirms it on the
+ * console, from a session signed in less than 5 minutes ago (audit H1, decision of 02/11/2026): the write answers
+ * 202 `GovernanceConfirmationPending` and nothing is written. The CLI shows where it is confirmed, then waits on
+ * `GET /confirmations/{id}` (long polling) until it is answered. The server says when it has expired; the CLI only stops waiting a minute past the
  * confirmation's 15 minutes by its own clock, so a clock ahead of the server's never cuts a valid wait short.
  *
  * @property access The organisation the write was made in.
@@ -39,7 +39,7 @@ internal class ConfirmationWait(
         val where = "It can still be confirmed at $url${expiry ?: ""}: check it there before asking again."
         access.terminal.err(
             "! This change to the governance of ${access.org.slug} was asked from the CLI: it is written once an " +
-                "owner or an admin confirms it with their passkey on the console:\n  $url\n" +
+                "owner or an admin confirms it.\nConfirm it on the console: $url\n" +
                 "Waiting for their answer (Ctrl-C stops waiting, not the request).\n",
         )
         val stop = access.clock() + WINDOW_MILLIS + GRACE_MILLIS

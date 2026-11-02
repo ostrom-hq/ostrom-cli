@@ -82,8 +82,8 @@ internal class OrgAccess(
      * is valid: no other token writes the governance (S2-52, decision of 02/11/2026). Without one, a 403 says to run
      * it; a 401 to it (revoked, or expired on the server) forgets it and says the same.
      *
-     * Made with a CLI token, a governance write is held by the server until an owner or an admin confirms it with
-     * their passkey on the console (202 `GovernanceConfirmationPending`, audit H1): any write held so is waited on,
+     * Made with a CLI token, a governance write is held by the server until an owner or an admin confirms it on the
+     * console (202 `GovernanceConfirmationPending`, audit H1): any write held so is waited on,
      * the link said, and the write's result is what the confirmation returns (77 refused, 75 not answered in time).
      */
     fun write(

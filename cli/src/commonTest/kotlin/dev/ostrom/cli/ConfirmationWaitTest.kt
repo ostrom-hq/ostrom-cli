@@ -11,9 +11,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 
 /**
- * A governance write made with a CLI token waits for an owner or an admin to confirm it with their passkey on the
- * console (audit H1, decision of 02/11/2026): the CLI shows the link, waits on `GET /confirmations/{id}`, and exits 0
- * once confirmed, 77 when refused or not written, 75 when nobody answered in time.
+ * A governance write made with a CLI token waits for an owner or an admin to confirm it on the console (audit H1,
+ * decision of 02/11/2026): the CLI shows the link, waits on `GET /confirmations/{id}`, and exits 0 once confirmed, 77
+ * when refused or not written, 75 when nobody answered in time.
  */
 class ConfirmationWaitTest : SetupKit() {
     private val home = "/home/maya/.config/ostrom"
@@ -80,7 +80,7 @@ class ConfirmationWaitTest : SetupKit() {
         polls += listOf(pending, answer(200, confirmed))
         assertEquals(0, selfApproval())
         assertErr("! This change to the governance of acme was asked from the CLI: it is written once an owner or an " +
-            "admin confirms it with their passkey on the console:\n  $link\n" +
+            "admin confirms it.\nConfirm it on the console: $link\n" +
             "Waiting for their answer (Ctrl-C stops waiting, not the request).\n")
         assertErr("✓ Confirmed by @lena on the console.\n")
         assertEquals(2, sent().count { it == poll }, "waited until answered")
@@ -105,7 +105,7 @@ class ConfirmationWaitTest : SetupKit() {
         val remove = mapOf("GET /api/v1/workflows/w1" to (200 to safety), "DELETE /api/v1/workflows/w1" to (202 to
             """{"confirmationId":"c1","expiresAt":"1970-01-11T00:15:00Z"}"""))
         assertEquals(0, confirm(remove, "harness", "remove", "w1", "--yes"))
-        assertErr("  $server/confirm/c1\n")
+        assertErr("Confirm it on the console: $server/confirm/c1\n")
         assertOut("✓ git-safety was removed.")
     }
 
