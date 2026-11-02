@@ -54,7 +54,7 @@ class ImportTeamCodeCommandTest : CliKit() {
         val plan = "POST /api/v1/import/teamcode?dryRun=true&cutover=true"
         val routes = mapOf(
             "GET /api/v1/members" to (200 to """{"items":[]}"""),
-            plan to (200 to """{"items":[],"reviveAtCutover":1}"""),
+            plan to (200 to """{"items":[{"kind":"account","name":"Team Max","action":"planned"}]}"""),
             "POST /api/v1/import/teamcode?cutover=true" to (200 to """{"items":[],"updated":1}"""),
         )
         fun run(vararg more: String) =

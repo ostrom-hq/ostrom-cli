@@ -160,7 +160,7 @@ class ImportTeamCodeUseCaseTest {
         assertEquals(77, import())
         replies["GET /api/v1/members"] = ServerReply(null, "connection refused")
         assertEquals(69, import())
-        replies.remove("GET /api/v1/members")
+        replies["GET /api/v1/members"] = ServerReply(500, """{"error":{"type":"internal","message":"boom"}}""")
         assertEquals(1, import())
         val lines = said.lines().filter { it.isNotEmpty() }
         assertEquals(
@@ -169,7 +169,7 @@ class ImportTeamCodeUseCaseTest {
             lines.first(),
         )
         assertEquals("ostrom import teamcode: Ostrom is unreachable (connection refused).", lines[2])
-        assertEquals("ostrom import teamcode: Ostrom answered 404: HTTP 404", lines[3])
+        assertEquals("ostrom import teamcode: Ostrom answered 500: boom", lines[3])
     }
 
     @Test
@@ -192,7 +192,7 @@ class ImportTeamCodeUseCaseTest {
 
     @Test
     fun theCutoverShowsItsPlanAndRunsOnlyOnceConfirmed() = runTest {
-        replies["POST /api/v1/import/teamcode?dryRun=true&cutover=true"] = ServerReply(200, WAITING)
+        replies["POST /api/v1/import/teamcode?dryRun=true&cutover=true"] = ServerReply(200, CUTOVER_PLAN)
         replies["POST /api/v1/import/teamcode?cutover=true"] = ServerReply(200, CUT)
         val asked = mutableListOf<String>()
         val declined = {
@@ -200,11 +200,12 @@ class ImportTeamCodeUseCaseTest {
             false
         }
         assertEquals(2, import(cutover = declined))
+        // the cutover's plan says planned for the accounts it writes: its reviveAtCutover is 0 (ostrom-server#86)
         val plan = "Cutover plan (nothing changed yet):\n" +
-            "  revive_at_cutover  account  Team Max (TeamCode still uses it)\n" +
-            "0 created, 1 updated, 0 unchanged, 0 skipped, 2 to revive at the cutover.\n" +
-            "The cutover tests and rotates the tokens of 2 shared accounts at their provider: " +
-            "TeamCode must be stopped, it would keep using the old ones.\n"
+            "  planned  account  Team Max\n  planned  account  Team Bo\n  planned  server  grafana\n" +
+            "0 created, 0 updated, 0 unchanged, 0 skipped.\n" +
+            "The cutover writes 2 shared accounts, testing and rotating at their provider the tokens of those that " +
+            "wait for a reconnection: TeamCode must be stopped, it would keep using the old ones.\n"
         assertTrue(asked.single().endsWith(plan), "the plan comes before the question: ${asked.single()}")
         assertTrue(failed.endsWith("ostrom import teamcode: No cutover: nothing was changed.\n"), failed.toString())
         assertEquals("/api/v1/import/teamcode?dryRun=true&cutover=true", calls.last().path, "nothing run")
@@ -230,10 +231,21 @@ class ImportTeamCodeUseCaseTest {
 
     @Test
     fun aCutoverWithNoAccountToReviveAsksNothing() = runTest {
-        replies["POST /api/v1/import/teamcode?dryRun=true&cutover=true"] = ServerReply(200, """{"items":[]}""")
+        val plan = "POST /api/v1/import/teamcode?dryRun=true&cutover=true"
+        replies[plan] = ServerReply(200, """{"items":[]}""")
         assertEquals(0, import(cutover = { error("never asked") }))
         assertTrue(said.endsWith("No shared account waits for the cutover: nothing to do.\n"), said.toString())
         assertEquals("/api/v1/import/teamcode?dryRun=true&cutover=true", calls.last().path)
+        // accounts the server cannot import are no nothing-to-do
+        val notPooled = """{"items":[{"kind":"account","name":"mistral/M","action":"skipped","reason":"not pooled"}]}"""
+        replies[plan] = ServerReply(200, notPooled)
+        assertEquals(2, import(cutover = { error("never asked") }))
+        assertTrue(failed.endsWith("1 shared account cannot be imported, for the reasons above.\n"), failed.toString())
+        // a server before ostrom-server#86's last shape counted its revivals in reviveAtCutover
+        replies[plan] = ServerReply(200, WAITING)
+        replies["POST /api/v1/import/teamcode?cutover=true"] = ServerReply(200, """{"items":[],"updated":2}""")
+        assertEquals(0, import(cutover = { true }))
+        assertTrue(said.contains("The cutover writes 2 shared accounts"), said.toString())
     }
 
     @Test
@@ -248,7 +260,7 @@ class ImportTeamCodeUseCaseTest {
         replies[route] = ServerReply(500, "{}")
         assertEquals(1, import(cutover = { true }))
         // the answer lost after the cutover started: it may have run in part
-        replies[route] = ServerReply(200, WAITING)
+        replies[route] = ServerReply(200, CUTOVER_PLAN)
         replies["POST /api/v1/import/teamcode?cutover=true"] = ServerReply(null, "timeout")
         assertEquals(69, import(cutover = { true }))
         // a normal pass never says the cutover's reasons
@@ -272,12 +284,34 @@ class ImportTeamCodeUseCaseTest {
         )
     }
 
+    @Test
+    fun aServerThatListsNoMembersMatchesNoOneAndTheImportGoesOn() = runTest {
+        replies["GET /api/v1/members"] = ServerReply(404, """{"error":{"type":"not_found","message":"Not found."}}""")
+        assertEquals(0, import())
+        assertTrue(said.startsWith("! Ostrom does not list its members here: every assignment is skipped.\n"))
+        assertEquals(parseObject("{}"), parseObject(calls.last().body)?.child("memberMap"), "no one matched")
+        assertEquals("/api/v1/import/teamcode?dryRun=true", calls.last().path)
+        // with --yes too: the import is written, its assignments left out
+        assertEquals(0, import(apply = true))
+        assertEquals("/api/v1/import/teamcode", calls.last().path)
+        // a later page that is gone, or a 404 of the server's own (not its router's), is a failure, never fewer members
+        replies["GET /api/v1/members?before=p%2F2"] = ServerReply(404, """{"error":{"message":"Not found."}}""")
+        replies["GET /api/v1/members"] = ServerReply(200, """{"items":[],"next":"p/2"}""")
+        assertEquals(1, import())
+        replies["GET /api/v1/members"] = ServerReply(404, """{"error":{"message":"Organization not found."}}""")
+        assertEquals(1, import())
+        assertTrue(failed.endsWith("ostrom import teamcode: Ostrom answered 404: Organization not found.\n"))
+    }
+
     private companion object {
         const val REPORT = """{"items":[{"kind":"mcp_server","name":"grafana","action":"created"},""" +
             """{"kind":"account","name":"Team Max","action":"skipped","reason":"no account importer yet"},"x"],""" +
             """"created":2,"unchanged":1,"skipped":1,"updated":"many"}"""
         const val WAITING = """{"items":[{"kind":"account","name":"Team Max","action":"revive_at_cutover",""" +
             """"reason":"TeamCode still uses it"}],"updated":1,"reviveAtCutover":2}"""
+        const val CUTOVER_PLAN = """{"items":[{"kind":"account","name":"Team Max","action":"planned"},""" +
+            """{"kind":"account","name":"Team Bo","action":"planned"},""" +
+            """{"kind":"server","name":"grafana","action":"planned"},"x"],"reviveAtCutover":0}"""
         const val CUT = """{"items":[{"kind":"account","name":"Team Max","action":"updated"},""" +
             """{"kind":"account","name":"Team Bo","action":"skipped","reason":"tokens refused"},""" +
             """{"kind":"mcp_server","name":"grafana","action":"skipped","reason":"no url"},""" +
