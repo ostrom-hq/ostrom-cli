@@ -356,7 +356,7 @@ class Journey:
 
         gated = None
         if self.invitee and self.owner:
-            self.begin("5.3", "a workflow gates the deployment: the two of them its approvers")
+            self.begin("5.3 setup", "a workflow gates the deployment: the two of them its approvers")
             if self.needs(("POST", "/api/v1/workflows"), on_main=True, org=True):
                 gated = self.gate_workflow(maya)
 
@@ -366,8 +366,9 @@ class Journey:
                       org=True):
             seen = self.claude(maya)
         if gated:
-            self.gate(maya, tom_email, seen)
-            self.begin("5.3", "the gating workflow, removed")
+            if seen is not None:
+                self.gate(maya, tom_email, seen)
+            self.begin("5.3 cleanup", "the gating workflow, removed")
             done = self.ostrom(maya, "harness", "remove", gated, "--yes", console=True)
             self.check(done.returncode == 0, f"harness remove ({done.returncode}): {done.stderr.strip()[:300]}")
 
@@ -447,8 +448,8 @@ class Journey:
             "nodes": [{"id": "deploy", "kind": "trigger", "label": "kubectl apply to production"},
                       {"id": "yes", "kind": "gate", "label": "Deploy to production",
                        "approvers": [self.owner, self.invitee],
-                       "actions": [{"class": "deploy", "label": "Deploy to production", "patterns": [],
-                                    "repos": []}]}],
+                       "actions": [{"class": "deploy", "label": "Deploy to production",
+                                    "patterns": ["\\bkubectl\\s+apply\\b"], "repos": []}]}],
             "edges": [{"from": "deploy", "to": "yes"}, {"from": "yes", "to": None}],
         }
         path = os.path.join(maya["home"], f"{name}.json")
@@ -481,7 +482,10 @@ class Journey:
         self.check(waited["code"] == 75, f"ostrom wait, in the session, is still waiting (exit {waited['code']}): "
                                          f"{(waited['stdout'] + waited['stderr']).strip()[-300:]}")
 
-        self.begin("5.4", "the second person sees the request (ostrom inbox)")
+        self.begin("5.4 inbox", "the second person sees the request (ostrom inbox)")
+        if not self.needs(("GET", "/api/v1/approvals"), ("POST", "/api/v1/approvals/x/answer"),
+                          ("GET", "/api/v1/receipts"), org=True):
+            return
         tom = self.machine("tom")
         tom_session = self.sign_in(tom_email)
         if self.login(tom, tom_email):
@@ -497,7 +501,10 @@ class Journey:
         if not self.check(status == 200 and pending, f"the console lists it for {who(tom_email)} ({status}, "
                                                      f"{len(pending)}): {error_of(body)[:200]}"):
             return
-        approval = pending[0]
+        # the request of this gate; a fresh organisation has no other, so a lone one is it
+        approval = next((a for a in pending if gate in json.dumps(a)), pending[0] if len(pending) == 1 else None)
+        if not self.check(approval is not None, f"the request of {gate} is among the {len(pending)} pending"):
+            return
         answer = {"answer": "approve", "shownDigest": approval.get("shownDigest", ""), "note": "go"}
 
         self.begin("5.6", "the asker's own yes is refused (self-approval never)")
@@ -517,16 +524,20 @@ class Journey:
                                          f"{(done.stdout + done.stderr).strip()[-300:]}")
 
         self.begin("5.7", "the signed receipt: listed, pulled, verified")
-        for console in (False, True):
-            listed = self.ostrom(maya, "receipts", "list", "--json", console=console)
-            receipts = read_json(listed.stdout) or []
-            token = "a console token" if console else "the device's token"
-            if self.check(listed.returncode == 0 and receipts, f"receipts list with {token} ({listed.returncode}, "
-                                                               f"{len(receipts)}): {listed.stderr.strip()[:300]}"):
-                break
-        if not receipts:
+        # the device's token reads receipts once it has receipts:read (server#83); until then, a console token
+        listed = self.ostrom(maya, "receipts", "list", "--json")
+        console = listed.returncode != 0
+        if console:
+            print(f"  note  receipts list with the device's token: exit {listed.returncode} "
+                  f"{listed.stderr.strip()[:200]}", flush=True)
+            listed = self.ostrom(maya, "receipts", "list", "--json", console=True)
+        receipts = read_json(listed.stdout) or []
+        if not self.check(listed.returncode == 0, f"receipts list exits 0 ({listed.returncode}): "
+                                                  f"{listed.stderr.strip()[:300]}"):
             return
-        receipt = next((r for r in receipts if gate in json.dumps(r)), receipts[0])
+        receipt = next((r for r in receipts if gate in json.dumps(r)), None)
+        if not self.check(receipt is not None, f"the receipt of {gate} is among the {len(receipts)} listed"):
+            return
         done = self.ostrom(maya, "receipts", "pull", receipt["id"], console=console)
         self.check(done.returncode == 0, f"receipts pull {receipt['id']} ({done.returncode}): "
                                          f"{done.stderr.strip()[:300]}")
