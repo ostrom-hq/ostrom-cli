@@ -12,9 +12,11 @@ import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import dev.ostrom.cli.CliDependencies
 import dev.ostrom.cli.ExitCode
+import dev.ostrom.cli.cloud.CloudSite
 import dev.ostrom.cli.launcher.Agent
 import dev.ostrom.cli.launcher.LaunchRequest
 import dev.ostrom.cli.launcher.LaunchSite
+import dev.ostrom.cli.launcher.cloud.CloudStart
 import dev.ostrom.cli.platform.ConfigKey
 import dev.ostrom.cli.platform.ConfigStoreImpl
 import kotlinx.coroutines.runBlocking
@@ -30,16 +32,22 @@ internal class AgentCommand(private val agent: Agent, private val dependencies: 
     override val treatUnknownOptionsAsArgs = true
     val repo by option("--repo", help = "Repository (else read from origin)")
     val model by option("--model", help = "Model for the agent")
-    val cloud by option("--cloud", help = "Run the session in Ostrom's cloud, attached to this terminal (coming soon)")
+    val cloud by option("--cloud", help = "Run the session in Ostrom's cloud, attached here (Ctrl-] detaches)")
         .flag()
     val dryRun by option("--dry-run", help = "Check the launch and show the harness that would apply, then exit").flag()
     val server by option("--server", help = "Ostrom server URL (else OSTROM_URL, else the one of ostrom login)")
     val agentArguments by argument("agent-args", help = "Passed to the agent as they are").multiple()
 
     override fun run() {
-        val path = currentContext.commandNameWithParents()
         if (cloud && dryRun) throw UsageError("--dry-run checks a launch on this machine: it does not go with --cloud")
-        if (cloud) throw notImplemented(path + "--cloud")
+        // a usage error before the server or the sign-in is looked at: 64, never 65 for a developer signed out
+        if (cloud && agentArguments.isNotEmpty()) {
+            throw stop(
+                ExitCode.USAGE,
+                "agent arguments do not go to a cloud session (${agentArguments.joinToString(" ")}): " +
+                    "start it with `ostrom ${agent.command} --cloud`, then type in it",
+            )
+        }
         val environment = dependencies.environment
         val directory = environment.configDirectory ?: throw stop(ExitCode.CANNOT_WRITE, NO_HOME)
         val saved = ConfigStoreImpl(dependencies.files, dependencies.configFile(directory)).get(ConfigKey.SERVER)
@@ -48,10 +56,11 @@ internal class AgentCommand(private val agent: Agent, private val dependencies: 
         refuseInClear(serverUrl, "the device's token")
         val credentials = dependencies.credentials(directory).load(serverUrl)
             ?: throw stop(ExitCode.SIGN_IN_REQUIRED, "not signed in to $serverUrl: run `ostrom login`")
+        if (cloud) throw ProgramResult(runBlocking { inTheCloud(CloudSite(serverUrl, credentials.token, cwd())) })
         val site = LaunchSite(
             serverUrl = serverUrl,
             credentials = credentials,
-            cwd = dependencies.workingDirectory(),
+            cwd = cwd(),
             executable = dependencies.executable ?: "ostrom",
             configDirectory = directory,
             temporaryDirectory = dependencies.temporaryDirectory,
@@ -62,6 +71,12 @@ internal class AgentCommand(private val agent: Agent, private val dependencies: 
         val request = LaunchRequest(agent, agentArguments, repo, model, dryRun)
         throw ProgramResult(runBlocking { dependencies.agents.run(request, site) })
     }
+
+    private fun cwd() = dependencies.workingDirectory()
+
+    /** `--cloud`: the session runs in Ostrom's cloud and this terminal is attached to it. */
+    private suspend fun inTheCloud(site: CloudSite): Int =
+        dependencies.cloud.start(CloudStart(agent, model, repo), site)
 
     private fun stop(code: ExitCode, message: String) = PrintMessage("ostrom: $message", code.code, printError = true)
 

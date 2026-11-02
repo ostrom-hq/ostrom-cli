@@ -4,6 +4,7 @@ package dev.ostrom.cli
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.CoreCliktCommand
 import com.github.ajalt.clikt.core.context
+import com.github.ajalt.clikt.core.subcommands
 import com.github.ajalt.clikt.testing.test
 import dev.ostrom.cli.commands.exitCodes
 import dev.ostrom.cli.help.DOCS
@@ -65,6 +66,16 @@ class HelpTest : CliKit() {
         val help = lone.test("--help").stdout
         assertTrue(help.startsWith("Usage: lone"), help)
         assertFalse(help.contains("Examples:"), help)
+        val plugin = object : CliktCommand(name = "ostrom") {
+            override fun run() = Unit
+        }.subcommands(
+            object : CliktCommand(name = "plugin") {
+                override fun run() = Unit
+            },
+        ).context { helpFormatter = { OstromHelpFormatter(it) } }
+        val pluginHelp = plugin.test("plugin --help").stdout
+        assertTrue(pluginHelp.startsWith("Usage: ostrom plugin"), pluginHelp)
+        assertFalse(pluginHelp.contains("Examples:"), pluginHelp)
     }
 
     @Test

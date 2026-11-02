@@ -42,6 +42,7 @@ class RelayHooksTest {
             HttpMethod.Get to "/api/v1/gates/g-1?wait=30",
             HttpMethod.Get to "/api/v1/gates/g-1",
             HttpMethod.Post to "/api/v1/notifications",
+            HttpMethod.Post to "/api/v1/checks",
         )
         relayTest(ostrom) {
             for ((method, path) in routes) {
