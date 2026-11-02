@@ -58,22 +58,20 @@ internal class ConfirmationWait(
         var tries = 0
         while (true) {
             val asked = access.clock()
-            when (val answer = runBlocking { access.server.get(path, token, POLL_MILLIS) }) {
-                is ServerAnswer.Ok -> {
-                    // a pending answer that came at once (a server or a proxy that does not hold it) is not asked
-                    // again straight away
-                    val passed = access.clock() - asked
-                    val early = answer.body.text("status") == PENDING && passed < MIN_POLL_MILLIS
-                    if (early) access.pause(MIN_POLL_MILLIS - passed)
-                    return answer.body
-                }
-                is ServerAnswer.Failed -> {
-                    val outage = answer.status.let { it == null || it >= SERVER_ERRORS }
-                    tries = if (outage) tries + 1 else TRIES
-                    if (tries >= TRIES) throw stopOn(answer, id, where)
-                    access.pause(MIN_POLL_MILLIS)
-                }
+            val answer = runBlocking { access.server.get(path, token, POLL_MILLIS) }
+            if (answer is ServerAnswer.Ok) {
+                // a pending answer that came at once (a server or a proxy that does not hold it) is not asked again
+                // straight away
+                val passed = access.clock() - asked
+                val early = answer.body.text("status") == PENDING && passed < MIN_POLL_MILLIS
+                if (early) access.pause(MIN_POLL_MILLIS - passed)
+                return answer.body
             }
+            val failed = answer as ServerAnswer.Failed
+            val outage = failed.status.let { it == null || it >= SERVER_ERRORS }
+            tries = if (outage) tries + 1 else TRIES
+            if (tries >= TRIES) throw stopOn(failed, id, where)
+            access.pause(MIN_POLL_MILLIS)
         }
     }
 
@@ -86,27 +84,24 @@ internal class ConfirmationWait(
 
     private fun answered(view: JsonObject, where: String): JsonObject {
         val by = view.child("answeredBy")?.text("login")?.let { " by @$it" } ?: ""
-        return when (val status = view.text("status")) {
+        val (code, message) = when (val status = view.text("status")) {
             CONFIRMED -> {
                 access.terminal.err("✓ Confirmed$by on the console.\n")
-                view.child("result") ?: JsonObject(emptyMap())
+                return view.child("result") ?: JsonObject(emptyMap())
             }
-            REFUSED -> throw stopWith(ExitCode.REFUSED, "Refused$by on the console: nothing was changed.")
-            EXPIRED -> throw stopWith(
-                ExitCode.STILL_WAITING,
-                "Nobody confirmed it in time: nothing was changed. Run the command again to ask again.",
-            )
-            PENDING -> throw stopWith(ExitCode.STILL_WAITING, "No answer yet, and the CLI stops waiting. $where")
+            REFUSED -> ExitCode.REFUSED to "Refused$by on the console: nothing was changed."
+            EXPIRED -> ExitCode.STILL_WAITING to
+                "Nobody confirmed it in time: nothing was changed. Run the command again to ask again."
+            PENDING -> ExitCode.STILL_WAITING to "No answer yet, and the CLI stops waiting. $where"
             // confirmed, but the write was refused (what it changes moved meanwhile, a version conflict)
             FAILED -> {
                 val why = view.child("error")?.text("message") ?: "the server did not say why."
-                throw stopWith(ExitCode.REFUSED, "Confirmed$by, but not written: $why")
+                ExitCode.REFUSED to "Confirmed$by, but not written: $why"
             }
-            else -> throw stopWith(
-                ExitCode.FAILED,
-                "The server answered a confirmation this version does not read (status \"$status\"). $where",
-            )
+            else -> ExitCode.FAILED to
+                "The server answered a confirmation this version does not read (status \"$status\"). $where"
         }
+        throw stopWith(code, message)
     }
 
     private companion object {

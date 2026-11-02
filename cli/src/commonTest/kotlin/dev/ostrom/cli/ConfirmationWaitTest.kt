@@ -15,7 +15,7 @@ import kotlin.test.assertFalse
  * console (audit H1, decision of 02/11/2026): the CLI shows the link, waits on `GET /confirmations/{id}`, and exits 0
  * once confirmed, 77 when refused or not written, 75 when nobody answered in time.
  */
-class GovernanceConfirmationTest : SetupKit() {
+class ConfirmationWaitTest : SetupKit() {
     private val home = "/home/maya/.config/ostrom"
     private val server = "https://ostrom.example"
     private val poll = "GET /api/v1/confirmations/c1?wait=30"
@@ -134,6 +134,9 @@ class GovernanceConfirmationTest : SetupKit() {
         polls += answer(200, """{"status":"withdrawn"}""")
         assertEquals(1, selfApproval())
         assertErr("The server answered a confirmation this version does not read (status \"withdrawn\"). $stillThere")
+        polls += answer(200, "{}")
+        assertEquals(1, selfApproval())
+        assertErr("(status \"null\")")
     }
 
     @Test

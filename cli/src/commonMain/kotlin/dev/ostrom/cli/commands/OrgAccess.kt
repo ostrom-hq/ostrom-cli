@@ -38,9 +38,7 @@ internal data class Org(val id: String, val slug: String, val name: String, val 
  * @property console The console of the server, where what the CLI cannot do is done.
  * @property consoleToken True when the token is `OSTROM_TOKEN` (a token made on the console), not the device's.
  * @property admin The tokens of `ostrom login --admin`, read only by a governance write.
- * @property clock The time, in milliseconds since the epoch (how long a governance confirmation is waited on).
- * @property terminal Where a governance confirmation's link and wait are said.
- * @property pause Waits the given milliseconds (between two polls of a governance confirmation).
+ * @param dependencies The clock, the terminal and the pause a governance confirmation is waited on with.
  */
 internal class OrgAccess(
     val signed: SignedIn,
@@ -49,10 +47,17 @@ internal class OrgAccess(
     val console: String,
     val consoleToken: Boolean,
     val admin: AdminTokens,
-    val clock: () -> Long,
-    val terminal: Console,
-    val pause: (Long) -> Unit,
+    private val dependencies: CliDependencies,
 ) {
+    /** The time, in milliseconds since the epoch. */
+    val clock: () -> Long get() = dependencies.clock
+
+    /** Where a governance confirmation's link and wait are said. */
+    val terminal: Console get() = dependencies.console
+
+    /** Waits [millis] (between two polls of a governance confirmation). */
+    fun pause(millis: Long) = runBlocking { dependencies.sleep(millis) }
+
     /** `GET` [path] in the organisation, or the spec's exit code; [notFound] is said on a 404. */
     fun read(path: String, notFound: String): JsonObject =
         runBlocking { server.get(path, signed.token) }.orStop(signed.serverUrl, notFound)
@@ -147,8 +152,7 @@ internal fun CliDependencies.orgAccess(
     val consoleToken = environment[LaunchVariables.LAUNCH_ID].isNullOrEmpty() &&
         !environment[LaunchVariables.DEVICE_TOKEN].isNullOrEmpty()
     val server = ServerJson(ApiServerTransport(api(signed.serverUrl), org.id))
-    return OrgAccess(signed, org, server, console, consoleToken, adminTokens(directory()), clock, this.console,
-        { runBlocking { sleep(it) } })
+    return OrgAccess(signed, org, server, console, consoleToken, adminTokens(directory()), this)
 }
 
 /** The organisations the caller is a member of (`GET /api/v1/orgs`). */
