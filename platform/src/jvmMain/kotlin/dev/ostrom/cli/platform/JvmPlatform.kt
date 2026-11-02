@@ -189,6 +189,26 @@ internal actual fun tcpExchange(
     TCP_UNREACHABLE to ByteArray(0)
 }
 
+// coverage: test-only JVM target; the shipped native actual is tested in posixTest against a real socket.
+@ExcludeFromCoverage
+internal actual fun unixExchange(
+    path: String,
+    request: ByteArray,
+    capacity: Int,
+    timeoutMillis: Int,
+): Pair<Int, ByteArray> = try {
+    java.nio.channels.SocketChannel.open(java.net.UnixDomainSocketAddress.of(path)).use { channel ->
+        java.nio.channels.Channels.newOutputStream(channel).write(request)
+        val bytes = java.nio.channels.Channels.newInputStream(channel).readBytes()
+        (if (bytes.size >= capacity) TCP_TOO_LARGE else bytes.size) to bytes
+    }
+} catch (_: IOException) {
+    TCP_UNREACHABLE to ByteArray(0)
+} catch (_: IllegalArgumentException) {
+    // a path no socket address can hold
+    TCP_UNREACHABLE to ByteArray(0)
+}
+
 /** The running JVM's command. */
 // coverage: test-only JVM target; the shipped native actuals are tested by ExecutableTest on each target.
 @ExcludeFromCoverage

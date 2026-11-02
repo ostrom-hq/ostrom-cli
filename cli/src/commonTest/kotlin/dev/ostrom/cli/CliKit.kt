@@ -179,6 +179,7 @@ open class CliKit {
             postHogKey = postHogKey,
             sendStatistics = { _, body -> statistics += body },
             secrets = secrets,
+            clock = { now },
         ),
     )
 

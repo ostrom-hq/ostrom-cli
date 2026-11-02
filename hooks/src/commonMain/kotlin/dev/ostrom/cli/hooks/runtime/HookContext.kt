@@ -26,6 +26,8 @@ import dev.ostrom.cli.hooks.gate.ShellPaths
  * @property packageManifest The manifest of the session package (`OSTROM_PACKAGE_MANIFEST`), or null.
  * @property relayTokenFile The file that holds the relay's capability for the hooks (`OSTROM_RELAY_TOKEN_FILE`): it is
  * never in the agent's environment (S2-25); null outside a session.
+ * @property runnerChecks The Unix socket of the cloud session's runner (`OSTROM_RUNNER_CHECKS`), which runs the
+ * package's checks on its own host: null on a workstation, where the hook runs them.
  */
 data class HookContext(
     val repository: String,
@@ -44,6 +46,7 @@ data class HookContext(
     val packageSeal: String?,
     val packageManifest: String?,
     val relayTokenFile: String?,
+    val runnerChecks: String?,
 ) {
     /** Reads the session from the environment. */
     companion object {
@@ -69,6 +72,7 @@ data class HookContext(
                 packageSeal = variable("OSTROM_PACKAGE_SEAL"),
                 packageManifest = variable("OSTROM_PACKAGE_MANIFEST"),
                 relayTokenFile = variable("OSTROM_RELAY_TOKEN_FILE"),
+                runnerChecks = variable("OSTROM_RUNNER_CHECKS"),
             )
         }
     }

@@ -49,7 +49,8 @@ class DeviceLoginTest {
     fun theCodeIsShownThenTheServerIsAskedUntilGitHubSaysYes() = runTest {
         polls += pending()
         polls += ServerReply(200, """{"token":"ost_new","login":"maya-k","expiresAt":"2026-11-29T00:00:00Z"}""")
-        assertEquals(LoginOutcome.SignedIn(Credentials("ost_new", "maya-k")), signIn())
+        val signedIn = LoginOutcome.SignedIn(Credentials("ost_new", "maya-k"), emptyList(), "2026-11-29T00:00:00Z")
+        assertEquals(signedIn, signIn())
         assertEquals(
             listOf("! Copy your one-time code: 4F2C-9B1D", "  Open https://github.com/login/device and enter it."),
             said,

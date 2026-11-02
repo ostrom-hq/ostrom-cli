@@ -167,7 +167,8 @@ internal class HarnessAddCommand(private val dependencies: CliDependencies) : Cl
         if (!yes && !dependencies.confirm("Add it to ${access.org.name}, $mode?")) {
             throw stopWith(ExitCode.INCOMPLETE, "Nothing was added.")
         }
-        val body = access.write("POST", WORKFLOWS, proposed, "No workflows in ${access.org.slug}.")
+        val notFound = "No workflows in ${access.org.slug}."
+        val body = access.write("POST", WORKFLOWS, proposed, notFound, governance = enforce)
         val id = body.text("id") ?: "?"
         val name = body.text("name") ?: document.text("name")
         dependencies.console.out("✓ Added $name ($id), $mode. Sessions started from now get it.\n")
@@ -194,7 +195,7 @@ internal class HarnessEnforceCommand(private val dependencies: CliDependencies) 
         }
         val enforced = saved(current, "status" to "accepted")
         val body = objectOf("workflow" to enforced, "expectedVersion" to current.expectedVersion(name))
-        access.write("PUT", workflow(id), body, "No workflow $id in ${access.org.slug}.")
+        access.write("PUT", workflow(id), body, "No workflow $id in ${access.org.slug}.", governance = true)
         dependencies.console.out("✓ $name is now enforced in ${access.org.name}.\n")
     }
 }
@@ -218,7 +219,8 @@ internal class HarnessUpdateCommand(private val dependencies: CliDependencies) :
         dependencies.console.out("Before  ${line(current)}\nAfter   ${line(next)}\n")
         if (!yes && !dependencies.confirm("Save it?")) throw stopWith(ExitCode.INCOMPLETE, "Nothing was changed.")
         val body = objectOf("workflow" to next, "expectedVersion" to current.expectedVersion(current.text("name")))
-        val stored = access.write("PUT", workflow(id), body, "No workflow $id in ${access.org.slug}.")
+        val notFound = "No workflow $id in ${access.org.slug}."
+        val stored = access.write("PUT", workflow(id), body, notFound, governance = true)
         dependencies.console.out("✓ Saved ${line(stored)}\n")
     }
 }
@@ -240,7 +242,7 @@ internal class HarnessRemoveCommand(private val dependencies: CliDependencies) :
         if (!yes && dependencies.ask(question, "--yes") != name) {
             throw stopWith(ExitCode.INCOMPLETE, "Nothing was removed.")
         }
-        access.write("DELETE", workflow(id), null, "No workflow $id in ${access.org.slug}.")
+        access.write("DELETE", workflow(id), null, "No workflow $id in ${access.org.slug}.", governance = true)
         dependencies.console.out("✓ $name was removed. Sessions started from now no longer get it.\n")
     }
 }

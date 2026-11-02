@@ -60,10 +60,11 @@ private const val MAX_PAGES = 20
  */
 internal fun OrgAccess.decideRules(ids: List<String>, status: String): Int {
     if (ids.size == 1) {
-        write("PATCH", rule(ids.single()), objectOf("status" to status), "No rule ${ids.single()}.")
+        write("PATCH", rule(ids.single()), objectOf("status" to status), "No rule ${ids.single()}.", governance = true)
         return 1
     }
-    val body = write("POST", "$RULES/bulk", objectOf("ids" to ids, "status" to status), "No such rules.")
+    val decided = objectOf("ids" to ids, "status" to status)
+    val body = write("POST", "$RULES/bulk", decided, "No such rules.", governance = true)
     return (body["updated"] as? JsonPrimitive)?.let { it.content.toIntOrNull() } ?: ids.size
 }
 
@@ -201,7 +202,7 @@ internal class RulesEditCommand(private val dependencies: CliDependencies) : Cli
         )
         if (changes.isEmpty()) throw stopWith(ExitCode.USAGE, "Nothing to change: add --statement, --strength, …")
         val access = dependencies.orgAccess(server, org)
-        val body = access.write("PATCH", rule(id), changes, "No rule $id in ${access.org.slug}.")
+        val body = access.write("PATCH", rule(id), changes, "No rule $id in ${access.org.slug}.", governance = true)
         dependencies.console.out("✓ ${ruleLine(body)}\n")
     }
 }
