@@ -146,6 +146,13 @@ jobs:
         run: python3 e2e/run.py --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
       - name: End to end, init, invite, members, policy and harness against the contract's server
         run: python3 e2e/setup_e2e.py --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
+      - name: End to end, every command of the real binary (help, exit codes, colours, completion)
+        # in a D-Bus session with an unlocked keyring, like a developer's desktop: the doctor checks the secret store
+        run: |
+          dbus-run-session -- bash -ec '
+            printf ci-keyring | gnome-keyring-daemon --unlock --components=secrets > /dev/null
+            python3 e2e/commands.py --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
+          '
       # The same binary against the REAL server: the image of ostrom-server main, as deployed (the owner role migrates,
       # the server serves as `ostrom_app`, which owns nothing and cannot bypass row-level security).
       - name: ostrom-server main (its database roles)

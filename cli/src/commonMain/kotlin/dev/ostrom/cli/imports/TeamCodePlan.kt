@@ -37,9 +37,17 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
             val policy = policies[variant["id"]]
             // a tool list that cannot be read is never sent as "no tool": a deny list would then deny nothing
             val tools = strings(policy?.get("tools"))
-            val server = if (tools == null) null else server(variant, policy, tools)
+            val mode = policy?.let { modeOf(it["mode"]) }
+            val server = when {
+                tools == null || policy != null && mode == null -> null
+                else -> server(variant, mode, tools)
+            }
             if (server == null) {
-                skipped += if (tools == null) unreadablePolicy(variant) else unsupported(variant)
+                skipped += when {
+                    tools == null -> unreadablePolicy(variant)
+                    policy != null && mode == null -> unknownMode(variant, policy)
+                    else -> unsupported(variant)
+                }
                 left += variant["id"]
             }
             server
@@ -67,7 +75,7 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
 
     private fun configOf(variant: Row) = parseObject(variant["config"]) ?: JsonObject(emptyMap())
 
-    private fun server(variant: Row, policy: Row?, tools: List<String>): Map<String, Any?>? {
+    private fun server(variant: Row, mode: String?, tools: List<String>): Map<String, Any?>? {
         // id, variant_id and member_id are required columns: a row read always has them
         val id = variant["id"]
         val config = configOf(variant)
@@ -83,7 +91,7 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
             "credentialHeader" to (config.text("CREDENTIAL_HEADER") ?: config.text("credentialHeader")),
             "sharedSecret" to secret.takeUnless { stdio },
             "stdio" to launch?.let { stdio(it, secret) },
-            "toolMode" to policy?.get("mode"),
+            "toolMode" to mode,
             "tools" to tools,
         )
     }
@@ -163,6 +171,9 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
         private fun unreadablePolicy(variant: Row) = "MCP server ${variant["target"]} (${variant["name"]}): its " +
             "tool policy is not a list of tool names in TeamCode."
 
+        private fun unknownMode(variant: Row, policy: Row) = "MCP server ${variant["target"]} (${variant["name"]}): " +
+            "its tool policy's mode (${policy["mode"]}) is neither ALLOWLIST nor DENYLIST in TeamCode."
+
         /**
          * Ostrom's provider (`claude` or `codex`, the contract's `TeamCodeAccount.provider`) of TeamCode's: TeamCode
          * names the company (`anthropic`, `openai`). Any other name goes as it is, and the server says it does not
@@ -173,6 +184,15 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
 
         private val PROVIDERS =
             mapOf("anthropic" to "claude", "claude" to "claude", "openai" to "codex", "codex" to "codex")
+
+        /**
+         * Ostrom's tool mode (`allow` or `deny`, the contract's `TeamCodeMcpServer.toolMode`) of TeamCode's policy
+         * mode, which TeamCode writes `ALLOWLIST` or `DENYLIST`; null for any other, whose server is said and skipped
+         * (the server would refuse the whole import for it, and its tool list means nothing without its mode).
+         */
+        internal fun modeOf(teamCode: String?): String? = teamCode?.let { MODES[it.trim().lowercase()] }
+
+        private val MODES = mapOf("allowlist" to "allow", "allow" to "allow", "denylist" to "deny", "deny" to "deny")
 
         private const val INCOMPLETE = "no provider, account id, tokens or expiry in TeamCode: it could never sign in."
 
