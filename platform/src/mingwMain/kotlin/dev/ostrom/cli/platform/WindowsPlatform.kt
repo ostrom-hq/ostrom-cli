@@ -102,6 +102,14 @@ internal actual fun spawnDetached(command: List<String>): Boolean = memScoped {
     resolved != null && ostrom_spawn_detached_w(windowsCommandLine(resolved).wcstr) == 0
 }
 
+/** A session's runner listens on Linux only: on Windows nothing answers on a Unix socket of the CLI's. */
+internal actual fun unixExchange(
+    path: String,
+    request: ByteArray,
+    capacity: Int,
+    timeoutMillis: Int,
+): Pair<Int, ByteArray> = TCP_UNREACHABLE to ByteArray(0)
+
 internal actual fun tcpExchange(
     port: Int,
     request: ByteArray,
