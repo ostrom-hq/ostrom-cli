@@ -95,9 +95,10 @@ kotlin {
                 )
             }
             if (buildType.name == "RELEASE") {
-                // the binary a developer downloads, 15 MB at most (scripts/measure.py --max-size-mb): Kotlin/Native's
-                // size-first build, and no symbol table on Linux and Windows (-4.1 MB on linuxX64). macOS is under
-                // the budget without stripping. Measured on 02/11/2026: linuxX64 19.8 MB -> 14.3 MB, start-up faster.
+                // the binary a developer downloads: 15 MB at most, Windows 17 (ci.yml, scripts/measure.py).
+                // Kotlin/Native's size-first build, and no symbol table on Linux and Windows (-4.1 MB on linuxX64);
+                // macOS is under the budget without stripping. Measured on 02/11/2026: linuxX64 19.8 -> 14.3 MB,
+                // linuxArm64 18.1 -> 12.5, mingwX64 17.6 -> 16.3, macosArm64 14.3 -> 12.9; start-up no slower.
                 binaryOption("smallBinary", "true")
                 if (konanTarget.family == Family.LINUX || konanTarget.family == Family.MINGW) linkerOpts("-s")
             }
