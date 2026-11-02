@@ -57,27 +57,32 @@ def timed(command, event, runs):
 def sampled(command, case, runs):
     """
     [runs] calls of a hook as the agent starts it (no shell), [case] giving the i-th call its event and extra
-    environment: (milliseconds, exit code) each.
+    environment: (milliseconds, exit code, milliseconds the hook says it spent inside, or None) each.
     """
     argv, samples = shlex.split(command), []
     for i in range(runs):
         event, extra = case(i)
-        environment = {**os.environ, **extra} if extra else None
+        # OSTROM_HOOK_TIMING: the hook says on stderr how long it took from its runner to its reply
+        environment = {**os.environ, "OSTROM_HOOK_TIMING": "1", **(extra or {})}
         started = time.perf_counter()
         done = subprocess.run(argv, input=json.dumps(event), capture_output=True, text=True, timeout=60,
                               env=environment)
-        samples.append(((time.perf_counter() - started) * 1000, done.returncode))
+        wall = (time.perf_counter() - started) * 1000
+        inside = re.search(r"ostrom hook \S+: ([0-9.]+) ms", done.stderr)
+        samples.append((wall, done.returncode, float(inside.group(1)) if inside else None))
     return samples
 
 
 def percentiles(samples):
     """p50, p95, p99 (nearest rank), min and max of [samples] (milliseconds, exit code), with the exit codes seen."""
     times = sorted(sample[0] for sample in samples)
+    insides = sorted(sample[2] for sample in samples if sample[2] is not None)
 
-    def rank(p):
-        return round(times[max(0, -(-len(times) * p // 100) - 1)], 1)
-    return {"runs": len(times), "p50": rank(50), "p95": rank(95), "p99": rank(99), "min": round(times[0], 1),
-            "max": round(times[-1], 1), "codes": sorted({sample[1] for sample in samples})}
+    def rank(values, p):
+        return round(values[max(0, -(-len(values) * p // 100) - 1)], 1) if values else None
+    return {"runs": len(times), "p50": rank(times, 50), "p95": rank(times, 95), "p99": rank(times, 99),
+            "min": round(times[0], 1), "max": round(times[-1], 1), "codes": sorted({sample[1] for sample in samples}),
+            "inside_p50": rank(insides, 50), "inside_p95": rank(insides, 95)}
 
 
 def perf(hook, base, runs):

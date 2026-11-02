@@ -446,10 +446,10 @@ class Journey:
         rows = [("local decision (policy in the relay's memory)", measured["local"]),
                 ("policy asked of Ostrom (the relay's memory missed)", measured["miss"]),
                 ("command under a gate (a request to Ostrom)", measured["gated"])]
-        print(f"  {'':52} {'p50':>7} {'p95':>7} {'p99':>7} {'max':>7}  runs  exits", flush=True)
+        print(f"  {'':52} {'p50':>7} {'p95':>7} {'p99':>7} {'max':>7}  inside p50/p95  runs  exits", flush=True)
         for label, row in rows:
             print(f"  {label:52} {row['p50']:7.1f} {row['p95']:7.1f} {row['p99']:7.1f} {row['max']:7.1f}  "
-                  f"{row['runs']:4}  {row['codes']}", flush=True)
+                  f"{row['inside_p50']}/{row['inside_p95']}  {row['runs']:4}  {row['codes']}", flush=True)
         print(f"  first call of the session (cold): {first.get('millis')} ms", flush=True)
         self.step["latency"] = {**measured, "first": first.get("millis")}
         local, server = self.options.max_local_p95_ms, self.options.max_server_p95_ms
