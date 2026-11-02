@@ -90,33 +90,35 @@ class SandboxedScripts(
  * - a commit is checked out in a clone of its own (`clone --shared`: its objects, none of its configuration), in an
  *   environment of its own: no user's or system's configuration (whatever the version of git), no variable of the
  *   agent's (`GIT_CONFIG_*`, `GIT_DIR`), no replaced object. No filter driver, hook or fsmonitor of anyone's applies,
- *   and nothing has to be named in advance (a name with `=` in it, a filter added during the hook). A repository that
- *   git trusts only through the user's `safe.directory` (owned by someone else) is not cloned: its commits are refused;
+ *   and nothing has to be named in advance (a name with `=` in it, a filter added during the hook). The clone takes the
+ *   repository's branches and tags too. A repository that git trusts only through the user's `safe.directory` (owned
+ *   by someone else) is not cloned: its commits are refused;
  * - the working tree is read in place only when no configuration declares a filter driver other than Git LFS's
- *   ([filtered]: its `git status` would run it, and it would answer for the tree), with hooks, fsmonitor and LFS's
- *   filter left out. The filters are read again after the status: one added meanwhile makes the tree unclean. Only
- *   one added and removed again while the status ran is not seen. A submodule is compared by its commit, not by the
- *   files of its own working tree (they would be read with its configuration).
+ *   ([filtered], read at each check: a check may write the configuration): its `git status` would run it, and it
+ *   would answer for the tree. The status leaves out hooks, fsmonitor, LFS's filter and replaced objects, and the
+ *   filters are read again after it: one added meanwhile makes the tree unclean. A submodule is compared by its commit,
+ *   not by the files of its own working tree (they would be read with its configuration).
+ *
+ * Not covered: a process of the agent's own, timed to add a filter between two of these commands and remove it again.
  *
  * POSIX only, as the check scripts are (`/usr/bin/env -i`, `/bin/sh`): on Windows a commit cannot be checked out.
  *
  * @param git The `git` the launcher resolved (`OSTROM_GIT`).
  * @param budget What is left of the agent's limit on the hook: a command it leaves no time for is not run, and fails.
- * @param path The `PATH` the clone's `git` is looked up in, or null.
+ * @param searchPath The `PATH` the clone's `git` is looked up in (the hook's own), or null.
  */
 class GitCheckouts(
     private val capture: ProcessCapture,
     private val git: String,
     private val budget: HookBudget = HookBudget.NONE,
-    private val path: String? = null,
+    private val searchPath: String? = null,
 ) : CommitCheckouts {
-    /** Read once per repository and hook run: every check of every commit of a push asks. */
-    private val filters = mutableMapOf<String, Boolean>()
-
-    override fun filtered(repository: String): Boolean = filters.getOrPut(repository) { declared(repository) }
+    // read at each check, never kept: a check may write the repository's configuration before the next one runs
+    override fun filtered(repository: String): Boolean = declared(repository)
 
     override fun clean(repository: String): Boolean {
-        val status = run(OFF + listOf("-C", repository, "status") + STATUS, SHORT_MILLIS)
+        // a replaced commit or tree would let the status compare the files with another commit than the one pushed
+        val status = run(OFF + listOf("--no-replace-objects", "-C", repository, "status") + STATUS, SHORT_MILLIS)
         val unchanged = status is CaptureResult.Exited && status.code == 0 && status.output.isEmpty()
         // a filter declared while the status ran may have answered for the tree
         return unchanged && !declared(repository)
@@ -124,13 +126,19 @@ class GitCheckouts(
 
     override fun add(repository: String, path: String, sha: String): Boolean {
         val clone = listOf("clone", "--quiet", "--shared", "--no-checkout", "--", repository, path)
+        // the branches and tags, as a worktree saw them (a check may compare with main); never refs/replace
+        val refs = listOf("-C", path, "fetch", "--quiet", "--update-head-ok", "origin") + BRANCHES_AND_TAGS
         val checkout = listOf("-C", path, "checkout", "--quiet", "--detach", sha)
-        return succeeded(configless(clone)) && succeeded(configless(checkout))
+        if (!succeeded(configless(clone))) return false
+        configless(refs)
+        return succeeded(configless(checkout))
     }
 
     override fun remove(repository: String, path: String) {
-        // a check may leave folders it cannot write (a module cache): rm alone would leave them, and the next clone
-        // would find the folder taken. What a check built (node_modules, target) can take long to delete
+        // what a check built (node_modules, target) can take long to delete
+        val removed = bounded(listOf(RM, "-rf", "--", path), CHECKOUT_MILLIS)
+        if (succeeded(removed)) return
+        // a folder a check left unwritable (a module cache) would take the next clone's place
         bounded(listOf(CHMOD, "-R", "u+w", "--", path), CHECKOUT_MILLIS)
         bounded(listOf(RM, "-rf", "--", path), CHECKOUT_MILLIS)
     }
@@ -144,12 +152,15 @@ class GitCheckouts(
 
     private fun succeeded(result: CaptureResult) = result is CaptureResult.Exited && result.code == 0
 
-    /** No filter driver but Git LFS's in the repository's configuration (exit 1: none at all). */
-    private fun noFilter(listed: CaptureResult): Boolean = listed is CaptureResult.Exited &&
-        (listed.code == NONE_DECLARED || listed.code == 0 && listed.output.lines().none(::otherFilter))
-
-    /** A filter's key that is not one of Git LFS's own (`filter.lfs.x.smudge` is another driver). */
-    private fun otherFilter(line: String) = line.startsWith(FILTER) && line !in LFS_KEYS
+    /**
+     * No filter driver but Git LFS's in the repository's configuration (exit 1: none at all). LFS's is known by its
+     * exact keys: `filter.lfs.x.smudge` is another driver.
+     */
+    private fun noFilter(listed: CaptureResult): Boolean {
+        val keys = (listed as? CaptureResult.Exited)?.takeIf { it.code == 0 }?.output?.lines()
+        return listed is CaptureResult.Exited && listed.code == NONE_DECLARED ||
+            keys != null && keys.none { it.startsWith(FILTER) && it !in LFS_KEYS }
+    }
 
     /** `git` with [arguments], with every configuration (the user's ignored files make a tree clean or not). */
     private fun run(arguments: List<String>, timeoutMillis: Int): CaptureResult =
@@ -161,7 +172,7 @@ class GitCheckouts(
      * hook or fsmonitor of the repository's. A checkout runs no filter.
      */
     private fun configless(arguments: List<String>): CaptureResult {
-        val environment = listOfNotNull(path?.let { "PATH=$it" }) + CONFIGLESS
+        val environment = listOfNotNull(searchPath?.let { "PATH=$it" }) + CONFIGLESS
         return bounded(listOf(ENV, "-i") + environment + git + HOOKS_OFF + arguments, CHECKOUT_MILLIS)
     }
 
@@ -185,6 +196,9 @@ class GitCheckouts(
         const val CHECKOUT_MILLIS = 60_000
     }
 }
+
+/** Every branch and tag of the repository, under the same names. */
+private val BRANCHES_AND_TAGS = listOf("+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*")
 
 /** Everything modified, staged or untracked; a submodule by its commit only. */
 private val STATUS = listOf("--porcelain", "--untracked-files=all", "--ignore-submodules=dirty")

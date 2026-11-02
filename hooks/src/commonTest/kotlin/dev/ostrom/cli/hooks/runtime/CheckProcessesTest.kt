@@ -116,11 +116,15 @@ class CheckProcessesTest {
 
     private fun git(vararg arguments: String) = listOf("git") + arguments.toList()
 
+    private val refs = listOf("+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*")
+
     private val hooksOff = listOf("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false")
 
     private val status = git(
-        *(safe + listOf("-C", "/w", "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=dirty"))
-            .toTypedArray(),
+        *(
+            safe + listOf("--no-replace-objects", "-C", "/w", "status", "--porcelain", "--untracked-files=all") +
+                "--ignore-submodules=dirty"
+            ).toTypedArray(),
     )
     private val filters = git("-C", "/w", "config", "--name-only", "--get-regexp", "^filter\\.")
 
@@ -155,35 +159,44 @@ class CheckProcessesTest {
         val checkouts = GitCheckouts(capture, "git")
         assertFalse(checkouts.filtered("/w"))
         assertFalse(checkouts.filtered("/w"))
-        assertEquals(listOf(filters to 5_000), capture.captured, "read once per repository: every check asks")
+        // never kept: a check may write the configuration before the next one runs
+        assertEquals(listOf(filters to 5_000, filters to 5_000), capture.captured)
     }
 
     @Test
     fun aCommitIsCheckedOutInACloneOfItsOwnAndRemovedAfterwards() {
         // a clone shares the objects, not the configuration: no filter, hook or fsmonitor of anyone's applies
         val capture = Capture(CaptureResult.Exited(0, ""))
-        val checkouts = GitCheckouts(capture, "git", path = "/usr/bin:/bin")
+        val checkouts = GitCheckouts(capture, "git", searchPath = "/usr/bin:/bin")
         assertTrue(checkouts.add("/w", "/t/sbx/wt-M", "M"))
         checkouts.remove("/w", "/t/sbx/wt-M")
         val path = listOf("PATH=/usr/bin:/bin")
+        val fetch = listOf("-C", "/t/sbx/wt-M", "fetch", "--quiet", "--update-head-ok", "origin") + refs
         assertEquals(
             listOf(
                 configless(listOf("clone", "--quiet", "--shared", "--no-checkout", "--", "/w", "/t/sbx/wt-M"), path) to
                     60_000,
+                configless(fetch, path) to 60_000,
                 configless(listOf("-C", "/t/sbx/wt-M", "checkout", "--quiet", "--detach", "M"), path) to 60_000,
-                // a folder a check left read-only would stay, and take the next clone's place
-                listOf("/bin/chmod", "-R", "u+w", "--", "/t/sbx/wt-M") to 60_000,
                 listOf("/bin/rm", "-rf", "--", "/t/sbx/wt-M") to 60_000,
             ),
             capture.captured,
         )
+        // a folder a check left unwritable is made writable, then removed
+        val stuck = Capture(CaptureResult.Exited(1, ""), CaptureResult.Exited(0, ""))
+        GitCheckouts(stuck, "git").remove("/w", "/p")
+        val rm = listOf("/bin/rm", "-rf", "--", "/p") to 60_000
+        assertEquals(listOf(rm, listOf("/bin/chmod", "-R", "u+w", "--", "/p") to 60_000, rm), stuck.captured)
         val noClone = Capture(CaptureResult.Exited(128, ""))
         assertFalse(GitCheckouts(noClone, "git").add("/w", "/p", "M"))
         assertEquals(1, noClone.captured.size, "nothing more once the clone failed")
         assertFalse(GitCheckouts(Capture(CaptureResult.NotFound), "git").add("/w", "/p", "M"))
-        val noCommit = Capture(CaptureResult.Exited(0, ""), CaptureResult.Exited(128, ""))
+        // the refs are a convenience: a fetch that fails leaves the commit to check out
+        val noRefs = Capture(CaptureResult.Exited(0, ""), CaptureResult.Exited(128, ""), CaptureResult.Exited(0, ""))
+        assertTrue(GitCheckouts(noRefs, "git").add("/w", "/p", "M"))
+        val noCommit = Capture(CaptureResult.Exited(0, ""), CaptureResult.Exited(0, ""), CaptureResult.Exited(128, ""))
         assertFalse(GitCheckouts(noCommit, "git").add("/w", "/p", "M"), "a commit the clone cannot check out")
-        assertEquals(configless(listOf("-C", "/p", "checkout", "--quiet", "--detach", "M")), noCommit.captured[1].first)
+        assertEquals(configless(listOf("-C", "/p", "checkout", "--quiet", "--detach", "M")), noCommit.captured[2].first)
     }
 
     @Test
@@ -198,6 +211,6 @@ class CheckProcessesTest {
         assertFalse(checkouts.clean("/w"), "no time to read the tree: it is not taken as clean")
         assertFalse(checkouts.add("/w", "/p", "M"))
         checkouts.remove("/w", "/p")
-        assertEquals(2, capture.captured.size, "nothing is run once the budget is spent")
+        assertEquals(3, capture.captured.size, "nothing is run once the budget is spent")
     }
 }
