@@ -10,6 +10,7 @@ import dev.ostrom.cli.launcher.objectOf
 import dev.ostrom.cli.launcher.parseObject
 import dev.ostrom.cli.launcher.text
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -20,6 +21,9 @@ import kotlin.test.assertTrue
 /** What every adapter shares: the layout of a session, the overlay of a config home, skills, MCP names. */
 /** Ostrom's plugin kept on in the session's Claude settings. */
 private const val ON = """"enabledPlugins":{"ostrom@inline":true}"""
+
+// Ostrom's variables, which a repository's `env` would rewrite: the layout's own here, the gate's budget alone
+private const val ENV = """"env":{"OSTROM_HOOK_BUDGET_MS":"18000"}"""
 
 class AdaptersTest {
     private val files = MemoryFiles()
@@ -171,9 +175,39 @@ class AdaptersTest {
             listOf("--plugin-dir", join("/tmp/run", "plugin"), "--resume", "x", "--settings", settings, "--", "prompt"),
             launch.arguments,
         )
-        assertEquals("""{"disableAllHooks":false,$ON}""", files.texts[settings])
+        assertEquals("""{"disableAllHooks":false,$ON,$ENV}""", files.texts[settings])
         assertEquals(FileAccess.PRIVATE, files.access[settings])
         assertEquals(emptyList(), launch.notes)
+    }
+
+    @Test
+    fun claudeKeepsOstromsVariablesWhateverTheRepositorysEnvSays() {
+        // a repository's .claude/settings.json `env` rewrites the session's variables, the hooks' included (H4):
+        // the session's settings come before the project's, so Ostrom's own are written there, beside the developer's
+        val settings = join("/tmp/run", "claude-settings.json")
+        val environment = mapOf(
+            "OSTROM_GATES" to "/tmp/run/gates.json",
+            "OSTROM_TOKEN" to null,
+            "PWD" to "/work/app",
+            "PATH" to "/opt/bin:/usr/bin",
+        )
+        val theirs = """{"env":{"OSTROM_GATES":"mine.json","DEBUG":"1"}}"""
+        val launch = ClaudeAdapter().prepare(
+            layout(arguments = listOf("--settings", theirs), inference = true, environment = environment),
+            files,
+        )
+        val env = checkNotNull(checkNotNull(parseObject(files.texts[settings])).child("env"))
+        assertEquals(JsonPrimitive("1"), env["DEBUG"], "the developer's own variables stay")
+        assertEquals(JsonPrimitive("/tmp/run/gates.json"), env["OSTROM_GATES"])
+        assertEquals(JsonPrimitive(""), env["OSTROM_TOKEN"], "a variable Ostrom removes is set empty")
+        assertEquals(JsonPrimitive("18000"), env["OSTROM_HOOK_BUDGET_MS"])
+        assertEquals(JsonPrimitive("http://127.0.0.1:4100"), env["ANTHROPIC_BASE_URL"], "inference stays Ostrom's")
+        assertEquals(JsonPrimitive("relay-token"), env["ANTHROPIC_AUTH_TOKEN"])
+        assertEquals(JsonPrimitive(""), env["ANTHROPIC_API_KEY"], "the agent's own key cannot come back")
+        assertNull(env["PWD"], "only Ostrom's and the provider's variables")
+        assertNull(env["PATH"])
+        assertEquals("/tmp/run/gates.json", environment["OSTROM_GATES"])
+        assertEquals("http://127.0.0.1:4100", launch.environment["ANTHROPIC_BASE_URL"])
     }
 
     @Test
@@ -184,7 +218,7 @@ class AdaptersTest {
         val theirs = """{"enabledPlugins":{"ostrom@inline":false,"other@market":false}}"""
         ClaudeAdapter().prepare(layout(arguments = listOf("--settings", theirs)), files)
         assertEquals(
-            """{"enabledPlugins":{"ostrom@inline":true,"other@market":false},"disableAllHooks":false}""",
+            """{"enabledPlugins":{"ostrom@inline":true,"other@market":false},"disableAllHooks":false,$ENV}""",
             files.texts[settings],
         )
     }
@@ -201,7 +235,7 @@ class AdaptersTest {
             listOf("--plugin-dir", join("/tmp/run", "plugin"), "-p", "hi", "--settings", settings),
             inline.arguments,
         )
-        assertEquals("""{"model":"opus","disableAllHooks":false,$ON}""", files.texts[settings])
+        assertEquals("""{"model":"opus","disableAllHooks":false,$ON,$ENV}""", files.texts[settings])
         assertEquals(
             listOf("claude: your --settings turns hooks off (disableAllHooks): Ostrom keeps them on for this session"),
             inline.notes,
@@ -210,7 +244,7 @@ class AdaptersTest {
         val file = ClaudeAdapter().prepare(layout(arguments = listOf("--settings=/home/dev/mine.json")), files)
         assertEquals(listOf("--plugin-dir", join("/tmp/run", "plugin"), "--settings", settings), file.arguments)
         assertEquals(
-            """{"permissions":{"allow":["Bash(ls)"]},"disableAllHooks":false,$ON}""",
+            """{"permissions":{"allow":["Bash(ls)"]},"disableAllHooks":false,$ON,$ENV}""",
             files.texts[settings],
         )
         assertEquals(emptyList(), file.notes)
@@ -222,7 +256,8 @@ class AdaptersTest {
         files.texts["/home/dev/last.json"] = """{"model":"haiku"}"""
         val arguments = listOf("--settings", """{"model":"opus"}""", "--settings", "/home/dev/last.json")
         val last = ClaudeAdapter().prepare(layout(arguments = arguments + listOf("--", "--settings", "x")), files)
-        assertEquals("""{"model":"haiku","disableAllHooks":false,$ON}""", files.texts[settings], "the last one wins")
+        val last = """{"model":"haiku","disableAllHooks":false,$ON,$ENV}"""
+        assertEquals(last, files.texts[settings], "the last one wins")
         assertEquals(
             listOf("--plugin-dir", join("/tmp/run", "plugin"), "--settings", settings, "--", "--settings", "x"),
             last.arguments,
@@ -364,6 +399,7 @@ class AdaptersTest {
         inference: Boolean = false,
         rules: String = "",
         variables: Map<String, String> = emptyMap(),
+        environment: Map<String, String?> = emptyMap(),
     ) = SessionLayout(
         temporary = "/tmp/run",
         plugin = join("/tmp/run", "plugin"),
@@ -374,5 +410,6 @@ class AdaptersTest {
         home = "/home/dev",
         variable = { variables[it] },
         relay = RelayView("http://127.0.0.1:4100", "relay-token", mcp, inference),
+        environment = environment,
     )
 }

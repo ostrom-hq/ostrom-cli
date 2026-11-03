@@ -93,6 +93,10 @@ class AgentLaunchUseCaseTest {
             commands.single(),
             "Ostrom's own MCP server is relayed to every session",
         )
+        // the session's settings carry Ostrom's variables, which a repository's `env` would otherwise rewrite (H4)
+        val written = filesWhileRunning[settings].orEmpty()
+        assertTrue(""""OSTROM_LAUNCH_ID":"L1"""" in written, written)
+        assertTrue(""""OSTROM_TOKEN":""""" in written, written)
         val environment = environments.single()
         assertEquals("http://127.0.0.1:4100", environment[LaunchVariables.RELAY_URL])
         // S2-25: the agent gets its own capability; the hooks' is in a private file, never in an environment
