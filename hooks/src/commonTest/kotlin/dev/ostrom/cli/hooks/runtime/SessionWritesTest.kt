@@ -39,6 +39,14 @@ class SessionWritesTest {
     }
 
     @Test
+    fun aReportIsSentOnceAndAClosedSessionIsNotReopenedForIt() {
+        val calls = FakeCalls().on(Routes.LOCAL_DENIALS, CallResult.Failed("session closed: s1", "session_closed"))
+        SessionWrites(calls, ids, "L1").report(Routes.LOCAL_DENIALS, json("""{"sessionId":"s1"}"""), 1_000)
+        assertEquals(listOf(Call(Routes.LOCAL_DENIALS, json("""{"sessionId":"s1"}"""), 1_000)), calls.calls)
+        assertNull(files.texts["/s/session"], "no segment adopted")
+    }
+
+    @Test
     fun otherFailuresAndUnreopenableSessionsAreReturnedAsIs() {
         val unreachable = CallResult.Failed("HTTP 502")
         val writes = SessionWrites(FakeCalls().on(Routes.GATES, unreachable), ids, null)

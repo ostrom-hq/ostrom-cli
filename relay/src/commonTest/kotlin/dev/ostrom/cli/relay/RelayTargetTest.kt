@@ -19,6 +19,7 @@ class RelayTargetTest {
             "/api/v1/sessions/s-1~r2/seen",
             "/api/v1/sessions/ses.a:b/seen",
             "/api/v1/gates",
+            "/api/v1/gates/local-denials",
             "/api/v1/notifications",
             "/api/v1/checks",
         )
@@ -50,6 +51,9 @@ class RelayTargetTest {
             HttpMethod.Post to "/api/v1/checks/",
             HttpMethod.Put to "/api/v1/checks",
             HttpMethod.Post to "/api/v1/gates/catalog",
+            // a local refusal is only POSTed, to the route itself
+            HttpMethod.Post to "/api/v1/gates/local-denials/x",
+            HttpMethod.Put to "/api/v1/gates/local-denials",
             HttpMethod.Post to "/api/v1/gates/a.b/consume",
             HttpMethod.Post to "/api/v1/sessions/",
             HttpMethod.Get to "/api/v1/gates",
