@@ -3,6 +3,7 @@ package dev.ostrom.cli.commands
 
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.Context
+import com.github.ajalt.clikt.core.PrintMessage
 import com.github.ajalt.clikt.parameters.options.option
 import dev.ostrom.cli.CliDependencies
 import dev.ostrom.cli.ExitCode
@@ -36,6 +37,9 @@ internal class InitCommand(private val dependencies: CliDependencies) : CliktCom
     /** What `--json` prints at the end, step by step. */
     private val summary = mutableMapOf<String, Any?>()
 
+    /** Why the server refused a read init makes, by what was read: a token made on the console may lack a scope. */
+    private val unreadable = mutableMapOf<String, String>()
+
     override fun run() {
         dependencies.outsideSessions("init")
         val access = dependencies.orgAccess(server, org, ::choose)
@@ -43,6 +47,7 @@ internal class InitCommand(private val dependencies: CliDependencies) : CliktCom
         repository(access)
         hooks()
         rules(access)
+        summary["unreadable"] = unreadable.keys.toList().ifEmpty { null }
         if (json) {
             val done = JsonObject(summary.filterValues { it != null }.mapValues { jsonOf(it.value) })
             dependencies.console.data("$done\n")
@@ -89,17 +94,20 @@ internal class InitCommand(private val dependencies: CliDependencies) : CliktCom
         // GET /api/v1/repos (SRV-LECTURES), when served. A clone in a folder named otherwise is not found by its name:
         // a warning, never a refusal, so that init still sets the device up.
         // Beyond the first page (100), a repository not found is not known to be missing: no warning.
-        val covered = access.readIfServed("/api/v1/repos?limit=$REPOS_PAGE")?.let { coverage(it, name) }
+        val covered = access.readIfAllowed("/api/v1/repos?limit=$REPOS_PAGE", "repos", unreadable)
+            ?.let { coverage(it, name) }
         summary["covered"] = covered
-        val workflows = access.readIfServed("/api/v1/workflows?repo=${segment(name)}")
+        val workflows = access.readIfAllowed("/api/v1/workflows?repo=${segment(name)}", "workflows", unreadable)
             ?.let { page -> page.list("items").filterIsInstance<JsonObject>() }
         summary["workflows"] = workflows?.size
         val harness = when {
+            "workflows" in unreadable -> cannotRead(access, unreadable.getValue("workflows"))
             workflows == null -> "not on this server yet"
             workflows.isEmpty() -> "no workflow yet (ostrom harness add <file.json>)"
             else -> workflows.joinToString(" · ") { "${it.text("name")} (${it.text("status")})" }
         }
         say("  Repository  $name${if (covered == true) " · covered" else ""}\n  Harness     $harness")
+        if ("repos" in unreadable) say("! Coverage    unknown: ${cannotRead(access, unreadable.getValue("repos"))}")
         if (covered == false) {
             say("! $name is not among ${access.org.name}'s repositories on the server: ask an admin to add it " +
                 "(${access.console}).")
@@ -142,7 +150,11 @@ internal class InitCommand(private val dependencies: CliDependencies) : CliktCom
 
     /** The rules the analysis proposed, accepted here by an owner or admin who says yes. */
     private fun rules(access: OrgAccess) {
-        val page = access.readIfServed("$RULES?status=proposed")
+        val page = access.readIfAllowed("$RULES?status=proposed", "rules", unreadable)
+        if ("rules" in unreadable) {
+            say("  Rules       ${cannotRead(access, unreadable.getValue("rules"))}")
+            return
+        }
         if (page == null) {
             say("  Rules       not on this server yet")
             return
@@ -194,4 +206,31 @@ private fun coverage(page: JsonObject, name: String): Boolean? {
     val found = page.list("items").filterIsInstance<JsonObject>().mapNotNull { it.text("name") }
         .any { it == name || it.endsWith("/$name") }
     return found.takeIf { it || page.text("next").isNullOrEmpty() }
+}
+
+/**
+ * `GET` [path] when served, or null; a right the token lacks (403 `This credential does not allow …`) is noted in
+ * [unreadable] under [what] rather than failing init, whose link and hooks are already done: a token made on the
+ * console may not hold every read scope. Any other refusal still stops init, the device's token older than a right
+ * `ostrom login` now gives included (its message says to sign in again).
+ */
+private fun OrgAccess.readIfAllowed(path: String, what: String, unreadable: MutableMap<String, String>): JsonObject? =
+    try {
+        readIfServed(path)
+    } catch (refused: PrintMessage) {
+        val message = "${refused.message}"
+        if (refused.statusCode != ExitCode.REFUSED.code || !message.startsWith(LACKS_SCOPE) || '\n' in message) {
+            throw refused
+        }
+        unreadable[what] = message
+        null
+    }
+
+/** The server's refusal of a right the token lacks, before the right's name. */
+private const val LACKS_SCOPE = "This credential does not allow "
+
+/** What init says of a read the server refused for [why], and how to make it otherwise. */
+private fun cannotRead(access: OrgAccess, why: String): String {
+    val said = "this token cannot read them ($why)"
+    return if (access.consoleToken) "$said: without OSTROM_TOKEN, ostrom login's token reads them" else said
 }

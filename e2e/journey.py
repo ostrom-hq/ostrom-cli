@@ -56,6 +56,7 @@ class Journey:
         self.invitee = None
         self.owner = None
         self.org_id = None
+        self.admin_token = None
         self.owner_session = None
         self.temporary = options.work is None
 
@@ -102,8 +103,10 @@ class Journey:
 
     # ---- the server ----------------------------------------------------------------------------------------------
 
-    def call(self, method, path, body=None, token=None, session=None, org=None):
+    def call(self, method, path, body=None, token=None, session=None, org=None, cookie=None):
         headers = {"accept": "application/json"}
+        if cookie:
+            headers["cookie"] = cookie
         if org:
             headers["ostrom-org"] = org
         data = None
@@ -156,14 +159,17 @@ class Journey:
     def sign_in(self, email):
         """A browser session of [email], by the link the server e-mailed: its cookie and CSRF token."""
         since = time.time()
-        status, _, _ = self.call("POST", "/api/v1/auth/email", {"email": email})
+        status, _, asked = self.call("POST", "/api/v1/auth/email", {"email": email})
         if not self.check(status < 300, f"a sign-in link is e-mailed to {who(email)} ({status})"):
             return None
+        # one browser: the link opens only where it was asked for, by the cookie POST /auth/email sets
+        # (ostrom_email_link, server#176; without it, 403 email_link_other_browser)
+        jar = cookies(asked)
         token = self.mail_token(email, "/auth/email", since)
         if not self.check(token is not None, f"the link reached {self.options.mail_dir}"):
             return None
-        status, body, headers = self.call("POST", "/api/v1/auth/email/verify", {"token": token})
-        cookie = "; ".join(c.split(";", 1)[0] for c in headers.get_all("set-cookie") or [])
+        status, body, headers = self.call("POST", "/api/v1/auth/email/verify", {"token": token}, cookie=jar)
+        cookie = cookies(headers)
         csrf = body.get("csrfToken") if isinstance(body, dict) else None
         if not self.check(status == 200 and cookie and csrf, f"{who(email)} has a browser session ({status})"):
             return None
@@ -344,8 +350,18 @@ class Journey:
             bashrc = os.path.join(maya["home"], ".bashrc")
             written = os.path.exists(bashrc) and "# >>> ostrom:" in open(bashrc, encoding="utf-8").read()
             self.check(written, "the agents start with Ostrom's hooks (~/.bashrc)")
-        again = self.ostrom(maya, "init", "--yes", console=True)
-        self.check(again.returncode == 0, f"init again, with a console token, exits 0 ({again.returncode})")
+        # init again, as the owner who governs: ostrom login --admin first (the governance token, approved on the
+        # console), then init with the device's token, which reads the rules
+        self.admin_signed_in(maya)
+        again = self.ostrom(maya, "init", "--yes")
+        self.check(again.returncode == 0 and "Rules" in again.stdout,
+                   f"init again exits 0 and says the rules ({again.returncode}): "
+                   f"{(again.stdout + again.stderr).strip()[-300:]}")
+        # the personal token holds no rules:read: init says so and the rest is done, exit 0 (cli#83)
+        personal = self.ostrom(maya, "init", "--yes", console=True)
+        self.check(personal.returncode == 0 and "Rules       this token cannot read them" in personal.stdout,
+                   f"init with a personal token exits 0 and says it cannot read the rules ({personal.returncode}): "
+                   f"{(personal.stdout + personal.stderr).strip()[-300:]}")
 
     def team(self, maya, tom_email, org):
         """2.6, 2.7, then the policy, the rules, the harness and the launch."""
@@ -375,10 +391,20 @@ class Journey:
             tom_login = next((m.get("login") for m in members if m.get("role") != "owner"), None)
             self.owner = next((m.get("login") for m in members if m.get("role") == "owner"), None)
             self.invitee = tom_login
+            text = self.ostrom(maya, "members", "list")
+            self.check(text.returncode == 0 and "2 members" in text.stdout and f"@{tom_login}" in text.stdout,
+                       f"and says it in words ({text.returncode}): {text.stdout.strip()[:200]}")
             if tom_login:
+                device = self.ostrom(maya, "members", "role", tom_login, "admin")
+                self.check(device.returncode == 77 and "console" in device.stderr,
+                           f"the device's token cannot change a role: the console can ({device.returncode})")
                 done = self.ostrom(maya, "members", "role", tom_login, "admin", console=True)
-                self.check(done.returncode == 0, f"a console token makes @{tom_login} admin ({done.returncode}): "
-                                                 f"{done.stderr.strip()[:300]}")
+                self.check(done.returncode == 0 and f"@{tom_login} is now admin" in done.stdout,
+                           f"a console token makes @{tom_login} admin ({done.returncode}): "
+                           f"{done.stderr.strip()[:300]}")
+                # as the server says it, not as the CLI printed it
+                self.check(self.role_of(maya, org, tom_login) == "admin",
+                           f"the server lists @{tom_login} as admin ({self.role_of(maya, org, tom_login)})")
 
         self.begin("3.4", "ostrom policy: the models and who may start which agent")
         if self.needs(("GET", "/api/v1/policy/models"), org=True):
@@ -386,9 +412,13 @@ class Journey:
             shown = self.ostrom(maya, "policy", "show", "--json", console=True)
             self.check(shown.returncode == 0, f"policy show exits 0 ({shown.returncode}): {shown.stderr.strip()[:300]}")
             allowed = ((read_json(shown.stdout) or {}).get("models") or {}).get("allowed") or []
-            done = self.ostrom(maya, "policy", "set", "models", ",".join(allowed or ["sonnet"]), console=True)
-            self.check(done.returncode == 0, f"policy set models, with a console token ({done.returncode}): "
-                                             f"{done.stderr.strip()[:300]}")
+            models = ",".join(allowed or ["sonnet"])
+            # a personal token (OSTROM_TOKEN) never governs: the policy takes ostrom login --admin
+            refused = self.ostrom(maya, "policy", "set", "models", models, console=True)
+            self.check(refused.returncode == 77, f"a personal token cannot set the models ({refused.returncode})")
+            if self.admin_signed_in(maya):
+                done = self.governed(maya, "policy", "set", "models", models)
+                self.check(done == 0, f"policy set models, with the admin token ({done})")
         self.begin("3.4", "ostrom policy check: what ostrom claude is told")
         if self.needs(("GET", "/api/v1/policy/agents"), org=True):
             done = self.ostrom(maya, "policy", "check", "claude")
@@ -396,8 +426,15 @@ class Journey:
                                                    f"{(done.stdout + done.stderr).strip()[:300]}")
         self.begin("3.3", "ostrom policy set self-approval")
         if self.needs(("GET", "/api/v1/gates/policy"), ("PUT", "/api/v1/gates/policy"), org=True):
-            done = self.ostrom(maya, "policy", "set", "self-approval", "never", console=True)
-            self.check(done.returncode == 0, f"self-approval never ({done.returncode}): {done.stderr.strip()[:300]}")
+            refused = self.ostrom(maya, "policy", "set", "self-approval", "never", console=True)
+            self.check(refused.returncode == 77, f"a personal token cannot set self-approval ({refused.returncode})")
+            if self.admin_signed_in(maya):
+                done = self.governed(maya, "policy", "set", "self-approval", "never")
+                self.check(done == 0, f"self-approval never, with the admin token ({done})")
+                # 5.6 relies on it
+                shown = self.ostrom(maya, "policy", "show", "--json", console=True)
+                gates = (read_json(shown.stdout) or {}).get("gates") or {}
+                self.check(gates.get("selfApproval") == "never", f"self-approval is never ({gates})")
 
         self.begin("3.1", "ostrom policy rules: what the analysis proposed")
         if self.needs(("GET", "/api/v1/rules"), org=True):
@@ -438,9 +475,22 @@ class Journey:
 
         if self.invitee:
             self.begin("2.6", "ostrom members remove")
+            device = self.ostrom(maya, "members", "remove", self.invitee, "--yes")
+            self.check(device.returncode == 77 and "console" in device.stderr,
+                       f"the device's token cannot remove a member: the console can ({device.returncode})")
             done = self.ostrom(maya, "members", "remove", self.invitee, "--yes", console=True)
             self.check(done.returncode == 0, f"a console token removes @{self.invitee} ({done.returncode}): "
                                              f"{done.stderr.strip()[:300]}")
+            self.check(self.role_of(maya, org, self.invitee) is None,
+                       f"the server no longer lists @{self.invitee}")
+            listed = (read_json(self.ostrom(maya, "members", "list", "--json").stdout) or {}).get("items", [])
+            self.check(len(listed) == 1, f"members list shows the owner alone ({len(listed)})")
+
+    def role_of(self, maya, org, login):
+        """[login]'s role in [org], as `GET /orgs/{org}/members` lists it to the console's token; None if not listed."""
+        status, body, _ = self.call("GET", f"/api/v1/orgs/{org['id']}/members", token=maya["token"], org=org["id"])
+        items = body.get("items", []) if status == 200 and isinstance(body, dict) else []
+        return next((m.get("role") for m in items if m.get("login") == login), None)
 
     def logs(self, maya, gated):
         last = self.ostrom(maya, "logs", "--json")
@@ -506,7 +556,7 @@ class Journey:
         # a personal token (OSTROM_TOKEN) never governs: enforcing and removing take ostrom login --admin
         refused = self.ostrom(maya, "harness", "enforce", workflow["id"], console=True)
         self.check(refused.returncode == 77, f"a personal token cannot enforce it ({refused.returncode})")
-        if not self.login(maya, maya["email"], admin=True):
+        if not self.admin_signed_in(maya):
             return
         done = self.governed(maya, "harness", "enforce", workflow["id"])
         self.check(done == 0, f"harness enforce, with the admin token ({done})")
@@ -519,6 +569,13 @@ class Journey:
         items = (read_json(listed.stdout) or {}).get("items", [])
         self.check(listed.returncode == 0 and all(w.get("id") != workflow["id"] for w in items),
                    f"it is gone from the harness ({listed.returncode})")
+
+    def admin_signed_in(self, maya):
+        """ostrom login --admin, tried once and approved by the owner (the token lasts 8 hours): True when it is
+        there. A failed attempt is not tried again: its failing checks are said once."""
+        if self.admin_token is None:
+            self.admin_token = self.login(maya, maya["email"], admin=True)
+        return self.admin_token
 
     def governed(self, maya, *arguments):
         """A governance write with the admin token: written at once, or held by the server until an owner confirms it
@@ -847,6 +904,11 @@ def read_json(raw):
         return json.loads(raw) if raw else None
     except ValueError:
         return None
+
+
+def cookies(headers):
+    """The cookies an answer sets, as a request's cookie header (name=value; ...); empty when it sets none."""
+    return "; ".join(c.split(";", 1)[0] for c in (headers.get_all("set-cookie") if headers else None) or [])
 
 
 def error_of(body):
