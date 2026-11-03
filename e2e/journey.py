@@ -63,6 +63,8 @@ class Journey:
         self.org_id = None
         self.admin_token = None
         self.held_writes = None
+        self.last_held = False
+        self.last_said = ""
         self.owner_session = None
         self.recent = {}
         self.temporary = options.work is None
@@ -255,7 +257,7 @@ class Journey:
 
     def login(self, machine, email, admin=False):
         """`ostrom login` (`--admin`: the governance token): the code it shows is approved from [email]'s browser
-        session, as on the console; a fresh one, as approving an admin token takes a sign-in of less than 5 minutes."""
+        session, as on the console; a recent one, as approving an admin token takes a sign-in of less than 5 minutes."""
         arguments = ["login", "--server", self.server] + (["--admin"] if admin else [])
         process = subprocess.Popen([self.binary, *arguments], cwd=machine["repo"],
                                    env=self.environment(machine), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
@@ -435,7 +437,7 @@ class Journey:
             models = ",".join(allowed or ["sonnet"])
             # a personal token (OSTROM_TOKEN) never governs: the policy takes ostrom login --admin
             self.kept_from(maya, "a personal token does not set the models", "policy", "set", "models", models,
-                           console=True)
+                           console=True, held=True)
             if self.admin_signed_in(maya):
                 done = self.governed(maya, "policy", "set", "models", models)
                 self.check(done == 0, f"policy set models, with the admin token ({done})")
@@ -447,7 +449,7 @@ class Journey:
         self.begin("3.3", "ostrom policy set self-approval")
         if self.needs(("GET", "/api/v1/gates/policy"), ("PUT", "/api/v1/gates/policy"), org=True):
             self.kept_from(maya, "a personal token does not set self-approval", "policy", "set", "self-approval",
-                           "sole-approver", console=True)
+                           "sole-approver", console=True, held=True)
             if self.admin_signed_in(maya):
                 done = self.governed(maya, "policy", "set", "self-approval", "never")
                 self.check(done == 0, f"self-approval never, with the admin token ({done})")
@@ -566,7 +568,7 @@ class Journey:
             json.dump(document, handle)
         self.kept_from(maya, "the device's token does not add a workflow", "harness", "add", path, "--yes")
         done = self.governed(maya, "harness", "add", path, "--yes", console=True, must_hold=False)
-        if not self.check(done == 0, f"harness add, on trial ({done})"):
+        if not self.check(done == 0, f"harness add, on trial ({done}): {self.last_said[-300:]}"):
             return
         listed = self.ostrom(maya, "harness", "list", "--all", "--json")
         items = (read_json(listed.stdout) or {}).get("items", [])
@@ -576,7 +578,7 @@ class Journey:
             return
         # a personal token (OSTROM_TOKEN) never governs: enforcing and removing take ostrom login --admin
         self.kept_from(maya, "a personal token does not enforce it", "harness", "enforce", workflow["id"],
-                       console=True)
+                       console=True, held=True)
         if not self.admin_signed_in(maya):
             return
         done = self.governed(maya, "harness", "enforce", workflow["id"])
@@ -604,15 +606,26 @@ class Journey:
             self.held_writes = self.served("GET", "/api/v1/confirmations/journey")
         return self.held_writes
 
-    def kept_from(self, maya, what, *arguments, console=False):
-        """A governance write this token does not make: refused (77) at once, or, on a server that holds it for a
-        console confirmation (H1), held and refused there by the owner, which exits 77 too."""
+    def kept_from(self, maya, what, *arguments, console=False, held=False):
+        """
+        A governance write this token does not make, exit 77: refused at once by the server, or, when [held] on a
+        server that holds the governance writes (H1: a personal token's), held and refused there by the owner. Which of
+        the two ran is checked, and said.
+        """
         done = self.governed(maya, *arguments, answer="refuse", console=console, must_hold=False)
-        self.check(done == 77, f"{what}: refused, 77 ({done})")
+        expected = held and self.holds()
+        way = "held, then refused on the console" if expected else "refused at once"
+        self.check(done == 77 and self.last_held == expected,
+                   f"{what}: {way}, 77 ({done}, held: {self.last_held}): {self.last_said[-300:]}")
 
     def governed(self, maya, *arguments, answer="confirm", console=False, must_hold=True):
-        """A governance write with the admin token: written at once, or held by the server until an owner confirms it
-        on the console (202, audit H1), which the owner does here from a fresh browser session. Its exit code."""
+        """
+        A governance write (the admin token's, or with [console] the personal token's): written or refused at once, or
+        held by the server until an owner answers it on the console (202, audit H1), which the owner does here with
+        [answer] from a sign-in of less than 4 minutes (recent_sign_in). With [must_hold], on a server that holds the
+        governance writes, a write that was not held is a failed check. Its exit code; whether it was held and what it
+        said on stderr are kept in last_held and last_said.
+        """
         shown = "ostrom " + " ".join(shlex.quote(a) for a in arguments)
         shown = ("OSTROM_TOKEN=… " if console else "") + shown
         process = subprocess.Popen([self.binary, *arguments], cwd=maya["repo"], env=self.environment(maya, console),
@@ -622,7 +635,8 @@ class Journey:
         reader = threading.Thread(target=lambda: [said.append(line) or (CONFIRM.search(line) and held.set())
                                                   for line in process.stderr], daemon=True)
         reader.start()
-        while process.poll() is None and not held.wait(0.2):
+        deadline = time.monotonic() + 120
+        while process.poll() is None and not held.wait(0.2) and time.monotonic() < deadline:
             pass
         if held.is_set():
             confirmation = next(CONFIRM.search(line).group(1) for line in said if CONFIRM.search(line))
@@ -640,6 +654,8 @@ class Journey:
         out = process.stdout.read()
         reader.join(5)
         self.record(maya, shown, process.returncode, out, "".join(said))
+        self.last_held = held.is_set()
+        self.last_said = "".join(said).strip()
         if must_hold and self.holds():
             # a server that holds the governance writes holds this one: the confirmation was played, not skipped
             self.check(held.is_set(), f"{shown} is held until the console confirms it (H1)")
@@ -761,7 +777,7 @@ class Journey:
         with open(path, "w") as handle:
             json.dump(document, handle)
         done = self.governed(maya, "harness", "add", path, "--yes", console=True, must_hold=False)
-        if not self.check(done == 0, f"harness add ({done})"):
+        if not self.check(done == 0, f"harness add ({done}): {self.last_said[-300:]}"):
             return None
         listed = self.ostrom(maya, "harness", "list", "--all", "--json")
         workflow = next((w for w in (read_json(listed.stdout) or {}).get("items", []) if w.get("name") == name), None)
