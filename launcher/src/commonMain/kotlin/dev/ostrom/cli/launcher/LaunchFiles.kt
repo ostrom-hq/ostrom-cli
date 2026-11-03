@@ -51,8 +51,9 @@ interface LaunchFiles {
     fun deleteRecursively(path: String)
 
     /**
-     * [path] with its links followed (realpath), or as written, normalized, when it does not resolve: a folder as
-     * Gemini CLI reads it before matching it with the trusted folders.
+     * [path] as Gemini CLI reads a folder before matching it with the trusted folders (Node's `realpathSync`): its `.`
+     * and `..` taken from the path as written, then its links followed, or as written, normalized, when it does not
+     * resolve. So `a/lien/..` is `a`, even where `a/lien` leads elsewhere.
      */
     fun canonical(path: String): String
 }
@@ -115,9 +116,12 @@ class LaunchFilesImpl(
 
     override fun deleteRecursively(path: String) = fileSystem.deleteRecursively(path.toPath(), mustExist = false)
 
-    override fun canonical(path: String): String = try {
-        fileSystem.canonicalize(path.toPath()).toString()
-    } catch (_: IOException) {
-        path.toPath(normalize = true).toString()
+    override fun canonical(path: String): String {
+        val written = path.toPath(normalize = true)
+        return try {
+            fileSystem.canonicalize(written).toString()
+        } catch (_: IOException) {
+            written.toString()
+        }
     }
 }
