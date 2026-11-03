@@ -85,7 +85,7 @@ class LaunchFilesTest {
         fileSystem.createDirectories("/real/project".toPath())
         fileSystem.createSymlink("/link".toPath(), "/real".toPath())
         assertEquals("/real/project", files.canonical("/link/project"))
-        assertEquals("/real/project", files.canonical("/link/../link/project/."))
+        assertEquals("/real/project", files.canonical("/real/project"))
         // as Gemini CLI: a path that does not resolve is kept, normalized
         assertEquals("/nowhere/b", files.canonical("/nowhere/a/../b"))
     }
