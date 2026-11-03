@@ -8,6 +8,7 @@
     5.6 the asker's own yes refused, 5.4 the second person's yes          5.5 ostrom wait lets it through
     5.7 the signed receipt, pulled and verified                         6.1 ostrom logs
     2.9 ostrom mcp: a server of the organisation, called through the session's relay
+    4.3 ostrom mcp --server ostrom: the agent asks a person, the console answers, the agent reads the answer
     6.2 ostrom claude --cloud and ostrom attach: a session in Ostrom's cloud, detached and attached again
 
     python3 e2e/journey.py --binary ostrom --server http://127.0.0.1:4600 --mail-dir /tmp/mail \\
@@ -42,6 +43,7 @@ import urllib.request
 
 from cloud import Cloud
 from mcp_relay import McpRelay
+from mcp_waits import McpWaits
 from rules import Rules
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -195,9 +197,11 @@ class Journey:
         last = self.recent.get(email)
         if last is not None and time.monotonic() - last[1] < RECENT_SIGN_IN_S:
             return last[0]
+        # its age counts from the request of the link, before the mail and the exchange
+        asked = time.monotonic()
         session = self.sign_in(email)
         if session is not None:
-            self.recent[email] = (session, time.monotonic())
+            self.recent[email] = (session, asked)
         return session
 
     def seed(self, email):
@@ -244,7 +248,8 @@ class Journey:
             out, err = [part.decode(errors="replace") if isinstance(part, bytes) else part or ""
                         for part in (late.stdout, late.stderr)]
             self.record(machine, prefix + shown, f"still running after {timeout} s", out, err)
-            raise
+            # a command that does not return fails its own check (no exit code), not the steps after it
+            return subprocess.CompletedProcess(late.cmd, None, out, f"{err}\n(still running after {timeout} s)")
         self.record(machine, prefix + shown, done.returncode, done.stdout, done.stderr)
         return done
 
@@ -548,6 +553,7 @@ class Journey:
 
         # a session of its own, after 6.1 (which reads the developer's last session, the one of 5.2)
         self.guarded(McpRelay(self, maya, SESSION_ROUTES).run)
+        self.guarded(McpWaits(self, maya, SESSION_ROUTES).run)
         self.guarded(Cloud(self, maya).run)
 
         if self.invitee:
@@ -597,9 +603,8 @@ class Journey:
         if not self.check(session.get("endedAt") and any("session ended" in line for line in lines),
                           f"to its end ({session.get('endedAt')})"):
             return
-        try:
-            followed = self.ostrom(maya, "logs", session["id"], "-f", timeout=60)
-        except subprocess.TimeoutExpired:
+        followed = self.ostrom(maya, "logs", session["id"], "-f", timeout=60)
+        if followed.returncode is None:
             self.check(False, "-f on an ended session returns (it was still waiting after 60 s)")
             return
         tail = followed.stdout.splitlines()
