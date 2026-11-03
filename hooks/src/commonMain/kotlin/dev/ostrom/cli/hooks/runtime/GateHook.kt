@@ -9,6 +9,7 @@ import dev.ostrom.cli.hooks.gate.GitRunner
 import dev.ostrom.cli.hooks.gate.PatternCache
 import dev.ostrom.cli.hooks.gate.PushReader
 import dev.ostrom.cli.hooks.gate.ScriptTexts
+import dev.ostrom.cli.hooks.gate.ShellPaths
 import dev.ostrom.cli.hooks.gate.ToolKind
 import dev.ostrom.cli.hooks.gate.ToolSubject
 import dev.ostrom.cli.hooks.gate.UnreadablePushException
@@ -69,7 +70,11 @@ class GateHook(
         }
 
     private fun beforeTool(event: JsonObject, written: ToolSubject, cwd: String, catalogue: GateCatalogue): HookReply {
-        val raw = if (written.kind == ToolKind.BASH) withScripts(written, cwd) else written
+        val raw = when (written.kind) {
+            ToolKind.BASH -> withScripts(written, cwd)
+            ToolKind.WRITE -> withRealPath(written, cwd)
+            else -> written
+        }
         val (subject, landing) = withPushTargets(raw, cwd)
         val action = catalogue.match(subject, patterns)
         val gate = action?.gate
@@ -128,6 +133,16 @@ class GateHook(
         return if (scripts.isEmpty()) subject else subject.copy(text = subject.text + scripts)
     }
 
+    /**
+     * A file write with where it really lands appended (`# ostrom: writes to: …`) when that is not the path the agent
+     * gave: a relative path, `a/./b`, `a/../b` or a folder linked elsewhere (security audit of the CLI n°2, M2).
+     */
+    private fun withRealPath(subject: ToolSubject, cwd: String): ToolSubject {
+        val path = subject.path ?: return subject
+        val real = ShellPaths.real(ShellPaths.join(cwd, path, context.home), canonical)
+        return if (real == path) subject else subject.copy(text = "${subject.text}$WRITES_NOTE $real")
+    }
+
     // the action ran: Ostrom, not the hook, uses its yes up when it sees the push land (S2-29)
     private fun afterTool(event: JsonObject, raw: ToolSubject, cwd: String): HookReply {
         checks.afterTool(event, withPushTargets(raw, cwd).first)
@@ -162,6 +177,7 @@ class GateHook(
     private companion object {
         const val DENIED = 2
         const val SEEN_MILLIS = 2_000
+        const val WRITES_NOTE = "\n# ostrom: writes to:"
     }
 }
 
