@@ -280,6 +280,25 @@ class CloudSessionUseCaseTest {
     }
 
     @Test
+    fun aTokenFromBeforeCloudSessionsIsToldToSignInAgain() = runTest {
+        // a token of ostrom login issued before the server gave it cloud sessions (server#240): the server's two
+        // wordings of a missing scope, on starting and on attaching
+        on("POST /api/v1/cloud/sessions", 403 to refusal("$LACKS cloud:write $SCOPE"))
+        assertEquals(77, useCase().start(claude, "device"))
+        assertEquals("ostrom: $OLDER", said.last())
+        on("GET /api/v1/cloud/sessions/cs1", 403 to refusal("$ALLOW cloud:read."))
+        assertEquals(77, useCase().attach("cs1", "device"))
+        assertEquals("ostrom: $OLDER", said.last())
+        // another scope, another refusal: the server's own words
+        on("GET /api/v1/cloud/sessions/cs1", 403 to refusal("$LACKS orgs:write $SCOPE"))
+        assertEquals(77, useCase().attach("cs1", "device"))
+        assertEquals("ostrom: $LACKS orgs:write $SCOPE", said.last())
+        on("GET /api/v1/cloud/sessions/cs1", 403 to refusal("Cloud sessions are closed."))
+        assertEquals(77, useCase().attach("cs1", "device"))
+        assertEquals("ostrom: Cloud sessions are closed.", said.last())
+    }
+
+    @Test
     fun aSocketThatCannotOpenIsUnreachable() = runTest {
         on("GET /api/v1/cloud/sessions/cs1", 200 to """{"status":"running"}""")
         refuseSocket = true
@@ -369,5 +388,14 @@ class CloudSessionUseCaseTest {
         val plain = CloudSessionUseCase(ServerJson(transport), { _, _ -> socket }, terminal, { said += it })
         assertEquals(0, plain.attach("cs1", "device"))
         assertEquals("Session cs1 ended.", said.last())
+    }
+
+    private fun refusal(message: String) = """{"error":{"type":"forbidden","message":"$message"}}"""
+
+    private companion object {
+        const val LACKS = "This credential lacks the"
+        const val SCOPE = "scope."
+        const val ALLOW = "This credential does not allow"
+        const val OLDER = "this device's token is older than cloud sessions: run `ostrom login` again for a new one"
     }
 }

@@ -11,6 +11,8 @@ import io.ktor.server.application.ApplicationCall
 import io.ktor.server.request.queryString
 import io.ktor.server.request.uri
 import io.ktor.server.response.respondBytes
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.time.Duration
@@ -25,16 +27,83 @@ import kotlin.time.TimeSource
 internal class PolicyMemory(private val freshFor: Duration, private val clock: TimeSource) {
     private val lock = Mutex()
     private var kept: Kept? = null
+    private var asked: TimeMark = clock.markNow()
 
     private class Kept(val query: String, val body: ByteArray, val at: TimeMark)
 
-    /** The policy kept for [query] while it is fresh, else null. */
+    /** The policy kept for [query] while it is fresh, else null: a hook asked for it now. */
     suspend fun fresh(query: String): ByteArray? = lock.withLock {
+        asked = clock.markNow()
         kept?.takeIf { it.query == query && it.at.elapsedNow() < freshFor }?.body
     }
 
     /** Keeps [body], what Ostrom answered for [query]. */
     suspend fun keep(query: String, body: ByteArray) = lock.withLock { kept = Kept(query, body, clock.markNow()) }
+
+    /** Drops the policy kept: Ostrom refused it, and the next hook asks again and hears the refusal (S2-38). */
+    suspend fun forget() = lock.withLock { kept = null }
+
+    /** The query of the policy kept, to read again while a hook asked within [activeFor]; else null. */
+    suspend fun toReadAgain(activeFor: Duration): String? = lock.withLock {
+        val held = kept ?: return@withLock null
+        if (asked.elapsedNow() < activeFor) held.query else null
+    }
+}
+
+/** When the relay reads the signed policy again in the background ([PolicyRefresher.refresh]), while it runs. */
+internal fun interface PolicyRefreshLoop {
+    /** Runs [refresh] when it is time, until cancelled with the relay. */
+    suspend fun run(refresh: suspend () -> Unit)
+}
+
+/** Reads the policy again every [every]; a read that fails in a way the exchange does not foresee ends no loop. */
+internal fun refreshEvery(every: Duration) = PolicyRefreshLoop { refresh ->
+    while (true) {
+        delay(every)
+        try {
+            refresh()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // Dropped on purpose: the policy kept still expires in its time, and the next read comes [every] later.
+        }
+    }
+}
+
+/** What Ostrom answers when it refuses the policy: a background read that hears one drops the policy kept (S2-38). */
+private val REFUSALS = setOf(HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden, HttpStatusCode.NotFound)
+
+/**
+ * Reads the signed policy kept in [memory] again ahead of its 30 s, while a hook asked for it within [activeFor] (perf
+ * pass of 03/11/2026): a hook runs at every tool call, and in an active session none waits on Ostrom for the policy;
+ * a policy tightened on the server still reaches the hooks within the memory's time (S2-40). A refusal (401, 403,
+ * 404) drops the policy kept; an outage (no answer, a 5xx, a 429) keeps it no longer than its time, after which the
+ * hook asks Ostrom itself (S2-38). An idle session asks Ostrom nothing in the background. A launch reads one
+ * repository's policy (`OSTROM_REPO` is set at the launch), so the memory's one policy is the one read again.
+ */
+internal class PolicyRefresher(
+    private val config: RelayConfig,
+    private val client: HttpClient,
+    private val exchange: UpstreamExchange,
+    private val timeout: Duration,
+    private val memory: PolicyMemory,
+    private val activeFor: Duration,
+) {
+    /** Reads the policy kept again, when a hook asked within [activeFor]. */
+    suspend fun refresh() {
+        val query = memory.toReadAgain(activeFor) ?: return
+        exchange.attempt(client, timeout, {
+            method = HttpMethod.Get
+            url("${config.serverUrl}$SIGNED_GATE_CATALOG?$query")
+            identify(config)
+        }) { response ->
+            when (response.status) {
+                HttpStatusCode.OK -> memory.keep(query, response.bodyAsBytes())
+                in REFUSALS -> memory.forget()
+                else -> Unit
+            }
+        }
+    }
 }
 
 /**
