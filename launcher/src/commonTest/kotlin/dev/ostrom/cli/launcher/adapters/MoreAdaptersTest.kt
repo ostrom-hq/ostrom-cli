@@ -19,6 +19,19 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** OpenCode, Gemini CLI, Grok CLI, Hermes Agent and Pi: each loads the session's harness its own way. */
+// the variables of Gemini CLI 0.66 that decide whether it trusts the folder, set by the launcher
+private val TRUST = listOf(
+    "GEMINI_RESTRICTED_MODE",
+    "GEMINI_CLI_TRUST_WORKSPACE",
+    "GEMINI_CLI_TRUSTED_FOLDERS_PATH",
+    "GEMINI_CLI_IDE_SERVER_PORT",
+    "GEMINI_CLI_IDE_SERVER_STDIO_COMMAND",
+    "GEMINI_CLI_IDE_SERVER_STDIO_ARGS",
+    "GEMINI_CLI_IDE_WORKSPACE_PATH",
+    "GEMINI_CLI_IDE_AUTH_TOKEN",
+    "GEMINI_CLI_IDE_PID",
+)
+
 class MoreAdaptersTest {
     private val files = MemoryFiles()
     private val session = join("/tmp/run", "session-env.json")
@@ -105,7 +118,7 @@ class MoreAdaptersTest {
     fun geminiAddsItsHooksAfterTheDevelopersAndKeepsTheirSettings() {
         val real = join("/home/dev", ".gemini")
         files.texts[join(real, "settings.json")] =
-            """{"theme":"dark","hooks":{"BeforeTool":[{"hooks":[{"command":"mine"}]}]},"mcpServers":{"x":{}}}"""
+            """{"theme":"dark","hooks":{"AfterTool":[{"hooks":[{"command":"mine"}]}]},"mcpServers":{"x":{}}}"""
         files.texts[join(real, "GEMINI.md")] = "Mine."
         val launch = GeminiAdapter { "n1" }.prepare(layout(arguments = listOf("-p", "hi"), rules = "R"), files)
         val root = join("/tmp/run", "gemini-home")
@@ -117,14 +130,15 @@ class MoreAdaptersTest {
                 "OSTROM_HOOK_BUDGET_MS" to "590000",
                 "GEMINI_CLI_SYSTEM_SETTINGS_PATH" to join("/etc", "gemini-cli", "settings.json"),
                 "GEMINI_CLI_SYSTEM_DEFAULTS_PATH" to join("/etc", "gemini-cli", "system-defaults.json"),
-            ),
+            ) + TRUST.associateWith { "" },
             launch.environment,
         )
         val directory = join(root, ".gemini")
         val settings = checkNotNull(parseObject(files.texts[join(directory, "settings.json")]))
         assertEquals(JsonPrimitive("dark"), settings["theme"])
+        val after = checkNotNull(settings.child("hooks")).list("AfterTool")
+        assertEquals(2, after.size, "theirs first, then Ostrom's")
         val before = checkNotNull(settings.child("hooks")).list("BeforeTool")
-        assertEquals(2, before.size, "theirs first, then Ostrom's")
         assertEquals(
             """{"hooks":[{"type":"command","command":"\"/opt/ostrom\" hook gate","timeout":600000,""" +
                 """"name":"ostrom-BeforeTool-n1"}],"matcher":".*"}""",
@@ -176,10 +190,21 @@ class MoreAdaptersTest {
         files.texts[join("/w/app/src", ".gemini", "settings.json")] = " "
         files.deleteRecursively(join("/tmp/run", "gemini-home"))
         GeminiAdapter().prepare(layout(workspace = workspace), files)
-        // the developer's own settings, when they work in their home, are not a repository's
-        files.texts[join("/home/dev", ".gemini", "settings.json")] = """{"hooksConfig":{"enabled":true}}"""
+        // in their home, Gemini reads the developer's own settings as the workspace's (its home is the session's):
+        // their own rules hold there, hooks of theirs on other events allowed, and a file Ostrom cannot read refused
+        val home = join("/home/dev", ".gemini", "settings.json")
+        files.texts[home] = """{"hooksConfig":{"enabled":true},"hooks":{"AfterTool":[{"hooks":[{"command":"m"}]}]}}"""
         files.deleteRecursively(join("/tmp/run", "gemini-home"))
         GeminiAdapter().prepare(layout(workspace = listOf("/home/dev")), files)
+        files.texts[home] = "[1]"
+        files.deleteRecursively(join("/tmp/run", "gemini-home"))
+        assertEquals(
+            "gemini: $home cannot be read as JSON: Gemini reads it in this folder, and Ostrom cannot tell whether it " +
+                "turns its hooks off, so Gemini is not started",
+            assertFailsWith<AdapterException> {
+                GeminiAdapter().prepare(layout(workspace = listOf("/home/dev")), files)
+            }.reason,
+        )
         assertFalse(join("/tmp/run", "gemini-system.json") in files.texts, "no system settings of the session")
     }
 
@@ -205,6 +230,46 @@ class MoreAdaptersTest {
         files.texts[real] = """{"hooksConfig":{"disabled":["mine"]}}"""
         files.deleteRecursively(join("/tmp/run", "gemini-home"))
         GeminiAdapter().prepare(layout(variables = variables), files)
+    }
+
+    @Test
+    fun geminiIsNotStartedBesideABeforeToolHookOfTheDevelopers() {
+        // Gemini runs a BeforeTool hook beside Ostrom's gate, in any order: it could change a tool's input after the
+        // gate has checked it. Hooks of other events stay allowed
+        val real = join("/home/dev", ".gemini", "settings.json")
+        files.texts[real] = """{"hooks":{"BeforeTool":[{"matcher":".*","hooks":[{"command":"mine"}]}]}}"""
+        assertEquals(
+            "gemini: $real adds a `BeforeTool` hook: Gemini runs it beside Ostrom's gate, in any order, and it could " +
+                "change a tool's input after the gate has checked it, so Gemini is not started. Move it to another " +
+                "event, or remove it, to work with Ostrom",
+            assertFailsWith<AdapterException> { GeminiAdapter().prepare(layout(), files) }.reason,
+        )
+    }
+
+    @Test
+    fun geminiTrustIsTheLaunchersNotARepositorysEnv() {
+        // Gemini loads a repository's .env without replacing a variable already set, and these take the trust away
+        // from the folder, so that Gemini runs none of the settings' hooks: the launcher sets them all
+        val launch = GeminiAdapter().prepare(layout(), files)
+        assertEquals(TRUST.associateWith { "" }, launch.environment.filterKeys { it in TRUST })
+        val developers = mapOf(
+            "GEMINI_CLI_TRUST_WORKSPACE" to "true",
+            "GEMINI_CLI_TRUSTED_FOLDERS_PATH" to "/dev/trusted.json",
+            "GEMINI_CLI_IDE_SERVER_PORT" to "4242",
+        )
+        files.deleteRecursively(join("/tmp/run", "gemini-home"))
+        val kept = GeminiAdapter().prepare(layout(variables = developers), files).environment
+        assertEquals(developers, kept.filterKeys { it in developers })
+        for ((name, value) in listOf("GEMINI_RESTRICTED_MODE" to "true", "GEMINI_CLI_TRUST_WORKSPACE" to "false")) {
+            files.deleteRecursively(join("/tmp/run", "gemini-home"))
+            assertEquals(
+                "gemini: $name=$value takes the trust away from this folder, and Gemini then runs none of the " +
+                    "settings' hooks, Ostrom's included, so it is not started. Unset it to work with Ostrom",
+                assertFailsWith<AdapterException> {
+                    GeminiAdapter().prepare(layout(variables = mapOf(name to value)), files)
+                }.reason,
+            )
+        }
     }
 
     @Test
@@ -269,11 +334,16 @@ class MoreAdaptersTest {
     fun geminiStartsFromNothingWhenTheDeveloperHasNoSettingsAndSaysSoWhenTheyAreUnreadable() {
         val variables = mapOf("GEMINI_CLI_HOME" to "/g")
         assertEquals(emptyList(), GeminiAdapter().prepare(layout(rules = "R", variables = variables), files).notes)
-        files.texts[join("/g", ".gemini", "settings.json")] = "{\"theme\":\"dark\",}"
+        // read as Gemini reads them: comments and a trailing comma are theirs, kept
+        files.texts[join("/g", ".gemini", "settings.json")] = "{// mine\n\"theme\":\"dark\",}"
+        GeminiAdapter().prepare(layout(variables = variables), files)
+        val kept = parseObject(files.texts[join("/tmp/run", "gemini-home", ".gemini", "settings.json")])
+        assertEquals(JsonPrimitive("dark"), kept?.get("theme"))
+        files.texts[join("/g", ".gemini", "settings.json")] = "[\"theme\"]"
         files.deleteRecursively(join("/tmp/run", "gemini-home")) // each launch lays its own folder down
         val launch = GeminiAdapter().prepare(layout(rules = "R", variables = variables), files)
         val note = launch.notes.single()
-        assertTrue(note.startsWith("gemini: your settings.json is not plain JSON"), note)
+        assertTrue(note.startsWith("gemini: your settings.json cannot be read as JSON"), note)
         val directory = join("/tmp/run", "gemini-home", ".gemini")
         val settings = checkNotNull(parseObject(files.texts[join(directory, "settings.json")]))
         assertEquals(setOf("hooks", "mcpServers"), settings.keys)
