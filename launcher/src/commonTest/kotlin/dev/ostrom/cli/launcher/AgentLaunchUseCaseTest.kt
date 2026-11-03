@@ -89,7 +89,10 @@ class AgentLaunchUseCaseTest {
         assertEquals(3, start(), "the agent's exit code is the CLI's")
         val mcp = join(temporary, "mcp.json")
         assertEquals(
-            listOf("/usr/bin/claude", "--plugin-dir", join(temporary, "plugin"), "--mcp-config", mcp),
+            listOf(
+                "/usr/bin/claude", "--plugin-dir", join(temporary, "plugin"),
+                "--settings", join(temporary, "claude-settings.json"), "--mcp-config", mcp,
+            ),
             commands.single(),
             "Ostrom's own MCP server is relayed to every session",
         )
@@ -162,7 +165,7 @@ class AgentLaunchUseCaseTest {
         variables["OSTROM_ALIVE_MS"] = "5000"
         assertEquals(3, start(arguments = listOf("-p", "hi"), model = "opus"))
         val command = commands.single()
-        assertEquals(listOf("-p", "hi", "--model", "opus", "--mcp-config"), command.drop(3).take(5))
+        assertEquals(listOf("-p", "hi", "--model", "opus", "--settings"), command.drop(3).take(5))
         val environment = environments.single()
         assertEquals("http://127.0.0.1:4100", environment["ANTHROPIC_BASE_URL"])
         assertEquals(join(temporary, "package.json"), environment[LaunchVariables.PACKAGE])
