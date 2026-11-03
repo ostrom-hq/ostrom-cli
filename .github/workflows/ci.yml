@@ -375,14 +375,36 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # a missing artifact (ci stopped before linking) is reported by the next step, by name, rather than here
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true
         with:
           name: tests-mingwX64
           path: tests
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true
         with:
           name: ostrom-binaries
           path: bin
+      # Since this job also runs after a red ci, it fails unless every module's tests and the release binary are
+      # there: it never passes having run less than every module's tests.
+      - name: Every module's test binary and the release binary are here
+        shell: pwsh
+        run: |
+          $missing = @()
+          foreach ($module in Get-ChildItem -Directory | Where-Object { Test-Path "$($_.Name)/src/commonTest" }) {
+            $found = Get-ChildItem -Recurse -Filter test.exe tests -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -like "*\$($module.Name)\build\*" }
+            if (-not $found) { $missing += "the tests of $($module.Name)" }
+          }
+          if (-not (Test-Path bin/mingwX64/releaseExecutable/ostrom.exe)) { $missing += "the release binary" }
+          if ($missing.Count -gt 0) {
+            $why = 'it stopped before linking them, a compilation error?'
+            foreach ($m in $missing) {
+              Write-Host "::error::ci did not hand over $m for mingwX64 ($why): Windows cannot run them"
+            }
+            exit 1
+          }
       - name: Every module's tests, cross-compiled on Linux x64
         shell: pwsh
         env:
