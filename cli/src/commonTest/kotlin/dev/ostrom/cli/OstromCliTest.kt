@@ -35,7 +35,6 @@ import kotlinx.coroutines.test.runTest
 import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNotSame
 import kotlin.test.assertSame
@@ -332,13 +331,30 @@ class OstromCliTest : CliKit() {
         assertSame(server, dependencies.api("https://ostrom.example"), "one client, closed by nobody but the process")
         assertSame(server, dependencies.api("https://ostrom.example/"), "the same server, written with its slash")
         assertNotSame(server, dependencies.api("https://other.example"), "a client per server")
-        // nothing listens on the discard port of the loopback: a client closed by a caller still sends, and says so
-        val refused = dependencies.api("http://127.0.0.1:9")
-        refused.close()
-        assertFailsWith<ServerUnreachableException> { runBlocking { refused.get("/api/v1/health") } }
-        assertFailsWith<ServerUnreachableException> {
-            runBlocking { refused.send(ServerRequest("GET", "/api/v1/health")) }
-        }
+        assertIs<KeptOpen>(server, "a caller's close() leaves it open for the next")
+    }
+
+    @Test
+    fun aClientKeptOpenForTheCommandSendsThroughItsServerAndIsClosedByNoCaller() = runTest {
+        var closed = 0
+        val sent = mutableListOf<String>()
+        val kept = KeptOpen(
+            object : OstromApi {
+                override suspend fun get(path: String) = ServerResponse(200, "{}", 0).also { sent += "GET $path" }
+
+                override suspend fun send(request: ServerRequest) =
+                    ServerResponse(201, "{}", 0).also { sent += "${request.method} ${request.path}" }
+
+                override fun close() {
+                    closed++
+                }
+            },
+        )
+        kept.close()
+        assertEquals(200, kept.get("/api/v1/health").status)
+        assertEquals(201, kept.send(ServerRequest("POST", "/api/v1/launches")).status)
+        assertEquals(listOf("GET /api/v1/health", "POST /api/v1/launches"), sent)
+        assertEquals(0, closed, "the process closes it, with the command")
     }
 
     @Test

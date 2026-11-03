@@ -154,7 +154,8 @@ class CliDependencies(
             // asked for while a command is wired or started, one after the other, never from two threads at once.
             val clients = mutableMapOf<String, OstromApi>()
             val api = { url: String ->
-                clients.getOrPut(url.trimEnd('/')) { KeptOpen(OstromApiImpl(url, USER_AGENT, trace = trace)) }
+                val server = url.trimEnd('/')
+                clients.getOrPut(server) { KeptOpen(OstromApiImpl(server, USER_AGENT, trace = trace)) }
             }
             val launchFiles = LaunchFilesImpl()
             val temporary = FileSystem.SYSTEM_TEMPORARY_DIRECTORY.toString()
@@ -263,6 +264,6 @@ class CliDependencies(
 internal fun pause(millis: Long) = runBlocking { delay(millis) }
 
 /** [api], whose close() is left to the end of the process: one client serves every call of a command to its server. */
-private class KeptOpen(private val api: OstromApi) : OstromApi by api {
+internal class KeptOpen(private val api: OstromApi) : OstromApi by api {
     override fun close() = Unit
 }
