@@ -647,24 +647,38 @@ class AgentLaunchUseCaseTest {
     }
 
     @Test
-    fun theMemoryIsGivenBackBeforeTheLaunchAsksAnythingAndOnceTheReadsAreLaidDownBeforeTheAgent() = runTest {
+    fun theMemoryIsGivenBackBeforeTheLaunchIsCreatedAndOnceMoreJustBeforeTheAgent() = runTest {
         // PERF-CLI: Kotlin/Native's collector never ran during a launch; without these two, 50-51 MB at the agent
         serveALaunch()
         assertEquals(3, start())
         assertEquals(2, reclaims.size, "$reclaims")
         val (first, second) = reclaims
-        assertEquals(Triple(emptyList(), false, false), first, "what the CLI's own first call left, before the policy")
+        val policy = "${Routes.POLICY}?agent=claude-code&dev=alice"
+        assertEquals(Triple(listOf(policy), false, false), first, "after the policy, before the launch is created")
         val read = listOf(Routes.PACKAGE, Routes.INSTANCE_KEYS, Routes.MCP_MINE, Routes.INFERENCE_MODELS)
         assertTrue(read.all { route -> second.first.any { it.startsWith(route) } }, "after the reads: ${second.first}")
-        assertEquals(false to false, second.second to second.third, "before the relay and the agent start")
+        assertEquals(true to false, second.second to second.third, "the relay started, the agent not yet")
     }
 
     @Test
-    fun aLaunchStoppedByThePolicyGivesBackOnlyOnce() = runTest {
+    fun aLaunchThatStopsBeforeItIsCreatedCollectsNothing() = runTest {
         serveALaunch()
         server["GET ${Routes.POLICY}?agent=claude-code&dev=alice"] = 200 to """{"allowed":false,"reason":"x"}"""
         assertEquals(77, start())
-        assertEquals(1, reclaims.size, "$reclaims")
+        serveALaunch()
+        start(dryRun = true)
+        assertEquals(emptyList(), reclaims, "a refusal and a dry run end at once: nothing to give back")
+    }
+
+    @Test
+    fun theRealReclaimIsThePlatformsCollector() {
+        // the JVM's leaves its collector alone; Kotlin/Native's collects (measured in the CLI journey's bench)
+        val finder = object : ExecutableFinder {
+            override fun find(name: String): String? = null
+        }
+        val blocking = UnconfinedTestDispatcher()
+        LaunchDependencies(ServerJson(server), files, finder, processes, capture, relays, clock, {}, blocking, "t")
+            .reclaim()
     }
 
     @Suppress("LongParameterList") // one default per fact of a launch a test changes

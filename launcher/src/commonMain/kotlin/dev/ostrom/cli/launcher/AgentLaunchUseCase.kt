@@ -83,7 +83,7 @@ class LaunchDependencies(
     val say: (String) -> Unit,
     val blocking: CoroutineDispatcher,
     val userAgent: String,
-    // gives back the memory the launch no longer holds, before the agent's long session (PERF-CLI, reclaimMemory)
+    // gives back the memory the launch no longer holds, before the agent's long session (reclaimMemory)
     val reclaim: () -> Unit = ::reclaimMemory,
 )
 
@@ -115,8 +115,6 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
     }
 
     private suspend fun start(request: LaunchRequest, site: LaunchSite): Int {
-        // what the CLI's own first call left (the organisation lookup): Kotlin/Native would not collect it by itself
-        dependencies.reclaim()
         val agent = request.agent
         val adapter = adapters[agent] ?: stop(NO_ADAPTER, "${agent.displayName} has no adapter in this version.")
         val executable = dependencies.finder.find(agent.executable) ?: stop(AGENT_MISSING, missing(agent))
@@ -130,6 +128,8 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         val model = models.firstOrNull()
         calls.checkPolicy(agent, model, site)
         if (request.dryRun) return calls.dryRun(agent, repo, model, site)
+        // a launch that goes on to its session: what the CLI's first calls left (the organisation, the policy)
+        dependencies.reclaim()
         val launch = calls.createLaunch(repo, agent, model, site)
         // From here on, however the launch ends (the agent's exit, a stop before it starts, a cancellation), its agent
         // token is revoked at once (AUDIT-SECU-RUNNER-2 R2b).
@@ -181,8 +181,6 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         val files = dependencies.files
         files.createPrivateDirectory(run.plugin)
         val laid = run.pack?.let { PackageLayout(files).layDown(it, run.plugin, run.temporary) }
-        // the reads' answers and the package's decoded forms, before the relay and the agent live for the whole session
-        dependencies.reclaim()
         // `ostrom` (rules_for, request_approval, get_receipt) is built into every Ostrom server
         val mcp = (listOf(BUILT_IN_MCP) + run.mcpServers + run.pack?.mcpServers.orEmpty()).distinct()
         val inference = run.inference
@@ -212,6 +210,9 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
                 dependencies.say,
             )
             val every = run.site.variable(ALIVE_VARIABLE).orEmpty().toLongOrNull() ?: ALIVE_MILLIS
+            // what the reads, the package's layout, the relay's start and the agent's preparation left, before the
+            // launcher and its relay live for the whole session
+            dependencies.reclaim()
             val code = runAgent(listOf(run.executable) + prepared.arguments, environment, lifeline, every)
             lifeline.end(code, run.model, run.name, run.pack, join(run.site.configDirectory, "receipts"))
             code
