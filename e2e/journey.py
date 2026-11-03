@@ -384,6 +384,48 @@ class Journey:
         self.check(personal.returncode == 0 and "Rules       this token cannot read them" in personal.stdout,
                    f"init with a personal token exits 0 and says it cannot read the rules ({personal.returncode}): "
                    f"{(personal.stdout + personal.stderr).strip()[-300:]}")
+        if self.holds():
+            self.init_accepts(maya)
+
+    def init_accepts(self, maya):
+        """
+        init's one governance write (audit H1): the rules proposed, accepted with a token made on the console that
+        reads them. The server holds the write until the owner confirms it on the console; init then says what it
+        accepted. The rule and the token are removed after, so that the steps after this one start as before.
+        """
+        session = self.recent_sign_in(maya["email"])
+        if not self.check(session is not None, "the owner is signed in to the console"):
+            return
+        status, rule, _ = self.call("POST", "/api/v1/rules", {"statement": "Never push to main without a review.",
+                                                              "group": "journey", "status": "proposed"},
+                                    session=session, org=self.org_id)
+        rule_id = rule.get("id") if isinstance(rule, dict) else None
+        if not self.check(status == 201 and rule_id, f"the console proposes a rule ({status}): {error_of(rule)[:200]}"):
+            return
+        status, catalogue, _ = self.call("GET", "/api/v1/tokens/scopes", session=session)
+        scopes = [s["scope"] for s in (catalogue or {}).get("scopes", [])][:32] if isinstance(catalogue, dict) else []
+        status, made, _ = self.call("POST", "/api/v1/tokens", {"name": "journey init", "scopes": scopes,
+                                                               "expiresInDays": 1}, session=session)
+        secret = made.get("secret") if isinstance(made, dict) else None
+        token_id = ((made or {}).get("token") or {}).get("id") if isinstance(made, dict) else None
+        try:
+            if not self.check(status == 201 and secret and "rules:read" in scopes,
+                              f"the console makes a token that reads the rules ({status}): {error_of(made)[:200]}"):
+                return
+            done = self.governed({**maya, "token": secret}, "init", "--yes", console=True)
+            out = self.step["commands"][-1]["stdout"]
+            self.check(done == 0 and "✓ 1 rules accepted" in out,
+                       f"init with it accepts the proposed rule once the owner confirms ({done}): "
+                       f"{(out + self.last_said).strip()[-300:]}")
+            status, read, _ = self.call("GET", f"/api/v1/rules/{rule_id}", session=session, org=self.org_id)
+            self.check(status == 200 and (read or {}).get("status") == "accepted",
+                       f"the rule is accepted on the server ({status}, {(read or {}).get('status')})")
+        finally:
+            removed, _, _ = self.call("DELETE", f"/api/v1/rules/{rule_id}", session=session, org=self.org_id)
+            self.check(removed in (200, 204), f"the journey's rule is removed on the console ({removed})")
+            if token_id:
+                revoked, _, _ = self.call("DELETE", f"/api/v1/tokens/{token_id}", session=session)
+                self.check(revoked in (200, 204), f"and its token revoked ({revoked})")
 
     def team(self, maya, tom_email, org):
         """2.6, 2.7, then the policy, the rules, the harness and the launch."""
