@@ -29,9 +29,13 @@ jobs:
             fi
           done
           chmod +x bin/ostrom.kexe
+          spctl --status || true; sudo spctl --status || true
           sw_vers; sysctl -n machdep.cpu.brand_string hw.memsize; df -h / | tail -1
       - name: First start, broken down
-        run: python3 e2e/macos_cold.py --binary bin/ostrom.kexe --runs 10 --out cold.json
+        run: python3 e2e/macos_cold.py --binary bin/ostrom.kexe --runs 3 --out cold.json
+      - name: Quarantine kept on the copy
+        run: |
+          cp bin/ostrom.kexe q; xattr -w com.apple.quarantine "0081;$(printf %x $(date +%s));Safari;" q; xattr -l q; spctl --assess --type execute -vv q || true; ./q version; echo "exit $?"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: macos-cold
