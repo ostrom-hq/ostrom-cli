@@ -256,8 +256,8 @@ class AdaptersTest {
         files.texts["/home/dev/last.json"] = """{"model":"haiku"}"""
         val arguments = listOf("--settings", """{"model":"opus"}""", "--settings", "/home/dev/last.json")
         val last = ClaudeAdapter().prepare(layout(arguments = arguments + listOf("--", "--settings", "x")), files)
-        val last = """{"model":"haiku","disableAllHooks":false,$ON,$ENV}"""
-        assertEquals(last, files.texts[settings], "the last one wins")
+        val expected = """{"model":"haiku","disableAllHooks":false,$ON,$ENV}"""
+        assertEquals(expected, files.texts[settings], "the last one wins")
         assertEquals(
             listOf("--plugin-dir", join("/tmp/run", "plugin"), "--settings", settings, "--", "--settings", "x"),
             last.arguments,

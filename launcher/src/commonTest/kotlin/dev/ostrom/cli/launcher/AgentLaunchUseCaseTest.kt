@@ -83,6 +83,16 @@ class AgentLaunchUseCaseTest {
     private val temporary = join("/tmp", "ostrom-run-42")
 
     @Test
+    fun theSessionsSettingsCarryOstromsVariables() = runTest {
+        // a repository's `env` would otherwise rewrite them, the hooks' included (H4)
+        serveALaunch()
+        start()
+        val written = filesWhileRunning[join(temporary, "claude-settings.json")].orEmpty()
+        assertTrue(""""OSTROM_LAUNCH_ID":"L1"""" in written, written)
+        assertTrue(""""OSTROM_TOKEN":""""" in written, written)
+    }
+
+    @Test
     fun theAgentRunsWithTheRelayAndNeverWithTheDeviceToken() = runTest {
         serveALaunch()
         installed["git"] = "/usr/local/bin/git"
@@ -93,10 +103,6 @@ class AgentLaunchUseCaseTest {
             commands.single(),
             "Ostrom's own MCP server is relayed to every session",
         )
-        // the session's settings carry Ostrom's variables, which a repository's `env` would otherwise rewrite (H4)
-        val written = filesWhileRunning[settings].orEmpty()
-        assertTrue(""""OSTROM_LAUNCH_ID":"L1"""" in written, written)
-        assertTrue(""""OSTROM_TOKEN":""""" in written, written)
         val environment = environments.single()
         assertEquals("http://127.0.0.1:4100", environment[LaunchVariables.RELAY_URL])
         // S2-25: the agent gets its own capability; the hooks' is in a private file, never in an environment
