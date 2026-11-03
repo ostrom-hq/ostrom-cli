@@ -7,7 +7,8 @@ stdout. Ctrl-] (0x1d on stdin) detaches and leaves it running. `ostrom attach <i
 the keys typed reach the session: Ctrl-C ends Claude Code (no account in the CI: it waits in its first-run
 screens), the session's script leaves a login shell, and a command typed in it comes back computed (`$((6*7))` read
 as 42), which only the session's shell can have done. It detaches the same way. The owner stops it
-(`DELETE /api/v1/cloud/sessions/{id}`, as the console's Stop does), and `ostrom attach` then says it is terminated. Every state is read back from the server.
+(`DELETE /api/v1/cloud/sessions/{id}`, as the console's Stop does), and `ostrom attach` then says it is terminated.
+Every state is read back from the server.
 
 The server must run cloud sessions somewhere: ostrom-server's cli-journey.yml gives it a runtime driver (the Docker of
 the CI's machine, as its console-journey.yml) and says so with --cloud-sessions; without it, the step is skipped and
