@@ -65,6 +65,20 @@ internal class OrgAccess(
         runBlocking { server.get(path, signed.token) }.also(::lackedRight).orStop(signed.serverUrl, notFound)
 
     /**
+     * `GET` [path] that a governance write reads before it is made (the model policy, whose default and members'
+     * lists `ostrom policy set` keeps): with the token the write goes with, the admin token while it is valid, as the
+     * device's token cannot read it (`inference:read`), and refused as the write would be. Without one, as [read].
+     */
+    fun readToGovern(path: String, notFound: String): JsonObject {
+        // OSTROM_TOKEN, set on purpose, is never swapped for the admin token (S2-52)
+        val elevated = if (consoleToken) null else admin.valid(signed.serverUrl)
+        if (elevated == null) return read(path, notFound)
+        val answer = runBlocking { server.get(path, elevated) }
+        if (answer is ServerAnswer.Failed) refused(answer, true, elevated)
+        return answer.orStop(signed.serverUrl, notFound)
+    }
+
+    /**
      * `GET` [path], or null on a 404: a route another part of the product serves (rules, gate policy), shown when the
      * server has it and left out when it does not, rather than failing the whole command.
      */
