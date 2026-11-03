@@ -199,8 +199,9 @@ class GeminiEnvironmentTest {
         assertTrue("($committed) is inside" in refusal(windows(comSpec = committed)))
         assertTrue("there is no PowerShell" in refusal(windows(comSpec = "D:\\pwsh.exe")))
         assertEquals(
-            "gemini: ComSpec names PowerShell without its full path (pwsh.exe), and Gemini would look it up from the " +
-                "repository to run Ostrom's hooks, so it is not started. Set ComSpec to a full path to work with Ostrom",
+            "gemini: ComSpec names PowerShell without its full path (pwsh.exe), and Gemini would look it up from " +
+                "the repository to run Ostrom's hooks, so it is not started. Set ComSpec to a full path to work " +
+                "with Ostrom",
             refusal(windows(comSpec = "pwsh.exe")),
         )
     }
