@@ -161,6 +161,8 @@ def main():
     parser.add_argument("--max-cold-ms", type=float, default=None)
     parser.add_argument("--max-hook-memory-mb", type=float, default=None)
     args = parser.parse_args()
+    if args.cold_runs < 3:
+        parser.error("--cold-runs must be 3 or more: one slow start must not move the median the cold budget holds")
 
     env = dict(os.environ, OSTROM_HOOK_TIMING="1")
     hook_walls, hook_insides = run_many([args.binary, "hook", "gate"], args.runs, stdin=EVENT, env=env, accepted=(0, 2))
@@ -220,8 +222,8 @@ def main():
             if not walls:
                 failed.append(f"{name} cannot be started with the file cache emptied here ({reason}), "
                               f"so --max-cold-ms {args.max_cold_ms} cannot be held")
-            elif statistics.median(walls) > args.max_cold_ms:
-                failed.append(f"{name} takes {statistics.median(walls):.2f} ms (median) with the file cache emptied, "
+            elif (median := statistics.median(walls)) > args.max_cold_ms:
+                failed.append(f"{name} takes {median:.2f} ms (median) with the file cache emptied, "
                               f"above {args.max_cold_ms} ms")
     if args.max_hook_memory_mb is not None:
         if memory is None:
