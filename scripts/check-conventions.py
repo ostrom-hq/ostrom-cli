@@ -36,7 +36,7 @@ NOT_COROUTINE_REACHABLE = "not coroutine-reachable:"
 JVM_ONLY_IMPORT = re.compile(r"^\s*import\s+(io\.mockk|org\.slf4j|ch\.qos\.logback|org\.jetbrains\.exposed|java\.|javax\.)")
 FORBIDDEN = [
     (re.compile(r"\bGlobalScope\b"), "GlobalScope: launch in a scope the application owns (section 4.3)"),
-    (re.compile(r"\binstall\(Koin\)|org\.koin\.ktor"), "no koin-ktor plugin: its per-call scope outlives cancelled calls (INF-074); build the Koin application in app and pass XxxRoutesDependencies (section 1.5)"),
+    (re.compile(r"\binstall\(Koin\)|org\.koin\.ktor"), "no koin-ktor plugin: its per-call scope outlives cancelled calls; build the Koin application in app and pass XxxRoutesDependencies (section 1.5)"),
 ]
 
 
@@ -53,7 +53,7 @@ def check_kotlin(path: str, text: str) -> list:
                           f"rethrow, or justify with `// {NOT_COROUTINE_REACHABLE} <reason>` (section 4.1)")
         if BROAD_CATCH.search(line) and not justified and not cancellation_handled(lines, index):
             errors.append(f"{path}:{number}: broad catch without `catch (e: CancellationException) {{ throw e }}` "
-                          f"before it nor ensureActive() in it (section 4.1, INF-019)")
+                          f"before it nor ensureActive() in it (section 4.1)")
         for pattern, reason in FORBIDDEN:
             if pattern.search(line):
                 errors.append(f"{path}:{number}: {reason}")
