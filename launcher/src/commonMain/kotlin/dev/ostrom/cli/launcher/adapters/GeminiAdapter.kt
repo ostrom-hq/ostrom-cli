@@ -78,11 +78,12 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
     private fun refuseWorkspaceHooks(layout: SessionLayout, files: LaunchFiles, real: String) {
         for (folder in layout.workspace) {
             val directory = join(folder, ".gemini")
+            // in their home, Gemini reads the developer's own settings as the workspace's (its home is the session's)
+            val own = directory == real
+            if (!own) refuseLink(files, folder, directory)
             val path = join(directory, "settings.json")
             val text = files.read(path)?.removePrefix(BOM)
             if (text.isNullOrBlank()) continue
-            // in their home, Gemini reads the developer's own settings as the workspace's (its home is the session's)
-            val own = directory == real
             val settings = parseObject(text, comments = true) ?: throw AdapterException(
                 "gemini: $path cannot be read as JSON: " + (if (own) "Gemini reads it in this folder, and " else "") +
                     "Ostrom cannot tell whether it turns its hooks off, so Gemini is not started",
@@ -96,6 +97,18 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
                         "started. Remove it from that file to work with Ostrom",
                 )
             }
+        }
+    }
+
+    /** A repository's `.gemini` must be a folder: through a link, what Gemini reads may not be what Ostrom read. */
+    private fun refuseLink(files: LaunchFiles, folder: String, directory: String) {
+        if (".gemini" !in files.list(folder)) return
+        val target = files.canonical(directory)
+        if (target != join(files.canonical(folder), ".gemini")) {
+            throw AdapterException(
+                "gemini: $directory is a link (to $target), so what Gemini reads there may not be what Ostrom " +
+                    "checked: Gemini is not started. Make it a folder to work with Ostrom",
+            )
         }
     }
 
@@ -218,5 +231,24 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
     }
 }
 
-// provisional, until the inventory of what Gemini CLI 0.66 reads in a workspace (AUDIT-SECU-CLI-H3-INVENTAIRE)
-private val WORKSPACE = InertKeys(setOf("\$schema", "ui"))
+private val BOOLEAN = { value: JsonElement -> value == JsonPrimitive(true) || value == JsonPrimitive(false) }
+
+// The twelve keys of Gemini CLI 0.66 that only change how its terminal looks, with the values they take (inventory of
+// the CLI's security audit n°2, annex A § 5). Left out though they look harmless: `ui.theme` (may name a file),
+// `ui.customWittyPhrases` (free text), the keys that hide what is running (`ui.footer.hideCWD`, …).
+private val WORKSPACE = InertKeys(
+    listOf(
+        "ui.hideBanner",
+        "ui.hideTips",
+        "ui.showShortcutsHint",
+        "ui.showLineNumbers",
+        "ui.showCitations",
+        "ui.showSpinner",
+        "ui.showMemoryUsage",
+        "ui.footer.showLabels",
+        "ui.accessibility.enableLoadingPhrases",
+        "ui.accessibility.screenReader",
+        "general.vimMode",
+    ).associateWith { BOOLEAN } +
+        mapOf("ui.loadingPhrases" to { value -> value in listOf("tips", "witty", "all", "off").map(::JsonPrimitive) }),
+)
