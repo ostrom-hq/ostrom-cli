@@ -200,7 +200,8 @@ class AdminLoginTest : SetupKit() {
         assertEquals(77, run(older, "policy", "set", "models", "sonnet"))
         assertErr("This credential does not allow inference:read.\nYour admin token is older than this right: " +
             "Run ostrom login --admin")
-        assertTrue(requests.none { it.second.method == "PUT" }, "nothing written")
+        val last = requests.last().second
+        assertEquals("GET /api/v1/policy/models", "${last.method} ${last.path}", "stopped at the read: nothing written")
         // a refusal of the read for its person: the server's word only, the token kept
         console.err.clear()
         val notAdminRead = mapOf("GET /api/v1/policy/models" to (403 to only))
