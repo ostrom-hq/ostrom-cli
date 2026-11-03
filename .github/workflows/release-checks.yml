@@ -22,6 +22,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Install shellcheck and actionlint
         run: |
           sudo apt-get update && sudo apt-get install -y shellcheck jq
@@ -36,6 +38,10 @@ jobs:
         run: sh scripts/release/tests/run.sh
       - name: install.sh against a fake release (good and bad checksums)
         run: sh install/tests/install.test.sh
+      - name: The GitHub host keys the taps job pins are the published ones
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: sh scripts/release/check-github-host-keys.sh
 
   installers-macos:
     name: install.sh on macOS
@@ -44,6 +50,8 @@ jobs:
     if: github.event_name != 'pull_request'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # macOS ships LibreSSL, without Ed25519 raw signing: the release signs on Linux with OpenSSL 3, test with it too.
       - run: brew install jq openssl@3
       - run: |
@@ -57,6 +65,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Pester
         shell: pwsh
         run: |
@@ -73,6 +83,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: ostrom-core version
         id: core
         run: echo "ref=$(tr -d '[:space:]' < gradle/ostrom-core.ref)" >> "$GITHUB_OUTPUT"
