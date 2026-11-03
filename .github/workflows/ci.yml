@@ -139,15 +139,16 @@ jobs:
           retention-days: 7
       # mingwX64 has a budget of its own: 16.3 MB with the options that put the others under 15 (17.6 before);
       # under 15 means removing code, not a build option (JOURNAL 03/11). Start-up and memory, measured on 03/11
-      # (run 41541750442): hook p95 5.1 ms, version p95 6.9 ms, a start with the file cache emptied 202 ms at most,
-      # the hook's peak memory 13.7 MB, which is Python's own floor on Linux (measure.py, peak_memory_mb; 6.5 MB on
-      # macOS). Budgets: 20 ms (perf pass), 30 ms, 500 ms and 25 MB, the runner's noise left.
+      # (run 41541750442): hook p95 5.1 ms, version p95 6.9 ms, the hook's peak memory 13.7 MB, which is Python's own
+      # floor on Linux (measure.py, peak_memory_mb; 6.5 MB on macOS). A start with the file cache emptied, median of 5:
+      # 29-89 ms on x64, up to 114 ms on arm64 (runs 41541750442, 41612349833, 41625900506, 41628920178; one start
+      # reached 620 ms). Budgets: 20 ms (perf pass), 30 ms, 300 ms and 25 MB, the runner's noise left.
       - name: Start-up (15 ms median, 20 ms p95, 40 ms for a git push), first start, memory and binary sizes
         run: >-
           python3 scripts/measure.py --label linuxX64 --max-push-ms 40
           --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
           --sizes cli/build/bin/*/releaseExecutable/ostrom.* --max-size-mb 15 --size-budget mingwX64=17
-          --max-hook-p95-ms 20 --max-version-p95-ms 30 --max-cold-ms 500 --max-hook-memory-mb 25
+          --max-hook-p95-ms 20 --max-version-p95-ms 30 --max-cold-ms 300 --max-hook-memory-mb 25
       - name: End to end, the real binary with fake Claude Code and Codex against the contract's server
         run: python3 e2e/run.py --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
       - name: End to end, init, invite, members, policy and harness against the contract's server
@@ -342,7 +343,7 @@ jobs:
         run: >-
           chmod 755 bin/linuxArm64/releaseExecutable/ostrom.kexe &&
           python3 scripts/measure.py --label linuxArm64 --binary bin/linuxArm64/releaseExecutable/ostrom.kexe
-          --max-hook-p95-ms 20 --max-version-p95-ms 30 --max-cold-ms 500 --max-hook-memory-mb 25
+          --max-hook-p95-ms 20 --max-version-p95-ms 30 --max-cold-ms 300 --max-hook-memory-mb 25
 
   windows:
     needs: ci
@@ -414,14 +415,18 @@ jobs:
         env:
           OSTROM_NETWORK_TESTS: '1'
         run: ./gradlew macosArm64Test :cli:linkReleaseExecutableMacosArm64
-      # macOS (run 41541750442): hook p95 7.4 ms, version p95 9.4 ms (19.2 on a noisy runner), a start with the file
-      # cache emptied 432 ms at most (purge), the hook's peak memory 6.5 MB
+      # macOS runners differ from one machine to the next by about 3 times, with no change to the code. On 03/11: hook
+      # median 7 and p95 10.7 ms in the morning (run 41612349833), then 13.3-15.3 and 20.5-25.5 ms from 10:00 (runs
+      # 41617836625, 41621223496, 41621434860); version p95 10, then 26-32 ms; a start with the file cache emptied,
+      # median of 5, 240-640 ms. Linux did not move, and the hook's own time stayed under 1 ms (0.45, then 0.75).
+      # Budgets of about twice the slow runner: they catch a start-up several times slower; the precise ones are held
+      # on Linux.
       - name: Start-up, first start, memory and size budgets
         run: >-
           python3 scripts/measure.py --label macosArm64
           --binary cli/build/bin/macosArm64/releaseExecutable/ostrom.kexe
           --sizes cli/build/bin/macosArm64/releaseExecutable/ostrom.kexe --max-size-mb 15
-          --max-hook-p95-ms 20 --max-version-p95-ms 30 --max-cold-ms 1000 --max-hook-memory-mb 25
+          --max-hook-ms 30 --max-hook-p95-ms 45 --max-version-p95-ms 60 --max-cold-ms 1500 --max-hook-memory-mb 25
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ostrom-macosArm64
