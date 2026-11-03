@@ -208,8 +208,11 @@ Every pull request marked ready runs one required check on Linux, `ci` (drafts u
 - `scripts/check-conventions.py` (module graph, broad catches that drop a cancellation), detekt (zero issue), `jvmTest`,
   and `koverVerify` at 100 % of lines and branches. On failure, `scripts/uncovered.py` lists what is not covered.
 - `linuxX64Test`; the linuxArm64 and mingwX64 test binaries and the release binaries of the three Linux-built targets;
-  `scripts/measure.py` measures `ostrom hook gate` and `ostrom version` start-up (fails above a 15 ms median) and the
-  binary sizes; `ci/build-linux.sh` leaves `dist/ostrom` for the end-to-end bench.
+  `scripts/measure.py` measures, on the release binary, `ostrom hook gate` and `ostrom version` start-up, warm (fails
+  above a 15 ms median, and a p95 of 20 ms for the hook and 30 ms for `version`) and with the file cache emptied first
+  (500 ms; 1000 ms on macOS), the hook's peak memory (25 MB) and the binary sizes (15 MB, Windows 17);
+  `ci/build-linux.sh` leaves `dist/ostrom` for the end-to-end bench. linuxArm64 and macOS hold the same start-up and
+  memory budgets, Windows only its median.
 
 On `main` and on demand (`workflow_dispatch` with `full_validation`), three more jobs run: the
 cross-compiled test binaries of every module on `ubuntu-24.04-arm` and on `windows-latest` (no Gradle there; the

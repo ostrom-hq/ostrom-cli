@@ -17,8 +17,10 @@ Actions, to the job summary. Exits 1 when the median hook time is above --max-ho
 above --max-push-ms when given, or a file of --sizes above its budget: --max-size-mb (the binary a developer downloads,
 15 MB, perf pass of 02/11/2026), or --size-budget for a target whose folder (`bin/<target>/`) has one of its own.
 It also exits 1, when they are given, above --max-hook-p95-ms and --max-version-p95-ms (the p95 of the warm starts),
---max-cold-ms (the slowest start with the file cache emptied) and --max-hook-memory-mb. It lists every budget
-exceeded, not only the first.
+--max-cold-ms (each command's slowest start with the file cache emptied) and --max-hook-memory-mb, and when one of
+these is given but cannot be measured here. It lists every budget exceeded, not only the first. On Linux the peak
+memory read for a child is never below this script's own (see `peak_memory_mb`): the summary shows that floor, and
+the memory budget holds as long as the floor stays under it.
 
 The budget is measured on the hook of an ordinary tool call (`ls`), which is most of an agent's calls. Outside a
 session, as here, there is no relay to read Ostrom's signed policy from, so the gate holds the call (exit 2) after
@@ -31,6 +33,7 @@ check of that path, not the cost of `git` in a large repository.
 import argparse
 import os
 import re
+import shutil
 import statistics
 import subprocess
 import sys
@@ -45,6 +48,7 @@ def event(command):
 
 EVENT = event("ls -la")
 PUSH = event("git push origin main")
+MEMORY_RUNS = 20
 
 
 def run_many(command, runs, stdin=None, env=None, accepted=(0,)):
@@ -95,21 +99,37 @@ def run_cold(command, runs, stdin=None, env=None, accepted=(0,)):
     return walls
 
 
-def peak_memory_mb(command, runs, stdin=None, env=None):
-    """The largest resident memory of [command] over [runs] starts, in MB; None where the system does not say."""
+def peak_memory_mb(command, runs, stdin=None, env=None, accepted=(0,)):
+    """The largest resident memory of [command] over [runs] starts, in MB; None where the system does not say.
+
+    On Linux, `exec` keeps in the child's high-water mark the memory of the process it replaces, which after the fork
+    is this Python script: the figure is the larger of the two, never their sum. `harness_floor_mb` measures that floor.
+    """
     if not hasattr(os, "wait4"):
         return None
     peaks = []
     for _ in range(runs):
         process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
-                                   stderr=subprocess.DEVNULL, env=env)
-        process.stdin.write(stdin or b"")
-        process.stdin.close()
+                                   stderr=subprocess.PIPE, env=env)
+        try:
+            process.stdin.write(stdin or b"")
+            process.stdin.close()
+        except BrokenPipeError:
+            pass  # the command exited before reading: its exit code below says why
+        errors = process.stderr.read()
         _, status, usage = os.wait4(process.pid, 0)
         process.returncode = os.waitstatus_to_exitcode(status)
+        if process.returncode not in accepted:
+            raise SystemExit(f"{command} exited {process.returncode}: {errors.decode(errors='replace')}")
         # ru_maxrss is in bytes on macOS, in kilobytes on Linux
         peaks.append(usage.ru_maxrss / (1e6 if sys.platform == "darwin" else 1e3))
     return max(peaks)
+
+
+def harness_floor_mb(runs):
+    """The resident memory read for `true` started the same way: the least any command can show here, in MB."""
+    true = shutil.which("true")
+    return peak_memory_mb([true], runs) if true else None
 
 
 def main():
@@ -139,7 +159,8 @@ def main():
     version_median, version_p95 = describe(version_walls)
     cold_hook = run_cold([args.binary, "hook", "gate"], args.cold_runs, stdin=EVENT, env=env, accepted=(0, 2))
     cold_version = run_cold([args.binary, "version"], args.cold_runs)
-    memory = peak_memory_mb([args.binary, "hook", "gate"], 20, stdin=EVENT, env=env)
+    memory = peak_memory_mb([args.binary, "hook", "gate"], MEMORY_RUNS, stdin=EVENT, env=env, accepted=(0, 2))
+    floor = harness_floor_mb(MEMORY_RUNS) if memory is not None else None
 
     lines = [
         f"### ostrom on {args.label}",
@@ -151,13 +172,18 @@ def main():
         f"| `ostrom hook gate` (inside the hook) | {inside_median:.3f} | |",
         f"| `ostrom version` (wall) | {version_median:.2f} | {version_p95:.2f} |",
     ]
-    for name, walls in (("ostrom hook gate", cold_hook), ("ostrom version", cold_version)):
+    colds = (("ostrom hook gate", cold_hook), ("ostrom version", cold_version))
+    if cold_hook or cold_version:
+        lines += ["", "| Measure | Median (ms) | Max (ms) |", "| --- | --- | --- |"]
+    for name, walls in colds:
         if walls:
-            lines.append(f"| `{name}`, file cache emptied first ({len(walls)} runs, max) | "
+            lines.append(f"| `{name}`, file cache emptied first ({len(walls)} runs) | "
                          f"{statistics.median(walls):.2f} | {max(walls):.2f} |")
     if memory is not None:
         lines += ["", "| Measure | Peak (MB) |", "| --- | --- |"]
-        lines.append(f"| `ostrom hook gate`, resident memory (20 runs) | {memory:.2f} |")
+        lines.append(f"| `ostrom hook gate`, resident memory ({MEMORY_RUNS} runs) | {memory:.2f} |")
+        if floor is not None:
+            lines.append(f"| `true` started the same way: the least this harness can show | {floor:.2f} |")
     if args.sizes:
         lines += ["", "| Binary | Size (MB) |", "| --- | --- |"]
         for path in sorted(args.sizes):
@@ -175,11 +201,23 @@ def main():
         failed.append(f"ostrom hook gate takes {hook_p95:.2f} ms at p95, above {args.max_hook_p95_ms} ms")
     if args.max_version_p95_ms is not None and version_p95 > args.max_version_p95_ms:
         failed.append(f"ostrom version takes {version_p95:.2f} ms at p95, above {args.max_version_p95_ms} ms")
-    slowest = max(cold_hook + cold_version, default=0.0)
-    if args.max_cold_ms is not None and slowest > args.max_cold_ms:
-        failed.append(f"a start with the file cache emptied takes {slowest:.2f} ms, above {args.max_cold_ms} ms")
-    if args.max_hook_memory_mb is not None and memory is not None and memory > args.max_hook_memory_mb:
-        failed.append(f"ostrom hook gate holds {memory:.2f} MB, above {args.max_hook_memory_mb} MB")
+    if args.max_cold_ms is not None:
+        for name, walls in colds:
+            if not walls:
+                failed.append(f"{name} cannot be started with the file cache emptied here (`sudo -n` refused), "
+                              f"so --max-cold-ms {args.max_cold_ms} cannot be held")
+            elif max(walls) > args.max_cold_ms:
+                failed.append(f"{name} takes {max(walls):.2f} ms with the file cache emptied, "
+                              f"above {args.max_cold_ms} ms")
+    if args.max_hook_memory_mb is not None:
+        if memory is None:
+            failed.append(f"this system does not give a process's peak memory (wait4), "
+                          f"so --max-hook-memory-mb {args.max_hook_memory_mb} cannot be held")
+        elif floor is not None and floor >= args.max_hook_memory_mb:
+            failed.append(f"`true` alone shows {floor:.2f} MB here, so --max-hook-memory-mb "
+                          f"{args.max_hook_memory_mb} cannot be held")
+        elif memory > args.max_hook_memory_mb:
+            failed.append(f"ostrom hook gate holds {memory:.2f} MB, above {args.max_hook_memory_mb} MB")
     own = {target: float(mb) for target, mb in (budget.split("=", 1) for budget in args.size_budget)}
 
     def budget_of(path):
