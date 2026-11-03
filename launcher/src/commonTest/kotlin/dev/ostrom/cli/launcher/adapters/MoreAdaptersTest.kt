@@ -184,6 +184,30 @@ class MoreAdaptersTest {
     }
 
     @Test
+    fun geminiIsNotStartedWhenTheDevelopersOwnSettingsTurnTheHooksOff() {
+        // the gate is the organization's rule: the developer's own settings turn it off as well as a repository's
+        val real = join("/g", ".gemini", "settings.json")
+        files.texts[real] = """{"theme":"dark","hooksConfig":{"enabled":false}}"""
+        val variables = mapOf("GEMINI_CLI_HOME" to "/g")
+        val refused = assertFailsWith<AdapterException> {
+            GeminiAdapter().prepare(layout(variables = variables), files)
+        }
+        assertEquals(
+            "gemini: $real sets `hooksConfig.enabled: false`, which turns Ostrom's hooks off: Gemini is not started. " +
+                "Remove it from that file to work with Ostrom",
+            refused.reason,
+        )
+        // their own hooks run beside Ostrom's (Gemini adds each scope's to the others'), and hooksConfig.disabled
+        // cannot name Ostrom's, named anew in each session
+        files.texts[real] = """{"hooksConfig":{"enabled":true,"disabled":["mine"]},"hooks":{"BeforeTool":[]}}"""
+        files.deleteRecursively(join("/tmp/run", "gemini-home"))
+        GeminiAdapter().prepare(layout(variables = variables), files)
+        files.texts[real] = """{"hooksConfig":{"disabled":["mine"]}}"""
+        files.deleteRecursively(join("/tmp/run", "gemini-home"))
+        GeminiAdapter().prepare(layout(variables = variables), files)
+    }
+
+    @Test
     fun geminiNamesItsHooksAnewInEachSession() {
         // a name a repository cannot know in advance, so it cannot list it in hooksConfig.disabled
         GeminiAdapter().prepare(layout(), files)
