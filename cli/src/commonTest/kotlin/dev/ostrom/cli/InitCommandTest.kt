@@ -151,6 +151,20 @@ class InitCommandTest : SetupKit() {
     }
 
     @Test
+    fun aTokenThatCannotReadTheRulesDoesNotFailInit() {
+        // a token made on the console may not hold rules:read: init again with it still exits 0
+        val denied = """{"error":{"message":"This credential does not allow rules:read."}}"""
+        val refused = mapOf(proposed to (403 to denied))
+        assertEquals(0, run(refused, "init", "--yes", "--repo", "api",
+            environment = withServer + ("OSTROM_TOKEN" to "ost_console")))
+        assertOut("  Rules       this token cannot read them (This credential does not allow rules:read.): ostrom " +
+            "policy rules list, without OSTROM_TOKEN, shows them\n")
+        // any other refusal of the rules still stops init
+        val broken = mapOf(proposed to (500 to """{"error":{"message":"boom"}}"""))
+        assertEquals(69, run(broken, "init", "--yes", "--repo", "api"))
+    }
+
+    @Test
     fun withoutAnAgentOrAKnownShellInitSaysWhatToDo() {
         assertEquals(0, run(emptyMap(), "init", "--repo", "api", installed = setOf("git")))
         assertOut("! No agent on this device. Install one, e.g. Claude Code: https://docs.claude.com/claude-code\n")

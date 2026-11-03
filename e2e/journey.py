@@ -339,7 +339,10 @@ class Journey:
             written = os.path.exists(bashrc) and "# >>> ostrom:" in open(bashrc, encoding="utf-8").read()
             self.check(written, "the agents start with Ostrom's hooks (~/.bashrc)")
         again = self.ostrom(maya, "init", "--yes", console=True)
-        self.check(again.returncode == 0, f"init again, with a console token, exits 0 ({again.returncode})")
+        # a console token without rules:read: init says it cannot read the rules, and the rest is done (exit 0)
+        self.check(again.returncode == 0 and "Rules" in again.stdout,
+                   f"init again, with a console token, exits 0 and says the rules ({again.returncode}): "
+                   f"{again.stderr.strip()[:300]}")
 
     def team(self, maya, tom_email, org):
         """2.6, 2.7, then the policy, the rules, the harness and the launch."""
@@ -391,8 +394,7 @@ class Journey:
             self.check(shown.returncode == 0, f"policy show exits 0 ({shown.returncode}): {shown.stderr.strip()[:300]}")
             allowed = ((read_json(shown.stdout) or {}).get("models") or {}).get("allowed") or []
             done = self.ostrom(maya, "policy", "set", "models", ",".join(allowed or ["sonnet"]), console=True)
-            self.check(done.returncode == 0, f"policy set models, with a console token ({done.returncode}): "
-                                             f"{done.stderr.strip()[:300]}")
+            self.console_only(done, "policy set models")
         self.begin("3.4", "ostrom policy check: what ostrom claude is told")
         if self.needs(("GET", "/api/v1/policy/agents"), org=True):
             done = self.ostrom(maya, "policy", "check", "claude")
@@ -401,7 +403,7 @@ class Journey:
         self.begin("3.3", "ostrom policy set self-approval")
         if self.needs(("GET", "/api/v1/gates/policy"), ("PUT", "/api/v1/gates/policy"), org=True):
             done = self.ostrom(maya, "policy", "set", "self-approval", "never", console=True)
-            self.check(done.returncode == 0, f"self-approval never ({done.returncode}): {done.stderr.strip()[:300]}")
+            self.console_only(done, "policy set self-approval never")
 
         self.begin("3.1", "ostrom policy rules: what the analysis proposed")
         if self.needs(("GET", "/api/v1/rules"), org=True):
@@ -521,12 +523,26 @@ class Journey:
                           f"harness list shows it on trial ({listed.returncode})"):
             return
         done = self.ostrom(maya, "harness", "enforce", workflow["id"], console=True)
-        self.check(done.returncode == 0, f"harness enforce ({done.returncode}): {done.stderr.strip()[:300]}")
+        self.console_only(done, "harness enforce")
         shown = self.ostrom(maya, "harness", "show", workflow["id"], "--json")
         status = (read_json(shown.stdout) or {}).get("status")
-        self.check(shown.returncode == 0 and status in ("accepted", "edited"), f"it is enforced ({status})")
+        self.check(shown.returncode == 0 and status == "proposed", f"it stays on trial ({status})")
         done = self.ostrom(maya, "harness", "remove", workflow["id"], "--yes", console=True)
-        self.check(done.returncode == 0, f"harness remove ({done.returncode}): {done.stderr.strip()[:300]}")
+        self.console_only(done, "harness remove")
+        # removed on the console, as the person would
+        status, body, _ = self.call("DELETE", f"/api/v1/workflows/{workflow['id']}",
+                                    session=self.owner_signed_in(maya), org=self.org_id)
+        self.check(status in (200, 204), f"the owner removes it on the console ({status}): {error_of(body)[:200]}")
+
+    def console_only(self, done, what):
+        """
+        A governance write made with a token (one made on the console included): refused, 77, saying the way through
+        (a session signed in to the console; ostrom login --admin and the console's confirmation, audit H1).
+        """
+        said = done.stderr.strip()
+        self.check(done.returncode == 77 and "ostrom login --admin" in said,
+                   f"{what} with a token: refused, the console's session writes it (77 expected, {done.returncode}): "
+                   f"{said[:300]}")
 
     def gated_session(self, maya, tom_email):
         """5.2 to 5.7 with the session alive: held at the gate, answered on the console, then let through in it."""

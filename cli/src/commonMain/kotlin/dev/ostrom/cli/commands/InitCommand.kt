@@ -3,6 +3,7 @@ package dev.ostrom.cli.commands
 
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.Context
+import com.github.ajalt.clikt.core.PrintMessage
 import com.github.ajalt.clikt.parameters.options.option
 import dev.ostrom.cli.CliDependencies
 import dev.ostrom.cli.ExitCode
@@ -142,7 +143,16 @@ internal class InitCommand(private val dependencies: CliDependencies) : CliktCom
 
     /** The rules the analysis proposed, accepted here by an owner or admin who says yes. */
     private fun rules(access: OrgAccess) {
-        val page = access.readIfServed("$RULES?status=proposed")
+        val page = try {
+            access.readIfServed("$RULES?status=proposed")
+        } catch (refused: PrintMessage) {
+            // a token without rules:read (one made on the console may not hold it): said, and init goes on, as the
+            // organisation, the repository and the hooks are already done
+            if (refused.statusCode != ExitCode.REFUSED.code) throw refused
+            say("  Rules       this token cannot read them (${refused.message}): ostrom policy rules list, " +
+                "without OSTROM_TOKEN, shows them")
+            return
+        }
         if (page == null) {
             say("  Rules       not on this server yet")
             return
