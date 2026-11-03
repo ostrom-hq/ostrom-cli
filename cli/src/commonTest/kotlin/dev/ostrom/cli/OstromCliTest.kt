@@ -330,9 +330,11 @@ class OstromCliTest : CliKit() {
         val server = dependencies.api("https://ostrom.example")
         server.close()
         assertSame(server, dependencies.api("https://ostrom.example"), "one client, closed by nobody but the process")
+        assertSame(server, dependencies.api("https://ostrom.example/"), "the same server, written with its slash")
         assertNotSame(server, dependencies.api("https://other.example"), "a client per server")
-        // nothing listens on the discard port of the loopback: the shared client still sends, and says so
+        // nothing listens on the discard port of the loopback: a client closed by a caller still sends, and says so
         val refused = dependencies.api("http://127.0.0.1:9")
+        refused.close()
         assertFailsWith<ServerUnreachableException> { runBlocking { refused.get("/api/v1/health") } }
         assertFailsWith<ServerUnreachableException> {
             runBlocking { refused.send(ServerRequest("GET", "/api/v1/health")) }

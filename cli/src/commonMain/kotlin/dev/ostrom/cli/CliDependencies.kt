@@ -149,10 +149,12 @@ class CliDependencies(
             val finder = ExecutableFinderImpl(environment)
             // One client per server for the whole command (PERF-CLI): its calls share one connection, so one TLS
             // handshake, where `ostrom claude` used to open one to look its organisation up and another to launch.
-            // A caller's close() keeps it open for the next: the process ends with the command.
+            // A caller's close() keeps it open for the next: the process ends with the command. The URL is the one the
+            // client sends to (no trailing slash), so `https://x/` and `https://x` share it. No lock: every client is
+            // asked for while a command is wired or started, one after the other, never from two threads at once.
             val clients = mutableMapOf<String, OstromApi>()
             val api = { url: String ->
-                clients.getOrPut(url) { KeptOpen(OstromApiImpl(url, USER_AGENT, trace = trace)) }
+                clients.getOrPut(url.trimEnd('/')) { KeptOpen(OstromApiImpl(url, USER_AGENT, trace = trace)) }
             }
             val launchFiles = LaunchFilesImpl()
             val temporary = FileSystem.SYSTEM_TEMPORARY_DIRECTORY.toString()
