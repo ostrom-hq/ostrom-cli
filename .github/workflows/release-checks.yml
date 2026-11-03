@@ -38,6 +38,8 @@ jobs:
         run: sh scripts/release/tests/run.sh
       - name: install.sh against a fake release (good and bad checksums)
         run: sh install/tests/install.test.sh
+      - name: The GitHub host keys the taps job pins are the published ones
+        run: sh scripts/release/check-github-host-keys.sh .github/workflows/release.yml
 
   installers-macos:
     name: install.sh on macOS
