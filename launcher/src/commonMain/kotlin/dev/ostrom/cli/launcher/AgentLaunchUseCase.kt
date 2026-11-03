@@ -366,6 +366,9 @@ private const val CONFIG_MODEL = "model="
 
 /** [arguments] with [extra] after the developer's options and before a literal `--`. */
 fun beforeSeparator(arguments: List<String>, extra: List<String>): List<String> {
-    val end = arguments.indexOf("--").takeIf { it >= 0 } ?: arguments.size
+    val end = separator(arguments)
     return arguments.take(end) + extra + arguments.drop(end)
 }
+
+/** Where the agent's own options end: the index of a literal `--`, or the end of [arguments]. */
+fun separator(arguments: List<String>): Int = arguments.indexOf("--").takeIf { it >= 0 } ?: arguments.size

@@ -12,6 +12,7 @@ import dev.ostrom.cli.launcher.text
 import kotlinx.serialization.json.JsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -154,6 +155,10 @@ class AdaptersTest {
             inline.arguments,
         )
         assertEquals("""{"model":"opus","disableAllHooks":false}""", files.texts[settings])
+        assertEquals(
+            listOf("claude: your --settings turns hooks off (disableAllHooks): Ostrom keeps them on for this session"),
+            inline.notes,
+        )
         files.texts["/home/dev/mine.json"] = """{"permissions":{"allow":["Bash(ls)"]}}"""
         val file = ClaudeAdapter().prepare(layout(arguments = listOf("--settings=/home/dev/mine.json")), files)
         assertEquals(listOf("--plugin-dir", join("/tmp/run", "plugin"), "--settings", settings), file.arguments)
@@ -162,27 +167,51 @@ class AdaptersTest {
     }
 
     @Test
-    fun claudeStartsWithoutSettingsItCannotRead() {
+    fun claudeReadsTheLastSettingsBeforeThePromptOnly() {
         val settings = join("/tmp/run", "claude-settings.json")
-        files.texts["/home/dev/list.json"] = "[1]"
-        for (value in listOf("/home/dev/missing.json", "{not json", "/home/dev/list.json")) {
-            val launch = ClaudeAdapter().prepare(layout(arguments = listOf("--settings", value)), files)
-            assertEquals(listOf("--plugin-dir", join("/tmp/run", "plugin"), "--settings", settings), launch.arguments)
-            assertEquals("""{"disableAllHooks":false}""", files.texts[settings], value)
-            assertEquals(1, launch.notes.size, value)
-            // a file is named; an inline value is not repeated, it may hold secrets
-            assertEquals(value.startsWith("/"), launch.notes.single().contains(value), value)
-        }
-        // a --settings with no value names nothing: the session gets Ostrom's alone
-        val dangling = ClaudeAdapter().prepare(layout(arguments = listOf("--settings")), files)
-        assertEquals(listOf("--plugin-dir", join("/tmp/run", "plugin"), "--settings", settings), dangling.arguments)
-        // nor does one right before `--`, whose prompt stays a prompt
-        val beforePrompt = ClaudeAdapter().prepare(layout(arguments = listOf("--settings", "--", "hi")), files)
+        files.texts["/home/dev/last.json"] = """{"model":"haiku"}"""
+        val arguments = listOf("--settings", """{"model":"opus"}""", "--settings", "/home/dev/last.json")
+        val last = ClaudeAdapter().prepare(layout(arguments = arguments + listOf("--", "--settings", "x")), files)
+        assertEquals("""{"model":"haiku","disableAllHooks":false}""", files.texts[settings], "the last one wins")
         assertEquals(
-            listOf("--plugin-dir", join("/tmp/run", "plugin"), "--settings", settings, "--", "hi"),
-            beforePrompt.arguments,
+            listOf("--plugin-dir", join("/tmp/run", "plugin"), "--settings", settings, "--", "--settings", "x"),
+            last.arguments,
+            "after --, it is the prompt's text",
         )
-        assertEquals(emptyList(), beforePrompt.notes)
+    }
+
+    @Test
+    fun claudeRefusesSettingsItCannotRead() {
+        // starting without them would drop the developer's own rules (permissions.deny, the sandbox)
+        files.texts["/home/dev/list.json"] = "[1]"
+        files.texts["/home/dev/broken.json"] = """{"permissions":{"deny":["Bash(rm:*)"]},}"""
+        val refusals = listOf(
+            "/home/dev/missing.json" to "claude: your --settings is not a JSON object Ostrom can read",
+            "{not json" to "claude: your --settings is not a JSON object Ostrom can read",
+            "[1]" to "claude: your --settings is not a JSON object Ostrom can read",
+            "/home/dev/list.json" to "claude: your --settings /home/dev/list.json is not a JSON object Ostrom can read",
+            "/home/dev/broken.json" to
+                "claude: your --settings /home/dev/broken.json is not a JSON object Ostrom can read",
+        )
+        for ((value, reason) in refusals) {
+            val refused = assertFailsWith<AdapterException>(value) {
+                ClaudeAdapter().prepare(layout(arguments = listOf("--settings", value)), files)
+            }
+            assertEquals("$reason: fix it, or start without it", refused.reason, value)
+        }
+        assertNull(files.texts[join("/tmp/run", "claude-settings.json")], "nothing is written")
+    }
+
+    @Test
+    fun claudeRefusesASettingsWithoutAValue() {
+        for (arguments in listOf(listOf("--settings"), listOf("--settings", "--", "hi"), listOf("--settings="))) {
+            val refused = assertFailsWith<AdapterException>(arguments.toString()) {
+                ClaudeAdapter().prepare(layout(arguments = arguments), files)
+            }
+            assertEquals("claude: --settings needs a value, a JSON object or a file", refused.reason)
+        }
+        val other = ClaudeAdapter().prepare(layout(arguments = listOf("--settings-sources", "user")), files)
+        assertTrue("--settings-sources" in other.arguments, "an option that only starts the same is the developer's")
     }
 
     @Test

@@ -10,6 +10,7 @@ import dev.ostrom.cli.launcher.join
 import dev.ostrom.cli.launcher.objectOf
 import dev.ostrom.cli.launcher.parseObject
 import dev.ostrom.cli.launcher.pretty
+import dev.ostrom.cli.launcher.separator
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -46,40 +47,48 @@ class ClaudeAdapter : AgentAdapter {
     /**
      * The value of the developer's last `--settings` (`--settings x` or `--settings=x`) before a literal `--`, or null,
      * and their arguments without any `--settings`.
+     *
+     * @throws AdapterException When a `--settings` has no value, as Claude Code would refuse it.
      */
     private fun developersSettings(arguments: List<String>): Pair<String?, List<String>> {
-        val end = arguments.indexOf("--").takeIf { it >= 0 } ?: arguments.size
+        val end = separator(arguments)
         var value: String? = null
         val rest = mutableListOf<String>()
         var index = 0
         while (index < end) {
             val argument = arguments[index]
-            when {
-                argument == SETTINGS -> {
-                    value = arguments.getOrNull(index + 1)?.takeIf { index + 1 < end } ?: value
-                    index++
-                }
-                argument.startsWith("$SETTINGS=") -> value = argument.removePrefix("$SETTINGS=")
-                else -> rest += argument
+            val given = when {
+                argument == SETTINGS -> arguments.getOrNull(++index)?.takeIf { index < end }.orEmpty()
+                argument.startsWith("$SETTINGS=") -> argument.removePrefix("$SETTINGS=")
+                else -> null
             }
+            if (given == null) rest += argument
+            if (given?.isBlank() == true) throw AdapterException(NO_VALUE)
+            value = given ?: value
             index++
         }
         return value to rest + arguments.drop(end)
     }
 
     /**
-     * Writes the session's settings: the developer's ([theirs], inline JSON or a file), with hooks on. Settings that
-     * cannot be read are left out, and the developer is told. The path, and what to tell.
+     * Writes the session's settings: the developer's ([theirs], inline JSON or a file), with hooks on. The path, and
+     * what to tell the developer.
+     *
+     * @throws AdapterException When [theirs] cannot be read: starting without them would drop their own rules
+     * (`permissions.deny`, the sandbox), where Claude Code would refuse to start.
      */
     private fun settings(layout: SessionLayout, files: LaunchFiles, theirs: String?): Pair<String, List<String>> {
         val inline = theirs?.trimStart()?.startsWith("{") == true
         val read = theirs?.let { parseObject(if (inline) it else files.read(it)) }
-        // an inline value may hold secrets (`env`): only a file is named
-        val notes = if (theirs != null && read == null) listOf(unread(if (inline) "" else " $theirs")) else emptyList()
+        if (theirs != null && read == null) {
+            // only a file that exists is named: an inline value may hold secrets (`env`)
+            throw AdapterException(unread(if (!inline && files.exists(theirs)) " $theirs" else ""))
+        }
+        val off = read?.get(DISABLE_ALL_HOOKS) == JsonPrimitive(true)
         val merged = JsonObject(read.orEmpty() + (DISABLE_ALL_HOOKS to JsonPrimitive(false)))
         val path = join(layout.temporary, "claude-settings.json")
         files.write(path, merged.toString(), FileAccess.PRIVATE)
-        return path to notes
+        return path to if (off) listOf(KEPT_ON) else emptyList()
     }
 
     private fun writeHooks(layout: SessionLayout, files: LaunchFiles) {
@@ -137,8 +146,12 @@ class ClaudeAdapter : AgentAdapter {
         private const val SETTINGS = "--settings"
         private const val DISABLE_ALL_HOOKS = "disableAllHooks"
 
+        private const val NO_VALUE = "claude: --settings needs a value, a JSON object or a file"
+        private const val KEPT_ON =
+            "claude: your --settings turns hooks off (disableAllHooks): Ostrom keeps them on for this session"
+
         private fun unread(file: String) =
-            "claude: your --settings$file is not a JSON object Ostrom can read: this session starts without it"
+            "claude: your --settings$file is not a JSON object Ostrom can read: fix it, or start without it"
         private val PROVIDER_OVERRIDES = listOf(
             "ANTHROPIC_API_KEY",
             "CLAUDE_CODE_OAUTH_TOKEN",
