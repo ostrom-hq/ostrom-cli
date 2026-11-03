@@ -246,6 +246,7 @@ class MoreAdaptersTest {
         )
         // no BeforeTool hook in it, empty or not a list: Gemini starts
         files.texts[real] = """{"hooks":{"BeforeTool":{}}}"""
+        files.deleteRecursively(join("/tmp/run", "gemini-home"))
         GeminiAdapter().prepare(layout(), files)
     }
 
@@ -339,6 +340,7 @@ class MoreAdaptersTest {
         assertEquals(emptyList(), GeminiAdapter().prepare(layout(rules = "R", variables = variables), files).notes)
         // read as Gemini reads them: comments and a trailing comma are theirs, kept
         files.texts[join("/g", ".gemini", "settings.json")] = "{// mine\n\"theme\":\"dark\",}"
+        files.deleteRecursively(join("/tmp/run", "gemini-home"))
         GeminiAdapter().prepare(layout(variables = variables), files)
         val kept = parseObject(files.texts[join("/tmp/run", "gemini-home", ".gemini", "settings.json")])
         assertEquals(JsonPrimitive("dark"), kept?.get("theme"))
