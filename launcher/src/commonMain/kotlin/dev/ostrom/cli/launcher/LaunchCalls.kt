@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.launcher
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.JsonObject
 
 /** A launch created by Ostrom. */
@@ -146,6 +148,37 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
             }
         }
 
+    /**
+     * What a launch reads of Ostrom once it has its agent token: the session package, the instance's keys, the MCP
+     * servers and whether the models are relayed. None depends on another, so they are asked together (PERF-CLI): the
+     * agent waits on one round trip for the four, not four. A refused package stops the launch first, then keys that
+     * cannot be read, as when they were asked one after the other; the notes are said in that order too.
+     */
+    suspend fun reads(request: LaunchRequest, site: LaunchSite, repo: String, launch: Launch): LaunchReads =
+        coroutineScope {
+            val notes = mutableListOf<String>()
+            val keys = async { stopOf { instanceKeys() } }
+            val mcp = async { mcpServers(site) { notes += it } }
+            val inference = async { inferenceRelayed(request, site, launch) }
+            val pack = packageOf(repo, site, keep = true)
+            val read = keys.await()()
+            notes.forEach(dependencies.say)
+            LaunchReads(pack, read, mcp.await(), inference.await())
+        }
+
+    private suspend fun inferenceRelayed(request: LaunchRequest, site: LaunchSite, launch: Launch): Boolean {
+        val choice = site.variable(INFERENCE_VARIABLE)
+        return when {
+            request.agent != Agent.CLAUDE -> false
+            choice in OFF -> false
+            choice in ON -> true
+            else -> {
+                val answer = dependencies.server.get(Routes.INFERENCE_MODELS, launch.agentToken, INFERENCE_MILLIS)
+                answer is ServerAnswer.Ok && answer.body.list("data").isNotEmpty()
+            }
+        }
+    }
+
     /** The routes, limits and names of a launch. */
     companion object {
         private const val UNREACHABLE = 69
@@ -163,6 +196,10 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
         private const val MCP_MILLIS = 5_000L
         private const val KEYS_MILLIS = 5_000L
         private const val END_MILLIS = 5_000L
+        private const val INFERENCE_MILLIS = 3_000L
+        private const val INFERENCE_VARIABLE = "OSTROM_INFERENCE"
+        private val ON = setOf("on", "1", "true")
+        private val OFF = setOf("off", "0", "false")
         private val SILENT_END = setOf<Int?>(UNAUTHORIZED, NOT_FOUND, NOT_ALLOWED)
         private val MCP_NAME = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
     }

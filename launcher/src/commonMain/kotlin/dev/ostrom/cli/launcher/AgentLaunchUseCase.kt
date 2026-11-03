@@ -13,7 +13,6 @@ import dev.ostrom.cli.platform.ProcessLauncher
 import dev.ostrom.cli.platform.ProcessResult
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -131,7 +130,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         // From here on, however the launch ends (the agent's exit, a stop before it starts, a cancellation), its agent
         // token is revoked at once (AUDIT-SECU-RUNNER-2 R2b).
         return try {
-            val reads = reads(request, site, repo, launch)
+            val reads = calls.reads(request, site, repo, launch)
             val temporary = join(site.temporaryDirectory, "ostrom-run-${dependencies.clock.millis()}")
             try {
                 dependencies.files.createPrivateDirectory(temporary)
@@ -288,37 +287,6 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         }
     }
 
-    /**
-     * What a launch reads of Ostrom once it has its agent token: the session package, the instance's keys, the MCP
-     * servers and whether the models are relayed. None depends on another, so they are asked together (PERF-CLI): the
-     * agent waits on one round trip for the four, not four. A refused package stops the launch first, then keys that
-     * cannot be read, as when they were asked one after the other; the notes are said in that order too.
-     */
-    private suspend fun reads(request: LaunchRequest, site: LaunchSite, repo: String, launch: Launch): LaunchReads =
-        coroutineScope {
-            val notes = mutableListOf<String>()
-            val keys = async { stopOf { calls.instanceKeys() } }
-            val mcp = async { calls.mcpServers(site) { notes += it } }
-            val inference = async { inferenceRelayed(request, site, launch) }
-            val pack = calls.packageOf(repo, site, keep = true)
-            val read = keys.await()()
-            notes.forEach(dependencies.say)
-            LaunchReads(pack, read, mcp.await(), inference.await())
-        }
-
-    private suspend fun inferenceRelayed(request: LaunchRequest, site: LaunchSite, launch: Launch): Boolean {
-        val choice = site.variable(INFERENCE_VARIABLE)
-        return when {
-            request.agent != Agent.CLAUDE -> false
-            choice in OFF -> false
-            choice in ON -> true
-            else -> {
-                val answer = dependencies.server.get(Routes.INFERENCE_MODELS, launch.agentToken, INFERENCE_MILLIS)
-                answer is ServerAnswer.Ok && answer.body.list("data").isNotEmpty()
-            }
-        }
-    }
-
     private fun gitTop(cwd: String): String {
         val result = dependencies.capture.capture(listOf("git", "-C", cwd, "rev-parse", "--show-toplevel"), GIT_MILLIS)
         val top = (result as? CaptureResult.Exited)?.takeIf { it.code == 0 }?.let { it.output.trim() }
@@ -346,14 +314,10 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         private const val BUILT_IN_MCP = "ostrom"
         private const val CANNOT_WRITE = 73
         private const val AGENT_MISSING = 127
-        private const val INFERENCE_MILLIS = 3_000L
         private const val GIT_MILLIS = 3_000
         private const val ALIVE_MILLIS = 20_000L
         private const val ALIVE_VARIABLE = "OSTROM_ALIVE_MS"
         private const val KEEP_VARIABLE = "OSTROM_KEEP_PLUGIN"
-        private const val INFERENCE_VARIABLE = "OSTROM_INFERENCE"
-        private val ON = setOf("on", "1", "true")
-        private val OFF = setOf("off", "0", "false")
 
         private fun missing(agent: Agent): String =
             "${agent.displayName} is not installed (`${agent.executable}` is not on your PATH)." +
