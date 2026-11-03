@@ -48,8 +48,9 @@ class GateRequests(
     private val git: GitRunner,
 ) {
     /**
-     * Refuses a push Ostrom cannot read or that redirects git while the gate is enforced, else asks the gate. A gate
-     * only proposed (shadow) never stops the agent: it is asked, and what Ostrom logs is all it does.
+     * Refuses a push Ostrom cannot read or that redirects git while the gate is enforced, then tells Ostrom of the
+     * refusal for the organisation's audit log (audit A6); else asks the gate. A gate only proposed (shadow) never
+     * stops the agent: it is asked, and what Ostrom logs is all it does.
      */
     fun ask(ask: GateAsk): HookReply {
         val subject = ask.subject
@@ -63,11 +64,26 @@ class GateRequests(
         }
         return when {
             redirected != null && ask.gate.enforce ->
-                replies.deny(GateTexts.redirected(ask.action.name, ask.gate, redirected))
+                deniedLocally(ask, REDIRECTED, GateTexts.redirected(ask.action.name, ask.gate, redirected))
             read.problem != null && ask.gate.enforce ->
-                replies.deny(GateTexts.unreadable(ask.action.name, ask.gate, read.problem))
+                deniedLocally(ask, UNREADABLE, GateTexts.unreadable(ask.action.name, ask.gate, read.problem))
             else -> request(ask, directory, read.push)
         }
+    }
+
+    // Audit A6: the refusal stands as it is; Ostrom is told after it, once and within a short delay, so that it is in
+    // the organisation's audit log. Whatever Ostrom answers, or not at all, the reply and its exit code are the same.
+    private fun deniedLocally(ask: GateAsk, reason: String, text: String): HookReply {
+        val reply = replies.deny(text)
+        val body = jsonOf(
+            "sessionId" to ids.of(ask.event.string("session_id")),
+            "class" to ask.action.actionClass,
+            "reason" to reason,
+            "command" to CommandSecrets.masked(ask.subject.text).take(MAX_DENIED_COMMAND),
+            "repo" to context.repository,
+        )
+        writes.report(Routes.LOCAL_DENIALS, body, DENIAL_MILLIS)
+        return reply
     }
 
     private fun request(ask: GateAsk, directory: String, push: Push?): HookReply {
@@ -140,6 +156,10 @@ class GateRequests(
     /** The note the hooks append to a push for the gate patterns, and how they read it. */
     companion object {
         private const val REQUEST_MILLIS = 3_000
+        private const val DENIAL_MILLIS = 1_000
+        private const val MAX_DENIED_COMMAND = 4_096
+        private const val REDIRECTED = "redirected"
+        private const val UNREADABLE = "unreadable"
         private const val NOTE = "\n# ostrom: git push to:"
 
         /** `\n# ostrom: git push to: main, dev`, or nothing without a destination. */
