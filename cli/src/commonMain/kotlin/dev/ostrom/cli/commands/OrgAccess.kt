@@ -76,7 +76,7 @@ internal class OrgAccess(
         val elevated = if (consoleToken) null else admin.valid(signed.serverUrl)
         val answer = runBlocking { server.get(path, elevated ?: signed.token) }
         if (answer is ServerAnswer.Failed) {
-            val older = elevated != null && answer.status == FORBIDDEN && answer.message.startsWith(LACKS)
+            val older = elevated != null && answer.status == REFUSED_STATUS && answer.message.startsWith(LACKS)
             if (older) throw stopWith(ExitCode.REFUSED, "${answer.message}\n$ADMIN_OLDER")
             refused(answer, true, elevated)
         }
@@ -268,3 +268,7 @@ private val UNAUTHORIZED: Int? = 401
 
 /** `GET`: the caller's organisations (served). */
 private const val ORGS = "/api/v1/orgs"
+
+/** 403, as the nullable status of an answer is compared to it (no branch for a null status: none is missed). */
+@Suppress("MayBeConst")
+private val REFUSED_STATUS: Int? = 403
