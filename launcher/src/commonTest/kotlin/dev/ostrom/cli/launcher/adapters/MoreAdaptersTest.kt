@@ -106,11 +106,17 @@ class MoreAdaptersTest {
         files.texts[join(real, "settings.json")] =
             """{"theme":"dark","hooks":{"BeforeTool":[{"hooks":[{"command":"mine"}]}]},"mcpServers":{"x":{}}}"""
         files.texts[join(real, "GEMINI.md")] = "Mine."
-        val launch = GeminiAdapter().prepare(layout(arguments = listOf("-p", "hi"), rules = "R"), files)
+        val launch = GeminiAdapter { "n1" }.prepare(layout(arguments = listOf("-p", "hi"), rules = "R"), files)
         val root = join("/tmp/run", "gemini-home")
         assertEquals(listOf("-p", "hi"), launch.arguments)
         assertEquals(
-            mapOf("GEMINI_CLI_HOME" to root, "OSTROM_HOOK_DIALECT" to "gemini", "OSTROM_HOOK_BUDGET_MS" to "590000"),
+            mapOf(
+                "GEMINI_CLI_HOME" to root,
+                "OSTROM_HOOK_DIALECT" to "gemini",
+                "OSTROM_HOOK_BUDGET_MS" to "590000",
+                "GEMINI_CLI_SYSTEM_SETTINGS_PATH" to join("/tmp/run", "gemini-system.json"),
+                "GEMINI_CLI_SYSTEM_DEFAULTS_PATH" to join("/etc", "gemini-cli", "system-defaults.json"),
+            ),
             launch.environment,
         )
         val directory = join(root, ".gemini")
@@ -120,7 +126,7 @@ class MoreAdaptersTest {
         assertEquals(2, before.size, "theirs first, then Ostrom's")
         assertEquals(
             """{"hooks":[{"type":"command","command":"\"/opt/ostrom\" hook gate","timeout":600000,""" +
-                """"name":"ostrom-BeforeTool"}],"matcher":".*"}""",
+                """"name":"ostrom-BeforeTool-n1"}],"matcher":".*"}""",
             before.last().toString(),
         )
         val start = checkNotNull(settings.child("hooks")).list("SessionStart").single() as JsonObject
@@ -174,14 +180,26 @@ class MoreAdaptersTest {
             """{"security":{"auth":{"enforcedType":"vertex-ai"}},"hooksConfig":{"enabled":true}}""",
             files.texts[join("/tmp/run", "gemini-system.json")],
         )
-        // macOS and Windows keep theirs elsewhere: the first that exists is the one Gemini reads on this machine
+        // macOS keeps them elsewhere, with nothing there yet: Gemini still reads that place, and Ostrom points it at
+        // the session's; Windows by its ProgramData folder
         files.deleteRecursively(join("/tmp/run", "gemini-home"))
-        files.texts[join("/Library", "Application Support", "GeminiCli", "settings.json")] = "{}"
+        files.directories += "/Library/Application Support"
         val mac = GeminiAdapter().prepare(layout(), files)
         assertEquals(
-            join("/Library", "Application Support", "GeminiCli", "system-defaults.json"),
+            join("/Library/Application Support", "GeminiCli", "system-defaults.json"),
             mac.environment["GEMINI_CLI_SYSTEM_DEFAULTS_PATH"],
         )
+        assertEquals("""{"hooksConfig":{"enabled":true}}""", files.texts[join("/tmp/run", "gemini-system.json")])
+        files.deleteRecursively(join("/tmp/run", "gemini-home"))
+        val windows = GeminiAdapter().prepare(layout(variables = mapOf("ProgramData" to "/pd")), files)
+        assertEquals(
+            join("/pd", "gemini-cli", "system-defaults.json"),
+            windows.environment["GEMINI_CLI_SYSTEM_DEFAULTS_PATH"],
+        )
+        files.deleteRecursively(join("/tmp/run", "gemini-home"))
+        val named = mapOf("GEMINI_CLI_SYSTEM_SETTINGS_PATH" to "s.json")
+        val relative = GeminiAdapter().prepare(layout(variables = named), files)
+        assertEquals(join(".", "system-defaults.json"), relative.environment["GEMINI_CLI_SYSTEM_DEFAULTS_PATH"])
     }
 
     @Test
