@@ -8,6 +8,7 @@ import io.ktor.client.request.HttpRequestData
 import io.ktor.client.request.HttpResponseData
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
+import kotlinx.coroutines.awaitCancellation
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
@@ -56,8 +57,13 @@ const val CLIENT_TOKEN = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba
  *
  * @property freshFor How long it answers from memory.
  * @property clock The test's clock.
+ * @property refresh How the relay reads it again in the background: by default, never.
  */
-class PolicyClock(val freshFor: Duration, val clock: TimeSource)
+class PolicyClock(
+    val freshFor: Duration,
+    val clock: TimeSource,
+    val refresh: PolicyRefreshLoop = PolicyRefreshLoop { awaitCancellation() },
+)
 
 /**
  * Runs [block] against a relay forwarding to [ostrom]; [reports] receives what the user would be told. Without
@@ -85,6 +91,7 @@ fun relayTest(
                 timeouts,
                 policyFreshFor = policy.freshFor,
                 clock = policy.clock,
+                policyRefresh = policy.refresh,
             )
             clientToken != null -> relayModule(config, TOKEN, ostrom::client, notices, timeouts, clientToken)
             else -> relayModule(config, TOKEN, ostrom::client, notices, timeouts)

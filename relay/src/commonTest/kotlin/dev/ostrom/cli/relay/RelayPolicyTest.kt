@@ -12,8 +12,15 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.http.headersOf
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TestTimeSource
 
@@ -90,5 +97,64 @@ class RelayPolicyTest {
             assertEquals(HttpStatusCode.Unauthorized, client.post("/api/v1/sessions").status)
         }
         assertEquals(4, ostrom.requests.size)
+    }
+
+    @Test
+    fun anActiveSessionsPolicyIsReadAgainAheadSoThatNoHookWaitsOnOstrom() {
+        // perf pass of 03/11: a hook runs at every tool call; past 30 s the next one used to wait on Ostrom for the
+        // policy. Read again in the background while hooks ask, it stays fresh: S2-40's 30 s still hold
+        val clock = TestTimeSource()
+        val refreshes = Channel<suspend () -> Unit>(1)
+        val ostrom = FakeOstrom { respond(signed, HttpStatusCode.OK) }
+        val loop = PolicyRefreshLoop { refresh -> refreshes.send(refresh).also { awaitCancellation() } }
+        relayTest(ostrom, policy = PolicyClock(30.seconds, clock, loop)) {
+            client.get(path) { bearerAuth(TOKEN) }
+            val refresh = refreshes.receive()
+            clock += 20.seconds
+            refresh()
+            assertEquals(2, ostrom.requests.size, "read again in the background")
+            assertEquals("$SERVER$path", ostrom.requests[1].url.toString())
+            assertEquals(listOf("Bearer $AGENT_TOKEN"), ostrom.requests[1].headers.getAll(HttpHeaders.Authorization))
+            clock += 20.seconds
+            val read = client.get(path) { bearerAuth(TOKEN) }
+            assertEquals(signed, read.bodyAsText())
+            assertEquals(2, ostrom.requests.size, "40 s after the first read, the hook was answered from memory")
+        }
+    }
+
+    @Test
+    fun anIdleSessionIsNotReadAgainAndARefusalIsForgotten() {
+        // ten minutes without a hook: nothing is asked of Ostrom in the background. A refusal read in the background
+        // drops the policy kept: the next hook asks Ostrom and gets it (S2-38)
+        val clock = TestTimeSource()
+        val refreshes = Channel<suspend () -> Unit>(1)
+        var status = HttpStatusCode.OK
+        val ostrom = FakeOstrom { respond(if (status == HttpStatusCode.OK) signed else "{}", status, json) }
+        val loop = PolicyRefreshLoop { refresh -> refreshes.send(refresh).also { awaitCancellation() } }
+        relayTest(ostrom, policy = PolicyClock(30.seconds, clock, loop)) {
+            val refresh = refreshes.receive()
+            refresh()
+            assertEquals(0, ostrom.requests.size, "nothing kept yet, nothing read again")
+            client.get(path) { bearerAuth(TOKEN) }
+            clock += 11.minutes
+            refresh()
+            assertEquals(1, ostrom.requests.size, "an idle session is not read again")
+            client.get(path) { bearerAuth(TOKEN) }
+            status = HttpStatusCode.Forbidden
+            refresh()
+            assertEquals(3, ostrom.requests.size)
+            assertEquals(HttpStatusCode.Forbidden, client.get(path) { bearerAuth(TOKEN) }.status)
+            assertEquals(4, ostrom.requests.size, "the refusal dropped the policy kept")
+        }
+    }
+
+    @Test
+    fun theRelayReadsThePolicyAgainEveryPeriod() = runTest {
+        var count = 0
+        val loop = launch { refreshEvery(20.seconds).run { count++ } }
+        advanceTimeBy(41.seconds)
+        runCurrent()
+        assertEquals(2, count)
+        loop.cancel()
     }
 }
