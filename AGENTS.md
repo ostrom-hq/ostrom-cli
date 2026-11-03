@@ -19,11 +19,11 @@ Never depend on server modules: only ostrom-core's `api`, `client` and protocol 
 3. Interfaces `XxxRepository`, `XxxUseCase`, `XxxService`; implementations `XxxImpl` (never `IXxx`). One per file, grouped by feature.
 4. Business rules live in use cases (`suspend operator fun invoke`), never in routes or CLI commands. Constructor injection; Koin wired only in the composition root, no `koin-ktor` plugin.
 5. Ktor: typed `@Resource` classes from ostrom-core, one `Route.xxxRoutes(XxxRoutesDependencies)` per feature, mappers as extension functions.
-6. Expected refusals are domain exceptions extending one `OstromException(kind)` base, routed by type in the single StatusPages `Throwable` handler (on Kotlin/Native StatusPages matches exact classes only) to 400/401/403/404/409/402 with a stable `ApiError` key; 500 only for the unforeseen, never echoing its message (ENG-007).
-7. **Never swallow `CancellationException`**: rethrow it before any broad catch, no `runCatching` around suspend code, cleanup in `withContext(NonCancellable)`. `scripts/check-conventions.py` fails the build otherwise (INF-019).
-8. Contract changes are additive: new fields optional, removal only after the optional phase; every sealed subclass has a stable `@SerialName` (ENG-009).
+6. Expected refusals are domain exceptions extending one `OstromException(kind)` base, routed by type in the single StatusPages `Throwable` handler (on Kotlin/Native StatusPages matches exact classes only) to 400/401/403/404/409/402 with a stable `ApiError` key; 500 only for the unforeseen, never echoing its message.
+7. **Never swallow `CancellationException`**: rethrow it before any broad catch, no `runCatching` around suspend code, cleanup in `withContext(NonCancellable)`. `scripts/check-conventions.py` fails the build otherwise.
+8. Contract changes are additive: new fields optional, removal only after the optional phase; every sealed subclass has a stable `@SerialName`.
 9. Never log credentials, tokens, prompts, response bodies or raw provider errors.
-10. Configuration is read once from `OSTROM_*` variables into a typed object; no feature switch in an environment variable (ENG-050).
+10. Configuration is read once from `OSTROM_*` variables into a typed object; no feature switch in an environment variable.
 11. Tests: TDD (red first), `kotlin.test` + `runTest` + hand-written fakes in `commonTest` (no MockK), lowerCamelCase sentence names. 100 % lines and branches of commonMain via the test-only `jvm()` target (Kover), plus `linuxX64Test`; integration on real PostgreSQL, end-to-end on the real binary, load tests for the server.
 12. Kotlin/Native only in production: no JVM-only library (Exposed, JDBC, Netty, Logback, MockK). Ktor CIO server, Ktor engine-defaults client, sqlx4k, cryptography-kotlin + OpenSSL prebuilt, Okio, Clikt.
 13. Gradle: versions only in `gradle/libs.versions.toml` (same versions in every repository), convention plugin `ostrom.kmp` from `build-logic/`, module build files hold dependencies only. No heavy local build on the shared Mac: CI, or `~/git/ostrom-hq/.coord/build-lock.sh`.

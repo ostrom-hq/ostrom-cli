@@ -17,10 +17,10 @@ Actions, to the job summary. Exits 1 when the median hook time is above --max-ho
 above --max-push-ms when given, or a file of --sizes above its budget: --max-size-mb (the binary a developer downloads,
 15 MB, perf pass of 02/11/2026), or --size-budget for a target whose folder (`bin/<target>/`) has one of its own.
 It also exits 1, when they are given, above --max-hook-p95-ms and --max-version-p95-ms (the p95 of the warm starts),
---max-cold-ms (each command's slowest start with the file cache emptied) and --max-hook-memory-mb, and when one of
-these is given but cannot be measured here. It lists every budget exceeded, not only the first. On Linux the peak
-memory read for a child is never below this script's own (see `peak_memory_mb`): the summary shows that floor, and
-the memory budget holds as long as the floor stays under it.
+--max-cold-ms (each command's median start with the file cache emptied: one disk hiccup is not a regression) and
+--max-hook-memory-mb, and when one of these is given but cannot be measured here. It lists every budget exceeded, not
+only the first. On Linux the peak memory read for a child is never below this script's own (see `peak_memory_mb`): the
+summary shows that floor, and the memory budget holds as long as the floor stays under it.
 
 The budget is measured on the hook of an ordinary tool call (`ls`), which is most of an agent's calls. Outside a
 session, as here, there is no relay to read Ostrom's signed policy from, so the gate holds the call (exit 2) after
@@ -161,6 +161,8 @@ def main():
     parser.add_argument("--max-cold-ms", type=float, default=None)
     parser.add_argument("--max-hook-memory-mb", type=float, default=None)
     args = parser.parse_args()
+    if args.cold_runs < 3:
+        parser.error("--cold-runs must be 3 or more: one slow start must not move the median the cold budget holds")
 
     env = dict(os.environ, OSTROM_HOOK_TIMING="1")
     hook_walls, hook_insides = run_many([args.binary, "hook", "gate"], args.runs, stdin=EVENT, env=env, accepted=(0, 2))
@@ -220,8 +222,8 @@ def main():
             if not walls:
                 failed.append(f"{name} cannot be started with the file cache emptied here ({reason}), "
                               f"so --max-cold-ms {args.max_cold_ms} cannot be held")
-            elif max(walls) > args.max_cold_ms:
-                failed.append(f"{name} takes {max(walls):.2f} ms with the file cache emptied, "
+            elif (median := statistics.median(walls)) > args.max_cold_ms:
+                failed.append(f"{name} takes {median:.2f} ms (median) with the file cache emptied, "
                               f"above {args.max_cold_ms} ms")
     if args.max_hook_memory_mb is not None:
         if memory is None:
