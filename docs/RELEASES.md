@@ -19,6 +19,12 @@ artifact of the run. A dry run reads no signing secret: it runs on any branch an
 so cosign and the manifest are signed with throwaway keys made in the job (checked against them, openssl included),
 and the macOS and Windows binaries are not code-signed. Only a tag signs with the release keys.
 
+**Who can cut a release.** The tag ruleset `release-tags` lets only organisation admins create, move or delete a tag
+`[0-9]*` or `v[0-9]*`. The jobs that sign or publish (`build-macos`, `package`, `image`, `publish`, `taps`) run in the
+`release` environment, which admits only those tags; a dry run enters no environment. The signing keys and the tap
+deploy keys belong in that environment's secrets, not the repository's: a job outside it, a dry run or another
+workflow, then cannot read them.
+
 **Draft or public.** While the repository is private the release is created as a **draft** (only the team sees it).
 At the go: make the repositories public, set the repository variable `RELEASE_DRAFT` to `false`
 (`gh variable set RELEASE_DRAFT --body false -R ostrom-hq/ostrom-cli`), and publish the existing draft
@@ -42,6 +48,19 @@ made public in the organisation's package settings.
 Also published: the image `ghcr.io/ostrom-hq/ostrom-runner:<version>` and `:latest` (linux/amd64 and linux/arm64,
 signed by digest, with an SBOM and max-mode provenance attached by buildx), the Homebrew formula
 (`ostrom-hq/homebrew-tap`, `Formula/ostrom.rb`) and the Scoop manifest (`ostrom-hq/scoop-bucket`, `bucket/ostrom.json`).
+The `taps` job pushes them over SSH trusting only GitHub's published host keys, pinned in
+`scripts/release/github_known_hosts` (no first-use trust, no system `known_hosts`); it takes its ssh options from
+`scripts/release/check-github-host-keys.sh --ssh-options`. The same script checks that every pinned key is still
+published at https://api.github.com/meta and that each pinned key type verifies github.com: in the release checks,
+and in the release's `version` job before a public release is published (`RELEASE_DRAFT` set to `false`: a draft
+release, and a dry run, run no taps job and skip the check). When GitHub rotates a key, run
+`sh scripts/release/check-github-host-keys.sh --update`, compare the diff with GitHub's announcement and merge it by
+pull request. A tag pushed before that does not publish: once the pins are on `main`, tag the next patch version. A
+key GitHub adds is only a warning until it is pinned.
+
+The Scoop manifest's `autoupdate` reads the archive's line of the release's `SHA256SUMS` instead of hashing the
+download: it catches a corrupt or swapped download, but is no stronger than the release, since Scoop does not check
+the signature of `SHA256SUMS`.
 
 ## Verifying
 

@@ -12,6 +12,7 @@ import dev.ostrom.cli.platform.ProcessCapture
 import dev.ostrom.cli.platform.ProcessLauncher
 import dev.ostrom.cli.platform.ProcessResult
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -126,19 +127,25 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         calls.checkPolicy(agent, model, site)
         if (request.dryRun) return calls.dryRun(agent, repo, model, site)
         val launch = calls.createLaunch(repo, agent, model, site)
-        val pack = calls.packageOf(repo, site, keep = true)
-        val keys = calls.instanceKeys()
-        val temporary = join(site.temporaryDirectory, "ostrom-run-${dependencies.clock.millis()}")
-        try {
-            dependencies.files.createPrivateDirectory(temporary)
-        } catch (e: IOException) {
-            stop(CANNOT_WRITE, "cannot create $temporary (${e.message})")
-        }
-        val run = Run(request, site, adapter, executable, repo, top, model, launch, pack, keys, temporary)
+        // From here on, however the launch ends (the agent's exit, a stop before it starts, a cancellation), its agent
+        // token is revoked at once (AUDIT-SECU-RUNNER-2 R2b).
         return try {
-            session(run)
+            val pack = calls.packageOf(repo, site, keep = true)
+            val keys = calls.instanceKeys()
+            val temporary = join(site.temporaryDirectory, "ostrom-run-${dependencies.clock.millis()}")
+            try {
+                dependencies.files.createPrivateDirectory(temporary)
+            } catch (e: IOException) {
+                stop(CANNOT_WRITE, "cannot create $temporary (${e.message})")
+            }
+            val run = Run(request, site, adapter, executable, repo, top, model, launch, pack, keys, temporary)
+            try {
+                session(run)
+            } finally {
+                cleanUp(temporary, site)
+            }
         } finally {
-            cleanUp(temporary, site)
+            withContext(NonCancellable) { calls.endLaunch(launch) }
         }
     }
 

@@ -140,7 +140,8 @@ without the session, 77 for a session the caller may not read (a gate it may not
 - **Governance writes** (`ostrom policy set`, the rule decisions and edits of `ostrom policy rules`, `ostrom harness
   enforce`, `update`, `remove`, `add --enforce`) never go with the device's token nor a console token (S2-52): they take the token of `ostrom login --admin`, which asks for
   `policy:write`, `harness:write` and `gates:policy` (`AdminTokens.SCOPES`), shown and approved in the browser by an
-  owner or admin. It is kept apart from the device's token (`<server>#admin` in the secret store, its expiry in
+  owner or admin. The read a governance write makes first (the model policy of `ostrom policy set`, `inference:read`,
+  which the device's token lacks) goes with the same token (`OrgAccess.readToGovern`). It is kept apart from the device's token (`<server>#admin` in the secret store, its expiry in
   `admin.json`), lasts until the server's expiry or 8 hours, the sooner, and is never renewed. Without a valid one, a
   403 is exit 77 saying to run `ostrom login --admin`; a 401 to it forgets it (exit 65). `OSTROM_TOKEN`, set on purpose,
   is never swapped for it. `ostrom logout` revokes and forgets it too, with or without the device's token. A token
@@ -148,7 +149,7 @@ without the session, 77 for a session the caller may not read (a gate it may not
   (exit 69); one approved by another person than the device's is kept, and said.
   Made with a CLI token (the admin token or the device's), a governance write is held by the server until an owner or
   an admin confirms it on the console, from a session signed in less than 5 minutes ago (audit H1, decision of
-  02/11/2026; coming soon: ostrom-server does not hold these writes yet): the write answers 202
+  02/11/2026): the write answers 202
   `GovernanceConfirmationPending` and nothing is written. Any write answered so is waited on (`ConfirmationWait`): the
   CLI says the link (`confirmUrl`, else `<console>/confirm/<id>`) on stderr and polls
   `GET /api/v1/confirmations/{id}?wait=30` with the token that asked; a pending answer that came at once is asked again
@@ -211,11 +212,13 @@ Every pull request marked ready runs one required check on Linux, `ci` (drafts u
 - `linuxX64Test`; the linuxArm64 and mingwX64 test binaries and the release binaries of the three Linux-built targets;
   `scripts/measure.py` measures, on the release binary, `ostrom hook gate` and `ostrom version` start-up, warm (fails
   above a 15 ms median, and a p95 of 20 ms for the hook and 30 ms for `version`) and with the file cache emptied first
-  (500 ms; 1000 ms on macOS), the hook's peak memory (25 MB; on Linux the figure read is never below the Python
+  (300 ms, median of 5 starts), the hook's peak memory (25 MB; on Linux the figure read is never below the Python
   script's own, about 14 MB, so the budget catches a hook above 25 MB, not a growth under it) and the binary sizes
   (15 MB, Windows 17); `ci/build-linux.sh` leaves `dist/ostrom` for the end-to-end bench. linuxArm64 holds the same
-  start-up and memory budgets, macOS too with 1000 ms for a start with the cache emptied; the `git push` budget is
-  held on linuxX64 only, and Windows holds only its 40 ms median.
+  start-up and memory budgets. macOS runners vary by about 3 times from one machine to the next, so macOS holds about
+  twice its slowest runner: a 30 ms median, a p95 of 45 ms for the hook and 60 ms for `version`, a 1500 ms median
+  with the cache emptied, the same 25 MB. The `git push` budget is held on linuxX64 only, and Windows holds only its 40 ms
+  median.
 
 On `main` and on demand (`workflow_dispatch` with `full_validation`), three more jobs run: the
 cross-compiled test binaries of every module on `ubuntu-24.04-arm` and on `windows-latest` (no Gradle there; the

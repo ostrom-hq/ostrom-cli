@@ -330,6 +330,49 @@ class AgentLaunchUseCaseTest {
     }
 
     @Test
+    fun theEndOfTheAgentEndsItsLaunchWithItsOwnTokenLast() = runTest {
+        serveALaunch()
+        server["DELETE ${Routes.launch("L1")}"] = 204 to ""
+        assertEquals(3, start())
+        // AUDIT-SECU-RUNNER-2 R2b: the agent token is revoked when ostrom <agent> ends, not 24 h later
+        val end = server.requests.last()
+        assertEquals("DELETE ${Routes.launch("L1")}", "${end.method} ${end.path}", "after the session's end")
+        assertEquals("agent-token", end.token, "the launch's own token, never the device token")
+        assertTrue(said.none { "revoked" in it }, "nothing to say when it is done")
+    }
+
+    @Test
+    fun aLaunchStoppedBeforeTheAgentStartsIsEndedToo() = runTest {
+        serveALaunch()
+        server["GET ${Routes.PACKAGE}?repo=acme-api"] = 200 to """{"format":"x","payload":"e30="}"""
+        assertEquals(78, start())
+        assertEquals("agent-token", server.sent("DELETE ${Routes.launch("L1")}").single().token)
+        assertEquals(emptyList(), commands)
+    }
+
+    @Test
+    fun anEndThatFailsIsSaidButNeverChangesTheExitCode() = runTest {
+        serveALaunch()
+        server["DELETE ${Routes.launch("L1")}"] = 500 to """{"error":{"type":"internal","message":"boom"}}"""
+        assertEquals(3, start())
+        assertEquals("ostrom: the launch's agent token was not revoked (boom): it expires on its own", said.last())
+        server.unreachable = setOf("DELETE ${Routes.launch("L1")}")
+        assertEquals(3, start())
+        assertEquals(
+            "ostrom: the launch's agent token was not revoked (connection refused): it expires on its own",
+            said.last(),
+        )
+        // an older server, or a token already refused: nothing to say
+        server.unreachable = emptySet()
+        for (status in listOf(401, 404, 405)) {
+            server["DELETE ${Routes.launch("L1")}"] = status to "{}"
+            said.clear()
+            assertEquals(3, start())
+            assertTrue(said.none { "revoked" in it }, "$status")
+        }
+    }
+
+    @Test
     fun aRefusedPackageOrNoPrivateFolderStopsTheLaunch() = runTest {
         serveALaunch()
         server["GET ${Routes.PACKAGE}?repo=acme-api"] = 200 to """{"format":"x","payload":"e30="}"""

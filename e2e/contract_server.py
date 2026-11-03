@@ -189,6 +189,9 @@ def make_handler(state):
                 return self._answer(200, {"id": session})
             if (method, path) == ("GET", "/api/v1/receipts/W-e2e/bundle"):
                 return self._answer(200, state["bundle"])
+            # the end of `ostrom <agent>`: the launch's own token ends its launch (AUDIT-SECU-RUNNER-2 R2b)
+            if (method, path) == ("DELETE", "/api/v1/launches/L-e2e"):
+                return self._empty(204)
             return self._error(404, "not_found", f"no {method} {path} in the e2e contract server")
 
         def _session_read(self, path, query):
@@ -218,6 +221,9 @@ def make_handler(state):
 
         def do_POST(self):
             self._handle("POST")
+
+        def do_DELETE(self):
+            self._handle("DELETE")
 
     return Handler
 
