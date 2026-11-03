@@ -493,7 +493,8 @@ class GateHookTest {
             assertEquals(2, reply.exitCode, command)
             assertContains(reply.stderr, "run the push as its own command")
         }
-        assertTrue(calls.calls.isEmpty())
+        // each refusal is told after it, never asked (audit A6)
+        assertEquals(List(3) { Routes.LOCAL_DENIALS }, calls.paths())
         assertEquals(HookReply(), hook().handle(bash("sh missing.sh")))
         assertEquals(HookReply(), hook().handle(bash("bash -c 'echo hi'")))
     }
