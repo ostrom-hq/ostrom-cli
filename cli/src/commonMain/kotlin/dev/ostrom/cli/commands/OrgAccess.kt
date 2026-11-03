@@ -67,14 +67,19 @@ internal class OrgAccess(
     /**
      * `GET` [path] that a governance write reads before it is made (the model policy, whose default and members'
      * lists `ostrom policy set` keeps): with the token the write goes with, the admin token while it is valid, as the
-     * device's token cannot read it (`inference:read`), and refused as the write would be. Without one, as [read].
+     * device's token cannot read it (`inference:read`), and refused as the write would be: without an admin token, a
+     * 403 says to run `ostrom login --admin`; an admin token approved before the server gave it the read says to run it
+     * again.
      */
     fun readToGovern(path: String, notFound: String): JsonObject {
         // OSTROM_TOKEN, set on purpose, is never swapped for the admin token (S2-52)
         val elevated = if (consoleToken) null else admin.valid(signed.serverUrl)
-        if (elevated == null) return read(path, notFound)
-        val answer = runBlocking { server.get(path, elevated) }
-        if (answer is ServerAnswer.Failed) refused(answer, true, elevated)
+        val answer = runBlocking { server.get(path, elevated ?: signed.token) }
+        if (answer is ServerAnswer.Failed) {
+            val older = elevated != null && answer.status == FORBIDDEN && answer.message.startsWith(LACKS)
+            if (older) throw stopWith(ExitCode.REFUSED, "${answer.message}\n$ADMIN_OLDER")
+            refused(answer, true, elevated)
+        }
         return answer.orStop(signed.serverUrl, notFound)
     }
 
@@ -158,6 +163,8 @@ internal class OrgAccess(
 
         /** The server's refusal of a right the token lacks (`requireScope`), before the right's name. */
         const val LACKS = "This credential does not allow "
+
+        const val ADMIN_OLDER = "Your admin token is older than this right: $ELEVATE"
 
         const val SIGN_IN_AGAIN =
             "This device's token is older than this right: run `ostrom login` again for a new one."

@@ -139,7 +139,8 @@ without the session, 77 for a session the caller may not read (a gate it may not
 - **Governance writes** (`ostrom policy set`, the rule decisions and edits of `ostrom policy rules`, `ostrom harness
   enforce`, `update`, `remove`, `add --enforce`) never go with the device's token nor a console token (S2-52): they take the token of `ostrom login --admin`, which asks for
   `policy:write`, `harness:write` and `gates:policy` (`AdminTokens.SCOPES`), shown and approved in the browser by an
-  owner or admin. It is kept apart from the device's token (`<server>#admin` in the secret store, its expiry in
+  owner or admin. The read a governance write makes first (the model policy of `ostrom policy set`, `inference:read`,
+  which the device's token lacks) goes with the same token (`OrgAccess.readToGovern`). It is kept apart from the device's token (`<server>#admin` in the secret store, its expiry in
   `admin.json`), lasts until the server's expiry or 8 hours, the sooner, and is never renewed. Without a valid one, a
   403 is exit 77 saying to run `ostrom login --admin`; a 401 to it forgets it (exit 65). `OSTROM_TOKEN`, set on purpose,
   is never swapped for it. `ostrom logout` revokes and forgets it too, with or without the device's token. A token

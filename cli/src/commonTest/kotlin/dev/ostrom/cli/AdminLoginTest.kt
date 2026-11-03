@@ -167,6 +167,17 @@ class AdminLoginTest : SetupKit() {
     }
 
     @Test
+    fun withoutAnAdminTokenTheReadOfTheModelPolicySaysToRunLoginAdmin() {
+        val lacks = """{"error":{"message":"This credential does not allow inference:read."}}"""
+        val refused = mapOf("GET /api/v1/policy/models" to (403 to lacks))
+        assertEquals(77, run(refused, "policy", "set", "models", "sonnet"))
+        assertErr("This credential does not allow inference:read.\nChanging the policy or the harness of acme " +
+            "takes an admin token. Run ostrom login --admin")
+        assertEquals("ost_1", requests.last().second.token)
+        assertTrue(requests.none { it.second.method == "PUT" }, "nothing written")
+    }
+
+    @Test
     fun anAdminTokenTheServerNoLongerTakesIsForgotten() {
         keptAdmin(now + hour)
         val revoked = mapOf("PUT /api/v1/gates/policy" to (401 to """{"error":{"message":"revoked"}}"""))
@@ -182,6 +193,20 @@ class AdminLoginTest : SetupKit() {
         assertErr("Only an owner or admin.")
         assertFalse(console.err.contains("takes an admin token"), console.err.toString())
         assertEquals("ost_adm", secretsKept[adminSecret], "kept: it is the person who may not")
+        // an admin token approved before the server gave it the model policy's read: run ostrom login --admin again
+        console.err.clear()
+        val lacks = """{"error":{"message":"This credential does not allow inference:read."}}"""
+        val older = mapOf("GET /api/v1/policy/models" to (403 to lacks))
+        assertEquals(77, run(older, "policy", "set", "models", "sonnet"))
+        assertErr("This credential does not allow inference:read.\nYour admin token is older than this right: " +
+            "Run ostrom login --admin")
+        assertTrue(requests.none { it.second.method == "PUT" }, "nothing written")
+        // a refusal of the read for its person: the server's word only, the token kept
+        console.err.clear()
+        val notAdminRead = mapOf("GET /api/v1/policy/models" to (403 to only))
+        assertEquals(77, run(notAdminRead, "policy", "set", "models", "sonnet"))
+        assertErr("Only an owner or admin.")
+        assertFalse(console.err.contains("older than this right"), console.err.toString())
         // refused at the read of the model policy, before its write: the same words
         console.err.clear()
         val gone = mapOf("GET /api/v1/policy/models" to (401 to """{"error":{"message":"revoked"}}"""))
