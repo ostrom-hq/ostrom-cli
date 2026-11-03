@@ -13,7 +13,6 @@ import dev.ostrom.cli.launcher.pretty
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlin.random.Random
 import kotlin.random.nextULong
 
@@ -23,8 +22,10 @@ import kotlin.random.nextULong
  *
  * A trusted workspace's `.gemini/settings.json` wins over the user's: `hooksConfig.enabled: false` would turn Ostrom's
  * hooks off, and its `hooksConfig.disabled` adds hook names to skip (Gemini CLI 0.66, security audit of the CLI n°2,
- * H3). Only the system settings win over the workspace, so the session's system settings are the administrator's with
- * `hooksConfig.enabled: true`, and Ostrom's hooks get names no repository can know in advance.
+ * H3). Only the system settings win over the workspace, and Gemini ignores system settings not owned by root, so a
+ * session cannot write its own: Gemini is not started where the workspace's settings touch `hooks` or `hooksConfig`.
+ * The system settings stay the administrator's, named by Ostrom so that a repository's `.env` cannot name others, and
+ * Ostrom's hooks get names no repository can know in advance.
  *
  * @param nonce A value of the session no repository can guess, for the names of Ostrom's hooks.
  */
@@ -32,12 +33,13 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
     AgentAdapter {
     override val agent = Agent.GEMINI
 
-    // the version in which the system settings were seen to win over a workspace's `hooksConfig` (security audit
-    // n°2, H3): an older one is not trusted to keep the hooks on
+    // the version whose settings were read for H3 (security audit n°2): an older one is not trusted to keep the
+    // hooks on
     override val minimum = MinimumVersion("0.66.0", "npm install -g @google/gemini-cli@latest")
 
     override fun prepare(layout: SessionLayout, files: LaunchFiles): AgentLaunch {
         val real = join(layout.variable("GEMINI_CLI_HOME") ?: layout.home, ".gemini")
+        refuseWorkspaceHooks(layout, files, real)
         val root = join(layout.temporary, "gemini-home")
         files.createPrivateDirectory(root)
         val own = setOf("settings.json", "GEMINI.md", "skills")
@@ -62,29 +64,43 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
     }
 
     /**
-     * The session's system settings: the ones Gemini would read on this machine (`GEMINI_CLI_SYSTEM_SETTINGS_PATH`, or
-     * the place of this machine's platform) with `hooksConfig.enabled: true`, and the variables that point
-     * Gemini at them, the administrator's defaults kept where they were. They are read as Gemini reads them,
-     * comments and trailing commas included.
+     * Stops the launch when a workspace's settings touch `hooks` or `hooksConfig`, or cannot be read: read as Gemini
+     * reads them (comments, trailing commas), in each folder of [SessionLayout.workspace] but the developer's own.
      *
-     * @throws AdapterException When they cannot be read even so: without them, a repository could turn the hooks off.
+     * @throws AdapterException When one does: a repository could turn Ostrom's hooks off.
+     */
+    private fun refuseWorkspaceHooks(layout: SessionLayout, files: LaunchFiles, real: String) {
+        for (folder in layout.workspace) {
+            val directory = join(folder, ".gemini")
+            // in their home, the developer's own settings are read as theirs, Ostrom's hooks added
+            val text = if (directory == real) null else files.read(join(directory, "settings.json"))?.removePrefix(BOM)
+            if (text.isNullOrBlank()) continue
+            val path = join(directory, "settings.json")
+            val settings = parseObject(text, comments = true) ?: throw AdapterException(
+                "gemini: $path cannot be read as JSON: Ostrom cannot tell whether it turns its hooks off, so Gemini " +
+                    "is not started",
+            )
+            if ("hooks" in settings || "hooksConfig" in settings) {
+                throw AdapterException(
+                    "gemini: $path sets `hooks` or `hooksConfig`, with which a repository can turn Ostrom's hooks " +
+                        "off: Gemini is not started. Remove them from that file to work with Ostrom",
+                )
+            }
+        }
+    }
+
+    /**
+     * The variables that name the administrator's system settings and defaults, where Gemini would read them on this
+     * machine (`GEMINI_CLI_SYSTEM_SETTINGS_PATH`, or the place of this machine's platform): set by Ostrom, a
+     * repository's `.env` cannot name others.
      */
     private fun systemSettings(layout: SessionLayout, files: LaunchFiles): Map<String, String> {
         val real = layout.variable(SYSTEM_SETTINGS) ?: systemPlace(layout, files)
-        val text = files.read(real)?.removePrefix(BOM)
-        val theirs = if (text.isNullOrBlank()) JsonObject(emptyMap()) else parseObject(text, comments = true)
-            ?: throw AdapterException(
-                "gemini: the system settings ($real) cannot be read as JSON: Ostrom cannot keep its hooks on, so " +
-                    "Gemini is not started; fix that file, or ask its administrator to",
-            )
-        val config = theirs.child("hooksConfig").orEmpty() + ("enabled" to JsonPrimitive(true))
-        val path = join(layout.temporary, "gemini-system.json")
-        files.write(path, JsonObject(theirs + ("hooksConfig" to JsonObject(config))).toString(), FileAccess.PRIVATE)
-        // Gemini looks for the defaults beside the system settings it is given: they stay beside the real ones
+        // Gemini looks for the defaults beside the system settings
         val cut = real.lastIndexOfAny(charArrayOf('/', '\\'))
         val beside = if (cut < 0) "." else real.substring(0, maxOf(cut, 1))
         val defaults = layout.variable(SYSTEM_DEFAULTS) ?: join(beside, "system-defaults.json")
-        return mapOf(SYSTEM_SETTINGS to path, SYSTEM_DEFAULTS to defaults)
+        return mapOf(SYSTEM_SETTINGS to real, SYSTEM_DEFAULTS to defaults)
     }
 
     /**

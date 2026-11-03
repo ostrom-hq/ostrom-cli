@@ -229,6 +229,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
             home = run.site.home,
             variable = run.site.variable,
             relay = relay,
+            workspace = listOf(run.site.cwd, run.top).distinct(),
         )
         return try {
             run.adapter.prepare(layout, dependencies.files)
