@@ -114,6 +114,17 @@ class OstromCliTest : CliKit() {
     }
 
     @Test
+    fun theVersionOptionIsOstromsOnlyNeverACommandsNorAnAgents() {
+        assertEquals(0, cli().run(arrayOf("--debug", "--version")))
+        assertOut("ostrom ${BuildInfo.VERSION} (kotlin-native, Linux x64)\n")
+        assertEquals(64, cli().run(arrayOf("doctor", "--version")), "doctor has no --version of its own")
+        val home = mapOf("HOME" to "/home/maya")
+        assertEquals(0, cli(environment = home).run(arrayOf("config", "set", "server", "https://cfg.example")))
+        assertEquals(7, cli(environment = home).run(arrayOf("codex", "--version")))
+        assertEquals(listOf("--version"), launches.last().first.arguments, "the agent's own --version, passed as is")
+    }
+
+    @Test
     fun noArgumentIsTheHomeScreenNeverTheRawHelp() {
         assertEquals(0, cli().run(emptyArray()))
         val home = console.out.toString()

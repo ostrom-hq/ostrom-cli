@@ -13,6 +13,7 @@ import com.github.ajalt.mordant.rendering.AnsiLevel
 import com.github.ajalt.mordant.terminal.Terminal
 import dev.ostrom.cli.BuildInfo
 import dev.ostrom.cli.CliDependencies
+import dev.ostrom.cli.ExitCode
 import dev.ostrom.cli.help.NO_COLOR_OPTION
 import dev.ostrom.cli.help.OstromHelpFormatter
 import dev.ostrom.cli.launcher.Agent
@@ -61,7 +62,7 @@ class RootCommand(private val dependencies: CliDependencies) : CliktCommand(name
         eagerOption("--version", help = "Print the version of ostrom") {
             invoked = VERSION_COMMAND
             dependencies.console.out(versionLine(dependencies))
-            throw ProgramResult(0)
+            throw ProgramResult(ExitCode.OK.code)
         }
     }
 
