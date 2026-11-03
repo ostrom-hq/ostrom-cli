@@ -61,21 +61,26 @@ def start_server(work, actions):
 def session(binary, actions, spec):
     """
     A session whose agent fires [spec] (`<calls>:<seconds>`) harmless before-tool hooks under a policy of [actions]:
-    each hook's wall time, exit code and the server's requests that arrived while it ran.
+    each hook's wall time, exit code and the server's requests that arrived while it ran; or, for a session that does
+    not end, why (what `ostrom` printed last).
     """
     with tempfile.TemporaryDirectory(prefix="ostrom-perf-") as work:
         process, server, log = start_server(work, actions)
         try:
             home, agents, repo = setup(work)
-            _, report = launch(binary, server, home, agents, repo, work, "claude", ["-p", "perf"],
-                               {"E2E_WINDOWS": spec})
+            try:
+                _, report = launch(binary, server, home, agents, repo, work, "claude", ["-p", "perf"],
+                                   {"E2E_WINDOWS": spec})
+            except subprocess.TimeoutExpired as late:
+                said = late.stderr.decode(errors="replace") if isinstance(late.stderr, bytes) else late.stderr or ""
+                return None, f"the session did not end in 120 s: {said.strip()[-300:] or 'nothing on stderr'}"
             with open(log) as handle:
                 arrived = [json.loads(line)["at"] for line in handle if line.strip()]
         finally:
             process.kill()
     hooks = report.get("windows") or []
     return [{"millis": h["millis"], "code": h["code"],
-             "requests": sum(1 for at in arrived if h["start"] <= at <= h["end"])} for h in hooks]
+             "requests": sum(1 for at in arrived if h["start"] <= at <= h["end"])} for h in hooks], None
 
 
 def cold(command, stdin=None):
@@ -83,6 +88,11 @@ def cold(command, stdin=None):
     environment = {"PATH": os.environ["PATH"], "HOME": tempfile.gettempdir()}
     walls, reason = run_cold(command, RUNS, stdin=stdin, env=environment, accepted=(0, 2))
     return (round(statistics.median(walls), 1), None) if walls else (None, reason)
+
+
+def per_hook(hooks):
+    """The server's requests per hook, or None without a hook measured."""
+    return round(sum(h["requests"] for h in hooks) / len(hooks), 2) if hooks else None
 
 
 def median(hooks, key):
@@ -105,16 +115,20 @@ def main():
 
     version, version_why = cold([binary, "version"])
     hook, hook_why = cold([binary, "hook", "gate"], HOOK_EVENT)
-    empty = session(binary, 0, f"{RUNS}:0")
-    ruled = session(binary, 50, f"{RUNS}:0")
-    spaced = session(binary, 50, SPACED)[1:]  # the first call follows the session's own hooks: not 31 s apart
+    empty, empty_why = session(binary, 0, f"{RUNS}:0")
+    ruled, ruled_why = session(binary, 50, f"{RUNS}:0")
+    spaced, spaced_why = session(binary, 50, SPACED)
+    # the first call follows the session's own hooks: not 31 s apart
+    spaced = spaced[1:] if spaced else None
+    unmeasured = empty is None or ruled is None or spaced is None
+    empty, ruled, spaced = empty or [], ruled or [], spaced or []
     size = round(os.path.getsize(binary) / 1024 / 1024, 2)
     figures = {
         "label": args.label,
         "cold_version_ms": version, "cold_hook_ms": hook,
         "hook_empty_ms": median(empty, "millis"), "hook_50_rules_gate_ms": median(ruled, "millis"),
-        "requests_per_hook_burst": round(sum(h["requests"] for h in empty + ruled) / max(1, len(empty + ruled)), 2),
-        "requests_per_hook_spaced": round(sum(h["requests"] for h in spaced) / max(1, len(spaced)), 2),
+        "requests_per_hook_burst": per_hook(empty + ruled),
+        "requests_per_hook_spaced": per_hook(spaced),
         "spaced_ms": [h["millis"] for h in spaced],
         "size_mb": size,
         "codes": sorted({h["code"] for h in empty + ruled + spaced}),
@@ -122,10 +136,10 @@ def main():
     rows = [
         ("`ostrom version`, file cache emptied (median of 20)", version, "ms", version_why),
         ("hook outside a session, file cache emptied (median of 20)", hook, "ms", hook_why),
-        ("hook in a session, policy without action (median of 20)", figures["hook_empty_ms"], "ms", None),
-        ("hook in a session, 50 actions and a gate (median of 20)", figures["hook_50_rules_gate_ms"], "ms", None),
-        ("requests to Ostrom per hook, 20 in a row", figures["requests_per_hook_burst"], "", None),
-        ("requests to Ostrom per hook, 31 s apart", figures["requests_per_hook_spaced"], "", None),
+        ("hook in a session, policy without action (median of 20)", figures["hook_empty_ms"], "ms", empty_why),
+        ("hook in a session, 50 actions and a gate (median of 20)", figures["hook_50_rules_gate_ms"], "ms", ruled_why),
+        ("requests to Ostrom per hook, 20 in a row", figures["requests_per_hook_burst"], "", empty_why or ruled_why),
+        ("requests to Ostrom per hook, 31 s apart", figures["requests_per_hook_spaced"], "", spaced_why),
         ("binary size", size, "MB", None),
     ]
     lines = [f"### Hook cost, {args.label}", "", "| Figure | Value |", "| --- | --- |"]
@@ -154,7 +168,9 @@ def main():
     for budget, value, what in budgets:
         if budget is not None and (value is None or value > budget):
             over.append(f"{what}: {value} > {budget}")
-    if figures["codes"] != [0]:
+    if unmeasured:
+        over.append("a session was not measured (see the table)")
+    elif figures["codes"] != [0]:
         over.append(f"a harmless tool was not let through (exit codes {figures['codes']})")
     if over:
         print("over budget:\n  " + "\n  ".join(over))

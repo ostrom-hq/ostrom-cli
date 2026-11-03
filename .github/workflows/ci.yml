@@ -439,8 +439,16 @@ jobs:
           --binary cli/build/bin/macosArm64/releaseExecutable/ostrom.kexe
           --sizes cli/build/bin/macosArm64/releaseExecutable/ostrom.kexe --max-size-mb 15
           --max-hook-ms 30 --max-hook-p95-ms 45 --max-version-p95-ms 60 --max-cold-ms 1500 --max-hook-memory-mb 25
+      # `ostrom` moves the device token to the Keychain: a keychain of the run's own, unlocked, without a time limit, so
+      # that no question of the Keychain holds a session (the runner's login keychain may ask, and nobody answers)
       - name: Hook cost in a session (median of 20)
-        run: python3 e2e/perf.py --binary cli/build/bin/macosArm64/releaseExecutable/ostrom.kexe --label macosArm64
+        run: |
+          security create-keychain -p ostrom-ci ostrom-ci.keychain
+          security set-keychain-settings ostrom-ci.keychain
+          security unlock-keychain -p ostrom-ci ostrom-ci.keychain
+          security list-keychains -d user -s ostrom-ci.keychain
+          security default-keychain -d user -s ostrom-ci.keychain
+          python3 e2e/perf.py --binary cli/build/bin/macosArm64/releaseExecutable/ostrom.kexe --label macosArm64
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ostrom-macosArm64
