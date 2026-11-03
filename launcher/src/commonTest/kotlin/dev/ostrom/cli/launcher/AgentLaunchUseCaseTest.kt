@@ -614,6 +614,30 @@ class AgentLaunchUseCaseTest {
     }
 
     @Test
+    fun theAgentsPathHoldsOnlyAbsoluteFoldersOutsideTheRepository() = runTest {
+        // a relative entry, an empty one, or one inside the repository lets the repository supply the hooks' bash
+        serveALaunch()
+        files.texts[join("/work/acme-api/node_modules/.bin", "bash")] = ""
+        files.texts[join("/usr/bin", "bash")] = ""
+        files.links["/home/dev/acme"] = "/work/acme-api"
+        variables["PATH"] = "node_modules/.bin::.:/work/acme-api/node_modules/.bin:/home/dev/acme/bin:/usr/bin:" +
+            "/work/acme-api/src/tools:/opt/tools:bin"
+        start()
+        val path = checkNotNull(environments.last()["PATH"])
+        assertEquals("/opt/bin:/usr/bin:/opt/tools", path)
+        val bash = path.split(':').map { join(it, "bash") }.first { it in files.texts }
+        assertEquals(join("/usr/bin", "bash"), bash, "the bash found is outside the repository")
+    }
+
+    @Test
+    fun theHooksConfigFolderIsTheLaunchersOwn() = runTest {
+        // set, so that neither a repository's .env nor XDG_CONFIG_HOME can choose another
+        serveALaunch()
+        start()
+        assertEquals("/config", environments.last()["OSTROM_HOME"])
+    }
+
+    @Test
     fun withoutAPathTheAgentGetsOstromsFolderAndNeverTheWorkingOne() = runTest {
         serveALaunch()
         variables["PATH"] = ""

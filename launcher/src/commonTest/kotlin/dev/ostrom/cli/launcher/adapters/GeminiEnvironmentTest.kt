@@ -31,6 +31,39 @@ private val SHELL = listOf(
     "NODE_PATH",
     "GEMINI_SANDBOX",
     "ComSpec",
+    // the rest of Gemini CLI 0.66's own list of what changes a program run (BLOCKED_EXECUTION_ENVS)
+    "NODE_CLI_FLAGS",
+    "_FORCE_NODE_OPTIONS",
+    "ELECTRON_RUN_AS_NODE",
+    "PYTHONPATH",
+    "PYTHONSTARTUP",
+    "RUBYOPT",
+    "RUBYLIB",
+    "PERL5OPT",
+    "PERL5LIB",
+    "PERL5DB",
+    "LD_DEBUG",
+    "LD_PROFILE",
+    "DYLD_FORCE_FLAT_NAMESPACE",
+    "DYLD_FALLBACK_LIBRARY_PATH",
+    "DYLD_FALLBACK_FRAMEWORK_PATH",
+    "JAVA_TOOL_OPTIONS",
+    "_JAVA_OPTIONS",
+    "CLASSPATH",
+    "DOTNET_STARTUP_HOOKS",
+    "CORECLR_PROFILER_PATH",
+    "CORECLR_ENABLE_PROFILING",
+    // and what Gemini's list lacks: Python's home, and the proxies the hooks' HTTP client would send the relay's
+    // token through
+    "PYTHONHOME",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "no_proxy",
 )
 
 // with one of these set, Ostrom cannot vouch for its gate
@@ -50,7 +83,7 @@ private val REFUSED = listOf(
  * never runs (security audit of the CLI n°2, H3).
  */
 class GeminiEnvironmentTest {
-    private val files = MemoryFiles()
+    private val files = MemoryFiles().apply { texts[join("/usr/bin", "bash")] = "" }
 
     private fun prepare(layout: SessionLayout): AgentLaunch {
         files.deleteRecursively(join("/tmp/run", "gemini-home"))
@@ -101,12 +134,16 @@ class GeminiEnvironmentTest {
     }
 
     @Test
-    fun geminiIsNotStartedWithoutAPath() {
+    fun geminiIsNotStartedWithoutABashOnItsPath() {
+        // Gemini runs its hooks with the bash of its PATH: without one, the spawn fails, and the tool runs ungated
         assertEquals(
-            "gemini: PATH is not set, and Gemini looks bash up in it to run Ostrom's hooks, so a repository's .env " +
-                "could name another: Gemini is not started. Set PATH to work with Ostrom",
-            refusal(layout(variables = mapOf("PATH" to ""))),
+            "gemini: there is no bash on the PATH Ostrom gives it (/opt/bin:/usr/local/bin), and Gemini runs " +
+                "Ostrom's hooks with it: without one they fail open, so Gemini is not started. Install bash, or " +
+                "put its folder on your PATH, to work with Ostrom",
+            refusal(layout(environment = mapOf("PATH" to "/opt/bin:/usr/local/bin"))),
         )
+        // Windows runs the hooks with PowerShell, not bash
+        prepare(layout(environment = mapOf("PATH" to "C:\\Windows"), pathSeparator = ';'))
     }
 
     @Test
@@ -151,13 +188,19 @@ class GeminiEnvironmentTest {
         )
         prepare(layout(workspace = listOf("/other")))
         files.texts[trusted] = """{"C:\\Work": "DO_NOT_TRUST"}"""
-        assertTrue("(DO_NOT_TRUST)" in refusal(layout(workspace = listOf("c:\\work\\repo"))))
+        val windows = layout(workspace = listOf("c:\\work\\repo"), pathSeparator = ';', foldsCase = true)
+        assertTrue("(DO_NOT_TRUST)" in refusal(windows))
         files.texts[trusted] = """{"/work": "DO_NOT_TRUST"}"""
         // as Gemini matches: the longest rule wins, a parent's TRUST_PARENT names the parent, and case is not told
         files.texts[trusted] = """{"/work": "DO_NOT_TRUST", "/work/repo/x": "TRUST_PARENT"}"""
         prepare(layout(workspace = listOf("/work/repo")))
+        // case is told apart as Gemini tells it: not on macOS and Windows, but on Linux
         files.texts[trusted] = """{"/Work/": "DO_NOT_TRUST", "/workshop": "TRUST_FOLDER"}"""
+        assertTrue("does not trust /work/repo" in refusal(layout(workspace = listOf("/work/repo"), foldsCase = true)))
+        assertNull(started(layout(workspace = listOf("/work/repo"))))
+        files.texts[trusted] = """{"/work": "DO_NOT_TRUST", "/work/Repo": "TRUST_FOLDER"}"""
         assertTrue("does not trust /work/repo" in refusal(layout(workspace = listOf("/work/repo"))))
+        assertNull(started(layout(workspace = listOf("/work/repo"), foldsCase = true)))
         prepare(layout(workspace = listOf("/workshop")))
         // the developer's own file, named by their variable, with comments as Gemini reads it
         files.texts["/dev/trusted.json"] = "{// mine\n\"/\": \"DO_NOT_TRUST\"}"
@@ -210,6 +253,8 @@ class GeminiEnvironmentTest {
         environment: Map<String, String?> = emptyMap(),
         workspace: List<String> = emptyList(),
         executable: String = "/opt/ostrom",
+        pathSeparator: Char = ':',
+        foldsCase: Boolean = false,
     ): SessionLayout {
         val all = mapOf("PATH" to "/usr/bin") + variables
         return SessionLayout(
@@ -224,6 +269,8 @@ class GeminiEnvironmentTest {
             relay = RelayView("http://127.0.0.1:4100", "relay-token", listOf("ostrom"), false),
             workspace = workspace,
             environment = environment,
+            pathSeparator = pathSeparator,
+            foldsCase = foldsCase,
         )
     }
 }

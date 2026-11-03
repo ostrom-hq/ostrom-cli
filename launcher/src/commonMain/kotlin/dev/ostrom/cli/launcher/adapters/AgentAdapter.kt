@@ -34,6 +34,8 @@ data class RelayView(val url: String, val token: String, val mcpServers: List<St
  * repository's top when it is another folder.
  * @property environment The variables the launcher sets (a value) or removes (null) for the agent, the adapter's
  * own aside.
+ * @property pathSeparator What separates the entries of `PATH` here (`;` on Windows).
+ * @property foldsCase Whether this machine's paths ignore case (macOS, Windows), as Gemini CLI compares them.
  */
 data class SessionLayout(
     val temporary: String,
@@ -47,6 +49,8 @@ data class SessionLayout(
     val relay: RelayView,
     val workspace: List<String> = emptyList(),
     val environment: Map<String, String?> = emptyMap(),
+    val pathSeparator: Char = ':',
+    val foldsCase: Boolean = false,
 ) {
     /** `"<ostrom>" hook gate|session`, the command an agent's hook runs. */
     fun hookCommand(kind: String): String = "${quoted(executable)} hook $kind"

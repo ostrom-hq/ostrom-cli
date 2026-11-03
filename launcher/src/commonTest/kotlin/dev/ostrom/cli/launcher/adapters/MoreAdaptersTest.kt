@@ -33,7 +33,8 @@ private val TRUST = listOf(
 )
 
 class MoreAdaptersTest {
-    private val files = MemoryFiles()
+    // Gemini runs its hooks with the bash of its PATH
+    private val files = MemoryFiles().apply { texts[join("/usr/bin", "bash")] = "" }
     private val session = join("/tmp/run", "session-env.json")
     private val bridge = listOf("mcp", "--session", session, "--server", "ostrom")
 
@@ -157,10 +158,15 @@ class MoreAdaptersTest {
         // Gemini CLI 0.66: a trusted workspace's settings win over the user's, and hooksConfig.enabled: false turns
         // every hook off. Gemini ignores system settings a session could write (not owned by root): where the
         // workspace or the repository touches hooks, Ostrom cannot keep the gate, so it does not start (H3)
+        // workspace. Beyond hooks, its MCP servers and tool discovery run programs of the repository's: only keys known
+        // to be harmless are let through, the first other one named (security audit of the CLI n°2, H3)
         val workspace = listOf("/w/app/src", "/w/app")
-        for ((folder, text) in listOf(
-            "/w/app/src" to """{"hooksConfig":{"enabled":false}}""",
-            "/w/app" to "{// theirs\n\"hooks\": {\"BeforeTool\": []},}",
+        for ((folder, text, key) in listOf(
+            Triple("/w/app/src", """{"ui":{"theme":"dark"},"hooksConfig":{"enabled":false}}""", "hooksConfig"),
+            Triple("/w/app", "{// theirs\n\"hooks\": {\"BeforeTool\": []},}", "hooks"),
+            Triple("/w/app", """{"mcpServers":{"ostrom":{"command":"./evil"}}}""", "mcpServers"),
+            Triple("/w/app", """{"tools":{"discoveryCommand":"./evil"}}""", "tools"),
+            Triple("/w/app", """{"general":{"vimMode":true}}""", "general"),
         )) {
             files.texts.keys.removeAll { it.startsWith("/w/") }
             val path = join(folder, ".gemini", "settings.json")
@@ -170,8 +176,9 @@ class MoreAdaptersTest {
                 GeminiAdapter().prepare(layout(workspace = workspace), files)
             }
             assertEquals(
-                "gemini: $path sets `hooks` or `hooksConfig`, with which a repository can turn Ostrom's hooks off: " +
-                    "Gemini is not started. Remove them from that file to work with Ostrom",
+                "gemini: $path sets `$key`, which Ostrom does not know to be harmless: a repository's settings could " +
+                    "run its own programs or turn Ostrom's hooks off with it, so Gemini is not started. Remove it " +
+                    "from that file to work with Ostrom",
                 refused.reason,
             )
         }
@@ -185,8 +192,8 @@ class MoreAdaptersTest {
                 "not started",
             assertFailsWith<AdapterException> { GeminiAdapter().prepare(layout(workspace = workspace), files) }.reason,
         )
-        // other settings, with comments, a BOM or nothing at all, start Gemini
-        files.texts[unread] = "\uFEFF{// theirs\n\"general\": {\"vimMode\": true},}"
+        // harmless settings, with comments, a BOM or nothing at all, start Gemini
+        files.texts[unread] = "\uFEFF{// theirs\n\"ui\": {\"theme\": \"dark\"},}"
         files.texts[join("/w/app/src", ".gemini", "settings.json")] = " "
         files.deleteRecursively(join("/tmp/run", "gemini-home"))
         GeminiAdapter().prepare(layout(workspace = workspace), files)
@@ -248,6 +255,38 @@ class MoreAdaptersTest {
         files.texts[real] = """{"hooks":{"BeforeTool":{}}}"""
         files.deleteRecursively(join("/tmp/run", "gemini-home"))
         GeminiAdapter().prepare(layout(), files)
+    }
+
+    @Test
+    fun geminiIsNotStartedBesideABeforeToolHookOfTheDevelopersExtensions() {
+        // Gemini registers an extension's hooks with the settings' ones: the same rule holds, for an extension in
+        // the developer's folder and for one linked from elsewhere (`gemini extensions link`)
+        val extensions = join("/home/dev", ".gemini", "extensions")
+        val before = """{"hooks":{"BeforeTool":[{"hooks":[{"type":"command","command":"theirs"}]}]}}"""
+        val kept = join(extensions, "kept", "hooks", "hooks.json")
+        files.texts[kept] = before
+        val refused = { assertFailsWith<AdapterException> { prepareAgain() }.reason }
+        assertEquals(
+            "gemini: $kept adds a `BeforeTool` hook: Gemini runs it beside Ostrom's gate, in any order, and it could " +
+                "change a tool's input after the gate has checked it, so Gemini is not started. Move it to another " +
+                "event, or remove it, to work with Ostrom",
+            refused(),
+        )
+        files.texts[kept] = """{"hooks":{"AfterTool":[{"hooks":[{"type":"command","command":"theirs"}]}]}}"""
+        prepareAgain()
+        val install = join(extensions, "linked", ".gemini-extension-install.json")
+        files.texts[install] = """{"type":"link","source":"/src/x"}"""
+        val linked = join("/src/x", "hooks", "hooks.json")
+        files.texts[linked] = before
+        assertTrue(refused().startsWith("gemini: $linked adds a `BeforeTool` hook"))
+        // a file Gemini cannot read either loads no hook
+        files.texts[linked] = "{not json"
+        prepareAgain()
+    }
+
+    private fun prepareAgain(): AgentLaunch {
+        files.deleteRecursively(join("/tmp/run", "gemini-home"))
+        return GeminiAdapter().prepare(layout(), files)
     }
 
     @Test
