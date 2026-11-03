@@ -13,6 +13,8 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** OpenCode, Gemini CLI, Grok CLI, Hermes Agent and Pi: each loads the session's harness its own way. */
@@ -127,6 +129,71 @@ class MoreAdaptersTest {
         assertEquals(setOf("x", "ostrom"), servers.keys)
         assertEquals("""{"command":"/opt/ostrom","args":${jsonList(bridge)}}""", servers["ostrom"].toString())
         assertEquals("Mine.\nR", files.texts[join(directory, "GEMINI.md")])
+    }
+
+    @Test
+    fun geminiKeepsOstromsHooksOnWhateverTheWorkspaceSays() {
+        // Gemini CLI 0.66: a trusted workspace's settings win over the user's (hooksConfig.enabled: false turns every
+        // hook off) and add to hooksConfig.disabled by hook name; only the system settings win over the workspace
+        // (security audit of the CLI n°2, H3)
+        files.texts[join("/etc", "gemini-cli", "settings.json")] =
+            """{"general":{"vimMode":true},"hooksConfig":{"enabled":false,"disabled":["theirs"]}}"""
+        val launch = GeminiAdapter().prepare(layout(), files)
+        val system = join("/tmp/run", "gemini-system.json")
+        assertEquals(system, launch.environment["GEMINI_CLI_SYSTEM_SETTINGS_PATH"])
+        assertEquals(
+            join("/etc", "gemini-cli", "system-defaults.json"),
+            launch.environment["GEMINI_CLI_SYSTEM_DEFAULTS_PATH"],
+            "the administrator's defaults stay where they were",
+        )
+        assertEquals(
+            """{"general":{"vimMode":true},"hooksConfig":{"enabled":true,"disabled":["theirs"]}}""",
+            files.texts[system],
+        )
+        assertEquals(FileAccess.PRIVATE, files.access[system])
+        // a name a repository cannot know in advance, so it cannot list it in hooksConfig.disabled
+        val settings = join("/tmp/run", "gemini-home", ".gemini", "settings.json")
+        val name = Regex(""""name":"(ostrom-BeforeTool-[0-9a-f]{16})"""")
+        val first = checkNotNull(name.find(files.texts[settings].orEmpty())).groupValues[1]
+        files.deleteRecursively(join("/tmp/run", "gemini-home"))
+        GeminiAdapter().prepare(layout(), files)
+        val second = checkNotNull(name.find(files.texts[settings].orEmpty())).groupValues[1]
+        assertNotEquals(first, second, "each session names its hooks anew")
+    }
+
+    @Test
+    fun geminiReadsTheSystemSettingsGeminiWouldRead() {
+        val variables = mapOf(
+            "GEMINI_CLI_SYSTEM_SETTINGS_PATH" to "/admin/settings.json",
+            "GEMINI_CLI_SYSTEM_DEFAULTS_PATH" to "/admin/defaults.json",
+        )
+        files.texts["/admin/settings.json"] = """{"security":{"auth":{"enforcedType":"vertex-ai"}}}"""
+        val launch = GeminiAdapter().prepare(layout(variables = variables), files)
+        assertEquals("/admin/defaults.json", launch.environment["GEMINI_CLI_SYSTEM_DEFAULTS_PATH"])
+        assertEquals(
+            """{"security":{"auth":{"enforcedType":"vertex-ai"}},"hooksConfig":{"enabled":true}}""",
+            files.texts[join("/tmp/run", "gemini-system.json")],
+        )
+        // macOS and Windows keep theirs elsewhere: the first that exists is the one Gemini reads on this machine
+        files.deleteRecursively(join("/tmp/run", "gemini-home"))
+        files.texts[join("/Library", "Application Support", "GeminiCli", "settings.json")] = "{}"
+        val mac = GeminiAdapter().prepare(layout(), files)
+        assertEquals(
+            join("/Library", "Application Support", "GeminiCli", "system-defaults.json"),
+            mac.environment["GEMINI_CLI_SYSTEM_DEFAULTS_PATH"],
+        )
+    }
+
+    @Test
+    fun geminiLeavesSystemSettingsItCannotReadAndSaysSo() {
+        // Gemini reads comments in its settings, strict JSON does not: an administrator's file is never dropped
+        files.texts[join("/etc", "gemini-cli", "settings.json")] = "{// managed\n}"
+        val launch = GeminiAdapter().prepare(layout(), files)
+        assertNull(launch.environment["GEMINI_CLI_SYSTEM_SETTINGS_PATH"])
+        assertEquals(
+            "gemini: the system settings.json is not plain JSON: a repository's settings could turn Ostrom's hooks off",
+            launch.notes.single(),
+        )
     }
 
     @Test
