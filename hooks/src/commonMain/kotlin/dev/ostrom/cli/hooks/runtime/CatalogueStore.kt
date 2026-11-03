@@ -12,7 +12,7 @@ fun interface CatalogueStore {
 /**
  * The organisation's gate policy, asked through the launcher's relay at every tool call and checked here, every time:
  * the instance's signature, the repository, the server's own expiry ([SignedGatePolicy]). The relay keeps the signed
- * envelope in its memory for a few seconds; the hook trusts no copy on disk (security audit S2-20).
+ * envelope in its memory for 30 s; the hook trusts no copy on disk (security audit S2-20).
  *
  * Fails closed, completely (S2-38): a session package changed since the launch ([PackageSeal], S2-33), a relay that
  * does not answer, a server it cannot reach, a policy expired, unsigned or signed by another key, and every tool call
