@@ -25,11 +25,11 @@ class RelayWaitsMcpTest {
         respond(if (sessions) started else "{}", if (sessions) sessionStatus else HttpStatusCode.OK, JSON)
     }
 
-    private suspend fun ApplicationTestBuilder.start(body: String = """{"id":"claude-session-1","launchId":"launch-1"}""") {
+    private suspend fun ApplicationTestBuilder.start() {
         client.post("/api/v1/sessions") {
             bearerAuth(TOKEN)
             contentType(ContentType.Application.Json)
-            setBody(body)
+            setBody("""{"id":"claude-session-1","launchId":"launch-1"}""")
         }
     }
 
