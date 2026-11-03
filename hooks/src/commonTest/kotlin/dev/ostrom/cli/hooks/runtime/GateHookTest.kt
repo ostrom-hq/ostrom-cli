@@ -103,6 +103,10 @@ class GateHookTest {
     private fun bash(command: String, after: Boolean = false, cwd: String? = null) =
         event("Bash", JsonObject(mapOf("command" to JsonPrimitive(command))).toString(), after, cwd)
 
+    /** [field] of each refusal the hooks told Ostrom of (audit A6). */
+    private fun reported(field: String): List<String> = calls.calls.filter { it.path == Routes.LOCAL_DENIALS }
+        .map { ((it.body as JsonObject)[field] as JsonPrimitive).content }
+
     private fun answer(json: String) {
         calls = FakeCalls().on("/api/v1/gates", ok(json))
     }
@@ -295,7 +299,9 @@ class GateHookTest {
                 "action was not run. Work only in /w; do not run it elsewhere.\n",
             reply.stderr,
         )
-        assertTrue(calls.calls.isEmpty())
+        assertEquals(listOf(Routes.LOCAL_DENIALS), calls.paths(), "told after the refusal, never asked")
+        assertEquals(listOf("foreign_repository"), reported("reason"))
+        assertEquals(listOf("push-main"), reported("class"))
         val named = hook(contextOf("OSTROM_REPO" to "app")).handle(bash("git push origin main", cwd = "/o"))
         assertContains(named.stderr, "opened for the repository app (acme/app, /w)")
         val bare = hook(git = repository - "/w|remote get-url origin").handle(bash("git -C /o push origin main"))
@@ -386,9 +392,10 @@ class GateHookTest {
         assertContains(all.stderr, "\"Push to main\" needs a yes from omar (gate \"Main\"). The action was not run.")
         val two = hook().handle(bash("git push origin main && git push up main"))
         assertContains(two.stderr, "needs a yes from omar (gate \"Main\"), and this command pushes to two remotes")
-        // the push Ostrom cannot read is told after its refusal; the one whose landing is unknown is the hook's alone
-        assertEquals(listOf(Routes.LOCAL_DENIALS), calls.paths())
-        assertEquals("unreadable", (calls.bodyOf(Routes.LOCAL_DENIALS)["reason"] as JsonPrimitive).content)
+        // both refusals are told after them, never asked
+        assertEquals(listOf("unknown_landing", "unreadable"), reported("reason"))
+        assertEquals(listOf("push-main", "push-main"), reported("class"))
+        assertEquals(List(2) { Routes.LOCAL_DENIALS }, calls.paths())
         val soft = catalogue.replace("\"enforce\":true,\"label\":\"Main\"", "\"label\":\"Main\"")
         answer("""{"id":"G3","status":"pending"}""")
         assertEquals(2, hook(catalogueText = soft).handle(bash("git push origin main && git push up main")).exitCode)
@@ -452,7 +459,9 @@ class GateHookTest {
             )
         }
         assertEquals(HookReply(), held.handle(event("Read", """{"file_path":"/w/a.txt"}""")), "not a gated tool")
-        assertTrue(calls.calls.isEmpty(), "nobody is asked for a yes")
+        assertEquals(List(4) { Routes.LOCAL_DENIALS }, calls.paths(), "nobody is asked for a yes")
+        assertEquals(List(4) { "policy_held" }, reported("reason"))
+        assertEquals(List(4) { "unknown" }, reported("class"), "no policy, no action known")
     }
 
     @Test
@@ -515,7 +524,8 @@ class GateHookTest {
         assertEquals(HookReply(), hook().handle(bash("echo \$HOME")), "a variable in an argument is read as text")
         val soft = catalogue.replace("\"enforce\":true,\"label\":\"Main\"", "\"label\":\"Main\"")
         assertEquals(HookReply(), hook(catalogueText = soft).handle(bash("\$G status")), "no gate on Bash enforced")
-        assertTrue(calls.calls.isEmpty())
+        assertEquals(listOf(Routes.LOCAL_DENIALS), calls.paths(), "told after the refusal, never asked")
+        assertEquals(listOf("dynamic_command" to "push-main"), reported("reason").zip(reported("class")))
     }
 
     @Test
@@ -524,7 +534,8 @@ class GateHookTest {
         assertContains(variable.stderr, "`\$B` is a shell variable or substitution")
         val git = repository + ("/w|config --get alias.yolo" to "!git push origin main")
         assertContains(hook(git = git).handle(bash("git yolo")).stderr, "runs the shell alias `!git push origin main`")
-        assertTrue(calls.calls.isEmpty())
+        assertEquals(List(2) { Routes.LOCAL_DENIALS }, calls.paths(), "told after the refusals, never asked")
+        assertEquals(List(2) { "unknown_landing" }, reported("reason"))
     }
 
     @Test
@@ -548,6 +559,7 @@ class GateHookTest {
             assertContains(reply.stderr, "needs a yes from omar (gate \"Main\"), and this command changes git")
         }
         assertContains(hook().handle(bash("git remote add up x")).stderr, "changes git remote add, which decides")
+        assertEquals(List(4) { "git_setting" to "push-main" }, reported("reason").zip(reported("class")))
         assertEquals(HookReply(), hook().handle(bash("git config --get remote.origin.url")))
         assertEquals(HookReply(), hook().handle(bash("git config user.name lena")))
         val soft = catalogue.replace("\"enforce\":true,\"label\":\"Main\"", "\"label\":\"Main\"")
