@@ -573,6 +573,27 @@ class AgentLaunchUseCaseTest {
     }
 
     @Test
+    fun theMcpServersNotListedAreSaidEvenWhenTheirAnswerComesLast() = runTest {
+        // the four reads are asked together: the list of MCP servers may fail after the package and keys are read
+        serveALaunch()
+        server.unreachable = setOf("GET ${Routes.MCP_MINE}")
+        server.slower = mapOf("GET ${Routes.MCP_MINE}" to ROUND_TRIP)
+        assertEquals(3, start(executable = "ostrom"))
+        assertTrue("ostrom: your organisation's MCP servers are not listed (connection refused)" in said, "$said")
+    }
+
+    @Test
+    fun aRefusedPackageStopsTheLaunchBeforeKeysThatCannotBeReadEvenWhenTheKeysAnswerFirst() = runTest {
+        serveALaunch()
+        server["GET ${Routes.PACKAGE}?repo=acme-api"] = 200 to """{"format":"x","payload":"e30="}"""
+        server.unreachable = setOf("GET ${Routes.INSTANCE_KEYS}")
+        server.slower = mapOf("GET ${Routes.PACKAGE}?repo=acme-api" to ROUND_TRIP)
+        assertEquals(78, start())
+        assertTrue(said.none { "instance's keys" in it }, "the package's refusal only: $said")
+        assertEquals(emptyList(), commands)
+    }
+
+    @Test
     fun aFileOfTheLaunchThatCannotBeWrittenIs73() = runTest {
         serveALaunch()
         files.failWrites = true
