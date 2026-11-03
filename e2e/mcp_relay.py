@@ -127,7 +127,8 @@ class McpRelay:
             return
         if not j.needs(*ROUTES, *self.session_routes, on_main=True, org=True):
             return
-        self.session = j.owner_signed_in(self.maya)
+        # a change of an MCP server takes a sign-in of the last minutes: the owner signs in again, not the 5.x session
+        self.session = j.sign_in(self.maya["email"])
         if not self.session:
             return
         fake = FakeMcp(self.options.fake_mcp_port, self.options.fake_mcp_cert, self.options.fake_mcp_key)
@@ -182,9 +183,11 @@ class McpRelay:
         j.check(fake.calls() == [{"text": SAID}], f"the server got the agent's call, its arguments untouched "
                                                   f"({fake.calls()})")
         status, body, _ = j.call("GET", f"/api/v1/mcp/calls?server={self.name}", session=self.session, org=j.org_id)
-        journaled = [c for c in (body or {}).get("items", []) if "echo" in json.dumps(c)] \
-            if isinstance(body, dict) else []
-        j.check(status == 200 and journaled, f"the console's journal shows the call ({status}, {len(journaled)})")
+        # the call of the tool echo (the server's name holds "echo-" too: the quoted tool name only)
+        items = body.get("items", []) if isinstance(body, dict) else []
+        journaled = [c for c in items if '"echo"' in json.dumps(c)]
+        j.check(status == 200 and journaled, f"the console's journal shows the call of echo ({status}, "
+                                             f"{len(journaled)}): {json.dumps(items[:3])[:300]}")
         builtin = mcp.get("ostrom") or {}
         # Ostrom's own MCP server, as an agent that starts stdio servers reaches it: said, not checked (4.3)
         print(f"  note  ostrom mcp --server ostrom: exit {builtin.get('code')}, "

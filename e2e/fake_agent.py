@@ -177,9 +177,13 @@ def mcp(arguments, name, text):
 
 def bridge(settings, server, messages):
     """`ostrom mcp --session [settings] --server [server]` sent [messages], one per line: its exit and answers."""
-    done = subprocess.run([os.environ["E2E_OSTROM"], "mcp", "--session", settings, "--server", server],
-                          input="".join(json.dumps(m) + "\n" for m in messages), capture_output=True, text=True,
-                          timeout=120)
+    try:
+        done = subprocess.run([os.environ["E2E_OSTROM"], "mcp", "--session", settings, "--server", server],
+                              input="".join(json.dumps(m) + "\n" for m in messages), capture_output=True, text=True,
+                              timeout=120)
+    except subprocess.TimeoutExpired as late:
+        # a bridge that does not end is a result, not the end of the session: its report is still written
+        return {"code": None, "answers": [], "stderr": f"still running after {late.timeout} s"}
     answers = []
     for line in done.stdout.splitlines():
         try:
