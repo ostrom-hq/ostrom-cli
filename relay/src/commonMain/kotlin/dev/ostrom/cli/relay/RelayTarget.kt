@@ -42,6 +42,9 @@ private const val SESSION = "[A-Za-z0-9_:~-][A-Za-z0-9_.:~-]{0,127}"
 
 /** A session's id as the hooks name it ([SESSION]): never `.` nor `..`, nothing a URL would read as more. */
 internal val SESSION_ID = Regex(SESSION)
+
+/** A hook's reopening of a closed segment: Ostrom answers with the segment it opens. */
+internal val SESSION_REOPEN = Regex("/api/v1/sessions/$SESSION/reopen")
 private const val API_PREFIX = "/api/v1/"
 private const val MCP_PREFIX = "/mcp/"
 private const val GATE_CATALOG = "/api/v1/gates/catalog"
