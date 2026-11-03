@@ -145,7 +145,64 @@ class GeminiEnvironmentTest {
         // nothing on it at all
         assertTrue("on the PATH Ostrom gives it ()" in refusal(layout(environment = mapOf("PATH" to null))))
         // Windows runs the hooks with PowerShell, not bash
+        files.texts[join("C:\\Windows", "powershell.exe")] = ""
         prepare(layout(environment = mapOf("PATH" to "C:\\Windows")).copy(pathSeparator = ';'))
+        // a bash of the repository's is the repository's program, even ahead of the system's
+        files.texts[join("/work/repo/bin", "bash")] = ""
+        assertEquals(
+            "gemini: the bash Gemini would run Ostrom's hooks with (/work/repo/bin/bash) is inside /work/repo, so " +
+                "the repository chooses it: Gemini is not started. Put one from outside the repository first on your " +
+                "PATH to work with Ostrom",
+            refusal(layout(environment = mapOf("PATH" to "/work/repo/bin:/usr/bin"), workspace = listOf("/work/repo"))),
+        )
+    }
+
+    @Test
+    fun onWindowsGeminiRunsItsHooksWithAPowerShellFromOutsideTheRepository() {
+        val system = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0"
+        val seven = "C:\\Program Files\\PowerShell\\7"
+        val path = "C:\\work\\Repo\\bin;$system;$seven"
+        fun windows(comSpec: String = "C:\\Windows\\system32\\cmd.exe") = layout(
+            variables = mapOf("ComSpec" to comSpec),
+            environment = mapOf("PATH" to path),
+            workspace = listOf("C:\\work\\repo"),
+        ).copy(pathSeparator = ';', foldsCase = true)
+        assertEquals(
+            "gemini: there is no PowerShell where Gemini looks for it (ComSpec, then the PATH Ostrom gives it: " +
+                "$path), and Gemini runs Ostrom's hooks with it: without one they fail open, so Gemini is not " +
+                "started. Install PowerShell, or put its folder on your PATH, to work with Ostrom",
+            refusal(windows()),
+        )
+        // Windows PowerShell, when there is no pwsh; Windows looks a bare name up in the current folder first unless
+        // told not to, and Gemini runs `powershell.exe` by its bare name
+        files.texts[join(system, "powershell.exe")] = ""
+        assertEquals("1", prepare(windows()).environment["NoDefaultCurrentDirectoryInExePath"])
+        assertNull(prepare(layout()).environment["NoDefaultCurrentDirectoryInExePath"])
+        // the first one on the PATH is the repository's, whatever its case
+        files.texts[join("C:\\work\\Repo\\bin", "powershell.exe")] = ""
+        assertEquals(
+            "gemini: the PowerShell Gemini would run Ostrom's hooks with (C:\\work\\Repo\\bin\\powershell.exe) is " +
+                "inside C:\\work\\repo, so the repository chooses it: Gemini is not started. Put one from outside " +
+                "the repository first on your PATH to work with Ostrom",
+            refusal(windows()),
+        )
+        // Gemini takes pwsh first, wherever it is on the PATH, with the extensions Windows tries
+        files.texts[join(seven, "pwsh.exe.cmd")] = ""
+        prepare(windows())
+        files.texts[join("C:\\work\\Repo\\bin", "pwsh.exe")] = ""
+        assertTrue("(C:\\work\\Repo\\bin\\pwsh.exe) is inside" in refusal(windows()))
+        // and ComSpec before both, when it names PowerShell
+        files.texts["C:\\Tools\\PowerShell.exe"] = ""
+        prepare(windows(comSpec = "C:\\Tools\\PowerShell.exe"))
+        val committed = "C:\\work\\repo\\tools\\pwsh.exe"
+        files.texts[committed] = ""
+        assertTrue("($committed) is inside" in refusal(windows(comSpec = committed)))
+        assertTrue("there is no PowerShell" in refusal(windows(comSpec = "D:\\pwsh.exe")))
+        assertEquals(
+            "gemini: ComSpec names PowerShell without its full path (pwsh.exe), and Gemini would look it up from the " +
+                "repository to run Ostrom's hooks, so it is not started. Set ComSpec to a full path to work with Ostrom",
+            refusal(windows(comSpec = "pwsh.exe")),
+        )
     }
 
     @Test
