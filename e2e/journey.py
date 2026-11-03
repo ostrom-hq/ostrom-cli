@@ -46,6 +46,8 @@ from mcp_waits import McpWaits
 HERE = os.path.dirname(os.path.abspath(__file__))
 GENERIC_404 = "Not found."
 MAIL_WAIT_S = 20
+# a sensitive write takes a sign-in of less than 5 minutes (S2-54), and a person gets 10 sign-in links per 10 minutes
+RECENT_SIGN_IN_S = 240
 
 
 class Journey:
@@ -63,6 +65,7 @@ class Journey:
         self.org_id = None
         self.admin_token = None
         self.owner_session = None
+        self.recent = {}
         self.temporary = options.work is None
 
     # ---- what the run says -------------------------------------------------------------------------------------
@@ -180,6 +183,19 @@ class Journey:
             return None
         return {"cookie": cookie, "csrf": csrf}
 
+    def recent_sign_in(self, email):
+        """
+        A browser session of [email] signed in less than RECENT_SIGN_IN_S ago, for a sensitive write: the last one, or
+        a new one. The journey's approvals and confirmations reuse it rather than ask the server for a link each time.
+        """
+        last = self.recent.get(email)
+        if last is not None and time.monotonic() - last[1] < RECENT_SIGN_IN_S:
+            return last[0]
+        session = self.sign_in(email)
+        if session is not None:
+            self.recent[email] = (session, time.monotonic())
+        return session
+
     def seed(self, email):
         """The owner: `ostrom-server seed-test-account <email>`, or the account of --seeded."""
         if self.options.seeded:
@@ -254,7 +270,7 @@ class Journey:
             process.kill()
             return False
         user_code = next(CODE.search(line).group(1) for line in said if CODE.search(line))
-        session = self.sign_in(email)
+        session = self.recent_sign_in(email)
         if session is None:
             process.kill()
             return False
@@ -588,7 +604,7 @@ class Journey:
 
     def governed(self, maya, *arguments):
         """A governance write with the admin token: written at once, or held by the server until an owner confirms it
-        on the console (202, audit H1), which the owner does here from a fresh browser session. Its exit code."""
+        on the console (202, audit H1), which the owner does here from a recent browser session. Its exit code."""
         shown = "ostrom " + " ".join(shlex.quote(a) for a in arguments)
         process = subprocess.Popen([self.binary, *arguments], cwd=maya["repo"], env=self.environment(maya),
                                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -601,7 +617,7 @@ class Journey:
             pass
         if held.is_set():
             confirmation = next(CONFIRM.search(line).group(1) for line in said if CONFIRM.search(line))
-            session = self.sign_in(maya["email"])
+            session = self.recent_sign_in(maya["email"])
             if session is not None:
                 status, body, _ = self.call("POST", f"/api/v1/confirmations/{urllib.parse.quote(confirmation)}/answer",
                                             {"answer": "confirm"}, session=session, org=self.org_id)

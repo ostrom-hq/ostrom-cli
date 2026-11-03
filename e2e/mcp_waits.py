@@ -33,8 +33,8 @@ class McpWaits:
         j.begin("4.3", "ostrom mcp --server ostrom: the agent asks a person, the console answers, the agent reads it")
         if not j.needs(*ROUTES, *self.session_routes, on_main=True, org=True):
             return
-        # answering is a person's, in the console: the owner signs in, not the 5.x session
-        session = j.sign_in(self.maya["email"])
+        # answering is a person's, in the console (any sign-in age): the owner's browser session
+        session = j.owner_signed_in(self.maya)
         if not session:
             return
         seen = self.session_answered(session)

@@ -127,8 +127,8 @@ class McpRelay:
             return
         if not j.needs(*ROUTES, *self.session_routes, on_main=True, org=True):
             return
-        # a change of an MCP server takes a sign-in of the last minutes: the owner signs in again, not the 5.x session
-        self.session = j.sign_in(self.maya["email"])
+        # a change of an MCP server takes a sign-in of the last minutes: a recent one, not the 5.x session
+        self.session = j.recent_sign_in(self.maya["email"])
         if not self.session:
             return
         fake = FakeMcp(self.options.fake_mcp_port, self.options.fake_mcp_cert, self.options.fake_mcp_key)
