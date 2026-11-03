@@ -41,12 +41,13 @@ object ShellPaths {
     /**
      * Where a file tool really writes [path] (absolute): `.`, `..` and repeated separators folded away, as the agent's
      * own `path.resolve` does, then the symbolic links of its deepest folder that [canonical] resolves. A pattern on a
-     * path then sees `a/./b`, `a/../b` and a folder linked to `b` as `b` (security audit of the CLI n°2, M2).
+     * path then sees `a/./b`, `a/../b` and a folder linked to `b` as `b` (security audit of the CLI n°2, M2). Its
+     * separators are `/`, as the patterns write them, on Windows too.
      *
      * @param canonical A path with its symbolic links resolved, or as given when it cannot be (a file not written yet).
      */
     fun real(path: String, canonical: (String) -> String): String =
-        real(path.toPath(normalize = true), emptyList(), canonical)
+        real(path.toPath(normalize = true), emptyList(), canonical).replace('\\', '/')
 
     private tailrec fun real(folder: Path, rest: List<String>, canonical: (String) -> String): String {
         val parent = folder.parent

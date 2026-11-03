@@ -29,8 +29,16 @@ enum class ToolKind(val wire: String) {
  * @property text The command, the path written, or the MCP tool and its arguments; empty when nothing is matched.
  * @property path The path a file tool writes, as the agent gave it; null for any other tool, or for a file tool
  *   without one.
+ * @property reaches Where that write really lands, when it is not [path] itself: matched beside [text], never in its
+ *   place, so that a pattern anchored on the path the agent gave still holds, and what is approved stays that text.
  */
-data class ToolSubject(val kind: ToolKind, val name: String, val text: String, val path: String? = null) {
+data class ToolSubject(
+    val kind: ToolKind,
+    val name: String,
+    val text: String,
+    val path: String? = null,
+    val reaches: String? = null,
+) {
     /** Reads tool calls of every agent. */
     companion object {
         private val SHELLS = setOf(

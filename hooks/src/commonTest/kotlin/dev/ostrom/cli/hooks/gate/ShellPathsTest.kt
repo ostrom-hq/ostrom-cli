@@ -19,7 +19,7 @@ class ShellPathsTest {
 
     @Test
     fun realResolvesTheDeepestLinkedFolderAndKeepsTheRest() {
-        val links = mapOf("/w/a" to "/x", "/w/f.txt" to "/y/g.txt", "C:\\w\\a" to "C:\\x")
+        val links = mapOf("/w/a" to "/x", "/w/f.txt" to "/y/g.txt", "C:\\w\\a" to "C:\\x", "C:/w/a" to "C:\\x")
         val canonical = { path: String -> links[path] ?: path }
         assertEquals("/x/b/c.txt", ShellPaths.real("/w/a/b/c.txt", canonical), "a link above the file")
         assertEquals("/y/g.txt", ShellPaths.real("/w/f.txt", canonical), "a link to the file itself")

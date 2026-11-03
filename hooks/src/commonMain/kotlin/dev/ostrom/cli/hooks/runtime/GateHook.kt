@@ -130,9 +130,10 @@ class GateHook(
     }
 
     /**
-     * [written] with what a shell command runs, or with where a file write really lands (`# ostrom: writes to: …`)
-     * when that is not the path the agent gave: a relative path, `a/./b`, `a/../b` or a folder linked elsewhere
-     * (security audit of the CLI n°2, M2). The patterns then see it.
+     * [written] with what a shell command runs, or with where a file write really lands ([ToolSubject.reaches]) when
+     * that is not the path the agent gave: a relative path, `a/./b`, `a/../b` or a folder linked elsewhere (security
+     * audit of the CLI n°2, M2). The patterns then see it. A file tool expands no `~`: `~/x` is under the working
+     * folder.
      */
     private fun withWhatItReaches(written: ToolSubject, cwd: String): ToolSubject {
         val path = written.path
@@ -140,8 +141,9 @@ class GateHook(
             written.kind == ToolKind.BASH -> withScripts(written, cwd)
             path == null -> written
             else -> {
-                val real = ShellPaths.real(ShellPaths.join(cwd, path, context.home), canonical)
-                if (real == path) written else written.copy(text = "${written.text}$WRITES_NOTE $real")
+                val absolute = if (ShellPaths.isAbsolute(path)) path else "${cwd.trimEnd('/', '\\')}/$path"
+                val real = ShellPaths.real(absolute, canonical)
+                if (real == path) written else written.copy(reaches = real)
             }
         }
     }
@@ -180,7 +182,6 @@ class GateHook(
     private companion object {
         const val DENIED = 2
         const val SEEN_MILLIS = 2_000
-        const val WRITES_NOTE = "\n# ostrom: writes to:"
     }
 }
 
