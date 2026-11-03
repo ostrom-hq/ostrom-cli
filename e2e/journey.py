@@ -56,6 +56,7 @@ class Journey:
         self.invitee = None
         self.owner = None
         self.org_id = None
+        self.admin_token = False
         self.owner_session = None
         self.temporary = options.work is None
 
@@ -227,9 +228,11 @@ class Journey:
                 print(f"    {line}")
             print(f"    (exit {code})", flush=True)
 
-    def login(self, machine, email):
-        """`ostrom login`: the code it shows is approved from [email]'s browser session, as on the console."""
-        process = subprocess.Popen([self.binary, "login", "--server", self.server], cwd=machine["repo"],
+    def login(self, machine, email, admin=False):
+        """`ostrom login` (`--admin`: the governance token): the code it shows is approved from [email]'s browser
+        session, as on the console; a fresh one, as approving an admin token takes a sign-in of less than 5 minutes."""
+        arguments = ["login", "--server", self.server] + (["--admin"] if admin else [])
+        process = subprocess.Popen([self.binary, *arguments], cwd=machine["repo"],
                                    env=self.environment(machine), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                    stderr=subprocess.PIPE, text=True)
         said = []
@@ -237,7 +240,7 @@ class Journey:
         reader = threading.Thread(target=lambda: [said.append(line) or (CODE.search(line) and code.set())
                                                   for line in process.stderr], daemon=True)
         reader.start()
-        if not self.check(code.wait(30), "ostrom login shows a one-time code"):
+        if not self.check(code.wait(30), f"ostrom {' '.join(arguments[:1] + arguments[3:])} shows a one-time code"):
             process.kill()
             return False
         user_code = next(CODE.search(line).group(1) for line in said if CODE.search(line))
@@ -245,11 +248,13 @@ class Journey:
         if session is None:
             process.kill()
             return False
-        status, body, _ = self.call("GET", f"/api/v1/auth/device?userCode={user_code}", session=session)
+        # an admin token is bound to the organisation it is approved in
+        org = self.org_id if admin else None
+        status, body, _ = self.call("GET", f"/api/v1/auth/device?userCode={user_code}", session=session, org=org)
         self.check(status == 200 and body.get("userCode") == user_code, f"the console finds the request ({status})")
-        status, _, _ = self.call("POST", "/api/v1/auth/device/answer", {"userCode": user_code, "approve": True},
-                                 session=session)
-        self.check(status in (200, 204), f"{who(email)} says yes on the console ({status})")
+        status, body, _ = self.call("POST", "/api/v1/auth/device/answer", {"userCode": user_code, "approve": True},
+                                    session=session, org=org)
+        self.check(status in (200, 204), f"{who(email)} says yes on the console ({status}): {error_of(body)[:200]}")
         # stderr is the reader's alone; stdout (two short lines) is read once the login has ended
         try:
             process.wait(timeout=60)
@@ -258,13 +263,15 @@ class Journey:
             process.wait()
         out = process.stdout.read()
         reader.join(5)
-        self.step["commands"].append({"who": machine["name"], "command": f"ostrom login --server {self.server}",
-                                      "exit": process.returncode, "stdout": out, "stderr": "".join(said)})
+        shown = "ostrom " + " ".join(arguments)
+        self.step["commands"].append({"who": machine["name"], "command": shown, "exit": process.returncode,
+                                      "stdout": out, "stderr": "".join(said)})
         if self.options.show:
-            print(f"  {machine['name']}$ ostrom login --server {self.server}")
+            print(f"  {machine['name']}$ {shown}")
             for line in ("".join(said) + out).rstrip().splitlines():
                 print(f"    {line}")
-        self.check(process.returncode == 0 and "Signed in as @" in out, f"ostrom login exits 0 ({process.returncode})")
+        signed = "Admin token for @" if admin else "Signed in as @"
+        self.check(process.returncode == 0 and signed in out, f"{shown} exits 0 ({process.returncode})")
         return process.returncode == 0
 
     # ---- the journey ---------------------------------------------------------------------------------------------
@@ -338,11 +345,16 @@ class Journey:
             bashrc = os.path.join(maya["home"], ".bashrc")
             written = os.path.exists(bashrc) and "# >>> ostrom:" in open(bashrc, encoding="utf-8").read()
             self.check(written, "the agents start with Ostrom's hooks (~/.bashrc)")
-        again = self.ostrom(maya, "init", "--yes", console=True)
-        # the console token holds no rules:read: init says it cannot read the rules, and the rest is done (exit 0)
-        self.check(again.returncode == 0 and "Rules       this token cannot read them" in again.stdout,
-                   f"init again, with a console token, exits 0 and says it cannot read the rules "
-                   f"({again.returncode}): {(again.stdout + again.stderr).strip()[-300:]}")
+        # init again, as the owner after ostrom login --admin (the governance token, approved on the console)
+        if self.admin_signed_in(maya):
+            again = self.ostrom(maya, "init", "--yes")
+            self.check(again.returncode == 0 and "Rules" in again.stdout,
+                       f"init again, after ostrom login --admin, exits 0 and says the rules ({again.returncode}): "
+                       f"{(again.stdout + again.stderr).strip()[-300:]}")
+        # a personal token without rules:read does not fail init: it says so, the rest is done (cli#83)
+        personal = self.ostrom(maya, "init", "--yes", console=True)
+        self.check(personal.returncode == 0, f"init with a personal token exits 0 ({personal.returncode}): "
+                                             f"{(personal.stdout + personal.stderr).strip()[-300:]}")
 
     def team(self, maya, tom_email, org):
         """2.6, 2.7, then the policy, the rules, the harness and the launch."""
@@ -393,8 +405,13 @@ class Journey:
             shown = self.ostrom(maya, "policy", "show", "--json", console=True)
             self.check(shown.returncode == 0, f"policy show exits 0 ({shown.returncode}): {shown.stderr.strip()[:300]}")
             allowed = ((read_json(shown.stdout) or {}).get("models") or {}).get("allowed") or []
-            done = self.ostrom(maya, "policy", "set", "models", ",".join(allowed or ["sonnet"]), console=True)
-            self.console_only(done, "policy set models")
+            models = ",".join(allowed or ["sonnet"])
+            # a personal token (OSTROM_TOKEN) never governs: the policy takes ostrom login --admin
+            refused = self.ostrom(maya, "policy", "set", "models", models, console=True)
+            self.check(refused.returncode == 77, f"a personal token cannot set the models ({refused.returncode})")
+            if self.admin_signed_in(maya):
+                done = self.governed(maya, "policy", "set", "models", models)
+                self.check(done == 0, f"policy set models, with the admin token ({done})")
         self.begin("3.4", "ostrom policy check: what ostrom claude is told")
         if self.needs(("GET", "/api/v1/policy/agents"), org=True):
             done = self.ostrom(maya, "policy", "check", "claude")
@@ -402,12 +419,15 @@ class Journey:
                                                    f"{(done.stdout + done.stderr).strip()[:300]}")
         self.begin("3.3", "ostrom policy set self-approval")
         if self.needs(("GET", "/api/v1/gates/policy"), ("PUT", "/api/v1/gates/policy"), org=True):
-            done = self.ostrom(maya, "policy", "set", "self-approval", "never", console=True)
-            self.console_only(done, "policy set self-approval never")
-            # 5.6 relies on it: never is the organisation's default, the refused write changed nothing
+            refused = self.ostrom(maya, "policy", "set", "self-approval", "never", console=True)
+            self.check(refused.returncode == 77, f"a personal token cannot set self-approval ({refused.returncode})")
+            if self.admin_signed_in(maya):
+                done = self.governed(maya, "policy", "set", "self-approval", "never")
+                self.check(done == 0, f"self-approval never, with the admin token ({done})")
+            # 5.6 relies on it
             shown = self.ostrom(maya, "policy", "show", "--json", console=True)
             gates = (read_json(shown.stdout) or {}).get("gates", {})
-            self.check(gates.get("selfApproval") == "never", f"self-approval stays never ({gates})")
+            self.check(gates.get("selfApproval") == "never", f"self-approval is never ({gates})")
 
         self.begin("3.1", "ostrom policy rules: what the analysis proposed")
         if self.needs(("GET", "/api/v1/rules"), org=True):
@@ -526,27 +546,58 @@ class Journey:
         if not self.check(workflow is not None and workflow.get("status") == "proposed",
                           f"harness list shows it on trial ({listed.returncode})"):
             return
-        done = self.ostrom(maya, "harness", "enforce", workflow["id"], console=True)
-        self.console_only(done, "harness enforce")
+        # a personal token (OSTROM_TOKEN) never governs: enforcing and removing take ostrom login --admin
+        refused = self.ostrom(maya, "harness", "enforce", workflow["id"], console=True)
+        self.check(refused.returncode == 77, f"a personal token cannot enforce it ({refused.returncode})")
+        if not self.admin_signed_in(maya):
+            return
+        done = self.governed(maya, "harness", "enforce", workflow["id"])
+        self.check(done == 0, f"harness enforce, with the admin token ({done})")
         shown = self.ostrom(maya, "harness", "show", workflow["id"], "--json")
         status = (read_json(shown.stdout) or {}).get("status")
-        self.check(shown.returncode == 0 and status == "proposed", f"it stays on trial ({status})")
-        done = self.ostrom(maya, "harness", "remove", workflow["id"], "--yes", console=True)
-        self.console_only(done, "harness remove")
-        # removed on the console, as the person would
-        status, body, _ = self.call("DELETE", f"/api/v1/workflows/{workflow['id']}",
-                                    session=self.owner_signed_in(maya), org=self.org_id)
-        self.check(status in (200, 204), f"the owner removes it on the console ({status}): {error_of(body)[:200]}")
+        self.check(shown.returncode == 0 and status in ("accepted", "edited"), f"it is enforced ({status})")
+        done = self.governed(maya, "harness", "remove", workflow["id"], "--yes")
+        self.check(done == 0, f"harness remove, with the admin token ({done})")
+        listed = self.ostrom(maya, "harness", "list", "--all", "--json")
+        items = (read_json(listed.stdout) or {}).get("items", [])
+        self.check(listed.returncode == 0 and all(w.get("id") != workflow["id"] for w in items),
+                   f"it is gone from the harness ({listed.returncode})")
 
-    def console_only(self, done, what):
-        """
-        A governance write made with a token (one made on the console included): refused, 77, saying the way through
-        (a session signed in to the console; ostrom login --admin and the console's confirmation, audit H1).
-        """
-        said = done.stderr.strip()
-        self.check(done.returncode == 77 and "ostrom login --admin" in said,
-                   f"{what} with a token: refused, the console's session writes it (77 expected, {done.returncode}): "
-                   f"{said[:300]}")
+    def admin_signed_in(self, maya):
+        """ostrom login --admin, approved once by the owner (the token lasts 8 hours): True when it is there."""
+        if not self.admin_token:
+            self.admin_token = self.login(maya, maya["email"], admin=True)
+        return self.admin_token
+
+    def governed(self, maya, *arguments):
+        """A governance write with the admin token: written at once, or held by the server until an owner confirms it
+        on the console (202, audit H1), which the owner does here from a fresh browser session. Its exit code."""
+        shown = "ostrom " + " ".join(shlex.quote(a) for a in arguments)
+        process = subprocess.Popen([self.binary, *arguments], cwd=maya["repo"], env=self.environment(maya),
+                                   stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        said = []
+        held = threading.Event()
+        reader = threading.Thread(target=lambda: [said.append(line) or (CONFIRM.search(line) and held.set())
+                                                  for line in process.stderr], daemon=True)
+        reader.start()
+        while process.poll() is None and not held.wait(0.2):
+            pass
+        if held.is_set():
+            confirmation = next(CONFIRM.search(line).group(1) for line in said if CONFIRM.search(line))
+            session = self.sign_in(maya["email"])
+            if session is not None:
+                status, body, _ = self.call("POST", f"/api/v1/confirmations/{urllib.parse.quote(confirmation)}/answer",
+                                            {"answer": "confirm"}, session=session, org=self.org_id)
+                self.check(status == 200, f"the owner confirms it on the console ({status}): {error_of(body)[:200]}")
+        try:
+            process.wait(timeout=120)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+        out = process.stdout.read()
+        reader.join(5)
+        self.record(maya, shown, process.returncode, out, "".join(said))
+        return process.returncode
 
     def gated_session(self, maya, tom_email):
         """5.2 to 5.7 with the session alive: held at the gate, answered on the console, then let through in it."""
@@ -811,6 +862,8 @@ class Journey:
 
 
 CODE = re.compile(r"one-time code: (\S+)")
+# the link a held governance write is confirmed at (ostrom-cli ConfirmationWait)
+CONFIRM = re.compile(r"Confirm it on the console: \S*/confirm/([^\s/?#]+)")
 # what ostrom claude needs from the server (5.2), and so does the read of the session it ran (6.1)
 SESSION_ROUTES = (("GET", "/api/v1/policy/agents"), ("POST", "/api/v1/launches"), ("POST", "/api/v1/sessions"))
 
