@@ -164,6 +164,7 @@ def lines(machine, other, nowhere):
     return [
         ("the home screen", [], 0, "Start an agent   ostrom claude", None),
         ("the version", ["version"], 0, "ostrom ", None),
+        ("the version option", ["--version"], 0, "ostrom ", None),
         ("the exit codes", ["help", "exit-codes"], 0, "   64  Bad usage", None),
         ("an unknown command", ["nope"], 64, "Run 'ostrom --help' for usage.", None),
         ("an unknown option", ["doctor", "--bad"], 64, "Run 'ostrom doctor --help' for usage.", None),

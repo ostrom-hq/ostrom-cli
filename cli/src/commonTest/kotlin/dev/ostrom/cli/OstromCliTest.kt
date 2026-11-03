@@ -107,6 +107,13 @@ class OstromCliTest : CliKit() {
     }
 
     @Test
+    fun theVersionOptionIsTheVersionCommand() {
+        // `ostrom --version`, as any command-line tool: the line of `ostrom version`, code 0 (CONVENTIONS § 16.3 times it)
+        assertEquals(0, cli().run(arrayOf("--version")))
+        assertEquals("ostrom ${BuildInfo.VERSION} (kotlin-native, Linux x64)\n", console.out.toString())
+    }
+
+    @Test
     fun noArgumentIsTheHomeScreenNeverTheRawHelp() {
         assertEquals(0, cli().run(emptyArray()))
         val home = console.out.toString()
@@ -395,6 +402,7 @@ class OstromCliTest : CliKit() {
             arrayOf<String>() to "home",
             arrayOf("--debug", "doctor", "--help") to "doctor",
             arrayOf("--help") to "help",
+            arrayOf("--version") to "version",
             arrayOf("https://secret.example") to "unknown",
             arrayOf("--bogus") to "unknown",
             arrayOf("config", "set", "colour", "x") to "config",
