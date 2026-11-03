@@ -205,6 +205,13 @@ class AdaptersTest {
             }
         }
         assertFalse("--dangerously-bypass-hook-trust" in arguments)
+        // with a package, the gate's limit is the package's: its hook changes, and so does the hash trusted for it
+        val pack = SessionPackage(objectOf("scripts" to listOf(mapOf("mode" to "enforce", "timeoutSec" to 120))), "d")
+        val packed = CodexAdapter().prepare(layout(pack = pack), MemoryFiles()).arguments
+        val gate = packed.single { it.startsWith("hooks.PreToolUse=") }
+        assertTrue("timeout=140}" in gate, gate)
+        val trusted = packed.single { it.startsWith("hooks.state=") }
+        assertFalse(hashes.first().second in trusted, "the 20 s hook's hash is not the 140 s hook's")
     }
 
     @Test

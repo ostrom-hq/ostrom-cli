@@ -7,10 +7,9 @@ import dev.ostrom.cli.launcher.LaunchVariables
 import dev.ostrom.cli.launcher.join
 import dev.ostrom.cli.launcher.quoted
 import dev.ostrom.cli.launcher.sha256Hex
-import kotlinx.serialization.json.addJsonObject
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * Codex: Ostrom's hooks and MCP servers by `-c` overrides, the rules and the package's context in
@@ -35,7 +34,7 @@ class CodexAdapter : AgentAdapter {
             // The launcher ends the session, never the hook (security audit S2-25): this one only reads the event.
             OstromHook("SessionEnd", "session_end", "session", END_SECONDS),
         )
-        val overrides = hooks.map { "hooks.${it.event}=[${hook(layout, it.kind, it.seconds)}]" }.toMutableList()
+        val overrides = hooks.map { "hooks.${it.event}=[${group(handler(layout, it))}]" }.toMutableList()
         overrides += "hooks.state=${trust(layout, hooks)}"
         overrides += "developer_instructions=${quoted(layout.rules)}"
         layout.relay.mcpServers.forEach { name ->
@@ -62,24 +61,27 @@ class CodexAdapter : AgentAdapter {
      * review.
      */
     private fun trust(layout: SessionLayout, hooks: List<OstromHook>): String = hooks.flatMap { hook ->
-        val identity = buildJsonObject {
-            put("event_name", hook.label)
-            putJsonArray("hooks") {
-                addJsonObject {
-                    put("async", false)
-                    put("command", layout.hookCommand(hook.kind))
-                    put("timeout", hook.seconds)
-                    put("type", "command")
-                }
-            }
-        }
+        // the handler the -c override holds, as Codex normalizes it (`async` false), keys sorted
+        val fields = handler(layout, hook) + ("async" to JsonPrimitive(false))
+        val normalized = JsonObject(fields.entries.sortedBy { it.key }.associate { it.key to it.value })
+        val identity = JsonObject(
+            mapOf("event_name" to JsonPrimitive(hook.label), "hooks" to JsonArray(listOf(normalized))),
+        )
         val hash = "sha256:" + sha256Hex(identity.toString().encodeToByteArray())
         FLAG_LAYERS.map { layer -> "${quoted("$layer:${hook.label}:0:0")}={trusted_hash=${quoted(hash)},enabled=true}" }
     }.joinToString(",", "{", "}")
 
+    /** One hook's handler: the one source of both its `-c` override and the identity whose hash is trusted. */
+    private fun handler(layout: SessionLayout, hook: OstromHook): Map<String, JsonPrimitive> = linkedMapOf(
+        "type" to JsonPrimitive("command"),
+        "command" to JsonPrimitive(layout.hookCommand(hook.kind)),
+        "timeout" to JsonPrimitive(hook.seconds),
+    )
+
     // No matcher: Codex names its shell tool "Bash" in hook events; the hook sorts the events out in a few ms.
-    private fun hook(layout: SessionLayout, kind: String, seconds: Long) =
-        "{hooks=[{type=\"command\",command=${quoted(layout.hookCommand(kind))},timeout=$seconds}]}"
+    // A JSON string or number is a TOML one too.
+    private fun group(handler: Map<String, JsonPrimitive>) =
+        handler.entries.joinToString(",", "{hooks=[{", "}]}") { (key, value) -> "$key=$value" }
 
     /** The CODEX_HOME of one session: the package's sub-agents become Codex roles (`codex/agents/ostrom_*.toml`). */
     private fun codexHome(layout: SessionLayout, files: LaunchFiles): String {
