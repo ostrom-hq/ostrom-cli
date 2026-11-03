@@ -6,7 +6,9 @@ a fake key), read by the real binary with TeamCode's read-only user, its passwor
 console token that may import (`import:write`, which the seeded token does not hold), then: the plan, which writes
 nothing; the import (`--yes`); what Ostrom now holds, read back by its API (the MCP servers, the secrets they name, the
 shared accounts), never only the exit code; and the same import again, which changes nothing. The token is revoked at
-the end; what was imported stays in the run's organisation, the journey's last step.
+the end; what was imported stays in the run's organisation, where no later step reads MCP servers, secrets or shared
+accounts. Without the team's options the step is skipped, even with --strict (a fixture, not a route): ostrom-server's
+cli-journey.yml gives them and fails a run without a passing 6.6.
 """
 import json
 import os
@@ -14,7 +16,8 @@ import re
 
 ROUTES = (("POST", "/api/v1/tokens"), ("POST", "/api/v1/import/teamcode"), ("GET", "/api/v1/mcp/servers"),
           ("GET", "/api/v1/secrets"), ("GET", "/api/v1/accounts"))
-SCOPES = ["import:write", "profile:read", "mcp:read", "secrets:read", "accounts:read"]
+# what the CLI's own calls need: the reads below go through the owner's browser session
+SCOPES = ["import:write", "profile:read"]
 
 # The demo team's MCP variants (compose/demo/teamcode/02-seed.sql), as Ostrom's console lists them once imported:
 # name -> (url, scope, credential header, whether an org secret holds a shared credential)
@@ -26,6 +29,9 @@ SERVERS = {
 }
 # Its shared accounts, label -> status: a-never never finished its enrolment and is left out
 ACCOUNTS = {"Claude Max 1": "ready", "Claude Max 2 (paused)": "disabled"}
+# A second import finds at least these unchanged: the four servers and the two accounts
+UNCHANGED_AT_LEAST = len(SERVERS) + len(ACCOUNTS)
+COUNTS = re.compile(r"^(\d+) created, (\d+) updated, (\d+) unchanged, (\d+) skipped", re.M)
 LEFT_OUT = "! Left out: account Never finished"
 REPORT_LINE = re.compile(r"^  (\S+)  (\S+)  (.+)$")
 
@@ -58,11 +64,8 @@ class TeamCode:
         missing = missing_options(self.options)
         if missing:
             j.step["missing"] = missing
-            if self.options.strict:
-                j.check(False, f"the fake TeamCode team is given ({', '.join(missing)} missing)")
-            else:
-                j.step["status"] = "skipped"
-                print(f"  skip  no fake TeamCode team: {', '.join(missing)}", flush=True)
+            j.step["status"] = "skipped"
+            print(f"  skip  no fake TeamCode team: {', '.join(missing)}", flush=True)
             return
         if not j.needs(*ROUTES, on_main=True, org=True):
             return
@@ -95,8 +98,9 @@ class TeamCode:
     def ostrom_import(self, *arguments):
         j = self.journey
         machine = {**self.maya, "token": self.token}
+        # the binary runs in the developer's repository: the key file's path is made absolute
         return j.ostrom(machine, "import", "teamcode", "--db", self.options.teamcode_db, "--key-file",
-                        self.options.teamcode_key_file, *arguments, console=True,
+                        os.path.abspath(self.options.teamcode_key_file), *arguments, console=True,
                         extra={"MYSQL_PWD": os.environ["OSTROM_E2E_TEAMCODE_PASSWORD"]})
 
     def planned(self):
@@ -153,35 +157,38 @@ class TeamCode:
         j = self.journey
         before = self.servers() or {}
         done = self.ostrom_import("--yes")
-        out = done.stdout
-        changed = [line for line in report_lines(out) if line[0] in ("created", "updated")]
-        j.check(done.returncode == 0 and not changed and re.search(r"^0 created, 0 updated, \d+ unchanged", out, re.M),
-                f"the same import again changes nothing ({done.returncode}, {changed}): {out.strip()[-300:]}")
+        # the import's own report, after its plan's
+        _, said, imported = done.stdout.partition("Imported:")
+        changed = [line for line in report_lines(imported) if line[0] in ("created", "updated")]
+        counts = COUNTS.search(imported)
+        created, updated, unchanged = (int(n) for n in counts.groups()[:3]) if counts else (None, None, 0)
+        j.check(done.returncode == 0 and said and not changed and (created, updated) == (0, 0)
+                and unchanged >= UNCHANGED_AT_LEAST,
+                f"the same import again changes nothing ({done.returncode}, {changed}, "
+                f"{counts.group(0) if counts else 'no counts'}): {imported.strip()[-300:]}")
         after = self.servers() or {}
         j.check({n: after.get(n, {}).get("version") for n in SERVERS} == {n: before.get(n, {}).get("version")
                                                                         for n in SERVERS},
                 "and the servers keep their version")
         j.check(self.accounts() == ACCOUNTS, "and the accounts their status")
 
-    def servers(self):
-        """Ostrom's MCP servers, by name, as the console lists them; None when it cannot."""
+    def listed(self, path, what):
+        """The items the console lists at [path] (the run's own org: one page); None when it cannot."""
         j = self.journey
-        status, body, _ = j.call("GET", "/api/v1/mcp/servers", session=self.session, org=j.org_id)
-        if not j.check(status == 200 and isinstance(body, dict), f"the console lists the MCP servers ({status})"):
+        status, body, _ = j.call("GET", path, session=self.session, org=j.org_id)
+        if not j.check(status == 200 and isinstance(body, dict), f"the console lists {what} ({status})"):
             return None
-        return {server.get("name"): server for server in body.get("items", []) if isinstance(server, dict)}
+        return [item for item in body.get("items", []) if isinstance(item, dict)]
+
+    def servers(self):
+        """Ostrom's MCP servers, by name; None when they cannot be listed."""
+        items = self.listed("/api/v1/mcp/servers", "the MCP servers")
+        return None if items is None else {server.get("name"): server for server in items}
 
     def secret_names(self):
-        j = self.journey
-        status, body, _ = j.call("GET", "/api/v1/secrets", session=self.session, org=j.org_id)
-        j.check(status == 200 and isinstance(body, dict), f"the console lists the org's secrets ({status})")
-        items = body.get("items", []) if isinstance(body, dict) else []
-        return {secret.get("name") for secret in items if isinstance(secret, dict)}
+        return {secret.get("name") for secret in self.listed("/api/v1/secrets", "the org's secrets") or []}
 
     def accounts(self):
         """The shared accounts, label -> status."""
-        j = self.journey
-        status, body, _ = j.call("GET", "/api/v1/accounts", session=self.session, org=j.org_id)
-        j.check(status == 200 and isinstance(body, dict), f"the console lists the shared accounts ({status})")
-        items = body.get("items", []) if isinstance(body, dict) else []
-        return {account.get("label"): account.get("status") for account in items if isinstance(account, dict)}
+        items = self.listed("/api/v1/accounts", "the shared accounts") or []
+        return {account.get("label"): account.get("status") for account in items}
