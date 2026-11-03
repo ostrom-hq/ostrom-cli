@@ -81,7 +81,6 @@ class McpBridge(
             path = "/mcp/${target.server}",
             headers = mapOf(
                 "Authorization" to "Bearer ${target.token}",
-                "Content-Type" to "application/json",
                 "Accept" to "application/json, text/event-stream",
             ),
             body = line,

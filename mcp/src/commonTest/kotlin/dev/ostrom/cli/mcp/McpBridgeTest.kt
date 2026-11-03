@@ -2,6 +2,7 @@
 package dev.ostrom.cli.mcp
 
 import dev.ostrom.cli.platform.Console
+import dev.ostrom.cli.platform.HttpMessages
 import dev.ostrom.cli.platform.LoopbackException
 import dev.ostrom.cli.platform.LoopbackFailure
 import dev.ostrom.cli.platform.LoopbackHttp
@@ -12,6 +13,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /** `ostrom mcp --session`: each line of the agent goes to the relay, each answer back on stdout. */
 class McpBridgeTest {
@@ -73,6 +75,8 @@ class McpBridgeTest {
         assertEquals(4100, port)
         assertEquals(LoopbackRequest("POST", "/mcp/github", sentRequest.headers, request), sentRequest)
         assertEquals("Bearer relay-token", sentRequest.headers["Authorization"])
+        // a header the loopback writes itself (its Content-Type for a body) makes the request unwritable: never sent
+        assertTrue(HttpMessages.isWritable(sentRequest), "${sentRequest.headers.keys}")
         assertEquals(2, sent.size, "the blank line is skipped, the notification forwarded")
     }
 

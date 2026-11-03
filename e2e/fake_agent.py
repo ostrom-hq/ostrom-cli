@@ -10,6 +10,11 @@ saw and what each hook answered go to $E2E_REPORT. With a package, it then rewri
 one more tool, which the hooks must hold (S2-33); it exits with $E2E_EXIT (3 by default), which `ostrom` must hand
 back.
 
+With $E2E_MCP (a relayed MCP server's name), the session does nothing else between its start and its end than talk
+to that server as an agent that only starts stdio servers does: `ostrom mcp --session <session-env.json> --server
+<name>`, sent `initialize`, `tools/list` and a `tools/call` of `echo` with $E2E_MCP_SAY ([mcp]); then the same
+`initialize` and `tools/list` to Ostrom's own server, `ostrom`.
+
 Installed by the run as `claude` and `codex` (the name it is started under picks the dialect).
 """
 import json
@@ -146,6 +151,48 @@ def after_the_yes(hook, event, gate, fired):
     return [waited, retry]
 
 
+def mcp(arguments, name, text):
+    """
+    The relayed server [name] as the agent's MCP config names it (Claude Code's --mcp-config), then reached through
+    `ostrom mcp --session`: what each bridge answered, by request id.
+    """
+    config = arguments[arguments.index("--mcp-config") + 1] if "--mcp-config" in arguments else None
+    servers = {}
+    if config:
+        with open(config) as handle:
+            servers = json.load(handle).get("mcpServers", {})
+    listed = any(str(server.get("url", "")).endswith(f"/mcp/{name}") for server in servers.values())
+    # the session's settings sit next to its MCP config, in the launch's private folder
+    settings = os.path.join(os.path.dirname(config), "session-env.json") if config else ""
+    hello = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+             "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                        "clientInfo": {"name": "journey-agent", "version": "1"}}}
+    ready = {"jsonrpc": "2.0", "method": "notifications/initialized"}
+    tools = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+    call = {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "echo", "arguments": {"text": text}}}
+    return {"servers": sorted(servers), "listed": listed,
+            "bridge": bridge(settings, name, [hello, ready, tools, call]),
+            "ostrom": bridge(settings, "ostrom", [hello, ready, tools])}
+
+
+def bridge(settings, server, messages):
+    """`ostrom mcp --session [settings] --server [server]` sent [messages], one per line: its exit and answers."""
+    try:
+        done = subprocess.run([os.environ["E2E_OSTROM"], "mcp", "--session", settings, "--server", server],
+                              input="".join(json.dumps(m) + "\n" for m in messages), capture_output=True, text=True,
+                              timeout=120)
+    except subprocess.TimeoutExpired as late:
+        # a bridge that does not end is a result, not the end of the session: its report is still written
+        return {"code": None, "answers": [], "stderr": f"still running after {late.timeout} s"}
+    answers = []
+    for line in done.stdout.splitlines():
+        try:
+            answers.append(json.loads(line))
+        except ValueError:
+            answers.append({"unparsed": line[:300]})
+    return {"code": done.returncode, "answers": answers, "stderr": done.stderr[-1000:]}
+
+
 def main():
     name = os.path.basename(sys.argv[0]).split(".")[0]
     arguments = sys.argv[1:]
@@ -154,6 +201,12 @@ def main():
     session = f"{name}-session-1"
     base = {"session_id": session, "cwd": cwd, "transcript_path": os.path.join(cwd, "transcript.jsonl")}
     fired = [fire(hooks["SessionStart"], {**base, "hook_event_name": "SessionStart", "source": "startup"})]
+    if os.environ.get("E2E_MCP"):
+        relayed = mcp(arguments, os.environ["E2E_MCP"], os.environ.get("E2E_MCP_SAY", ""))
+        fired.append(fire(hooks["SessionEnd"], {**base, "hook_event_name": "SessionEnd", "reason": "exit"}))
+        with open(os.environ["E2E_REPORT"], "w") as handle:
+            json.dump({"agent": name, "arguments": arguments, "hooks": fired, "mcp": relayed}, handle, indent=2)
+        sys.exit(int(os.environ.get("E2E_EXIT", "3")))
     for command in ("ls -la", "kubectl apply -f prod.yaml"):
         tool = {"tool_name": "Bash", "tool_input": {"command": command}}
         fired.append(fire(hooks["PreToolUse"], {**base, "hook_event_name": "PreToolUse", **tool}))

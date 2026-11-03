@@ -6,7 +6,8 @@
     3.1 ostrom policy rules                                               3.2 and 4.1 ostrom harness
     5.2 ostrom claude (a fake Claude Code plays the hooks)                5.3 the deployment it tries is held
     5.6 the asker's own yes refused, 5.4 the second person's yes          5.5 ostrom wait lets it through
-    5.7 the signed receipt, pulled and verified
+    5.7 the signed receipt, pulled and verified                         6.1 ostrom logs
+    2.9 ostrom mcp: a server of the organisation, called through the session's relay
 
     python3 e2e/journey.py --binary ostrom --server http://127.0.0.1:4600 --mail-dir /tmp/mail \\
         --seed "docker run --rm --network host --env-file server.env ghcr.io/ostrom-hq/ostrom-server:edge \\
@@ -37,6 +38,8 @@ import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
+
+from mcp_relay import McpRelay
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GENERIC_404 = "Not found."
@@ -472,6 +475,9 @@ class Journey:
         # the session read is the one ostrom claude just ran: the routes of 5.2 too
         if self.needs(*SESSION_ROUTES, ("GET", "/api/v1/sessions"), org=True):
             self.guarded(self.logs, maya, gated)
+
+        # a session of its own, after 6.1 (which reads the developer's last session, the one of 5.2)
+        self.guarded(McpRelay(self, maya, SESSION_ROUTES).run)
 
         if self.invitee:
             self.begin("2.6", "ostrom members remove")
@@ -944,6 +950,10 @@ def main():
     parser.add_argument("--max-yes-to-action-ms", type=float, default=5_000, help="5.5: from the yes to the action")
     parser.add_argument("--report", help="write every step as JSON there")
     parser.add_argument("--work", help="the folder of the machines (default: a new temporary one)")
+    # 2.9: the fake MCP server, in HTTPS on 127.0.0.1, whose certificate the server trusts (2.9 is skipped without)
+    parser.add_argument("--fake-mcp-port", type=int, help="2.9: the port of the fake MCP server")
+    parser.add_argument("--fake-mcp-cert", help="2.9: its certificate (PEM), trusted by the server")
+    parser.add_argument("--fake-mcp-key", help="2.9: its private key (PEM)")
     options = parser.parse_args()
     if not options.mail_dir:
         parser.error("--mail-dir (or OSTROM_E2E_MAIL_DIR) is needed: people sign in by their e-mailed link")
