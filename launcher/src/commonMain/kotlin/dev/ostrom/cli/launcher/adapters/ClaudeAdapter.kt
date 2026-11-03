@@ -78,7 +78,7 @@ class ClaudeAdapter : AgentAdapter {
      * (`permissions.deny`, the sandbox), where Claude Code would refuse to start.
      */
     private fun settings(layout: SessionLayout, files: LaunchFiles, theirs: String?): Pair<String, List<String>> {
-        val inline = theirs?.trimStart()?.startsWith("{") == true
+        val inline = theirs != null && theirs.trimStart().startsWith("{")
         val read = theirs?.let { parseObject(if (inline) it else files.read(it)) }
         if (theirs != null && read == null) {
             // only a file that exists is named: an inline value may hold secrets (`env`)
