@@ -40,6 +40,9 @@ class AgentLaunchUseCaseTest {
     private val filesWhileRunning = mutableMapOf<String, String>()
     private val relaySettings = mutableListOf<RelaySettings>()
     private var relayClosed = false
+
+    /** At each memory reclaim: the requests made so far, whether the relay had started, whether the agent had. */
+    private val reclaims = mutableListOf<Triple<List<String>, Boolean, Boolean>>()
     private var adapters: List<AgentAdapter> = listOf(ClaudeAdapter(), CodexAdapter())
 
     /** The test's clock, and when the agent was started on it. */
@@ -643,6 +646,41 @@ class AgentLaunchUseCaseTest {
         assertTrue(waited <= 3 * ROUND_TRIP, "the agent starts after 3 round trips at most, not ${waited / ROUND_TRIP}")
     }
 
+    @Test
+    fun theMemoryIsGivenBackBeforeTheLaunchIsCreatedAndOnceMoreBeforeTheRelayStarts() = runTest {
+        // PERF-CLI: Kotlin/Native's collector never ran during a launch; without these two, 50-51 MB at the agent
+        serveALaunch()
+        assertEquals(3, start())
+        assertEquals(2, reclaims.size, "$reclaims")
+        val (first, second) = reclaims
+        val policy = "${Routes.POLICY}?agent=claude-code&dev=alice"
+        assertEquals(Triple(listOf(policy), false, false), first, "after the policy, before the launch is created")
+        val read = listOf(Routes.PACKAGE, Routes.INSTANCE_KEYS, Routes.MCP_MINE, Routes.INFERENCE_MODELS)
+        assertTrue(read.all { route -> second.first.any { it.startsWith(route) } }, "after the reads: ${second.first}")
+        assertEquals(false to false, second.second to second.third, "before the relay and the agent start")
+    }
+
+    @Test
+    fun aLaunchThatStopsBeforeItIsCreatedCollectsNothing() = runTest {
+        serveALaunch()
+        server["GET ${Routes.POLICY}?agent=claude-code&dev=alice"] = 200 to """{"allowed":false,"reason":"x"}"""
+        assertEquals(77, start())
+        serveALaunch()
+        start(dryRun = true)
+        assertEquals(emptyList(), reclaims, "a refusal and a dry run end at once: nothing to give back")
+    }
+
+    @Test
+    fun theRealReclaimIsThePlatformsCollector() {
+        // the JVM's leaves its collector alone; Kotlin/Native's collects (measured in the CLI journey's bench)
+        val finder = object : ExecutableFinder {
+            override fun find(name: String): String? = null
+        }
+        val blocking = UnconfinedTestDispatcher()
+        LaunchDependencies(ServerJson(server), files, finder, processes, capture, relays, clock, {}, blocking, "t")
+            .reclaim()
+    }
+
     @Suppress("LongParameterList") // one default per fact of a launch a test changes
     private suspend fun TestScope.start(
         agent: Agent = Agent.CLAUDE,
@@ -665,6 +703,9 @@ class AgentLaunchUseCaseTest {
             say = { if (it.startsWith(NO_ORIGIN)) warned += it else said += it },
             blocking = UnconfinedTestDispatcher(testScheduler),
             userAgent = "ostrom/test",
+            reclaim = {
+                reclaims += Triple(server.requests.map { it.path }, relaySettings.isNotEmpty(), commands.isNotEmpty())
+            },
         )
         val site = LaunchSite(
             serverUrl = "https://ostrom.example",

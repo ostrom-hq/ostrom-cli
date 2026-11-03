@@ -83,6 +83,8 @@ class LaunchDependencies(
     val say: (String) -> Unit,
     val blocking: CoroutineDispatcher,
     val userAgent: String,
+    // gives back the memory the launch no longer holds, before the agent's long session (reclaimMemory)
+    val reclaim: () -> Unit = ::reclaimMemory,
 )
 
 /** The launch stops before the agent runs, with an exit code of the spec (CLI.md § 2.3). */
@@ -126,6 +128,8 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         val model = models.firstOrNull()
         calls.checkPolicy(agent, model, site)
         if (request.dryRun) return calls.dryRun(agent, repo, model, site)
+        // a launch that goes on to its session: what the CLI's first calls left (the organisation, the policy)
+        dependencies.reclaim()
         val launch = calls.createLaunch(repo, agent, model, site)
         // From here on, however the launch ends (the agent's exit, a stop before it starts, a cancellation), its agent
         // token is revoked at once (AUDIT-SECU-RUNNER-2 R2b).
@@ -177,6 +181,10 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         val files = dependencies.files
         files.createPrivateDirectory(run.plugin)
         val laid = run.pack?.let { PackageLayout(files).layDown(it, run.plugin, run.temporary) }
+        // what the reads and the package's layout left, before the relay starts: collected after it, the relay's own
+        // allocations have already grown the heap, whose freed pages are not given back (cli#122's bench: 43.6 MB at
+        // the agent's start against 36-37 collected here)
+        dependencies.reclaim()
         // `ostrom` (rules_for, request_approval, get_receipt) is built into every Ostrom server
         val mcp = (listOf(BUILT_IN_MCP) + run.mcpServers + run.pack?.mcpServers.orEmpty()).distinct()
         val inference = run.inference
