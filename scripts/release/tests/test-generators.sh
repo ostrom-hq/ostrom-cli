@@ -29,6 +29,9 @@ assert_eq "scoop: url" "$base/download/1.2.3/ostrom-1.2.3-windows-x64.zip" \
 assert_eq "scoop: hash" "$(sum windows-x64.zip)" "$(printf '%s' "$scoop" | jq -r '.architecture["64bit"].hash')"
 assert_eq "scoop: bin" "ostrom.exe" "$(printf '%s' "$scoop" | jq -r .bin)"
 assert_eq "scoop: license" "Apache-2.0" "$(printf '%s' "$scoop" | jq -r .license)"
+# Scoop's autoupdate (checkver -u) takes the sum from the release's SHA256SUMS, never from what it downloads
+assert_eq "scoop: autoupdate hash" '$baseurl/SHA256SUMS' \
+  "$(printf '%s' "$scoop" | jq -r '.autoupdate.architecture["64bit"].hash.url')"
 assert_fails "scoop: usage" sh "$rel/scoop-manifest.sh"
 
 # winget
