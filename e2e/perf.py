@@ -17,7 +17,17 @@ It measures:
   the relay keeps the signed policy (POLICY_FRESH_FOR), a hook would wait on Ostrom for it, which the relay's read in
   the background spares it (cli#99). The relay's own background read may land inside a hook's few milliseconds: the
   budgets leave that room (a hook that waits on Ostrom counts 1 each time), and the spaced hooks' time has a budget too;
+- the first start of a binary just installed: a new copy (a file the system never ran, with its own home; on macOS a
+  code directory hash it has never seen, its signature checked) started once, the rest of the system's files left in
+  the cache, as on a developer's machine after `install.sh` or an update;
 - the size of the binary.
+
+On macOS, the start with the file cache emptied is an upper bound that a developer's Mac does not pay: `purge` also
+empties the system libraries every program loads (Foundation, Security and their dependencies, 262 images), which
+a running Mac keeps in memory. Measured on 03/11 (cli#111, run 41659088187, medians of 10): 570 ms after `purge`,
+424 ms for a C program linked with ostrom's 13 libraries, 100 ms for /usr/bin/true, 437 ms when ostrom's own file
+was read before; a fresh copy's first start 39 ms and its second 15 ms. Gatekeeper is not in these figures: the
+runner's shell starts a quarantined copy that `spctl --assess` rejects without a hold (cli#111, run 41660139300).
 
 Results go to stdout, to the job summary in GitHub Actions, and to --out (JSON). Exits 1 when a figure is above the
 budget given for it, listing every budget exceeded; a budget that cannot be measured here (no `sudo` to empty the
@@ -26,16 +36,18 @@ file cache) is said and fails too.
 import argparse
 import json
 import os
+import shutil
 import statistics
 import subprocess
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "scripts"))
 
-from measure import run_cold  # noqa: E402
+from measure import checked, run_cold  # noqa: E402
 from run import launch, requests, setup, start_server  # noqa: E402
 
 RUNS = 20
@@ -84,6 +96,28 @@ def cold(command, stdin=None):
     return (round(statistics.median(walls), 1), None) if walls else (None, reason)
 
 
+def installed(binary):
+    """The median of RUNS first starts of `ostrom version`, each from a new copy of [binary] with its own home.
+
+    On macOS each copy is signed again ad hoc under its own identifier: a new code directory hash, as an update brings,
+    so that no check the system keeps for a hash it has seen is reused. The rest of the system stays in the cache."""
+    walls = []
+    for run in range(RUNS):
+        with tempfile.TemporaryDirectory(prefix="ostrom-installed-") as work:
+            path = os.path.join(work, "ostrom")
+            shutil.copyfile(binary, path)
+            os.chmod(path, 0o755)
+            if sys.platform == "darwin":
+                subprocess.run(["codesign", "--force", "--sign", "-", "--identifier", f"ostrom-installed-{run}", path],
+                               check=True, capture_output=True)
+            environment = {"PATH": os.environ["PATH"], "HOME": work}
+            start = time.perf_counter()
+            result = subprocess.run([path, "version"], capture_output=True, env=environment)
+            walls.append((time.perf_counter() - start) * 1000)
+            checked([path, "version"], result.returncode, result.stderr, (0,))
+    return round(statistics.median(walls), 1)
+
+
 def per_hook(hooks):
     """The server's requests per hook, or None without a hook measured."""
     return round(sum(h["requests"] for h in hooks) / len(hooks), 2) if hooks else None
@@ -101,6 +135,7 @@ def main():
     parser.add_argument("--max-hook-ms", type=float, help="median of a hook in a session, either policy")
     parser.add_argument("--max-cold-version-ms", type=float)
     parser.add_argument("--max-cold-hook-ms", type=float)
+    parser.add_argument("--max-installed-ms", type=float, help="first start of a fresh copy (median)")
     parser.add_argument("--max-size-mb", type=float)
     parser.add_argument("--max-burst-requests", type=float, help="requests to Ostrom per hook, 20 calls in a row")
     parser.add_argument("--max-spaced-requests", type=float, help="requests to Ostrom per hook, calls 31 s apart")
@@ -110,6 +145,7 @@ def main():
 
     version, version_why = cold([binary, "version"])
     hook, hook_why = cold([binary, "hook", "gate"], HOOK_EVENT)
+    first = installed(binary)
     empty, empty_why = session(binary, 0, f"{RUNS + WARM_UP}:0")
     ruled, ruled_why = session(binary, 50, f"{RUNS + WARM_UP}:0")
     spaced, spaced_why = session(binary, 50, SPACED)
@@ -120,7 +156,7 @@ def main():
     size = round(os.path.getsize(binary) / 1024 / 1024, 2)
     figures = {
         "label": args.label,
-        "cold_version_ms": version, "cold_hook_ms": hook,
+        "cold_version_ms": version, "cold_hook_ms": hook, "installed_first_ms": first,
         "hook_empty_ms": median(empty, "millis"), "hook_50_rules_gate_ms": median(ruled, "millis"),
         "requests_per_hook_burst": per_hook(empty + ruled),
         "requests_per_hook_spaced": per_hook(spaced),
@@ -131,6 +167,7 @@ def main():
     rows = [
         ("`ostrom version`, file cache emptied (median of 20)", version, "ms", version_why),
         ("hook outside a session, file cache emptied (median of 20)", hook, "ms", hook_why),
+        ("`ostrom version`, first start of a fresh copy (median of 20)", first, "ms", None),
         ("hook in a session, policy without action (median of 20)", figures["hook_empty_ms"], "ms", empty_why),
         ("hook in a session, 50 actions and a gate (median of 20)", figures["hook_50_rules_gate_ms"], "ms", ruled_why),
         ("requests to Ostrom per hook, 20 in a row", figures["requests_per_hook_burst"], "", empty_why or ruled_why),
@@ -158,6 +195,7 @@ def main():
         (args.max_spaced_ms, figures["hook_spaced_ms"], "hook 31 s after the last one (median)"),
         (args.max_cold_version_ms, version, f"`ostrom version` with the file cache emptied ({version_why})"),
         (args.max_cold_hook_ms, hook, f"the hook with the file cache emptied ({hook_why})"),
+        (args.max_installed_ms, first, "first start of a fresh copy (median)"),
         (args.max_size_mb, size, "binary size"),
         (args.max_burst_requests, figures["requests_per_hook_burst"], "requests per hook, 20 in a row"),
         (args.max_spaced_requests, figures["requests_per_hook_spaced"], "requests per hook, 31 s apart"),
