@@ -42,6 +42,9 @@ made public in the organisation's package settings.
 Also published: the image `ghcr.io/ostrom-hq/ostrom-runner:<version>` and `:latest` (linux/amd64 and linux/arm64,
 signed by digest, with an SBOM and max-mode provenance attached by buildx), the Homebrew formula
 (`ostrom-hq/homebrew-tap`, `Formula/ostrom.rb`) and the Scoop manifest (`ostrom-hq/scoop-bucket`, `bucket/ostrom.json`).
+The `taps` job pushes them over SSH trusting only GitHub's published host keys, pinned in `release.yml`; the release
+checks fail when GitHub rotates one (`scripts/release/check-github-host-keys.sh`), and the pins are then updated from
+https://api.github.com/meta. The Scoop manifest's `autoupdate` reads its sum from the release's `SHA256SUMS`.
 
 ## Verifying
 
