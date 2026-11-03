@@ -42,6 +42,7 @@ import urllib.parse
 import urllib.request
 
 from cloud import Cloud
+from launch import LaunchLatency
 from mcp_relay import McpRelay
 from mcp_waits import McpWaits
 from rules import Rules
@@ -484,6 +485,8 @@ class Journey:
                 self.gated_session(maya, tom_email)
             else:
                 self.claude_ended(self.claude(maya))
+        if gated and self.options.launch_runs > 0:
+            self.guarded(LaunchLatency(self, maya).run)
         if gated:
             self.begin("5.3 cleanup", "the gating workflow, removed on the console")
             status, body, _ = self.call("DELETE", f"/api/v1/workflows/{gated}", session=self.owner_signed_in(maya),
@@ -711,7 +714,7 @@ class Journey:
             self.check(measured[name]["p95"] < server, f"a round trip to Ostrom ({name}): p95 "
                                                        f"{measured[name]['p95']} ms < {server}")
 
-    def claude(self, maya, hold=None):
+    def claude(self, maya, hold=None, env=None):
         """Starts `ostrom claude` with the fake agent; [claude_ended] waits for it and checks what it saw."""
         agents = os.path.join(self.work, "agents")
         os.makedirs(agents, exist_ok=True)
@@ -724,7 +727,8 @@ class Journey:
         report = os.path.join(self.work, "claude-report.json")
         extra = {"PATH": agents + os.pathsep + os.environ["PATH"], "E2E_REPORT": report, "E2E_EXIT": "0",
                  "E2E_OSTROM": self.binary, **({"E2E_HOLD": hold} if hold else {}),
-                 **({"E2E_PERF": str(self.options.perf_runs)} if hold and self.options.perf_runs else {})}
+                 **({"E2E_PERF": str(self.options.perf_runs)} if hold and self.options.perf_runs else {}),
+                 **(env or {})}
         # files, not pipes: nobody reads them while the session waits for its yes
         out, err = (open(os.path.join(self.work, f"claude.{name}"), "w+") for name in ("out", "err"))
         process = subprocess.Popen([self.binary, "claude", "-p", "hello"], cwd=maya["repo"],
@@ -1010,7 +1014,15 @@ def main():
     parser.add_argument("--fake-mcp-key", help="2.9: its private key (PEM)")
     # 6.2: the server runs cloud sessions (a runtime driver, as the Docker of the CI's machine); skipped without
     parser.add_argument("--cloud-sessions", action="store_true", help="6.2: the server runs cloud sessions")
+    # 5.9: what a launch costs, end to end; at most 60 launches an hour and a person (the server's LaunchLimit.DEFAULT)
+    parser.add_argument("--launch-runs", type=int, default=20,
+                        help="5.9: successive launches of `ostrom claude` timed to the first gated tool (0: none; max 60)")
+    parser.add_argument("--server-log-command",
+                        help="5.9: the command that prints the server's logs (docker logs ostrom-server): the server's "
+                             "share of each launch is read from its `request served` lines; without it, not shown")
     options = parser.parse_args()
+    if not 0 <= options.launch_runs <= 60:
+        parser.error("--launch-runs is between 0 and 60: the server allows 60 launches an hour and a person")
     if not options.mail_dir:
         parser.error("--mail-dir (or OSTROM_E2E_MAIL_DIR) is needed: people sign in by their e-mailed link")
     journey = Journey(options)
