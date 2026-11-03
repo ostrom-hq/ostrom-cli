@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.launcher.adapters
 
+import dev.ostrom.cli.launcher.Folders
 import dev.ostrom.cli.launcher.LaunchFiles
 import dev.ostrom.cli.launcher.LaunchVariables
 import dev.ostrom.cli.launcher.join
@@ -50,20 +51,15 @@ internal object GeminiEnvironment {
         val pinned = (TRUST + SHELL + LaunchVariables.ALL).associateWith { name ->
             if (name in layout.environment) layout.environment[name].orEmpty() else layout.variable(name).orEmpty()
         }
-        if (pinned.getValue(PATH).isEmpty()) {
-            refuse(
-                "PATH is not set, and Gemini looks bash up in it to run Ostrom's hooks, so a repository's .env could " +
-                    "name another: Gemini is not started. Set PATH to work with Ostrom",
-            )
-        }
+        refuseWithoutBash(layout, files, pinned.getValue(PATH))
         return pinned
     }
 
     /**
      * Stops the launch in a folder the developer's trusted folders do not trust (`DO_NOT_TRUST`), matched as Gemini
      * matches them: the folder and each rule with their links followed (a path that does not resolve is kept as
-     * written), the longest rule holding the folder wins, `TRUST_PARENT` names the rule's parent, and case is not told
-     * apart (it is not on macOS and Windows).
+     * written), the longest rule holding the folder wins, `TRUST_PARENT` names the rule's parent, and case is told
+     * apart except on macOS and Windows.
      */
     private fun refuseDistrust(layout: SessionLayout, files: LaunchFiles, real: String) {
         val path = layout.variable(TRUSTED_FOLDERS) ?: join(real, "trustedFolders.json")
@@ -79,7 +75,7 @@ internal object GeminiEnvironment {
         }
         for (folder in layout.workspace) {
             val followed = files.canonical(folder)
-            val level = rules.filter { (_, _, resolved) -> within(followed, resolved) }
+            val level = rules.filter { (_, _, resolved) -> Folders.within(followed, resolved, layout.foldsCase) }
                 .maxByOrNull { (rule, _, _) -> rule.length }?.second
             if (level == JsonPrimitive("DO_NOT_TRUST")) {
                 refuse(
@@ -90,10 +86,20 @@ internal object GeminiEnvironment {
         }
     }
 
-    private fun within(folder: String, rule: String): Boolean {
-        val parent = rule.trimEnd('/', '\\').lowercase()
-        val child = folder.trimEnd('/', '\\').lowercase()
-        return child == parent || child.startsWith("$parent/") || child.startsWith("$parent\\")
+    /**
+     * Stops the launch when the `PATH` Gemini gets holds no `bash`: Gemini spawns `bash -c` for each hook, and a spawn
+     * that fails leaves the tool ungated. Windows runs the hooks with PowerShell instead.
+     */
+    private fun refuseWithoutBash(layout: SessionLayout, files: LaunchFiles, path: String) {
+        if (layout.pathSeparator != ':') return
+        val folders = path.split(layout.pathSeparator).filter { it.isNotEmpty() }
+        if (folders.none { files.exists(join(it, "bash")) }) {
+            refuse(
+                "there is no bash on the PATH Ostrom gives it ($path), and Gemini runs Ostrom's hooks with it: " +
+                    "without one they fail open, so Gemini is not started. Install bash, or put its folder on your " +
+                    "PATH, to work with Ostrom",
+            )
+        }
     }
 
     private fun parent(rule: String): String {
@@ -156,5 +162,38 @@ internal object GeminiEnvironment {
         "NODE_PATH",
         "GEMINI_SANDBOX",
         "ComSpec",
+        // the rest of Gemini CLI 0.66's own list of what changes a program run (BLOCKED_EXECUTION_ENVS)
+        "NODE_CLI_FLAGS",
+        "_FORCE_NODE_OPTIONS",
+        "ELECTRON_RUN_AS_NODE",
+        "PYTHONPATH",
+        "PYTHONSTARTUP",
+        "RUBYOPT",
+        "RUBYLIB",
+        "PERL5OPT",
+        "PERL5LIB",
+        "PERL5DB",
+        "LD_DEBUG",
+        "LD_PROFILE",
+        "DYLD_FORCE_FLAT_NAMESPACE",
+        "DYLD_FALLBACK_LIBRARY_PATH",
+        "DYLD_FALLBACK_FRAMEWORK_PATH",
+        "JAVA_TOOL_OPTIONS",
+        "_JAVA_OPTIONS",
+        "CLASSPATH",
+        "DOTNET_STARTUP_HOOKS",
+        "CORECLR_PROFILER_PATH",
+        "CORECLR_ENABLE_PROFILING",
+        // and what that list lacks: Python's home, and the proxies the hooks' HTTP client would send the relay's
+        // token through
+        "PYTHONHOME",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "no_proxy",
     )
 }

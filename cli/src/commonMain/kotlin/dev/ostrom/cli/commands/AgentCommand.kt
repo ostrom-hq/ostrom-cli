@@ -73,6 +73,7 @@ internal class AgentCommand(private val agent: Agent, private val dependencies: 
             pathSeparator = environment.pathListSeparator,
             variable = { environment[it] },
             org = orgId,
+            foldsCase = environment.operatingSystem.foldsCase,
         )
         val request = LaunchRequest(agent, agentArguments, repo, model, dryRun)
         throw ProgramResult(runBlocking { dependencies.agents.run(request, site) })

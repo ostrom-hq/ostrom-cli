@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.platform
 
-/** The operating system families the CLI ships for. */
-enum class OperatingSystem(val displayName: String) {
-    MACOS("macOS"),
-    LINUX("Linux"),
-    WINDOWS("Windows"),
+/**
+ * The operating system families the CLI ships for.
+ *
+ * @property foldsCase Whether its paths ignore case, as its default file systems do (and Gemini CLI compares them).
+ */
+enum class OperatingSystem(val displayName: String, val foldsCase: Boolean) {
+    MACOS("macOS", true),
+    LINUX("Linux", false),
+    WINDOWS("Windows", true),
 }
 
 /** The process environment and the machine it runs on. */

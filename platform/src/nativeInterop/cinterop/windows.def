@@ -492,3 +492,36 @@ static inline void ostrom_unlock_file_w(void *file) {
     UnlockFileEx((HANDLE)file, 0, MAXDWORD, MAXDWORD, &whole);
     CloseHandle((HANDLE)file);
 }
+
+#ifndef SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE
+#define SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE 0x2
+#endif
+
+/*
+ * Writes the final path of `path`, its links followed, to `out` (`capacity` wide characters, NUL included), as
+ * GetFinalPathNameByHandleW gives it (`\\?\` prefix). Returns its length, or 0 when it cannot be opened or resolved.
+ */
+static inline int ostrom_real_path_w(const unsigned short *path, unsigned short *out, int capacity) {
+    HANDLE handle = CreateFileW((LPCWSTR)path, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+                                OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    if (handle == INVALID_HANDLE_VALUE) return 0;
+    DWORD length = GetFinalPathNameByHandleW(handle, (LPWSTR)out, (DWORD)capacity, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+    CloseHandle(handle);
+    return (length == 0 || length >= (DWORD)capacity) ? 0 : (int)length;
+}
+
+/*
+ * Makes `link` a symbolic link to `target`, a folder link when `target` is a folder: without the administrator's right
+ * where developer mode allows it, else with it. Returns 1, or 0 when it cannot.
+ */
+static inline int ostrom_symlink_w(const unsigned short *target, const unsigned short *link) {
+    DWORD attributes = GetFileAttributesW((LPCWSTR)target);
+    DWORD flags = (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY))
+        ? SYMBOLIC_LINK_FLAG_DIRECTORY : 0;
+    if (CreateSymbolicLinkW((LPCWSTR)link, (LPCWSTR)target, flags | SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE)) {
+        return 1;
+    }
+    if (GetLastError() != ERROR_INVALID_PARAMETER) return 0;
+    return CreateSymbolicLinkW((LPCWSTR)link, (LPCWSTR)target, flags) ? 1 : 0;
+}
+

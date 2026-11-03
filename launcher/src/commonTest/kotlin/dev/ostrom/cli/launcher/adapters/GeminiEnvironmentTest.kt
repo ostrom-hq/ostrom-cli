@@ -142,6 +142,8 @@ class GeminiEnvironmentTest {
                 "put its folder on your PATH, to work with Ostrom",
             refusal(layout(environment = mapOf("PATH" to "/opt/bin:/usr/local/bin"))),
         )
+        // nothing on it at all
+        assertTrue("on the PATH Ostrom gives it ()" in refusal(layout(environment = mapOf("PATH" to null))))
         // Windows runs the hooks with PowerShell, not bash
         prepare(layout(environment = mapOf("PATH" to "C:\\Windows"), pathSeparator = ';'))
     }

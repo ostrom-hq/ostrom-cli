@@ -86,6 +86,9 @@ object LaunchVariables {
     /** Never passed on: the server URL; the hooks reach Ostrom through the relay only. */
     const val SERVER = "OSTROM_URL"
 
+    /** The CLI's own folder, as the launcher resolved it, for the hooks to read the same. */
+    const val HOME = "OSTROM_HOME"
+
     /** Never passed on: the developer's own device token, when set in their shell. */
     const val DEVICE_TOKEN = "OSTROM_TOKEN"
 
@@ -118,8 +121,8 @@ object LaunchVariables {
         HOOK_BUDGET_MS,
         SERVER,
         DEVICE_TOKEN,
+        HOME,
         // read by the CLI itself, its hooks or the agents' plugins
-        "OSTROM_HOME",
         "OSTROM_HOOK_TIMING",
         "OSTROM_TELEMETRY",
         "OSTROM_ORG",

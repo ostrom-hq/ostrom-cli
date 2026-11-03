@@ -282,6 +282,10 @@ class MoreAdaptersTest {
         // a file Gemini cannot read either loads no hook
         files.texts[linked] = "{not json"
         prepareAgain()
+        // a link without a source is read in its own folder
+        files.texts[install] = """{"type":"link","source":{}}"""
+        files.texts[join(extensions, "linked", "hooks", "hooks.json")] = before
+        assertTrue(refused().startsWith("gemini: ${join(extensions, "linked", "hooks", "hooks.json")} adds"))
     }
 
     private fun prepareAgain(): AgentLaunch {

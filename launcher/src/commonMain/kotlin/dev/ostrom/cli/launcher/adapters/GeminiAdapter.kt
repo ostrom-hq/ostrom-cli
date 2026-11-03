@@ -52,6 +52,7 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
         val parsed = if (text.isNullOrBlank()) null else parseObject(text, comments = true)
         val theirs = parsed ?: JsonObject(emptyMap())
         developersRules(theirs, join(real, "settings.json"))
+        extensionsRules(files, real)
         // Gemini reads the session's settings, not these: settings Ostrom cannot read are left out, and said
         val notes = if (parsed == null && !text.isNullOrBlank()) listOf(UNREAD) else emptyList()
         val suffix = nonce()
@@ -86,14 +87,34 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
                 "gemini: $path cannot be read as JSON: " + (if (own) "Gemini reads it in this folder, and " else "") +
                     "Ostrom cannot tell whether it turns its hooks off, so Gemini is not started",
             )
-            if (own) {
-                developersRules(settings, path)
-            } else if ("hooks" in settings || "hooksConfig" in settings) {
+            val outside = if (own) null else WORKSPACE.firstOutside(settings)
+            if (own) developersRules(settings, path)
+            if (outside != null) {
                 throw AdapterException(
-                    "gemini: $path sets `hooks` or `hooksConfig`, with which a repository can turn Ostrom's hooks " +
-                        "off: Gemini is not started. Remove them from that file to work with Ostrom",
+                    "gemini: $path sets `$outside`, which Ostrom does not know to be harmless: a repository's " +
+                        "settings could run its own programs or turn Ostrom's hooks off with it, so Gemini is not " +
+                        "started. Remove it from that file to work with Ostrom",
                 )
             }
+        }
+    }
+
+    /**
+     * The developer's extensions follow their rules: Gemini registers an extension's hooks (`hooks/hooks.json`, in its
+     * folder or, for a linked one, in its source) with the settings' ones. A file Gemini cannot read loads no hook.
+     *
+     * @throws AdapterException When one adds a `BeforeTool` hook.
+     */
+    private fun extensionsRules(files: LaunchFiles, real: String) {
+        val extensions = join(real, "extensions")
+        for (name in files.list(extensions)) {
+            val folder = join(extensions, name)
+            val install = files.read(join(folder, ".gemini-extension-install.json"))?.let { parseObject(it) }
+            val source = (install?.get("source") as? JsonPrimitive)?.content
+            val effective = if (install?.get("type") == JsonPrimitive("link") && source != null) source else folder
+            val path = join(effective, "hooks", "hooks.json")
+            val hooks = files.read(path)?.let { parseObject(it) } ?: continue
+            developersRules(hooks, path)
         }
     }
 
@@ -194,5 +215,8 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
         const val NONCE = 16
 
         const val MACOS_ROOT = "/Library/Application Support"
+
+        // provisional, until the inventory of what Gemini CLI 0.66 reads in a workspace (AUDIT-SECU-CLI-H3-INVENTAIRE)
+        val WORKSPACE = InertKeys(setOf("\$schema", "ui"))
     }
 }

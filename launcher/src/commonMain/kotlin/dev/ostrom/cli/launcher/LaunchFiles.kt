@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.launcher
 
+import dev.ostrom.cli.platform.realPath
 import dev.ostrom.cli.platform.restrictToOwner
 import okio.FileSystem
 import okio.IOException
@@ -66,6 +67,14 @@ interface LaunchFiles {
 class LaunchFilesImpl(
     private val fileSystem: FileSystem = FileSystem.SYSTEM,
     private val restrict: (String, Boolean) -> Unit = ::restrictToOwner,
+    // the system's own realpath for its files: okio's canonicalize does not follow links on Windows
+    private val resolve: (String) -> String? = if (fileSystem === FileSystem.SYSTEM) ::realPath else { path ->
+        try {
+            fileSystem.canonicalize(path.toPath()).toString()
+        } catch (_: IOException) {
+            null
+        }
+    },
 ) : LaunchFiles {
     override fun read(path: String): String? = try {
         fileSystem.read(path.toPath()) { readUtf8() }
@@ -117,11 +126,7 @@ class LaunchFilesImpl(
     override fun deleteRecursively(path: String) = fileSystem.deleteRecursively(path.toPath(), mustExist = false)
 
     override fun canonical(path: String): String {
-        val written = path.toPath(normalize = true)
-        return try {
-            fileSystem.canonicalize(written).toString()
-        } catch (_: IOException) {
-            written.toString()
-        }
+        val written = path.toPath(normalize = true).toString()
+        return resolve(written) ?: written
     }
 }
