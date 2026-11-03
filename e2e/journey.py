@@ -402,11 +402,13 @@ class Journey:
         rule_id = rule.get("id") if isinstance(rule, dict) else None
         if not self.check(status == 201 and rule_id, f"the console proposes a rule ({status}): {error_of(rule)[:200]}"):
             return
-        # every scope a personal token may hold (1 to 32, the server's catalogue): init reads the org, its repositories,
-        # workflows and rules; a write scope is never on a personal token, and its governance write is held anyway
+        # the catalogue's reads (a token holds 1 to 32 scopes): init reads the org, its repositories, workflows and
+        # rules; its one write, the rules' acceptance, needs no scope of the token, as the server holds it anyway (H1)
         listed, catalogue, _ = self.call("GET", "/api/v1/tokens/scopes", session=session)
-        scopes = [s["scope"] for s in catalogue.get("scopes", [])] if isinstance(catalogue, dict) else []
-        if not self.check(listed == 200 and scopes, f"the console lists the scopes of a token ({listed})"):
+        scopes = [s["scope"] for s in catalogue.get("scopes", []) if s["scope"].endswith(":read")] \
+            if isinstance(catalogue, dict) else []
+        if not self.check(listed == 200 and 0 < len(scopes) <= 32,
+                          f"the console lists the reads a token may hold ({listed}, {len(scopes)})"):
             return
         status, made, _ = self.call("POST", "/api/v1/tokens", {"name": "journey init", "scopes": scopes,
                                                                "expiresInDays": 1}, session=session)
