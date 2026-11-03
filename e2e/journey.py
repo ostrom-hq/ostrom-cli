@@ -16,6 +16,12 @@
         --seed "docker run --rm --network host --env-file server.env ghcr.io/ostrom-hq/ostrom-server:edge \\
                 seed-test-account"
 
+6.6 imports ostrom-helm's fake TeamCode team (compose/demo/teamcode, its MySQL at 127.0.0.1:3307) when given it; without,
+it is skipped, and ostrom-server's cli-journey.yml, which gives it, fails a run where 6.6 was not played and passed:
+
+    OSTROM_E2E_TEAMCODE_PASSWORD=demo-teamcode-ro python3 e2e/journey.py … \\
+        --teamcode-db mysql://teamcode_ro@127.0.0.1:3307/teamcode --teamcode-key-file demo/teamcode/key.txt
+
 Nothing is faked on the server side: people sign in by their e-mailed link (read from the server's OSTROM_MAIL_DIR),
 the owner is made by `ostrom-server seed-test-account` (its personal token stands for a token made on the console,
 OSTROM_TOKEN), and every command is the real binary. A step whose route the server does not serve yet (its router's
