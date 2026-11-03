@@ -155,6 +155,21 @@ class AdaptersTest {
     }
 
     @Test
+    fun codexRunsOstromsHooksWithoutAPackageToo() {
+        // Codex runs no hook given by -c until the developer reviews it ("1 hook needs review before it can run"):
+        // without a package, the gate never ran (security audit of the CLI n°2, H2)
+        val real = join("/home/dev", ".codex")
+        files.texts[join(real, "config.toml")] = ""
+        files.texts[join(real, "hooks.json")] = "{}"
+        val launch = CodexAdapter().prepare(layout(arguments = listOf("hi")), files)
+        val home = join("/tmp/run", "codex-home")
+        assertTrue("--dangerously-bypass-hook-trust" in launch.arguments)
+        assertEquals(home, launch.environment["CODEX_HOME"])
+        assertEquals(join(real, "config.toml"), files.links[join(home, "config.toml")])
+        assertNull(files.links[join(home, "hooks.json")], "the developer's own hooks are not trusted with Ostrom's")
+    }
+
+    @Test
     fun codexHomeLaysThePackageRolesBesideTheDevelopers() {
         val real = join("/home/dev", ".codex")
         files.texts[join(real, "config.toml")] = ""
