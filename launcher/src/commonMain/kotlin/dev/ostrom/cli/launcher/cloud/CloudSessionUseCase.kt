@@ -250,10 +250,8 @@ class CloudSessionUseCase(
          * (`MissingScopeException` of the runners module, `requireScope` of the kernel): a token of `ostrom login`
          * issued before the server gave it cloud sessions (ostrom-server#240), which signing in again renews.
          */
-        private fun olderThanCloud(message: String): Boolean {
-            val scope = MISSING_SCOPE.matchEntire(message)?.groupValues?.drop(1)?.firstOrNull { it.isNotEmpty() }
-            return scope in CLOUD_SCOPES
-        }
+        private fun olderThanCloud(message: String): Boolean =
+            MISSING_SCOPE.matchEntire(message)?.groupValues.orEmpty().any { it in CLOUD_SCOPES }
 
         /** Agents with a cloud image (contract `CloudSession.agent`). */
         val CLOUD_AGENTS = listOf("claude", "codex", "opencode", "gemini")
