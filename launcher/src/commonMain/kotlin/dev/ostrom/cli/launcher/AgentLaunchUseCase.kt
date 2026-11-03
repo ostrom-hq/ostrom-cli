@@ -130,15 +130,14 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         // From here on, however the launch ends (the agent's exit, a stop before it starts, a cancellation), its agent
         // token is revoked at once (AUDIT-SECU-RUNNER-2 R2b).
         return try {
-            val pack = calls.packageOf(repo, site, keep = true)
-            val keys = calls.instanceKeys()
+            val reads = calls.reads(request, site, repo, launch)
             val temporary = join(site.temporaryDirectory, "ostrom-run-${dependencies.clock.millis()}")
             try {
                 dependencies.files.createPrivateDirectory(temporary)
             } catch (e: IOException) {
                 stop(CANNOT_WRITE, "cannot create $temporary (${e.message})")
             }
-            val run = Run(request, site, adapter, executable, repo, top, model, launch, pack, keys, temporary)
+            val run = Run(request, site, adapter, executable, repo, top, model, launch, reads, temporary)
             try {
                 session(run)
             } finally {
@@ -160,10 +159,13 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         val top: String,
         val model: String?,
         val launch: Launch,
-        val pack: SessionPackage?,
-        val keys: String,
+        reads: LaunchReads,
         val temporary: String,
     ) {
+        val pack = reads.pack
+        val keys = reads.keys
+        val mcpServers = reads.mcp
+        val inference = reads.inference
         val plugin = join(temporary, "plugin")
         val relayTokenFile = join(temporary, "relay-token")
         val sessionFile = join(temporary, "session-id")
@@ -176,8 +178,8 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         files.createPrivateDirectory(run.plugin)
         val laid = run.pack?.let { PackageLayout(files).layDown(it, run.plugin, run.temporary) }
         // `ostrom` (rules_for, request_approval, get_receipt) is built into every Ostrom server
-        val mcp = (listOf(BUILT_IN_MCP) + calls.mcpServers(run.site) + run.pack?.mcpServers.orEmpty()).distinct()
-        val inference = inferenceRelayed(run)
+        val mcp = (listOf(BUILT_IN_MCP) + run.mcpServers + run.pack?.mcpServers.orEmpty()).distinct()
+        val inference = run.inference
         val settings = RelaySettings(
             run.site.serverUrl,
             run.launch.agentToken,
@@ -287,19 +289,6 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         }
     }
 
-    private suspend fun inferenceRelayed(run: Run): Boolean {
-        val choice = run.site.variable(INFERENCE_VARIABLE)
-        return when {
-            run.request.agent != Agent.CLAUDE -> false
-            choice in OFF -> false
-            choice in ON -> true
-            else -> {
-                val answer = dependencies.server.get(Routes.INFERENCE_MODELS, run.launch.agentToken, INFERENCE_MILLIS)
-                answer is ServerAnswer.Ok && answer.body.list("data").isNotEmpty()
-            }
-        }
-    }
-
     private fun gitTop(cwd: String): String {
         val result = dependencies.capture.capture(listOf("git", "-C", cwd, "rev-parse", "--show-toplevel"), GIT_MILLIS)
         val top = (result as? CaptureResult.Exited)?.takeIf { it.code == 0 }?.let { it.output.trim() }
@@ -327,14 +316,10 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         private const val BUILT_IN_MCP = "ostrom"
         private const val CANNOT_WRITE = 73
         private const val AGENT_MISSING = 127
-        private const val INFERENCE_MILLIS = 3_000L
         private const val GIT_MILLIS = 3_000
         private const val ALIVE_MILLIS = 20_000L
         private const val ALIVE_VARIABLE = "OSTROM_ALIVE_MS"
         private const val KEEP_VARIABLE = "OSTROM_KEEP_PLUGIN"
-        private const val INFERENCE_VARIABLE = "OSTROM_INFERENCE"
-        private val ON = setOf("on", "1", "true")
-        private val OFF = setOf("off", "0", "false")
 
         private fun missing(agent: Agent): String =
             "${agent.displayName} is not installed (`${agent.executable}` is not on your PATH)." +
