@@ -107,6 +107,7 @@ internal class InitCommand(private val dependencies: CliDependencies) : CliktCom
             else -> workflows.joinToString(" · ") { "${it.text("name")} (${it.text("status")})" }
         }
         say("  Repository  $name${if (covered == true) " · covered" else ""}\n  Harness     $harness")
+        if ("repos" in unreadable) say("! Coverage    unknown: ${cannotRead(access, unreadable.getValue("repos"))}")
         if (covered == false) {
             say("! $name is not among ${access.org.name}'s repositories on the server: ask an admin to add it " +
                 "(${access.console}).")
@@ -208,17 +209,25 @@ private fun coverage(page: JsonObject, name: String): Boolean? {
 }
 
 /**
- * `GET` [path] when served, or null; a refusal (403) is noted in [unreadable] under [what] rather than failing init,
- * whose link and hooks are already done: a token made on the console may not hold every read scope.
+ * `GET` [path] when served, or null; a right the token lacks (403 `This credential does not allow …`) is noted in
+ * [unreadable] under [what] rather than failing init, whose link and hooks are already done: a token made on the
+ * console may not hold every read scope. Any other refusal still stops init, the device's token older than a right
+ * `ostrom login` now gives included (its message says to sign in again).
  */
 private fun OrgAccess.readIfAllowed(path: String, what: String, unreadable: MutableMap<String, String>): JsonObject? =
     try {
         readIfServed(path)
     } catch (refused: PrintMessage) {
-        if (refused.statusCode != ExitCode.REFUSED.code) throw refused
-        unreadable[what] = "${refused.message}"
+        val message = "${refused.message}"
+        if (refused.statusCode != ExitCode.REFUSED.code || !message.startsWith(LACKS_SCOPE) || '\n' in message) {
+            throw refused
+        }
+        unreadable[what] = message
         null
     }
+
+/** The server's refusal of a right the token lacks, before the right's name. */
+private const val LACKS_SCOPE = "This credential does not allow "
 
 /** What init says of a read the server refused for [why], and how to make it otherwise. */
 private fun cannotRead(access: OrgAccess, why: String): String {

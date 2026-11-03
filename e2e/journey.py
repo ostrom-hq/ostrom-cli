@@ -56,7 +56,7 @@ class Journey:
         self.invitee = None
         self.owner = None
         self.org_id = None
-        self.admin_token = False
+        self.admin_token = None
         self.owner_session = None
         self.temporary = options.work is None
 
@@ -345,16 +345,18 @@ class Journey:
             bashrc = os.path.join(maya["home"], ".bashrc")
             written = os.path.exists(bashrc) and "# >>> ostrom:" in open(bashrc, encoding="utf-8").read()
             self.check(written, "the agents start with Ostrom's hooks (~/.bashrc)")
-        # init again, as the owner after ostrom login --admin (the governance token, approved on the console)
-        if self.admin_signed_in(maya):
-            again = self.ostrom(maya, "init", "--yes")
-            self.check(again.returncode == 0 and "Rules" in again.stdout,
-                       f"init again, after ostrom login --admin, exits 0 and says the rules ({again.returncode}): "
-                       f"{(again.stdout + again.stderr).strip()[-300:]}")
-        # a personal token without rules:read does not fail init: it says so, the rest is done (cli#83)
+        # init again, as the owner who governs: ostrom login --admin first (the governance token, approved on the
+        # console), then init with the device's token, which reads the rules
+        self.admin_signed_in(maya)
+        again = self.ostrom(maya, "init", "--yes")
+        self.check(again.returncode == 0 and "Rules" in again.stdout,
+                   f"init again exits 0 and says the rules ({again.returncode}): "
+                   f"{(again.stdout + again.stderr).strip()[-300:]}")
+        # the personal token holds no rules:read: init says so and the rest is done, exit 0 (cli#83)
         personal = self.ostrom(maya, "init", "--yes", console=True)
-        self.check(personal.returncode == 0, f"init with a personal token exits 0 ({personal.returncode}): "
-                                             f"{(personal.stdout + personal.stderr).strip()[-300:]}")
+        self.check(personal.returncode == 0 and "Rules       this token cannot read them" in personal.stdout,
+                   f"init with a personal token exits 0 and says it cannot read the rules ({personal.returncode}): "
+                   f"{(personal.stdout + personal.stderr).strip()[-300:]}")
 
     def team(self, maya, tom_email, org):
         """2.6, 2.7, then the policy, the rules, the harness and the launch."""
@@ -424,10 +426,10 @@ class Journey:
             if self.admin_signed_in(maya):
                 done = self.governed(maya, "policy", "set", "self-approval", "never")
                 self.check(done == 0, f"self-approval never, with the admin token ({done})")
-            # 5.6 relies on it
-            shown = self.ostrom(maya, "policy", "show", "--json", console=True)
-            gates = (read_json(shown.stdout) or {}).get("gates", {})
-            self.check(gates.get("selfApproval") == "never", f"self-approval is never ({gates})")
+                # 5.6 relies on it
+                shown = self.ostrom(maya, "policy", "show", "--json", console=True)
+                gates = (read_json(shown.stdout) or {}).get("gates") or {}
+                self.check(gates.get("selfApproval") == "never", f"self-approval is never ({gates})")
 
         self.begin("3.1", "ostrom policy rules: what the analysis proposed")
         if self.needs(("GET", "/api/v1/rules"), org=True):
@@ -564,8 +566,9 @@ class Journey:
                    f"it is gone from the harness ({listed.returncode})")
 
     def admin_signed_in(self, maya):
-        """ostrom login --admin, approved once by the owner (the token lasts 8 hours): True when it is there."""
-        if not self.admin_token:
+        """ostrom login --admin, tried once and approved by the owner (the token lasts 8 hours): True when it is
+        there. A failed attempt is not tried again: its failing checks are said once."""
+        if self.admin_token is None:
             self.admin_token = self.login(maya, maya["email"], admin=True)
         return self.admin_token
 
