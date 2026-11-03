@@ -44,6 +44,8 @@ from mcp_relay import McpRelay
 HERE = os.path.dirname(os.path.abspath(__file__))
 GENERIC_404 = "Not found."
 MAIL_WAIT_S = 20
+# a sensitive write takes a sign-in of less than 5 minutes (S2-54), and a person gets 10 sign-in links per 10 minutes
+RECENT_SIGN_IN_S = 240
 
 
 class Journey:
@@ -62,6 +64,7 @@ class Journey:
         self.admin_token = None
         self.held_writes = None
         self.owner_session = None
+        self.recent = {}
         self.temporary = options.work is None
 
     # ---- what the run says -------------------------------------------------------------------------------------
@@ -179,6 +182,19 @@ class Journey:
             return None
         return {"cookie": cookie, "csrf": csrf}
 
+    def recent_sign_in(self, email):
+        """
+        A browser session of [email] signed in less than RECENT_SIGN_IN_S ago, for a sensitive write: the last one, or
+        a new one. The journey's approvals and confirmations reuse it rather than ask the server for a link each time.
+        """
+        last = self.recent.get(email)
+        if last is not None and time.monotonic() - last[1] < RECENT_SIGN_IN_S:
+            return last[0]
+        session = self.sign_in(email)
+        if session is not None:
+            self.recent[email] = (session, time.monotonic())
+        return session
+
     def seed(self, email):
         """The owner: `ostrom-server seed-test-account <email>`, or the account of --seeded."""
         if self.options.seeded:
@@ -253,7 +269,7 @@ class Journey:
             process.kill()
             return False
         user_code = next(CODE.search(line).group(1) for line in said if CODE.search(line))
-        session = self.sign_in(email)
+        session = self.recent_sign_in(email)
         if session is None:
             process.kill()
             return False
@@ -418,8 +434,8 @@ class Journey:
             allowed = ((read_json(shown.stdout) or {}).get("models") or {}).get("allowed") or []
             models = ",".join(allowed or ["sonnet"])
             # a personal token (OSTROM_TOKEN) never governs: the policy takes ostrom login --admin
-            refused = self.ostrom(maya, "policy", "set", "models", models, console=True)
-            self.check(refused.returncode == 77, f"a personal token cannot set the models ({refused.returncode})")
+            self.kept_from(maya, "a personal token does not set the models", "policy", "set", "models", models,
+                           console=True)
             if self.admin_signed_in(maya):
                 done = self.governed(maya, "policy", "set", "models", models)
                 self.check(done == 0, f"policy set models, with the admin token ({done})")
@@ -430,15 +446,11 @@ class Journey:
                                                    f"{(done.stdout + done.stderr).strip()[:300]}")
         self.begin("3.3", "ostrom policy set self-approval")
         if self.needs(("GET", "/api/v1/gates/policy"), ("PUT", "/api/v1/gates/policy"), org=True):
-            refused = self.ostrom(maya, "policy", "set", "self-approval", "never", console=True)
-            self.check(refused.returncode == 77, f"a personal token cannot set self-approval ({refused.returncode})")
+            self.kept_from(maya, "a personal token does not set self-approval", "policy", "set", "self-approval",
+                           "sole-approver", console=True)
             if self.admin_signed_in(maya):
                 done = self.governed(maya, "policy", "set", "self-approval", "never")
                 self.check(done == 0, f"self-approval never, with the admin token ({done})")
-                if self.holds():
-                    # refused on the console: nothing is written, the CLI says so (77)
-                    done = self.governed(maya, "policy", "set", "self-approval", "sole-approver", answer="refuse")
-                    self.check(done == 77, f"a change refused on the console exits 77 ({done})")
                 # 5.6 relies on it
                 shown = self.ostrom(maya, "policy", "show", "--json", console=True)
                 gates = (read_json(shown.stdout) or {}).get("gates") or {}
@@ -552,11 +564,9 @@ class Journey:
         path = os.path.join(maya["home"], f"{name}.json")
         with open(path, "w") as handle:
             json.dump(document, handle)
-        device = self.ostrom(maya, "harness", "add", path, "--yes")
-        self.check(device.returncode == 77, f"the device's token cannot add a workflow ({device.returncode})")
-        done = self.ostrom(maya, "harness", "add", path, "--yes", console=True)
-        if not self.check(done.returncode == 0, f"harness add, on trial ({done.returncode}): "
-                                                f"{done.stderr.strip()[:300]}"):
+        self.kept_from(maya, "the device's token does not add a workflow", "harness", "add", path, "--yes")
+        done = self.governed(maya, "harness", "add", path, "--yes", console=True, must_hold=False)
+        if not self.check(done == 0, f"harness add, on trial ({done})"):
             return
         listed = self.ostrom(maya, "harness", "list", "--all", "--json")
         items = (read_json(listed.stdout) or {}).get("items", [])
@@ -565,8 +575,8 @@ class Journey:
                           f"harness list shows it on trial ({listed.returncode})"):
             return
         # a personal token (OSTROM_TOKEN) never governs: enforcing and removing take ostrom login --admin
-        refused = self.ostrom(maya, "harness", "enforce", workflow["id"], console=True)
-        self.check(refused.returncode == 77, f"a personal token cannot enforce it ({refused.returncode})")
+        self.kept_from(maya, "a personal token does not enforce it", "harness", "enforce", workflow["id"],
+                       console=True)
         if not self.admin_signed_in(maya):
             return
         done = self.governed(maya, "harness", "enforce", workflow["id"])
@@ -594,11 +604,18 @@ class Journey:
             self.held_writes = self.served("GET", "/api/v1/confirmations/journey")
         return self.held_writes
 
-    def governed(self, maya, *arguments, answer="confirm"):
+    def kept_from(self, maya, what, *arguments, console=False):
+        """A governance write this token does not make: refused (77) at once, or, on a server that holds it for a
+        console confirmation (H1), held and refused there by the owner, which exits 77 too."""
+        done = self.governed(maya, *arguments, answer="refuse", console=console, must_hold=False)
+        self.check(done == 77, f"{what}: refused, 77 ({done})")
+
+    def governed(self, maya, *arguments, answer="confirm", console=False, must_hold=True):
         """A governance write with the admin token: written at once, or held by the server until an owner confirms it
         on the console (202, audit H1), which the owner does here from a fresh browser session. Its exit code."""
         shown = "ostrom " + " ".join(shlex.quote(a) for a in arguments)
-        process = subprocess.Popen([self.binary, *arguments], cwd=maya["repo"], env=self.environment(maya),
+        shown = ("OSTROM_TOKEN=… " if console else "") + shown
+        process = subprocess.Popen([self.binary, *arguments], cwd=maya["repo"], env=self.environment(maya, console),
                                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         said = []
         held = threading.Event()
@@ -609,7 +626,7 @@ class Journey:
             pass
         if held.is_set():
             confirmation = next(CONFIRM.search(line).group(1) for line in said if CONFIRM.search(line))
-            session = self.sign_in(maya["email"])
+            session = self.recent_sign_in(maya["email"])
             if session is not None:
                 status, body, _ = self.call("POST", f"/api/v1/confirmations/{urllib.parse.quote(confirmation)}/answer",
                                             {"answer": answer}, session=session, org=self.org_id)
@@ -623,7 +640,7 @@ class Journey:
         out = process.stdout.read()
         reader.join(5)
         self.record(maya, shown, process.returncode, out, "".join(said))
-        if self.holds():
+        if must_hold and self.holds():
             # a server that holds the governance writes holds this one: the confirmation was played, not skipped
             self.check(held.is_set(), f"{shown} is held until the console confirms it (H1)")
         return process.returncode
@@ -743,8 +760,8 @@ class Journey:
         path = os.path.join(maya["home"], f"{name}.json")
         with open(path, "w") as handle:
             json.dump(document, handle)
-        done = self.ostrom(maya, "harness", "add", path, "--yes", console=True)
-        if not self.check(done.returncode == 0, f"harness add ({done.returncode}): {done.stderr.strip()[:300]}"):
+        done = self.governed(maya, "harness", "add", path, "--yes", console=True, must_hold=False)
+        if not self.check(done == 0, f"harness add ({done})"):
             return None
         listed = self.ostrom(maya, "harness", "list", "--all", "--json")
         workflow = next((w for w in (read_json(listed.stdout) or {}).get("items", []) if w.get("name") == name), None)
