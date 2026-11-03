@@ -294,9 +294,40 @@ class AdaptersTest {
         )
         assertFalse(overrides.any { "default_tools_approval_mode" in it }, "S2-37: Codex asks before an MCP tool")
         assertEquals(mapOf("OSTROM_HOOK_BUDGET_MS" to "18000"), launch.environment)
-        assertFalse("--dangerously-bypass-hook-trust" in arguments, "no package: no hook to trust")
+        assertFalse("--dangerously-bypass-hook-trust" in arguments, "no hook is trusted blindly")
         assertEquals("-c", CodexAdapter().prepare(layout(arguments = listOf("hi")), files).arguments.first())
         assertEquals(listOf("-c"), CodexAdapter().prepare(layout(), files).arguments.take(1))
+    }
+
+    @Test
+    fun codexTrustsOstromsOwnHooksByTheirHash() {
+        // Codex runs no hook given by -c until it is reviewed, and its --dangerously-bypass-hook-trust trusts every
+        // hook, a repository's included: Ostrom writes the trust of its own hooks, which -c may do (security audit of
+        // the CLI n°2, H2). These are the hashes Codex 0.164 computes for these hooks, and it ran them without review.
+        val arguments = CodexAdapter().prepare(layout(), files).arguments
+        val overrides = arguments.windowed(2).filter { it[0] == "-c" }.map { it[1] }
+        val state = overrides.single { it.startsWith("hooks.state=") }
+        val hashes = listOf(
+            "pre_tool_use" to "sha256:85cf5f813f0f9d47ac5ad5d07d403e34a2e1370649f479568e4ba97bf5b16b94",
+            "post_tool_use" to "sha256:4138744f7bc469b8cc6314205790f8b0d777ca18b5e8effbef4d437b3e795430",
+            "session_start" to "sha256:ded3612589ce96b42a7abfde522a7a64cff3e29cfcb93fa54236013eadd33503",
+            "session_end" to "sha256:c97c6c5fe4cb5eda16ab6a62962493ad64921c246f684d68b8118fb014fdeac3",
+        )
+        // the key names the -c layer as Codex does on POSIX and on Windows
+        for ((event, hash) in hashes) {
+            for (source in listOf("/<session-flags>/config.toml", "C:\\\\<session-flags>\\\\config.toml")) {
+                val entry = "\"$source:$event:0:0\"={trusted_hash=\"$hash\",enabled=true}"
+                assertTrue(entry in state, "$entry in $state")
+            }
+        }
+        assertFalse("--dangerously-bypass-hook-trust" in arguments)
+        // with a package, the gate's limit is the package's: its hook changes, and so does the hash trusted for it
+        val pack = SessionPackage(objectOf("scripts" to listOf(mapOf("mode" to "enforce", "timeoutSec" to 120))), "d")
+        val packed = CodexAdapter().prepare(layout(pack = pack), MemoryFiles()).arguments
+        val gate = packed.single { it.startsWith("hooks.PreToolUse=") }
+        assertTrue("timeout=140}" in gate, gate)
+        val trusted = packed.single { it.startsWith("hooks.state=") }
+        assertFalse(hashes.first().second in trusted, "the 20 s hook's hash is not the 140 s hook's")
     }
 
     @Test
@@ -312,7 +343,7 @@ class AdaptersTest {
         val launch = CodexAdapter().prepare(layout(pack = pack), files)
         val home = join("/tmp/run", "codex-home")
         assertEquals(home, launch.environment["CODEX_HOME"])
-        assertTrue("--dangerously-bypass-hook-trust" in launch.arguments)
+        assertFalse("--dangerously-bypass-hook-trust" in launch.arguments, "only Ostrom's hooks are trusted, by hash")
         assertEquals(join(real, "config.toml"), files.links[join(home, "config.toml")])
         assertNull(files.links[join(home, "hooks.json")], "the developer's own hooks are not trusted with the package")
         assertEquals(join(real, "agents", "reviewer.toml"), files.links[join(home, "agents", "reviewer.toml")])
