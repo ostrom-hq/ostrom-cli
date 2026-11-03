@@ -115,7 +115,7 @@ class MoreAdaptersTest {
                 "GEMINI_CLI_HOME" to root,
                 "OSTROM_HOOK_DIALECT" to "gemini",
                 "OSTROM_HOOK_BUDGET_MS" to "590000",
-                "GEMINI_CLI_SYSTEM_SETTINGS_PATH" to join("/tmp/run", "gemini-system.json"),
+                "GEMINI_CLI_SYSTEM_SETTINGS_PATH" to join("/etc", "gemini-cli", "settings.json"),
                 "GEMINI_CLI_SYSTEM_DEFAULTS_PATH" to join("/etc", "gemini-cli", "system-defaults.json"),
             ),
             launch.environment,
@@ -139,26 +139,54 @@ class MoreAdaptersTest {
     }
 
     @Test
-    fun geminiKeepsOstromsHooksOnWhateverTheWorkspaceSays() {
-        // Gemini CLI 0.66: a trusted workspace's settings win over the user's (hooksConfig.enabled: false turns every
-        // hook off) and add to hooksConfig.disabled by hook name; only the system settings win over the workspace
-        // (security audit of the CLI n°2, H3)
-        files.texts[join("/etc", "gemini-cli", "settings.json")] =
-            """{"general":{"vimMode":true},"hooksConfig":{"enabled":false,"disabled":["theirs"]}}"""
-        val launch = GeminiAdapter().prepare(layout(), files)
-        val system = join("/tmp/run", "gemini-system.json")
-        assertEquals(system, launch.environment["GEMINI_CLI_SYSTEM_SETTINGS_PATH"])
+    fun geminiIsNotStartedWhereTheWorkspaceTouchesItsHooks() {
+        // Gemini CLI 0.66: a trusted workspace's settings win over the user's, and hooksConfig.enabled: false turns
+        // every hook off. Gemini ignores system settings a session could write (not owned by root): where the
+        // workspace or the repository touches hooks, Ostrom cannot keep the gate, so it does not start (H3)
+        val workspace = listOf("/w/app/src", "/w/app")
+        for ((folder, text) in listOf(
+            "/w/app/src" to """{"hooksConfig":{"enabled":false}}""",
+            "/w/app" to "{// theirs\n\"hooks\": {\"BeforeTool\": []},}",
+        )) {
+            files.texts.keys.removeAll { it.startsWith("/w/") }
+            val path = join(folder, ".gemini", "settings.json")
+            files.texts[path] = text
+            files.deleteRecursively(join("/tmp/run", "gemini-home"))
+            val refused = assertFailsWith<AdapterException> {
+                GeminiAdapter().prepare(layout(workspace = workspace), files)
+            }
+            assertEquals(
+                "gemini: $path sets `hooks` or `hooksConfig`, with which a repository can turn Ostrom's hooks off: " +
+                    "Gemini is not started. Remove them from that file to work with Ostrom",
+                refused.reason,
+            )
+        }
+        // settings that cannot be read could say anything
+        files.texts.keys.removeAll { it.startsWith("/w/") }
+        val unread = join("/w/app", ".gemini", "settings.json")
+        files.texts[unread] = "[1]"
+        files.deleteRecursively(join("/tmp/run", "gemini-home"))
         assertEquals(
-            join("/etc", "gemini-cli", "system-defaults.json"),
-            launch.environment["GEMINI_CLI_SYSTEM_DEFAULTS_PATH"],
-            "the administrator's defaults stay where they were",
+            "gemini: $unread cannot be read as JSON: Ostrom cannot tell whether it turns its hooks off, so Gemini is " +
+                "not started",
+            assertFailsWith<AdapterException> { GeminiAdapter().prepare(layout(workspace = workspace), files) }.reason,
         )
-        assertEquals(
-            """{"general":{"vimMode":true},"hooksConfig":{"enabled":true,"disabled":["theirs"]}}""",
-            files.texts[system],
-        )
-        assertEquals(FileAccess.PRIVATE, files.access[system])
+        // other settings, with comments, a BOM or nothing at all, start Gemini
+        files.texts[unread] = "\uFEFF{// theirs\n\"general\": {\"vimMode\": true},}"
+        files.texts[join("/w/app/src", ".gemini", "settings.json")] = " "
+        files.deleteRecursively(join("/tmp/run", "gemini-home"))
+        GeminiAdapter().prepare(layout(workspace = workspace), files)
+        // the developer's own settings, when they work in their home, are not a repository's
+        files.texts[join("/home/dev", ".gemini", "settings.json")] = """{"hooksConfig":{"enabled":true}}"""
+        files.deleteRecursively(join("/tmp/run", "gemini-home"))
+        GeminiAdapter().prepare(layout(workspace = listOf("/home/dev")), files)
+        assertFalse(join("/tmp/run", "gemini-system.json") in files.texts, "no system settings of the session")
+    }
+
+    @Test
+    fun geminiNamesItsHooksAnewInEachSession() {
         // a name a repository cannot know in advance, so it cannot list it in hooksConfig.disabled
+        GeminiAdapter().prepare(layout(), files)
         val settings = join("/tmp/run", "gemini-home", ".gemini", "settings.json")
         val name = Regex(""""name": ?"(ostrom-BeforeTool-[0-9a-f]{16})"""")
         val first = checkNotNull(name.find(files.texts[settings].orEmpty())).groupValues[1]
@@ -169,30 +197,31 @@ class MoreAdaptersTest {
     }
 
     @Test
-    fun geminiReadsTheSystemSettingsGeminiWouldRead() {
+    fun geminiIsPointedAtTheAdministratorsOwnSystemSettings() {
+        // set by Ostrom, a repository's .env cannot point Gemini at other system settings: .env never replaces a
+        // variable already set
         val variables = mapOf(
             "GEMINI_CLI_SYSTEM_SETTINGS_PATH" to "/admin/settings.json",
             "GEMINI_CLI_SYSTEM_DEFAULTS_PATH" to "/admin/defaults.json",
         )
-        files.texts["/admin/settings.json"] = """{"security":{"auth":{"enforcedType":"vertex-ai"}}}"""
         val launch = GeminiAdapter().prepare(layout(variables = variables), files)
+        assertEquals("/admin/settings.json", launch.environment["GEMINI_CLI_SYSTEM_SETTINGS_PATH"])
         assertEquals("/admin/defaults.json", launch.environment["GEMINI_CLI_SYSTEM_DEFAULTS_PATH"])
-        assertEquals(
-            """{"security":{"auth":{"enforcedType":"vertex-ai"}},"hooksConfig":{"enabled":true}}""",
-            files.texts[join("/tmp/run", "gemini-system.json")],
-        )
-        // macOS keeps them elsewhere, with nothing there yet: Gemini still reads that place, and Ostrom points it at
-        // the session's; Windows by its ProgramData folder
+        // macOS and Windows keep them elsewhere
         files.deleteRecursively(join("/tmp/run", "gemini-home"))
         files.directories += "/Library/Application Support"
         val mac = GeminiAdapter().prepare(layout(), files)
         assertEquals(
+            join("/Library/Application Support", "GeminiCli", "settings.json"),
+            mac.environment["GEMINI_CLI_SYSTEM_SETTINGS_PATH"],
+        )
+        assertEquals(
             join("/Library/Application Support", "GeminiCli", "system-defaults.json"),
             mac.environment["GEMINI_CLI_SYSTEM_DEFAULTS_PATH"],
         )
-        assertEquals("""{"hooksConfig":{"enabled":true}}""", files.texts[join("/tmp/run", "gemini-system.json")])
         files.deleteRecursively(join("/tmp/run", "gemini-home"))
         val windows = GeminiAdapter().prepare(layout(variables = mapOf("ProgramData" to "/pd")), files)
+        assertEquals(join("/pd", "gemini-cli", "settings.json"), windows.environment["GEMINI_CLI_SYSTEM_SETTINGS_PATH"])
         assertEquals(
             join("/pd", "gemini-cli", "system-defaults.json"),
             windows.environment["GEMINI_CLI_SYSTEM_DEFAULTS_PATH"],
@@ -201,6 +230,7 @@ class MoreAdaptersTest {
         val named = mapOf("GEMINI_CLI_SYSTEM_SETTINGS_PATH" to "s.json")
         val relative = GeminiAdapter().prepare(layout(variables = named), files)
         assertEquals(join(".", "system-defaults.json"), relative.environment["GEMINI_CLI_SYSTEM_DEFAULTS_PATH"])
+        assertFalse(join("/tmp/run", "gemini-system.json") in files.texts, "none of the session's: Gemini ignores it")
     }
 
     @Test
@@ -209,27 +239,6 @@ class MoreAdaptersTest {
         assertEquals("0.66.0", minimum.version)
         assertEquals("npm install -g @google/gemini-cli@latest", minimum.update)
         assertNull(ClaudeAdapter().minimum, "no minimum known for the other agents")
-    }
-
-    @Test
-    fun geminiReadsSystemSettingsWithCommentsAndRefusesThoseItCannotRead() {
-        // Gemini reads comments in its settings: an administrator's file with comments is read, never dropped
-        val real = join("/etc", "gemini-cli", "settings.json")
-        files.texts[real] = "\uFEFF{// managed\n\"general\": {\"vimMode\": true}, /* end */}"
-        GeminiAdapter().prepare(layout(), files)
-        assertEquals(
-            """{"general":{"vimMode":true},"hooksConfig":{"enabled":true}}""",
-            files.texts[join("/tmp/run", "gemini-system.json")],
-        )
-        // a file Ostrom cannot read at all: starting Gemini would leave a repository free to turn the hooks off
-        files.deleteRecursively(join("/tmp/run", "gemini-home"))
-        files.texts[real] = "[1]"
-        val refused = assertFailsWith<AdapterException> { GeminiAdapter().prepare(layout(), files) }
-        assertEquals(
-            "gemini: the system settings ($real) cannot be read as JSON: Ostrom cannot keep its hooks on, so Gemini " +
-                "is not started; fix that file, or ask its administrator to",
-            refused.reason,
-        )
     }
 
     @Test
@@ -336,6 +345,7 @@ class MoreAdaptersTest {
         mcp: List<String> = listOf("ostrom"),
         rules: String = "",
         variables: Map<String, String> = emptyMap(),
+        workspace: List<String> = emptyList(),
     ) = SessionLayout(
         temporary = "/tmp/run",
         plugin = join("/tmp/run", "plugin"),
@@ -346,5 +356,6 @@ class MoreAdaptersTest {
         home = "/home/dev",
         variable = { variables[it] },
         relay = RelayView("http://127.0.0.1:4100", "relay-token", mcp, false),
+        workspace = workspace,
     )
 }

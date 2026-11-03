@@ -479,6 +479,25 @@ class AgentLaunchUseCaseTest {
     }
 
     @Test
+    fun anAdapterSeesTheWorkingFolderAndTheRepositorysTop() = runTest {
+        serveALaunch()
+        val seen = mutableListOf<List<String>>()
+        adapters = listOf(
+            object : AgentAdapter {
+                override val agent = Agent.CLAUDE
+
+                override fun prepare(layout: dev.ostrom.cli.launcher.adapters.SessionLayout, files: LaunchFiles) =
+                    AgentLaunch(emptyList(), emptyMap()).also { seen += layout.workspace }
+            },
+        )
+        start()
+        assertEquals(listOf(listOf("/work/acme-api/src", "/work/acme-api")), seen)
+        gitAnswer = CaptureResult.Exited(0, "/work/acme-api/src\n")
+        start()
+        assertEquals(listOf("/work/acme-api/src"), seen.last(), "once when the session starts at the top")
+    }
+
+    @Test
     fun anAdapterThatCannotPrepareStopsTheLaunch() = runTest {
         serveALaunch()
         val broken = object : AgentAdapter {
