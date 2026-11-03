@@ -86,7 +86,28 @@ class LaunchFilesTest {
         fileSystem.createSymlink("/link".toPath(), "/real".toPath())
         assertEquals("/real/project", files.canonical("/link/project"))
         assertEquals("/real/project", files.canonical("/real/project"))
+        // the fake does not take `..` through a link: theDefaultFilesFollowLinksBeforeDotDot does, on the platform's
         // as Gemini CLI: a path that does not resolve is kept, normalized
         assertEquals("/nowhere/b", files.canonical("/nowhere/a/../b"))
+    }
+
+    @Test
+    fun theDefaultFilesFollowLinksBeforeDotDot() {
+        // realpath, as Gemini CLI: `..` is the parent of where a link leads, not of the link
+        val real = LaunchFilesImpl()
+        val temporary = FileSystem.SYSTEM.canonicalize(FileSystem.SYSTEM_TEMPORARY_DIRECTORY)
+        val base = temporary / "ostrom-canonical-${modes.hashCode()}"
+        FileSystem.SYSTEM.createDirectories(base / "real" / "project")
+        FileSystem.SYSTEM.createDirectories(base / "b" / "x")
+        FileSystem.SYSTEM.createDirectories(base / "b" / "projet")
+        FileSystem.SYSTEM.createDirectories(base / "a")
+        // where links cannot be made (Windows without developer mode), there is nothing to follow
+        if (real.link((base / "real").toString(), (base / "link").toString())) {
+            assertTrue(real.link((base / "b" / "x").toString(), (base / "a" / "lien").toString()))
+            val dots = "$base/link/../link/project/."
+            assertEquals((base / "real" / "project").toString(), real.canonical(dots))
+            assertEquals((base / "b" / "projet").toString(), real.canonical("$base/a/lien/../projet"))
+        }
+        real.deleteRecursively(base.toString())
     }
 }

@@ -72,16 +72,33 @@ class MemoryFiles : LaunchFiles {
         links.keys.removeAll(under)
     }
 
-    /** [path] with the [links] it goes through followed, the longest first. */
+    /**
+     * [path] as realpath reads it: each name in turn, a link replaced by where it leads, `..` the parent of that, not
+     * of the link. Only POSIX paths are followed; others are kept.
+     */
     override fun canonical(path: String): String {
-        var resolved = path
-        repeat(links.size) {
-            val link = links.keys.filter { resolved == it || below(it, resolved) != null }.maxByOrNull { it.length }
-                ?: return resolved
-            resolved = links.getValue(link) + resolved.removePrefix(link)
+        if (!path.startsWith("/")) return path
+        val pending = ArrayDeque(names(path))
+        var resolved = ""
+        var hops = 0
+        while (pending.isNotEmpty()) {
+            val name = pending.removeFirst()
+            val next = "$resolved/$name"
+            val target = links[next]
+            when {
+                name == "." -> Unit
+                name == ".." -> resolved = resolved.substringBeforeLast('/', "")
+                target != null && hops++ <= links.size -> {
+                    resolved = ""
+                    names(target).asReversed().forEach(pending::addFirst)
+                }
+                else -> resolved = next
+            }
         }
-        return resolved
+        return resolved.ifEmpty { "/" }
     }
+
+    private fun names(path: String) = path.split('/').filter { it.isNotEmpty() }
 
     /**
      * What follows [path] in [entry], or null when [entry] is not under it. Okio keeps the separator a path was written
