@@ -485,8 +485,6 @@ class Journey:
                 self.gated_session(maya, tom_email)
             else:
                 self.claude_ended(self.claude(maya))
-        if gated and self.options.launch_runs > 0:
-            self.guarded(LaunchLatency(self, maya).run)
         if gated:
             self.begin("5.3 cleanup", "the gating workflow, removed on the console")
             status, body, _ = self.call("DELETE", f"/api/v1/workflows/{gated}", session=self.owner_signed_in(maya),
@@ -502,6 +500,10 @@ class Journey:
         # the session read is the one ostrom claude just ran: the routes of 5.2 too
         if self.needs(*SESSION_ROUTES, ("GET", "/api/v1/sessions"), org=True):
             self.guarded(self.logs, maya, gated)
+
+        # 5.9 launches sessions of its own: after 6.1, which reads the last one (5.2's)
+        if gated and self.options.launch_runs > 0:
+            self.guarded(LaunchLatency(self, maya).run)
 
         # a session of its own, after 6.1 (which reads the developer's last session, the one of 5.2)
         self.guarded(McpRelay(self, maya, SESSION_ROUTES).run)
