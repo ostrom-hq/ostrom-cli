@@ -72,9 +72,10 @@ internal class HookForwarder(
             identify(config)
             if (method == HttpMethod.Post) setBody(ByteArrayContent(body, ContentType.Application.Json))
         }) { response ->
-            if (method == HttpMethod.Post) session.started(call.request.path(), body, response.status)
+            val answer = response.bodyAsBytes()
+            if (method == HttpMethod.Post) session.started(call.request.path(), answer, response.status)
             val type = response.contentType() ?: ContentType.Application.Json
-            call.respondBytes(response.bodyAsBytes(), type, response.status)
+            call.respondBytes(answer, type, response.status)
         }
     }
 

@@ -13,8 +13,10 @@ import kotlin.concurrent.atomics.AtomicReference
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
 
 /**
- * The agent's session, as its start hook named it to Ostrom (`POST /api/v1/sessions`, accepted): Ostrom's own MCP
- * server, the waits server, is bound to it. Before the session starts, or when Ostrom refused it, there is none.
+ * The agent's session, as Ostrom opened it for the start hook (`POST /api/v1/sessions`, accepted): Ostrom's own MCP
+ * server, the waits server, is bound to it. Ostrom's answer names the segment, which is not the id the hook sent once
+ * the agent's session is resumed by another launch (`<id>~r<n>`). Before the session starts, or when Ostrom refused
+ * it, there is none.
  */
 internal class AgentSession {
     private val id = AtomicReference<String?>(null)
@@ -22,19 +24,20 @@ internal class AgentSession {
     /** The session's id, or null. */
     val current: String? get() = id.load()
 
-    /** Learns the session a hook started: a POST to `/api/v1/sessions` Ostrom accepted, whose body names a plain id. */
-    fun started(path: String, body: ByteArray, status: HttpStatusCode) {
+    /** Learns the session a hook started: a POST to `/api/v1/sessions` Ostrom accepted, whose answer names it. */
+    fun started(path: String, answer: ByteArray, status: HttpStatusCode) {
         if (path != SESSIONS || !status.isSuccess()) return
-        idOf(body)?.let(id::store)
+        idOf(answer)?.let(id::store)
     }
 
-    private fun idOf(body: ByteArray): String? {
+    private fun idOf(answer: ByteArray): String? {
         val element = try {
-            Json.parseToJsonElement(body.decodeToString())
+            Json.parseToJsonElement(answer.decodeToString())
         } catch (_: SerializationException) {
             null
         }
-        val named = ((element as? JsonObject)?.get("id") as? JsonPrimitive)?.takeIf { it.isString }?.content
+        val session = (element as? JsonObject)?.get("session") as? JsonObject
+        val named = (session?.get("id") as? JsonPrimitive)?.takeIf { it.isString }?.content
         return named?.takeIf { SESSION_ID.matches(it) }
     }
 
