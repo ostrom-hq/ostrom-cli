@@ -15,8 +15,14 @@ sealed interface CallResult {
      *
      * @property type The server's stable error key (`session_closed`), or null.
      * @property relayDown Nothing listens on the local relay's port: the launch that served it has ended.
+     * @property status The HTTP status of the answer, or null when there was none.
      */
-    data class Failed(val message: String, val type: String? = null, val relayDown: Boolean = false) : CallResult {
+    data class Failed(
+        val message: String,
+        val type: String? = null,
+        val relayDown: Boolean = false,
+        val status: Int? = null,
+    ) : CallResult {
         /** Ostrom refused the write because its session is closed (the machine slept past Ostrom's wait). */
         val sessionClosed: Boolean get() = type == "session_closed" || message.startsWith("session closed:")
 
@@ -25,6 +31,9 @@ sealed interface CallResult {
          * failure an organisation's `open` fail mode lets an action through. A refusal or an error of Ostrom is not.
          */
         val unreachable: Boolean get() = type == UNREACHABLE
+
+        /** Ostrom answered and refused (a 4xx): [message] is its reason, never an outage. */
+        val refused: Boolean get() = status != null && status in REFUSED
     }
 
     /** The error type of a call that never reached Ostrom. */
@@ -33,6 +42,9 @@ sealed interface CallResult {
         const val UNREACHABLE = "unreachable"
     }
 }
+
+/** The statuses of Ostrom's refusals. */
+private val REFUSED = 400..499
 
 /**
  * The calls the hooks make to Ostrom. In a session they go to the launcher's local relay (loopback, the session's

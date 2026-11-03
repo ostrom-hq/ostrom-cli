@@ -56,7 +56,7 @@ class RelayCalls(
         return if (response.status in SUCCESS) {
             CallResult.Ok(json ?: JsonObject(emptyMap()))
         } else {
-            CallResult.Failed(message, detail?.string("type"))
+            CallResult.Failed(message, detail?.string("type"), status = response.status)
         }
     }
 

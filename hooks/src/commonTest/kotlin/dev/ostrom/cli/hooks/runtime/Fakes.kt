@@ -33,7 +33,7 @@ class FakeCalls(private val answers: MutableMap<String, ArrayDeque<CallResult>> 
         calls += Call(path, body, timeoutMillis)
         val queue = answers.entries.filter { path.startsWith(it.key) }.maxByOrNull { it.key.length }?.value
         return when {
-            queue == null || queue.isEmpty() -> CallResult.Failed("HTTP 404")
+            queue == null || queue.isEmpty() -> CallResult.Failed("HTTP 404", status = 404)
             queue.size == 1 -> queue.first()
             else -> queue.removeFirst()
         }

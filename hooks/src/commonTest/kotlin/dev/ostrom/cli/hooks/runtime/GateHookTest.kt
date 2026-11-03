@@ -190,7 +190,7 @@ class GateHookTest {
         calls = FakeCalls()
         val closed = hook().handle(bash("git push origin main"))
         assertEquals(2, closed.exitCode)
-        assertContains(closed.stderr, "needs a yes from omar (Main), and Ostrom is unreachable (HTTP 404)")
+        assertContains(closed.stderr, "needs a yes from omar (Main), and Ostrom refused the request: HTTP 404")
         val open = catalogue.replace("\"closed\"", "\"open\"")
         assertEquals(2, hook(catalogueText = open).handle(bash("git push origin main")).exitCode, "a 404 is no outage")
         val outage = CallResult.Failed("Ostrom is unreachable (no connection)", CallResult.UNREACHABLE)
