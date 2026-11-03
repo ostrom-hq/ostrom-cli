@@ -42,10 +42,15 @@ class AgentLaunchUseCaseTest {
     private var relayClosed = false
     private var adapters: List<AgentAdapter> = listOf(ClaudeAdapter(), CodexAdapter())
 
+    /** The test's clock, and when the agent was started on it. */
+    private var now: () -> Long = { 0L }
+    private var agentStartedAt: Long? = null
+
     private val processes = object : ProcessLauncher {
         override fun run(command: List<String>, environment: Map<String, String?>): ProcessResult {
             commands += command
             environments += environment
+            agentStartedAt = agentStartedAt ?: now()
             // The agent's session hook records its session, as the real one does.
             environment[LaunchVariables.SESSION_FILE]?.let { files.texts[it] = "s1" }
             // the session's folder is removed once the agent ends: what it saw is kept here
@@ -599,6 +604,23 @@ class AgentLaunchUseCaseTest {
         assertEquals("opencode", ostromName(Agent.OPENCODE))
     }
 
+    @Test
+    fun theReadsAfterTheLaunchIsCreatedAreAskedTogetherNotOneAfterTheOther() = runTest {
+        // PERF-CLI: every request is a round trip to Ostrom; far from the server, each one the agent waits on shows
+        serveALaunch()
+        server.roundTripMillis = ROUND_TRIP
+        now = { testScheduler.currentTime }
+        assertEquals(3, start())
+        assertEquals(
+            listOf("GET ${Routes.POLICY}?agent=claude-code&dev=alice", "POST ${Routes.LAUNCHES}"),
+            server.requests.take(2).map { "${it.method} ${it.path}" },
+            "the policy, then the launch, before anything else",
+        )
+        // the policy, the launch, then the package, the instance's keys, the MCP servers and the models together
+        val waited = checkNotNull(agentStartedAt)
+        assertTrue(waited <= 3 * ROUND_TRIP, "the agent starts after 3 round trips at most, not ${waited / ROUND_TRIP}")
+    }
+
     @Suppress("LongParameterList") // one default per fact of a launch a test changes
     private suspend fun TestScope.start(
         agent: Agent = Agent.CLAUDE,
@@ -649,6 +671,7 @@ class AgentLaunchUseCaseTest {
 
     private companion object {
         const val NO_ORIGIN = "ostrom: no origin with an owner/name here"
+        const val ROUND_TRIP = 100L
         const val KEYS = """{"keys":[{"keyId":"k1","algorithm":"ed25519","publicKeyPem":"pem"}]}"""
     }
 }
