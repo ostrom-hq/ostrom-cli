@@ -101,13 +101,12 @@ class LaunchFilesTest {
         FileSystem.SYSTEM.createDirectories(base / "b" / "x")
         FileSystem.SYSTEM.createDirectories(base / "b" / "projet")
         FileSystem.SYSTEM.createDirectories(base / "a")
-        // where links cannot be made (Windows without developer mode), there is nothing to follow
-        if (real.link((base / "real").toString(), (base / "link").toString())) {
-            assertTrue(real.link((base / "b" / "x").toString(), (base / "a" / "lien").toString()))
-            val dots = "$base/link/../link/project/."
-            assertEquals((base / "real" / "project").toString(), real.canonical(dots))
-            assertEquals((base / "b" / "projet").toString(), real.canonical("$base/a/lien/../projet"))
-        }
+        // no skip: a test that cannot make its links fails (GitHub's Windows runners make them as administrator)
+        assertTrue(real.link((base / "real").toString(), (base / "link").toString()), "links can be made here")
+        assertTrue(real.link((base / "b" / "x").toString(), (base / "a" / "lien").toString()))
+        val dots = "$base/link/../link/project/."
+        assertEquals((base / "real" / "project").toString(), real.canonical(dots))
+        assertEquals((base / "b" / "projet").toString(), real.canonical("$base/a/lien/../projet"))
         real.deleteRecursively(base.toString())
     }
 }
