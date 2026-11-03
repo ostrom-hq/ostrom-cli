@@ -16,6 +16,9 @@ figures are an upper bound of the binary's start-up. `inside` is the time the ho
 Actions, to the job summary. Exits 1 when the median hook time is above --max-hook-ms, the median `git push` time
 above --max-push-ms when given, or a file of --sizes above its budget: --max-size-mb (the binary a developer downloads,
 15 MB, perf pass of 02/11/2026), or --size-budget for a target whose folder (`bin/<target>/`) has one of its own.
+It also exits 1, when they are given, above --max-hook-p95-ms and --max-version-p95-ms (the p95 of the warm starts),
+--max-cold-ms (the slowest start with the file cache emptied) and --max-hook-memory-mb. It lists every budget
+exceeded, not only the first.
 
 The budget is measured on the hook of an ordinary tool call (`ls`), which is most of an agent's calls. Outside a
 session, as here, there is no relay to read Ostrom's signed policy from, so the gate holds the call (exit 2) after
