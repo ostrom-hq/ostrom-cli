@@ -98,6 +98,11 @@ class SessionHookTest {
         val start = event("""{"hook_event_name":"SessionStart","session_id":"a1"}""")
         val reply = hook(refusing).handle(start)
         assertEquals(HookReply(stderr = "Ostrom refused ($reason): session not recorded.\n"), reply)
+        assertEquals(0, reply.exitCode, "a refused start never stops the agent")
+        // the prototype's form of Ostrom's error is said the same
+        val legacy = relayed(404, """{"error":"No such organization."}""")
+        val said = hook(legacy).handle(start).stderr
+        assertEquals("Ostrom refused (No such organization.): session not recorded.\n", said)
         // Hermes: no context, and no mark, so the next model call asks again
         val hermes = hook(refusing, contextOf("OSTROM_HOOK_DIALECT" to "hermes"))
         val call = event("""{"hook_event_name":"PreLLMCall","session_id":"h3"}""")
@@ -113,6 +118,9 @@ class SessionHookTest {
         assertEquals("Ostrom unreachable (connection refused): session not recorded.\n", outage)
         val error = relayed(500, """{"error":{"type":"internal","message":"Internal error."}}""")
         assertEquals("Ostrom unreachable (Internal error.): session not recorded.\n", hook(error).handle(start).stderr)
+        // a 4xx without a reason is not said as Ostrom's refusal
+        val blank = relayed(422, """{"error":{"type":"invalid","message":" "}}""")
+        assertEquals("Ostrom unreachable (HTTP 422): session not recorded.\n", hook(blank).handle(start).stderr)
         // the relay's own refusal is plain text: Ostrom never saw the request
         val relay = relayed(401, "Unauthorized.")
         assertEquals("Ostrom unreachable (HTTP 401): session not recorded.\n", hook(relay).handle(start).stderr)
