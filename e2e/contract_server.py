@@ -6,12 +6,15 @@ It stands in for ostrom-server until the server serves launches, packages and se
 the run then points OSTROM_URL at the real server and keeps every assertion.
 
     python3 e2e/contract_server.py --port 0 --log requests.jsonl --ready ready.txt [--package vectors/package.json] \
-        [--without-session-reads]
+        [--without-session-reads] [--actions N]
 
 It keeps the sessions the hooks start, their gates and their end, and serves them back to `ostrom logs` with the
 device's token (`GET /api/v1/sessions`, `GET /api/v1/sessions/{id}`); a gate, as ostrom-server, it does not give that
 token (403).
 `--without-session-reads` plays an older server that does not serve those reads.
+`--actions N` signs another gate policy, for e2e/perf.py: N actions that gate nothing (a hook matches each tool call
+against all of them) and the deployment's gate; with 0, a policy without any action. Each line of the log has its
+arrival time (`at`, seconds since the epoch), so that the perf run counts the requests made while a hook ran.
 """
 import argparse
 import base64
@@ -21,6 +24,7 @@ import json
 import os
 import re
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
@@ -64,12 +68,23 @@ def instance_keys():
     return {"keys": [key]}
 
 
-def signed_policy(repo):
-    """`GET /api/v1/gates/catalog/signed?repo=`: the catalogue signed for [repo], valid for 10 minutes."""
+def catalogue_of(actions):
+    """The gate policy of `--actions`: [actions] that gate nothing, then the deployment's gate; with 0, no action."""
+    if actions is None:
+        return CATALOGUE
+    if actions == 0:
+        return {"failMode": "closed", "actions": []}
+    others = [{"class": f"rule-{i}", "label": f"rule {i}", "tools": ["Bash"],
+               "patterns": [rf"\bperf-tool-{i}\s+--write\b"]} for i in range(actions)]
+    return {**CATALOGUE, "actions": others + CATALOGUE["actions"]}
+
+
+def signed_policy(repo, catalogue=CATALOGUE):
+    """`GET /api/v1/gates/catalog/signed?repo=`: the [catalogue] signed for [repo], valid for 10 minutes."""
     now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
     stamp = lambda moment: moment.strftime("%Y-%m-%dT%H:%M:%SZ")
     payload = json.dumps({"repo": repo, "issuedAt": stamp(now),
-                          "expiresAt": stamp(now + datetime.timedelta(minutes=10)), **CATALOGUE})
+                          "expiresAt": stamp(now + datetime.timedelta(minutes=10)), **catalogue})
     signature = base64.b64encode(ed25519.sign(POLICY_SEED, payload.encode())).decode()
     return {"format": "ostrom.gates/1", "alg": "ed25519", "kid": POLICY_KID, "signature": signature,
             "payload": payload}
@@ -106,7 +121,7 @@ def make_handler(state):
             token = auth[len("Bearer "):] if auth.startswith("Bearer ") else ""
             with state["lock"]:
                 state["log"].write(json.dumps({"method": method, "path": url.path, "query": url.query,
-                                               "token": token, "body": raw}) + "\n")
+                                               "token": token, "body": raw, "at": time.time()}) + "\n")
                 state["log"].flush()
             body = json.loads(raw) if raw else {}
             self._route(method, url.path, token, body, parse_qs(url.query))
@@ -153,9 +168,9 @@ def make_handler(state):
             if not agent:
                 return self._error(401, "unauthorized", "the launch's agent token only")
             if (method, path) == ("GET", "/api/v1/gates/catalog/signed"):
-                return self._answer(200, signed_policy(query.get("repo", [""])[0]))
+                return self._answer(200, signed_policy(query.get("repo", [""])[0], state["catalogue"]))
             if (method, path) == ("GET", "/api/v1/gates/catalog"):
-                return self._answer(200, CATALOGUE)
+                return self._answer(200, state["catalogue"])
             if (method, path) == ("POST", "/api/v1/sessions"):
                 # the id this server gives the session: the hooks name it so afterwards (gates, end)
                 session = body.get("sessionId") or "seg-1"
@@ -235,13 +250,15 @@ def main():
     parser.add_argument("--ready", required=True)
     parser.add_argument("--package")
     parser.add_argument("--without-session-reads", action="store_true")
+    parser.add_argument("--actions", type=int)
     args = parser.parse_args()
     package = json.load(open(args.package)) if args.package else None
     # W-e2e, signed by the TEST key that signs vectors/package.json: `ostrom verify W-e2e` holds once the key is pinned
     with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "vectors", "receipt-bundle.json")) as handle:
         bundle = json.load(handle)["bundle"]
     state = {"lock": threading.Lock(), "log": open(args.log, "a"), "package": package, "bundle": bundle,
-             "sessions": {}, "session_reads": not args.without_session_reads}
+             "sessions": {}, "session_reads": not args.without_session_reads,
+             "catalogue": catalogue_of(args.actions)}
     server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(state))
     with open(args.ready, "w") as ready:
         ready.write(f"http://127.0.0.1:{server.server_address[1]}")
