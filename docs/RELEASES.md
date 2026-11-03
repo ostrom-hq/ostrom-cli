@@ -43,13 +43,17 @@ Also published: the image `ghcr.io/ostrom-hq/ostrom-runner:<version>` and `:late
 signed by digest, with an SBOM and max-mode provenance attached by buildx), the Homebrew formula
 (`ostrom-hq/homebrew-tap`, `Formula/ostrom.rb`) and the Scoop manifest (`ostrom-hq/scoop-bucket`, `bucket/ostrom.json`).
 The `taps` job pushes them over SSH trusting only GitHub's published host keys, pinned in
-`scripts/release/github_known_hosts` (no first-use trust, no system `known_hosts`).
-`scripts/release/check-github-host-keys.sh` compares the pins with https://api.github.com/meta and checks that they verify github.com: in the release's `version`
-job, before anything is published, and in the release checks. When GitHub rotates a key, both fail; run
-`sh scripts/release/check-github-host-keys.sh --update`, review the diff against GitHub's announcement, and open a
-pull request. The Scoop manifest's `autoupdate` reads the archive's line of the release's `SHA256SUMS` instead of
-hashing the download: it catches a corrupt or swapped download, but is no stronger than the release, since Scoop does
-not check the signature of `SHA256SUMS`.
+`scripts/release/github_known_hosts` (no first-use trust, no system `known_hosts`); it takes its ssh options from
+`scripts/release/check-github-host-keys.sh --ssh-options`. The same script checks that every pinned key is still
+published at https://api.github.com/meta and that each pinned key type verifies github.com: in the release checks,
+and in the release's `version` job before a public release is published. When GitHub rotates a key, run
+`sh scripts/release/check-github-host-keys.sh --update`, compare the diff with GitHub's announcement and merge it by
+pull request. A tag pushed before that does not publish: once the pins are on `main`, tag the next patch version. A
+key GitHub adds is only a warning until it is pinned.
+
+The Scoop manifest's `autoupdate` reads the archive's line of the release's `SHA256SUMS` instead of hashing the
+download: it catches a corrupt or swapped download, but is no stronger than the release, since Scoop does not check
+the signature of `SHA256SUMS`.
 
 ## Verifying
 

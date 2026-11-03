@@ -45,12 +45,6 @@ jobs:
             scripts/release
           sparse-checkout-cone-mode: false
           persist-credentials: false
-      # Before anything is published: the taps job trusts only these pins, and fails after the release if GitHub
-      # rotated a key since (AUDIT-SECU-PUBLIC P8).
-      - name: The pinned GitHub host keys are the published ones
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: sh scripts/release/check-github-host-keys.sh
       - id: v
         env:
           EVENT: ${{ github.event_name }}
@@ -72,6 +66,13 @@ jobs:
           esac
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "publish=$publish" >> "$GITHUB_OUTPUT"
+      # Before anything is published, when the taps job will run: it trusts only these pins, and would fail after the
+      # release if GitHub rotated a key since (AUDIT-SECU-PUBLIC P8, docs/RELEASES.md).
+      - name: The pinned GitHub host keys are still published
+        if: ${{ steps.v.outputs.publish == 'true' && vars.RELEASE_DRAFT == 'false' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: sh scripts/release/check-github-host-keys.sh
 
   build-linux:
     name: build linuxX64, linuxArm64, mingwX64
@@ -448,7 +449,7 @@ jobs:
       # known_hosts): the deploy keys write to the taps. The release's version job checks them first.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          sparse-checkout: scripts/release/github_known_hosts
+          sparse-checkout: scripts/release
           sparse-checkout-cone-mode: false
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -461,8 +462,7 @@ jobs:
         run: |
           set -eu
           install -m 600 /dev/null "$RUNNER_TEMP/tap_key"; printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/tap_key"
-          pins="$GITHUB_WORKSPACE/scripts/release/github_known_hosts"
-          strict="-o StrictHostKeyChecking=yes -o GlobalKnownHostsFile=/dev/null -o UserKnownHostsFile=$pins"
+          strict=$(sh scripts/release/check-github-host-keys.sh --ssh-options)
           export GIT_SSH_COMMAND="ssh -i $RUNNER_TEMP/tap_key -o IdentitiesOnly=yes $strict"
           git clone git@github.com:ostrom-hq/homebrew-tap.git tap
           mkdir -p tap/Formula && cp extras/ostrom.rb tap/Formula/ostrom.rb
@@ -477,8 +477,7 @@ jobs:
         run: |
           set -eu
           install -m 600 /dev/null "$RUNNER_TEMP/scoop_key"; printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/scoop_key"
-          pins="$GITHUB_WORKSPACE/scripts/release/github_known_hosts"
-          strict="-o StrictHostKeyChecking=yes -o GlobalKnownHostsFile=/dev/null -o UserKnownHostsFile=$pins"
+          strict=$(sh scripts/release/check-github-host-keys.sh --ssh-options)
           export GIT_SSH_COMMAND="ssh -i $RUNNER_TEMP/scoop_key -o IdentitiesOnly=yes $strict"
           git clone git@github.com:ostrom-hq/scoop-bucket.git bucket
           mkdir -p bucket/bucket && cp extras/ostrom.json bucket/bucket/ostrom.json

@@ -8,8 +8,9 @@ here=$(cd "$(dirname "$0")" && pwd)
 version="$1"; base="$2"; dist="$3"
 f=$(archive_of "$dist" "$version" windows-x64)
 # autoupdate (Scoop's checkver -u) reads the archive's line of the SHA256SUMS published with the release, instead of
-# hashing the download (AUDIT-SECU-PUBLIC P9). It catches a corrupt or swapped download; it is no stronger than the
-# release itself, since Scoop does not check the SHA256SUMS signature (docs/RELEASES.md, Verifying).
+# hashing the download (AUDIT-SECU-PUBLIC P9); the line ends at the name, never at a longer one (an SBOM). It catches a
+# corrupt or swapped download; it is no stronger than the release itself, since Scoop does not check the SHA256SUMS
+# signature (docs/RELEASES.md, Verifying).
 cat <<JSON
 {
   "version": "$version",
@@ -32,7 +33,7 @@ cat <<JSON
         "url": "https://github.com/ostrom-hq/ostrom-cli/releases/download/\$version/ostrom-\$version-windows-x64.zip",
         "hash": {
           "url": "\$baseurl/SHA256SUMS",
-          "regex": "\$sha256\\\\s+\$basename"
+          "regex": "\$sha256 [ *]\$basename\\\\s"
         }
       }
     }
