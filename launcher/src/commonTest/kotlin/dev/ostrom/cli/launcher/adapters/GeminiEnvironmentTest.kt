@@ -145,7 +145,7 @@ class GeminiEnvironmentTest {
         // nothing on it at all
         assertTrue("on the PATH Ostrom gives it ()" in refusal(layout(environment = mapOf("PATH" to null))))
         // Windows runs the hooks with PowerShell, not bash
-        prepare(layout(environment = mapOf("PATH" to "C:\\Windows"), pathSeparator = ';'))
+        prepare(layout(environment = mapOf("PATH" to "C:\\Windows")).copy(pathSeparator = ';'))
     }
 
     @Test
@@ -190,19 +190,21 @@ class GeminiEnvironmentTest {
         )
         prepare(layout(workspace = listOf("/other")))
         files.texts[trusted] = """{"C:\\Work": "DO_NOT_TRUST"}"""
-        val windows = layout(workspace = listOf("c:\\work\\repo"), pathSeparator = ';', foldsCase = true)
+        val windows = layout(workspace = listOf("c:\\work\\repo")).copy(pathSeparator = ';', foldsCase = true)
         assertTrue("(DO_NOT_TRUST)" in refusal(windows))
         files.texts[trusted] = """{"/work": "DO_NOT_TRUST"}"""
         // as Gemini matches: the longest rule wins, a parent's TRUST_PARENT names the parent, and case is not told
         files.texts[trusted] = """{"/work": "DO_NOT_TRUST", "/work/repo/x": "TRUST_PARENT"}"""
         prepare(layout(workspace = listOf("/work/repo")))
         // case is told apart as Gemini tells it: not on macOS and Windows, but on Linux
+        val linux = layout(workspace = listOf("/work/repo"))
+        val macos = linux.copy(foldsCase = true)
         files.texts[trusted] = """{"/Work/": "DO_NOT_TRUST", "/workshop": "TRUST_FOLDER"}"""
-        assertTrue("does not trust /work/repo" in refusal(layout(workspace = listOf("/work/repo"), foldsCase = true)))
-        assertNull(started(layout(workspace = listOf("/work/repo"))))
+        assertTrue("does not trust /work/repo" in refusal(macos))
+        assertNull(started(linux))
         files.texts[trusted] = """{"/work": "DO_NOT_TRUST", "/work/Repo": "TRUST_FOLDER"}"""
-        assertTrue("does not trust /work/repo" in refusal(layout(workspace = listOf("/work/repo"))))
-        assertNull(started(layout(workspace = listOf("/work/repo"), foldsCase = true)))
+        assertTrue("does not trust /work/repo" in refusal(linux))
+        assertNull(started(macos))
         prepare(layout(workspace = listOf("/workshop")))
         // the developer's own file, named by their variable, with comments as Gemini reads it
         files.texts["/dev/trusted.json"] = "{// mine\n\"/\": \"DO_NOT_TRUST\"}"
@@ -255,8 +257,6 @@ class GeminiEnvironmentTest {
         environment: Map<String, String?> = emptyMap(),
         workspace: List<String> = emptyList(),
         executable: String = "/opt/ostrom",
-        pathSeparator: Char = ':',
-        foldsCase: Boolean = false,
     ): SessionLayout {
         val all = mapOf("PATH" to "/usr/bin") + variables
         return SessionLayout(
@@ -271,8 +271,6 @@ class GeminiEnvironmentTest {
             relay = RelayView("http://127.0.0.1:4100", "relay-token", listOf("ostrom"), false),
             workspace = workspace,
             environment = environment,
-            pathSeparator = pathSeparator,
-            foldsCase = foldsCase,
         )
     }
 }
