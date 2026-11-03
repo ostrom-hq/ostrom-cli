@@ -159,6 +159,10 @@ Installer variables: `OSTROM_VERSION` (default: the latest, through `latest.json
 `~/.ostrom/bin`; never needs root), `OSTROM_DOWNLOAD_BASE` (default `https://github.com/ostrom-hq/ostrom-cli/releases`),
 `OSTROM_NO_MODIFY_PATH=1`, `OSTROM_SKIP_COSIGN=1`.
 
+Both installers check the signature of `SHA256SUMS` before the archive's checksum. `install.sh` does it with `cosign`
+or, without it, `openssl`. With neither, it installs nothing: the checksum alone comes from the same place as the
+archive. Set `OSTROM_SKIP_COSIGN=1` to install on the checksum alone. `install.ps1` always has .NET to check it.
+
 ## Signing the binaries themselves
 
 macOS (Developer ID + notarisation) and Windows (Authenticode) run in the `build-macos` and `package` jobs only when
