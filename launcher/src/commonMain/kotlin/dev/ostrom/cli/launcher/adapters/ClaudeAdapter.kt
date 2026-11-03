@@ -41,7 +41,7 @@ class ClaudeAdapter : AgentAdapter {
         val mcp = mcpConfig(layout, files)
         val ours = listOf("--settings", settings) + if (mcp == null) emptyList() else listOf("--mcp-config", mcp)
         arguments += beforeSeparator(rest, ours)
-        return AgentLaunch(arguments, inference(layout), notes)
+        return AgentLaunch(arguments, inference(layout) + gateBudget(layout), notes)
     }
 
     /**
@@ -92,17 +92,19 @@ class ClaudeAdapter : AgentAdapter {
     }
 
     private fun writeHooks(layout: SessionLayout, files: LaunchFiles) {
-        fun entry(kind: String, timeout: Long, matcher: String?) = listOf(
+        fun entry(kind: String, timeout: Long, matcher: String?, blocking: Boolean = false) = listOf(
             listOfNotNull(
                 matcher?.let { "matcher" to it },
                 "hooks" to listOf(
-                    mapOf("type" to "command", "command" to layout.hookCommand(kind), "timeout" to timeout),
+                    mapOf("type" to "command", "command" to layout.hookCommand(kind), "timeout" to timeout) +
+                        if (blocking) mapOf("onFailure" to "block") else emptyMap(),
                 ),
             ).toMap(),
         )
         val hooks = objectOf(
             "hooks" to mapOf(
-                "PreToolUse" to entry("gate", layout.beforeToolSeconds, MATCHER),
+                // a gate hook that fails or runs past its timeout blocks the tool: Claude Code runs it otherwise
+                "PreToolUse" to entry("gate", layout.beforeToolSeconds, MATCHER, blocking = true),
                 "PostToolUse" to entry("gate", AFTER_SECONDS, "$MATCHER|Skill|Task|Agent"),
                 "SessionStart" to entry("session", START_SECONDS, null),
                 "SessionEnd" to entry("session", END_SECONDS, null),

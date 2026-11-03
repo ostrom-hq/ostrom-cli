@@ -17,7 +17,9 @@ import io.ktor.server.response.respond
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
+import kotlinx.coroutines.launch
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
 
@@ -28,7 +30,22 @@ private val HOOK_TIMEOUT = 15.seconds
 private val LONG_POLL_TIMEOUT = 70.seconds
 
 /** How long the signed gate policy is answered from memory: a policy tightened on the server reaches the hooks then. */
-private val POLICY_FRESH_FOR = 30.seconds
+internal val POLICY_FRESH_FOR = 30.seconds
+
+/**
+ * How often the policy is read again in the background: twice within [POLICY_FRESH_FOR], each with its time
+ * ([POLICY_REFRESH_TIMEOUT]), so that one failed read leaves the hooks the next one.
+ */
+internal val POLICY_REFRESH_EVERY = 12.seconds
+
+/** A background read of the policy: a hook does not wait on it, a short bound keeps the next read on time. */
+internal val POLICY_REFRESH_TIMEOUT = 5.seconds
+
+/**
+ * How long after a hook's last call the session counts as active, and its policy is read again in the background: an
+ * agent between two tool calls, not an idle session (10 reads at most after the last hook).
+ */
+private val POLICY_ACTIVE_FOR = 2.minutes
 
 private const val CAPABILITY_REQUIRED = "A local Ostrom capability is required."
 private const val NOT_LOCAL = "Browser or non-loopback requests are not accepted."
@@ -41,6 +58,7 @@ private const val WRONG_CAPABILITY = "This Ostrom capability does not open this 
  *
  * @param policyFreshFor How long the signed gate policy is answered from memory.
  * @param clock Measures that time.
+ * @param policyRefresh When the policy is read again in the background ([PolicyRefresher]).
  */
 @Suppress("LongParameterList") // the relay's settings, all defaulted but the launch's own
 internal fun Application.relayModule(
@@ -52,6 +70,7 @@ internal fun Application.relayModule(
     clientToken: String = token,
     policyFreshFor: Duration = POLICY_FRESH_FOR,
     clock: TimeSource = TimeSource.Monotonic,
+    policyRefresh: PolicyRefreshLoop = refreshEvery(POLICY_REFRESH_EVERY),
 ) {
     val shared = upstream()
     monitor.subscribe(ApplicationStopped) { shared.close() }
@@ -59,6 +78,9 @@ internal fun Application.relayModule(
     val capabilities = Capabilities(token, clientToken)
     val memory = PolicyMemory(policyFreshFor, clock)
     val relay = Relay(upstreamConfig, capabilities, shared, upstream, notices, timeouts, memory)
+    val refresher = PolicyRefresher(upstreamConfig, shared, UpstreamExchange(notices), POLICY_REFRESH_TIMEOUT, memory,
+        POLICY_ACTIVE_FOR)
+    launch { policyRefresh.run(refresher::refresh) }
     routing {
         route("{...}") {
             // The agent hanging up cancels the call, and with it the upstream call (a long poll, a stream).
@@ -83,8 +105,9 @@ private class Relay(
     memory: PolicyMemory,
 ) {
     private val exchange = UpstreamExchange(notices)
-    private val hooks = HookForwarder(config, shared, exchange, timeouts)
-    private val mcp = McpForwarder(config, upstream, exchange)
+    private val session = AgentSession()
+    private val hooks = HookForwarder(config, shared, exchange, timeouts, session)
+    private val mcp = McpForwarder(config, upstream, exchange, session)
     private val inference = InferenceForwarder(config, upstream, exchange)
     private val policy = SignedCatalogForwarder(config, shared, exchange, timeouts.hook, memory)
 

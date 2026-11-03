@@ -12,8 +12,10 @@
 #
 # SHA256SUMS is checked against its signature and the key pinned below, with cosign when it is installed, else with
 # openssl (cosign signs a blob as ECDSA P-256 over its SHA-256: openssl checks the same signature). The archive is then
-# checked against SHA256SUMS. With neither tool, only the checksum is checked, and the installer says so.
+# checked against SHA256SUMS. With neither tool, nothing is installed: the checksum alone comes from the same place as
+# the archive.
 #   OSTROM_SKIP_COSIGN=1 skips the signature check (the checksum is still checked).
+# A download with curl is never redirected from HTTPS to HTTP (wget has no such option; the signature covers it).
 #
 # Everything runs from main, called on the last line: a download cut short runs nothing.
 set -eu
@@ -30,7 +32,9 @@ say() { printf '%s\n' "$*"; }
 fail() { printf 'ostrom install: %s\n' "$*" >&2; exit 1; }
 
 fetch() { # <url> <dest>
-  if command -v curl >/dev/null 2>&1; then curl -fsSL -o "$2" "$1" || return 1
+  # from HTTPS, curl never follows a redirect to HTTP; an http:// mirror keeps its own redirects
+  case "$1" in https://*) redirects='=https' ;; *) redirects='all' ;; esac
+  if command -v curl >/dev/null 2>&1; then curl -fsSL --proto-redir "$redirects" -o "$2" "$1" || return 1
   elif command -v wget >/dev/null 2>&1; then wget -q -O "$2" "$1" || return 1
   else fail "curl or wget is required"; fi
 }
@@ -52,15 +56,18 @@ detect_target() {
   esac
 }
 
-verify_signature() { # <release url> <work dir>: SHA256SUMS against its signature and the pinned key, or stop
-  if [ "${OSTROM_SKIP_COSIGN:-}" = "1" ]; then
-    say "Signature check skipped (OSTROM_SKIP_COSIGN=1): only the checksum is checked."
-    return 0
-  fi
-  if command -v cosign >/dev/null 2>&1; then tool=cosign
+verifier() { # the tool that checks the signature, before anything is downloaded, or stop
+  if [ "${OSTROM_SKIP_COSIGN:-}" = "1" ]; then tool=none
+  elif command -v cosign >/dev/null 2>&1; then tool=cosign
   elif command -v openssl >/dev/null 2>&1; then tool=openssl
   else
-    say "Warning: neither cosign nor openssl is installed: the signature of SHA256SUMS was not checked, only the checksum."
+    fail "neither cosign nor openssl is installed, so the signature of SHA256SUMS cannot be checked: refusing to install. Install cosign or openssl, or set OSTROM_SKIP_COSIGN=1 to check the checksum only"
+  fi
+}
+
+verify_signature() { # <release url> <work dir>: SHA256SUMS against its signature and the pinned key, or stop
+  if [ "$tool" = none ]; then
+    say "Signature check skipped (OSTROM_SKIP_COSIGN=1): only the checksum is checked."
     return 0
   fi
   fetch "$1/SHA256SUMS.sig" "$2/SHA256SUMS.sig" \
@@ -84,6 +91,7 @@ main() {
     linux-x64|linux-arm64|macos-arm64) ;;
     *) fail "unsupported platform: $target (supported: linux-x64, linux-arm64, macos-arm64; on Windows use install.ps1)" ;;
   esac
+  verifier
 
   work=$(mktemp -d "${TMPDIR:-/tmp}/ostrom-install.XXXXXX")
   trap 'rm -rf "$work"' EXIT INT TERM

@@ -12,8 +12,15 @@ back.
 
 With $E2E_MCP (a relayed MCP server's name), the session does nothing else between its start and its end than talk
 to that server as an agent that only starts stdio servers does: `ostrom mcp --session <session-env.json> --server
-<name>`, sent `initialize`, `tools/list` and a `tools/call` of `echo` with $E2E_MCP_SAY ([mcp]); then the same
-`initialize` and `tools/list` to Ostrom's own server, `ostrom`.
+<name>`, sent `initialize`, `tools/list` and a `tools/call` of `echo` with $E2E_MCP_SAY ([mcp]).
+
+With $E2E_WAITS (a path), the session asks a person through Ostrom's own server, `ostrom mcp --session … --server
+ostrom` ([waits]): two `ask_human`, whose answers it writes to $E2E_WAITS.asked; then it reads the first with
+`get_wait` until a person answers it on the console (150 s at most), cancels the second with `cancel_wait` and reads it.
+
+With $E2E_LAUNCH_ONLY, the session only plays what a launch costs (5.9): it writes the epoch time it started at, fires
+SessionStart, then one gated PreToolUse, each with the epoch time it began and ended at, and writes $E2E_REPORT
+({"started", "hooks": [{"event", "tool", "code", "begin", "end"}]}); it exits 0. Nothing else is fired.
 
 Installed by the run as `claude` and `codex` (the name it is started under picks the dialect).
 """
@@ -164,15 +171,69 @@ def mcp(arguments, name, text):
     listed = any(str(server.get("url", "")).endswith(f"/mcp/{name}") for server in servers.values())
     # the session's settings sit next to its MCP config, in the launch's private folder
     settings = os.path.join(os.path.dirname(config), "session-env.json") if config else ""
-    hello = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
-             "params": {"protocolVersion": "2025-06-18", "capabilities": {},
-                        "clientInfo": {"name": "journey-agent", "version": "1"}}}
-    ready = {"jsonrpc": "2.0", "method": "notifications/initialized"}
     tools = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
-    call = {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "echo", "arguments": {"text": text}}}
     return {"servers": sorted(servers), "listed": listed,
-            "bridge": bridge(settings, name, [hello, ready, tools, call]),
-            "ostrom": bridge(settings, "ostrom", [hello, ready, tools])}
+            "bridge": bridge(settings, name, [HELLO, READY, tools, tool_call(3, "echo", {"text": text})])}
+
+
+HELLO = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+         "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                    "clientInfo": {"name": "journey-agent", "version": "1"}}}
+READY = {"jsonrpc": "2.0", "method": "notifications/initialized"}
+WAIT_ID = re.compile(r"wait ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
+
+
+def tool_call(number, name, arguments):
+    return {"jsonrpc": "2.0", "id": number, "method": "tools/call", "params": {"name": name, "arguments": arguments}}
+
+
+def tool_text(answers, number):
+    """The text a tool answered under request [number], or None."""
+    reply = next((a for a in answers.get("answers") or [] if isinstance(a, dict) and a.get("id") == number), {})
+    content = (reply.get("result") or {}).get("content") or []
+    return next((c.get("text") for c in content if isinstance(c, dict)), None)
+
+
+def read_wait(settings, wait):
+    """`get_wait` of [wait] through the bridge: the wait as JSON, or None."""
+    got = bridge(settings, "ostrom", [HELLO, READY, tool_call(2, "get_wait", {"wait": wait})])
+    try:
+        return json.loads(tool_text(got, 2) or "null")
+    except ValueError:
+        return None
+
+
+def waits(arguments, path):
+    """
+    Ostrom's own server as the agent reaches it, `ostrom mcp --server ostrom`: it asks two questions, then reads the
+    first until a person answers it, and cancels the second.
+    """
+    config = arguments[arguments.index("--mcp-config") + 1] if "--mcp-config" in arguments else None
+    servers = {}
+    if config:
+        with open(config) as handle:
+            servers = json.load(handle).get("mcpServers", {})
+    settings = os.path.join(os.path.dirname(config), "session-env.json") if config else ""
+    asked = bridge(settings, "ostrom", [
+        HELLO, READY, {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+        tool_call(3, "ask_human", {"title": "Deploy acme/api to production?"}),
+        tool_call(4, "ask_human", {"title": "Drop the old sessions table?"}),
+    ])
+    ids = [(WAIT_ID.search(tool_text(asked, n) or "") or [None, None])[1] for n in (3, 4)]
+    with open(path + ".tmp", "w") as handle:
+        json.dump({"asked": asked, "ids": ids}, handle)
+    os.replace(path + ".tmp", path + ".asked")
+    answered, deadline = None, time.monotonic() + 150
+    # a bridge that failed once (no wait read) is asked again: only a wait no longer open ends the reading
+    while ids[0] and time.monotonic() < deadline:
+        answered = read_wait(settings, ids[0])
+        if isinstance(answered, dict) and answered.get("status") != "open":
+            break
+        time.sleep(1)
+    cancelled = bridge(settings, "ostrom", [HELLO, READY, tool_call(2, "cancel_wait", {"wait": ids[1]})]) \
+        if ids[1] else None
+    return {"servers": sorted(servers), "asked": asked, "ids": ids, "answered": answered, "cancelled": cancelled,
+            "after": read_wait(settings, ids[1]) if ids[1] else None}
 
 
 def bridge(settings, server, messages):
@@ -193,16 +254,36 @@ def bridge(settings, server, messages):
     return {"code": done.returncode, "answers": answers, "stderr": done.stderr[-1000:]}
 
 
+def launch_only(hooks, base, started):
+    """E2E_LAUNCH_ONLY: SessionStart, then one gated tool; each hook's begin and end in epoch seconds (5.9)."""
+    played = []
+    for event, tool in (("SessionStart", None), ("PreToolUse", "kubectl apply -f prod.yaml")):
+        payload = {**base, "hook_event_name": event}
+        payload.update({"source": "startup"} if tool is None else
+                       {"tool_name": "Bash", "tool_input": {"command": tool}})
+        begin = time.time()
+        done = fire(hooks[event], payload)
+        played.append({"event": event, "tool": tool, "code": done["code"], "begin": begin, "end": time.time(),
+                       "millis": done["millis"], "stderr": done["stderr"][-300:]})
+    with open(os.environ["E2E_REPORT"], "w") as handle:
+        json.dump({"started": started, "hooks": played}, handle)
+    sys.exit(0)
+
+
 def main():
+    started = time.time()
     name = os.path.basename(sys.argv[0]).split(".")[0]
     arguments = sys.argv[1:]
     hooks = claude_hooks(arguments) if name == "claude" else codex_hooks(arguments)
     cwd = os.getcwd()
     session = f"{name}-session-1"
     base = {"session_id": session, "cwd": cwd, "transcript_path": os.path.join(cwd, "transcript.jsonl")}
+    if os.environ.get("E2E_LAUNCH_ONLY"):
+        launch_only(hooks, base, started)
     fired = [fire(hooks["SessionStart"], {**base, "hook_event_name": "SessionStart", "source": "startup"})]
-    if os.environ.get("E2E_MCP"):
-        relayed = mcp(arguments, os.environ["E2E_MCP"], os.environ.get("E2E_MCP_SAY", ""))
+    if os.environ.get("E2E_MCP") or os.environ.get("E2E_WAITS"):
+        relayed = mcp(arguments, os.environ["E2E_MCP"], os.environ.get("E2E_MCP_SAY", "")) \
+            if os.environ.get("E2E_MCP") else waits(arguments, os.environ["E2E_WAITS"])
         fired.append(fire(hooks["SessionEnd"], {**base, "hook_event_name": "SessionEnd", "reason": "exit"}))
         with open(os.environ["E2E_REPORT"], "w") as handle:
             json.dump({"agent": name, "arguments": arguments, "hooks": fired, "mcp": relayed}, handle, indent=2)
