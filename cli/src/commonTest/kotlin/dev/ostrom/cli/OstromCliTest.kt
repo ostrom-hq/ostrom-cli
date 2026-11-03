@@ -118,10 +118,9 @@ class OstromCliTest : CliKit() {
         assertEquals(0, cli().run(arrayOf("--debug", "--version")))
         assertOut("ostrom ${BuildInfo.VERSION} (kotlin-native, Linux x64)\n")
         assertEquals(64, cli().run(arrayOf("doctor", "--version")), "doctor has no --version of its own")
-        val home = mapOf("HOME" to "/home/maya")
-        assertEquals(0, cli(environment = home).run(arrayOf("config", "set", "server", "https://cfg.example")))
-        assertEquals(7, cli(environment = home).run(arrayOf("codex", "--version")))
-        assertEquals(listOf("--version"), launches.last().first.arguments, "the agent's own --version, passed as is")
+        signIn("/home/maya/.config/ostrom")
+        assertEquals(7, cli(environment = withServer).run(arrayOf("codex", "--version")))
+        assertEquals(listOf("--version"), launches.single().first.arguments, "the agent's own --version, passed as is")
     }
 
     @Test
