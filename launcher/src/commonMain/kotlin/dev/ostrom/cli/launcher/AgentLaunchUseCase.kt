@@ -159,11 +159,13 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         val top: String,
         val model: String?,
         val launch: Launch,
-        val reads: LaunchReads,
+        reads: LaunchReads,
         val temporary: String,
     ) {
         val pack = reads.pack
         val keys = reads.keys
+        val mcpServers = reads.mcp
+        val inference = reads.inference
         val plugin = join(temporary, "plugin")
         val relayTokenFile = join(temporary, "relay-token")
         val sessionFile = join(temporary, "session-id")
@@ -176,8 +178,8 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         files.createPrivateDirectory(run.plugin)
         val laid = run.pack?.let { PackageLayout(files).layDown(it, run.plugin, run.temporary) }
         // `ostrom` (rules_for, request_approval, get_receipt) is built into every Ostrom server
-        val mcp = (listOf(BUILT_IN_MCP) + run.reads.mcp + run.pack?.mcpServers.orEmpty()).distinct()
-        val inference = run.reads.inference
+        val mcp = (listOf(BUILT_IN_MCP) + run.mcpServers + run.pack?.mcpServers.orEmpty()).distinct()
+        val inference = run.inference
         val settings = RelaySettings(
             run.site.serverUrl,
             run.launch.agentToken,

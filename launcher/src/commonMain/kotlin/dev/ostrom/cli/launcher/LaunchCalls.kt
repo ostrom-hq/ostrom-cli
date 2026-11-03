@@ -162,8 +162,10 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
             val inference = async { inferenceRelayed(request, site, launch) }
             val pack = packageOf(repo, site, keep = true)
             val read = keys.await()()
+            // said once the list has come back, whichever answer came last
+            val servers = mcp.await()
             notes.forEach(dependencies.say)
-            LaunchReads(pack, read, mcp.await(), inference.await())
+            LaunchReads(pack, read, servers, inference.await())
         }
 
     private suspend fun inferenceRelayed(request: LaunchRequest, site: LaunchSite, launch: Launch): Boolean {
