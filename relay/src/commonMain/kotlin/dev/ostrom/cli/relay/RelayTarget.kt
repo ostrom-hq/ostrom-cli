@@ -16,8 +16,8 @@ internal sealed interface RelayTarget {
 
     /**
      * `GET /api/v1/gates/catalog/signed`: the organisation's gate policy signed by the instance, forwarded to Ostrom
-     * and kept in memory for 30 s, read again in the background in an active session; the hook checks its signature and expiry at every call (security audit
-     * S2-20).
+     * and kept in memory for 30 s, read again in the background in an active session; the hook checks its signature
+     * and expiry at every call (security audit S2-20).
      */
     data object SignedCatalog : RelayTarget
 

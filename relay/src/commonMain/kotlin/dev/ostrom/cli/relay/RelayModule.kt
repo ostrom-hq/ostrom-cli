@@ -30,16 +30,22 @@ private val HOOK_TIMEOUT = 15.seconds
 private val LONG_POLL_TIMEOUT = 70.seconds
 
 /** How long the signed gate policy is answered from memory: a policy tightened on the server reaches the hooks then. */
-private val POLICY_FRESH_FOR = 30.seconds
+internal val POLICY_FRESH_FOR = 30.seconds
 
-/** How often the policy is read again in the background: inside [POLICY_FRESH_FOR], with a read's time to spare. */
-private val POLICY_REFRESH_EVERY = 20.seconds
-
-/** How long after a hook's last call the session counts as active, and its policy is read again in the background. */
-private val POLICY_ACTIVE_FOR = 10.minutes
+/**
+ * How often the policy is read again in the background: twice within [POLICY_FRESH_FOR], each with its time
+ * ([POLICY_REFRESH_TIMEOUT]), so that one failed read leaves the hooks the next one.
+ */
+internal val POLICY_REFRESH_EVERY = 12.seconds
 
 /** A background read of the policy: a hook does not wait on it, a short bound keeps the next read on time. */
-private val POLICY_REFRESH_TIMEOUT = 5.seconds
+internal val POLICY_REFRESH_TIMEOUT = 5.seconds
+
+/**
+ * How long after a hook's last call the session counts as active, and its policy is read again in the background: an
+ * agent between two tool calls, not an idle session (10 reads at most after the last hook).
+ */
+private val POLICY_ACTIVE_FOR = 2.minutes
 
 private const val CAPABILITY_REQUIRED = "A local Ostrom capability is required."
 private const val NOT_LOCAL = "Browser or non-loopback requests are not accepted."

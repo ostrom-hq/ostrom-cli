@@ -11,6 +11,7 @@ import io.ktor.server.application.ApplicationCall
 import io.ktor.server.request.queryString
 import io.ktor.server.request.uri
 import io.ktor.server.response.respondBytes
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -54,20 +55,30 @@ internal fun interface PolicyRefreshLoop {
     suspend fun run(refresh: suspend () -> Unit)
 }
 
-/** Reads the policy again every [every]. */
+/** Reads the policy again every [every]; a read that fails in a way the exchange does not foresee ends no loop. */
 internal fun refreshEvery(every: Duration) = PolicyRefreshLoop { refresh ->
     while (true) {
         delay(every)
-        refresh()
+        try {
+            refresh()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // Dropped on purpose: the policy kept still expires in its time, and the next read comes [every] later.
+        }
     }
 }
+
+/** What Ostrom answers when it refuses the policy: a background read that hears one drops the policy kept (S2-38). */
+private val REFUSALS = setOf(HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden, HttpStatusCode.NotFound)
 
 /**
  * Reads the signed policy kept in [memory] again ahead of its 30 s, while a hook asked for it within [activeFor] (perf
  * pass of 03/11/2026): a hook runs at every tool call, and in an active session none waits on Ostrom for the policy;
- * a policy tightened on the server still reaches the hooks within the memory's time (S2-40). A refusal drops the
- * policy kept; an outage keeps it no longer than its time, after which the hook asks Ostrom itself (S2-38). An idle
- * session asks Ostrom nothing in the background.
+ * a policy tightened on the server still reaches the hooks within the memory's time (S2-40). A refusal (401, 403,
+ * 404) drops the policy kept; an outage (no answer, a 5xx, a 429) keeps it no longer than its time, after which the
+ * hook asks Ostrom itself (S2-38). An idle session asks Ostrom nothing in the background. A launch reads one
+ * repository's policy (`OSTROM_REPO` is set at the launch), so the memory's one policy is the one read again.
  */
 internal class PolicyRefresher(
     private val config: RelayConfig,
@@ -85,7 +96,11 @@ internal class PolicyRefresher(
             url("${config.serverUrl}$SIGNED_GATE_CATALOG?$query")
             identify(config)
         }) { response ->
-            if (response.status == HttpStatusCode.OK) memory.keep(query, response.bodyAsBytes()) else memory.forget()
+            when (response.status) {
+                HttpStatusCode.OK -> memory.keep(query, response.bodyAsBytes())
+                in REFUSALS -> memory.forget()
+                else -> Unit
+            }
         }
     }
 }

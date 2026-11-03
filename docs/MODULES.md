@@ -77,9 +77,9 @@ alternative: a second private file for `ostrom wait`, which a command of the age
   package's checks, and takes their capability, not the agent's. It is the developer's machine's word: the hooks'
   capability file is readable by the agent's own user (S2-20), so a report proves no more than the hooks that sent
   it. The catalogue of the verified package is answered from memory when there is one. Also forwarded: the
-  organisation's gate policy signed by the instance (`GET /api/v1/gates/catalog/signed`, kept 30 s in memory and read again every 20 s in the background while a hook
-  asked within 10 minutes, so that no hook of an active session waits on Ostrom for it; a failure never kept, a refusal
-  read in the background drops it; the
+  organisation's gate policy signed by the instance (`GET /api/v1/gates/catalog/signed`, kept 30 s in memory and read again every 12 s in the background while a hook
+  asked within 2 minutes, so that no hook of an active session waits on Ostrom for it; a failure never kept, a refusal
+  (401, 403, 404) read in the background drops it; the
   hooks check its signature against `OSTROM_INSTANCE_KEYS` and its expiry at every call, and hold every action without
   one, S2-20 and S2-38), `POST /mcp/{server}` for the launch's servers (to `/api/v1/mcp/{server}`, streamed, 401/403 from
   Ostrom become 502), and with inference `/v1/messages`, `/v1/chat/completions`, `/v1/models` (to
