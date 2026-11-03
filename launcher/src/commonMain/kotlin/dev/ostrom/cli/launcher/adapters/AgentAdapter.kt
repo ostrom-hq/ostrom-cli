@@ -3,6 +3,7 @@ package dev.ostrom.cli.launcher.adapters
 
 import dev.ostrom.cli.launcher.Agent
 import dev.ostrom.cli.launcher.LaunchFiles
+import dev.ostrom.cli.launcher.LaunchVariables
 import dev.ostrom.cli.launcher.SessionPackage
 import dev.ostrom.cli.launcher.join
 import dev.ostrom.cli.launcher.quoted
@@ -134,3 +135,13 @@ fun mcpLabel(server: String): String {
 private fun bareKeyCharacter(c: Char): Boolean = c in "-_" || c.isLetterOrDigit() && c.code < ASCII_END
 
 private const val ASCII_END = 0x80
+
+/**
+ * `OSTROM_HOOK_BUDGET_MS` for an agent that stops waiting for its gate hook at the timeout Ostrom gives it
+ * ([SessionLayout.beforeToolSeconds]): Claude Code and Codex. The hook then refuses in time instead of being cut off,
+ * which these agents read as "run the tool" (security audit of the CLI n°2, M1).
+ */
+fun gateBudget(layout: SessionLayout): Map<String, String> =
+    mapOf(LaunchVariables.HOOK_BUDGET_MS to (layout.beforeToolSeconds * MILLIS_PER_SECOND).toString())
+
+private const val MILLIS_PER_SECOND = 1_000L

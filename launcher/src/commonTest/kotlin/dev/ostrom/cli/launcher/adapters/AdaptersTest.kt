@@ -88,12 +88,13 @@ class AdaptersTest {
             listOf("--plugin-dir", join("/tmp/run", "plugin"), "--resume", "x", "--mcp-config", mcp, "--", "prompt"),
             launch.arguments,
         )
-        assertEquals(emptyMap(), launch.environment)
+        assertEquals(mapOf("OSTROM_HOOK_BUDGET_MS" to "20000"), launch.environment)
         val hooks = checkNotNull(parseObject(files.texts[join("/tmp/run", "plugin", "hooks", "hooks.json")]))
         val pre = hooks.child("hooks")?.let { it["PreToolUse"].toString() }
         assertEquals(
             """[{"matcher":"Bash|Write|Edit|MultiEdit|mcp__.*",""" +
-                """"hooks":[{"type":"command","command":"\"/opt/ostrom\" hook gate","timeout":20}]}]""",
+                """"hooks":[{"type":"command","command":"\"/opt/ostrom\" hook gate","timeout":20,""" +
+                """"onFailure":"block"}]}]""",
             pre,
         )
         assertTrue(hooks.child("hooks").toString().contains("mcp__.*|Skill|Task|Agent"))
@@ -168,7 +169,7 @@ class AdaptersTest {
                 "bearer_token_env_var=\"OSTROM_RELAY_TOKEN\"}" in overrides,
         )
         assertFalse(overrides.any { "default_tools_approval_mode" in it }, "S2-37: Codex asks before an MCP tool")
-        assertEquals(emptyMap(), launch.environment)
+        assertEquals(mapOf("OSTROM_HOOK_BUDGET_MS" to "20000"), launch.environment)
         assertFalse("--dangerously-bypass-hook-trust" in arguments, "no package: no hook to trust")
         assertEquals("-c", CodexAdapter().prepare(layout(arguments = listOf("hi")), files).arguments.first())
         assertEquals(listOf("-c"), CodexAdapter().prepare(layout(), files).arguments.take(1))

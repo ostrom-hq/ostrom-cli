@@ -3,9 +3,10 @@ package dev.ostrom.cli.hooks.runtime
 
 /**
  * What is left of the agent's limit on a hook (`OSTROM_HOOK_BUDGET_MS`) for the child processes of the hook: a check
- * script and the git commands around it. Grok, Gemini and Hermes let an action through when its hook runs past their
- * timeout, so a check that outlived it would fail open; each child is cut to what is left, and once nothing is left it
- * is not started, which refuses the action in time ([BudgetedCalls] does the same for the calls to Ostrom).
+ * script and the git commands around it. Every agent Ostrom launches lets an action through when its hook runs past
+ * its timeout (Claude Code unless the hook says `onFailure: block`), so a check that outlived it would fail open;
+ * each child is cut to what is left, and once nothing is left it is not started, which refuses the action in time
+ * ([BudgetedCalls] does the same for the calls to Ostrom).
  *
  * @param budgetMillis The agent's limit from the hook's start, or null when the agent waits for the hook.
  * @param clock The current time in milliseconds.
@@ -24,7 +25,7 @@ class HookBudget(budgetMillis: Long?, private val clock: () -> Long) {
         /** Time kept for the hook to report and answer after its last child ended. */
         private const val MARGIN_MILLIS = 1_000L
 
-        /** No limit: the agent waits for its hook (Claude Code, Codex). */
+        /** No limit: no variable was given (a hook run by hand, or by an agent started before this variable). */
         val NONE = HookBudget(null) { 0L }
 
         /** The budget [variable] names (`OSTROM_HOOK_BUDGET_MS`), or [NONE] when it is not a positive number. */
