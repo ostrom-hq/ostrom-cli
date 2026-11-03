@@ -8,6 +8,7 @@
     5.6 the asker's own yes refused, 5.4 the second person's yes          5.5 ostrom wait lets it through
     5.7 the signed receipt, pulled and verified                         6.1 ostrom logs
     2.9 ostrom mcp: a server of the organisation, called through the session's relay
+    4.3 ostrom mcp --server ostrom: the agent asks a person, the console answers, the agent reads the answer
 
     python3 e2e/journey.py --binary ostrom --server http://127.0.0.1:4600 --mail-dir /tmp/mail \\
         --seed "docker run --rm --network host --env-file server.env ghcr.io/ostrom-hq/ostrom-server:edge \\
@@ -40,6 +41,7 @@ import urllib.parse
 import urllib.request
 
 from mcp_relay import McpRelay
+from mcp_waits import McpWaits
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GENERIC_404 = "Not found."
@@ -478,6 +480,7 @@ class Journey:
 
         # a session of its own, after 6.1 (which reads the developer's last session, the one of 5.2)
         self.guarded(McpRelay(self, maya, SESSION_ROUTES).run)
+        self.guarded(McpWaits(self, maya, SESSION_ROUTES).run)
 
         if self.invitee:
             self.begin("2.6", "ostrom members remove")
