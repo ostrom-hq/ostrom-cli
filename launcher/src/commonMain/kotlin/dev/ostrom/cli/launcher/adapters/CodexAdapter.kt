@@ -31,7 +31,7 @@ class CodexAdapter : AgentAdapter {
             overrides += "mcp_servers.${mcpLabel(name)}={url=$url," +
                 "bearer_token_env_var=\"${LaunchVariables.RELAY_TOKEN}\"}"
         }
-        val environment = mutableMapOf<String, String?>()
+        val environment = gateBudget(layout).toMutableMap<String, String?>()
         val own = mutableListOf<String>()
         if (layout.pack != null) {
             environment["CODEX_HOME"] = codexHome(layout, files)
