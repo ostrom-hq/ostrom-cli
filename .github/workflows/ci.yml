@@ -163,7 +163,7 @@ jobs:
         run: >-
           python3 e2e/perf.py --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe --label linuxX64
           --max-hook-ms 20 --max-cold-version-ms 500 --max-cold-hook-ms 500 --max-size-mb 15
-          --max-burst-requests 0.1 --max-spaced-requests 0.5 --max-spaced-ms 20 --max-installed-ms 60
+          --max-burst-requests 0.1 --max-spaced-requests 0.5 --max-spaced-ms 20 --max-installed-ms 20
       - name: End to end, init, invite, members, policy and harness against the contract's server
         run: python3 e2e/setup_e2e.py --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
       - name: End to end, every command of the real binary (help, exit codes, colours, completion)
@@ -455,7 +455,7 @@ jobs:
       # The ~550 ms with the file cache emptied are `purge` emptying the system libraries too (Foundation, Security:
       # 424 ms for a C program linked with the same 13 libraries), which a running Mac keeps in memory (cli#111, run
       # 41659088187). What a developer pays after an install or an update is the fresh copy's first start, its
-      # signature checked: 39 ms there, budget 150 ms. Gatekeeper is not measured here (docs/RELEASES.md).
+      # signature checked: 39 ms there, 26 ms in run 41660879786, budget 100 ms. Gatekeeper is not measured here (docs/RELEASES.md).
       - name: Hook cost in a session (median of 20)
         run: |
           login=$(security default-keychain -d user | tr -d ' "')
@@ -467,7 +467,7 @@ jobs:
           security list-keychains -d user -s ostrom-ci.keychain
           security default-keychain -d user -s ostrom-ci.keychain
           python3 e2e/perf.py --binary cli/build/bin/macosArm64/releaseExecutable/ostrom.kexe --label macosArm64 \
-            --max-hook-ms 70 --max-cold-version-ms 1500 --max-cold-hook-ms 1500 --max-size-mb 15 --max-installed-ms 150 \
+            --max-hook-ms 70 --max-cold-version-ms 1500 --max-cold-hook-ms 1500 --max-size-mb 15 --max-installed-ms 100 \
             --max-burst-requests 0.1 --max-spaced-requests 0.5 --max-spaced-ms 120
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

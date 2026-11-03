@@ -17,9 +17,9 @@ It measures:
   the relay keeps the signed policy (POLICY_FRESH_FOR), a hook would wait on Ostrom for it, which the relay's read in
   the background spares it (cli#99). The relay's own background read may land inside a hook's few milliseconds: the
   budgets leave that room (a hook that waits on Ostrom counts 1 each time), and the spaced hooks' time has a budget too;
-- the first start of a binary just installed: a fresh copy (a file the system never ran: its signature checked on
-  macOS) started once, the rest of the system's files left in the cache, as on a developer's machine after
-  `install.sh` or an update;
+- the first start of a binary just installed: a new copy (a file the system never ran, with its own home; on macOS a
+  code directory hash it has never seen, its signature checked) started once, the rest of the system's files left in
+  the cache, as on a developer's machine after `install.sh` or an update;
 - the size of the binary.
 
 On macOS, the start with the file cache emptied is an upper bound that a developer's Mac does not pay: `purge` also
@@ -47,7 +47,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "scripts"))
 
-from measure import run_cold  # noqa: E402
+from measure import checked, run_cold  # noqa: E402
 from run import launch, requests, setup, start_server  # noqa: E402
 
 RUNS = 20
@@ -97,19 +97,24 @@ def cold(command, stdin=None):
 
 
 def installed(binary):
-    """The median of RUNS first starts of `ostrom version`, each from a fresh copy of [binary] (cache left warm)."""
-    environment = {"PATH": os.environ["PATH"], "HOME": tempfile.gettempdir()}
+    """The median of RUNS first starts of `ostrom version`, each from a new copy of [binary] with its own home.
+
+    On macOS each copy is signed again ad hoc under its own identifier: a new code directory hash, as an update brings,
+    so that no check the system keeps for a hash it has seen is reused. The rest of the system stays in the cache."""
     walls = []
-    with tempfile.TemporaryDirectory(prefix="ostrom-installed-") as work:
-        for run in range(RUNS):
-            path = os.path.join(work, f"ostrom-{run}")
+    for run in range(RUNS):
+        with tempfile.TemporaryDirectory(prefix="ostrom-installed-") as work:
+            path = os.path.join(work, "ostrom")
             shutil.copyfile(binary, path)
             os.chmod(path, 0o755)
+            if sys.platform == "darwin":
+                subprocess.run(["codesign", "--force", "--sign", "-", "--identifier", f"ostrom-installed-{run}", path],
+                               check=True, capture_output=True)
+            environment = {"PATH": os.environ["PATH"], "HOME": work}
             start = time.perf_counter()
             result = subprocess.run([path, "version"], capture_output=True, env=environment)
             walls.append((time.perf_counter() - start) * 1000)
-            if result.returncode != 0:
-                sys.exit(f"a fresh copy did not start: exit code {result.returncode}")
+            checked([path, "version"], result.returncode, result.stderr, (0,))
     return round(statistics.median(walls), 1)
 
 
