@@ -162,11 +162,11 @@ class MoreAdaptersTest {
         // to be harmless are let through, the first other one named (security audit of the CLI n°2, H3)
         val workspace = listOf("/w/app/src", "/w/app")
         for ((folder, text, key) in listOf(
-            Triple("/w/app/src", """{"ui":{"theme":"dark"},"hooksConfig":{"enabled":false}}""", "hooksConfig"),
+            Triple("/w/app/src", """{"ui":{"hideBanner":true},"hooksConfig":{"enabled":false}}""", "hooksConfig"),
             Triple("/w/app", "{// theirs\n\"hooks\": {\"BeforeTool\": []},}", "hooks"),
             Triple("/w/app", """{"mcpServers":{"ostrom":{"command":"./evil"}}}""", "mcpServers"),
             Triple("/w/app", """{"tools":{"discoveryCommand":"./evil"}}""", "tools"),
-            Triple("/w/app", """{"general":{"vimMode":true}}""", "general"),
+            Triple("/w/app", """{"general":{"preferredEditor":"vim"}}""", "general.preferredEditor"),
         )) {
             files.texts.keys.removeAll { it.startsWith("/w/") }
             val path = join(folder, ".gemini", "settings.json")
@@ -193,7 +193,7 @@ class MoreAdaptersTest {
             assertFailsWith<AdapterException> { GeminiAdapter().prepare(layout(workspace = workspace), files) }.reason,
         )
         // harmless settings, with comments, a BOM or nothing at all, start Gemini
-        files.texts[unread] = "\uFEFF{// theirs\n\"ui\": {\"theme\": \"dark\"},}"
+        files.texts[unread] = "\uFEFF{// theirs\n\"ui\": {\"hideBanner\": true},}"
         files.texts[join("/w/app/src", ".gemini", "settings.json")] = " "
         files.deleteRecursively(join("/tmp/run", "gemini-home"))
         GeminiAdapter().prepare(layout(workspace = workspace), files)
@@ -255,6 +255,45 @@ class MoreAdaptersTest {
         files.texts[real] = """{"hooks":{"BeforeTool":{}}}"""
         files.deleteRecursively(join("/tmp/run", "gemini-home"))
         GeminiAdapter().prepare(layout(), files)
+    }
+
+    @Test
+    fun aWorkspaceMaySetOnlyTheTwelveKeysThatChangeHowGeminiLooks() {
+        // the inventory of Gemini CLI 0.66 (AUDIT-SECU-CLI-H3-INVENTAIRE, annex A § 5), with their values checked:
+        // Gemini restores an invalid value and expands `$VAR` in a string; `ui.theme` may name a file
+        val path = join("/w/app", ".gemini", "settings.json")
+        val started = { text: String ->
+            files.texts[path] = text
+            files.deleteRecursively(join("/tmp/run", "gemini-home"))
+            GeminiAdapter().prepare(layout(workspace = listOf("/w/app")), files)
+        }
+        for ((text, key) in listOf(
+            """{"${'$'}schema":"https://example.com/s.json"}""" to "${'$'}schema",
+            """{"ui":{"theme":"/w/app/theme.json"}}""" to "ui.theme",
+            """{"ui":{"hideBanner":"${'$'}HOME"}}""" to "ui.hideBanner",
+            """{"ui":{"loadingPhrases":"anything"}}""" to "ui.loadingPhrases",
+            """{"ui":{"footer":{"hideCWD":true}}}""" to "ui.footer.hideCWD",
+            """{"ui":{"footer":true}}""" to "ui.footer",
+            """{"general":{"vimMode":true,"preferredEditor":"./evil"}}""" to "general.preferredEditor",
+        )) {
+            val refused = assertFailsWith<AdapterException> { started(text) }.reason
+            assertTrue(refused.startsWith("gemini: $path sets `$key`, which Ostrom does not know to be harmless"), key)
+        }
+        started(
+            """{"ui":{"hideBanner":true,"hideTips":false,"showShortcutsHint":true,"showLineNumbers":true,""" +
+                """"showCitations":true,"showSpinner":false,"showMemoryUsage":true,"footer":{"showLabels":false},""" +
+                """"loadingPhrases":"witty","accessibility":{"enableLoadingPhrases":true,"screenReader":false}},""" +
+                """"general":{"vimMode":true}}""",
+        )
+        // a `.gemini` that is a link: what Gemini reads there need not be what Ostrom read
+        files.texts.remove(path)
+        files.texts[join("/elsewhere", "settings.json")] = """{"hooksConfig":{"enabled":false}}"""
+        files.links[join("/w/app", ".gemini")] = "/elsewhere"
+        assertEquals(
+            "gemini: ${join("/w/app", ".gemini")} is a link (to /elsewhere), so what Gemini reads there may not be " +
+                "what Ostrom checked: Gemini is not started. Make it a folder to work with Ostrom",
+            assertFailsWith<AdapterException> { started("") }.reason,
+        )
     }
 
     @Test
