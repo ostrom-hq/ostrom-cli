@@ -244,6 +244,9 @@ class MoreAdaptersTest {
                 "event, or remove it, to work with Ostrom",
             assertFailsWith<AdapterException> { GeminiAdapter().prepare(layout(), files) }.reason,
         )
+        // no BeforeTool hook in it, empty or not a list: Gemini starts
+        files.texts[real] = """{"hooks":{"BeforeTool":{}}}"""
+        GeminiAdapter().prepare(layout(), files)
     }
 
     @Test

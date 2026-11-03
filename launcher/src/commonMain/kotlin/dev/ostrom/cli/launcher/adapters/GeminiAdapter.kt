@@ -40,24 +40,18 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
 
     override fun prepare(layout: SessionLayout, files: LaunchFiles): AgentLaunch {
         val real = join(layout.variable("GEMINI_CLI_HOME") ?: layout.home, ".gemini")
+        val trust = trust(layout)
         refuseWorkspaceHooks(layout, files, real)
         val root = join(layout.temporary, "gemini-home")
         files.createPrivateDirectory(root)
         val own = setOf("settings.json", "GEMINI.md", "skills")
         val directory = overlayHome(files, real, join(root, ".gemini"), own)
         skillsInto(files, layout.plugin, join(directory, "skills"), join(real, "skills"))
-        val text = files.read(join(real, "settings.json"))
-        val parsed = parseObject(text)
+        val text = files.read(join(real, "settings.json"))?.removePrefix(BOM)
+        val parsed = if (text.isNullOrBlank()) null else parseObject(text, comments = true)
         val theirs = parsed ?: JsonObject(emptyMap())
-        // the gate is the organization's rule: the developer's own settings do not turn it off either. Their hooks
-        // run beside Ostrom's, and their `hooksConfig.disabled` cannot name Ostrom's, named anew in each session
-        if (theirs.child("hooksConfig")?.get("enabled") == JsonPrimitive(false)) {
-            throw AdapterException(
-                "gemini: ${join(real, "settings.json")} sets `hooksConfig.enabled: false`, which turns Ostrom's " +
-                    "hooks off: Gemini is not started. Remove it from that file to work with Ostrom",
-            )
-        }
-        // comments, a trailing comma or a BOM: Gemini reads them, strict JSON does not, so the session goes without
+        developersRules(theirs, join(real, "settings.json"))
+        // Gemini reads the session's settings, not these: settings Ostrom cannot read are left out, and said
         val notes = if (parsed == null && !text.isNullOrBlank()) listOf(UNREAD) else emptyList()
         val suffix = nonce()
         files.write(join(directory, "settings.json"), pretty(settings(layout, theirs, suffix)), FileAccess.PRIVATE)
@@ -68,34 +62,81 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
             "GEMINI_CLI_HOME" to root,
             LaunchVariables.HOOK_DIALECT to "gemini",
             LaunchVariables.HOOK_BUDGET_MS to BUDGET_MILLIS,
-        ) + system
+        ) + system + trust
         return AgentLaunch(layout.arguments, environment, notes)
     }
 
     /**
      * Stops the launch when a workspace's settings touch `hooks` or `hooksConfig`, or cannot be read: read as Gemini
-     * reads them (comments, trailing commas), in each folder of [SessionLayout.workspace] but the developer's own.
+     * reads them (comments, trailing commas), in each folder of [SessionLayout.workspace]. In their home, the
+     * developer's own settings are the workspace's, and their own rules hold.
      *
      * @throws AdapterException When one does: a repository could turn Ostrom's hooks off.
      */
     private fun refuseWorkspaceHooks(layout: SessionLayout, files: LaunchFiles, real: String) {
         for (folder in layout.workspace) {
             val directory = join(folder, ".gemini")
-            // in their home, the developer's own settings are read as theirs, Ostrom's hooks added
-            val text = if (directory == real) null else files.read(join(directory, "settings.json"))?.removePrefix(BOM)
-            if (text.isNullOrBlank()) continue
             val path = join(directory, "settings.json")
+            val text = files.read(path)?.removePrefix(BOM)
+            if (text.isNullOrBlank()) continue
+            // in their home, Gemini reads the developer's own settings as the workspace's (its home is the session's)
+            val own = directory == real
             val settings = parseObject(text, comments = true) ?: throw AdapterException(
-                "gemini: $path cannot be read as JSON: Ostrom cannot tell whether it turns its hooks off, so Gemini " +
-                    "is not started",
+                "gemini: $path cannot be read as JSON: " + (if (own) "Gemini reads it in this folder, and " else "") +
+                    "Ostrom cannot tell whether it turns its hooks off, so Gemini is not started",
             )
-            if ("hooks" in settings || "hooksConfig" in settings) {
+            if (own) {
+                developersRules(settings, path)
+            } else if ("hooks" in settings || "hooksConfig" in settings) {
                 throw AdapterException(
                     "gemini: $path sets `hooks` or `hooksConfig`, with which a repository can turn Ostrom's hooks " +
                         "off: Gemini is not started. Remove them from that file to work with Ostrom",
                 )
             }
         }
+    }
+
+    /**
+     * The developer's own rules: the gate is the organization's, so their settings do not turn the hooks off
+     * (`hooksConfig.enabled: false`) nor add a `BeforeTool` hook, which Gemini runs beside the gate in any order and
+     * which could change a tool's input after the gate has checked it. Their hooks of other events run beside
+     * Ostrom's, and their `hooksConfig.disabled` cannot name Ostrom's, named anew in each session.
+     *
+     * @throws AdapterException When they do.
+     */
+    private fun developersRules(settings: JsonObject, path: String) {
+        if (settings.child("hooksConfig")?.get("enabled") == JsonPrimitive(false)) {
+            throw AdapterException(
+                "gemini: $path sets `hooksConfig.enabled: false`, which turns Ostrom's hooks off: Gemini is not " +
+                    "started. Remove it from that file to work with Ostrom",
+            )
+        }
+        if ((settings.child("hooks")?.get("BeforeTool") as? JsonArray).orEmpty().isNotEmpty()) {
+            throw AdapterException(
+                "gemini: $path adds a `BeforeTool` hook: Gemini runs it beside Ostrom's gate, in any order, and it " +
+                    "could change a tool's input after the gate has checked it, so Gemini is not started. Move it to " +
+                    "another event, or remove it, to work with Ostrom",
+            )
+        }
+    }
+
+    /**
+     * The variables that decide whether Gemini trusts the folder, as the developer set them or empty: Gemini loads a
+     * repository's `.env` without replacing a variable already set, and an untrusted folder runs none of the
+     * settings' hooks, Ostrom's included (Gemini CLI 0.66, `checkPathTrust`).
+     *
+     * @throws AdapterException When the developer's own take the trust away.
+     */
+    private fun trust(layout: SessionLayout): Map<String, String> {
+        val untrusting = UNTRUSTING.firstOrNull { (name, value) -> layout.variable(name) == value }
+        if (untrusting != null) {
+            throw AdapterException(
+                "gemini: ${untrusting.first}=${untrusting.second} takes the trust away from this folder, and Gemini " +
+                    "then runs none of the settings' hooks, Ostrom's included, so it is not started. Unset it to " +
+                    "work with Ostrom",
+            )
+        }
+        return TRUST.associateWith { layout.variable(it).orEmpty() }
     }
 
     /**
@@ -162,8 +203,8 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
         const val END_SECONDS = 30L
         const val MILLIS = 1_000L
         const val BUDGET_MILLIS = "590000"
-        const val UNREAD = "gemini: your settings.json is not plain JSON (comments or a trailing comma?): this " +
-            "session starts without your settings"
+        const val UNREAD = "gemini: your settings.json cannot be read as JSON: this session starts without your " +
+            "settings"
         const val BOM = "\uFEFF"
         const val SYSTEM_SETTINGS = "GEMINI_CLI_SYSTEM_SETTINGS_PATH"
         const val SYSTEM_DEFAULTS = "GEMINI_CLI_SYSTEM_DEFAULTS_PATH"
@@ -171,5 +212,22 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
         const val NONCE = 16
 
         const val MACOS_ROOT = "/Library/Application Support"
+
+        // what takes the trust away from a folder: restricted mode, or the workspace's trust turned off
+        val UNTRUSTING = listOf("GEMINI_RESTRICTED_MODE" to "true", "GEMINI_CLI_TRUST_WORKSPACE" to "false")
+
+        // what decides the folder's trust: the two above, the trusted folders' file, and an IDE's connection, which
+        // tells Gemini whether the IDE trusts the folder
+        val TRUST = listOf(
+            "GEMINI_RESTRICTED_MODE",
+            "GEMINI_CLI_TRUST_WORKSPACE",
+            "GEMINI_CLI_TRUSTED_FOLDERS_PATH",
+            "GEMINI_CLI_IDE_SERVER_PORT",
+            "GEMINI_CLI_IDE_SERVER_STDIO_COMMAND",
+            "GEMINI_CLI_IDE_SERVER_STDIO_ARGS",
+            "GEMINI_CLI_IDE_WORKSPACE_PATH",
+            "GEMINI_CLI_IDE_AUTH_TOKEN",
+            "GEMINI_CLI_IDE_PID",
+        )
     }
 }
