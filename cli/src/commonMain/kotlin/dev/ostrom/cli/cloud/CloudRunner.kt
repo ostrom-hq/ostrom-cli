@@ -52,7 +52,7 @@ class CloudRunnerImpl(
     private val terminal: RawTerminal,
     private val capture: ProcessCapture,
 ) : CloudRunner {
-    // the client is closed with the command: its engine holds a thread and the connection pool
+    // `use` hands the client back: the wiring keeps one per server for the whole command, closed with the process
     override suspend fun start(start: CloudStart, site: CloudSite): Int = api(site.serverUrl).use {
         useCase(it, site).start(start.copy(repo = start.repo ?: gitHubOrigin(site.cwd)), site.token)
     }

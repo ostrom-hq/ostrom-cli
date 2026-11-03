@@ -147,7 +147,16 @@ class CliDependencies(
             // Built on first send only: with statistics off (the default) no HTTP client is made.
             val statistics by lazy { StatisticsSender() }
             val finder = ExecutableFinderImpl(environment)
-            val api = { url: String -> OstromApiImpl(url, USER_AGENT, trace = trace) }
+            // One client per server for the whole command (PERF-CLI): its calls share one connection, so one TLS
+            // handshake, where `ostrom claude` used to open one to look its organisation up and another to launch.
+            // A caller's close() keeps it open for the next: the process ends with the command. The URL is the one the
+            // client sends to (no trailing slash), so `https://x/` and `https://x` share it. No lock: every client is
+            // asked for while a command is wired or started, one after the other, never from two threads at once.
+            val clients = mutableMapOf<String, OstromApi>()
+            val api = { url: String ->
+                val server = url.trimEnd('/')
+                clients.getOrPut(server) { KeptOpen(OstromApiImpl(server, USER_AGENT, trace = trace)) }
+            }
             val launchFiles = LaunchFilesImpl()
             val temporary = FileSystem.SYSTEM_TEMPORARY_DIRECTORY.toString()
             val files = FileStoreImpl()
@@ -253,3 +262,8 @@ class CliDependencies(
 
 /** Blocks the thread [millis] milliseconds: `ostrom wait` runs as a plain command, never inside a hook. */
 internal fun pause(millis: Long) = runBlocking { delay(millis) }
+
+/** [api], whose close() is left to the end of the process: one client serves every call of a command to its server. */
+internal class KeptOpen(private val api: OstromApi) : OstromApi by api {
+    override fun close() = Unit
+}
