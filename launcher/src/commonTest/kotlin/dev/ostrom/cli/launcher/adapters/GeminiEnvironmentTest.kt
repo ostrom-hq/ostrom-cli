@@ -7,6 +7,7 @@ import dev.ostrom.cli.launcher.join
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 // what changes the shell that runs Ostrom's hooks (`bash -c`, PowerShell on Windows), the loader under it, or Node
@@ -170,6 +171,29 @@ class GeminiEnvironmentTest {
         )
         files.texts[trusted] = "  "
         prepare(layout(workspace = listOf("/work/repo")))
+    }
+
+    @Test
+    fun linksAreFollowedAsGeminiFollowsThem() {
+        val trusted = join("/home/dev", ".gemini", "trustedFolders.json")
+        // a link to a folder the developer does not trust: Gemini follows it, and runs none of the hooks
+        files.links["/lien"] = "/vrai/projet"
+        files.texts[trusted] = """{"/vrai/projet": "DO_NOT_TRUST"}"""
+        assertTrue("does not trust /lien (DO_NOT_TRUST)" in refusal(layout(workspace = listOf("/lien"))))
+        // a rule written through a link
+        files.links["/raccourci"] = "/vrai"
+        files.texts[trusted] = """{"/raccourci/projet": "DO_NOT_TRUST"}"""
+        assertTrue("does not trust /vrai/projet" in refusal(layout(workspace = listOf("/vrai/projet"))))
+        // TRUST_PARENT through a link names the folder, longer than the rule that distrusts its parent
+        files.texts[trusted] = """{"/vrai": "DO_NOT_TRUST", "/raccourci/projet/x": "TRUST_PARENT"}"""
+        assertNull(started(layout(workspace = listOf("/vrai/projet"))))
+    }
+
+    private fun started(layout: SessionLayout): String? = try {
+        prepare(layout)
+        null
+    } catch (refused: AdapterException) {
+        refused.reason
     }
 
     private fun layout(

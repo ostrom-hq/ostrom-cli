@@ -49,6 +49,12 @@ interface LaunchFiles {
 
     /** Deletes [path] and everything under it. */
     fun deleteRecursively(path: String)
+
+    /**
+     * [path] with its links followed (realpath), or as written, normalized, when it does not resolve: a folder as
+     * Gemini CLI reads it before matching it with the trusted folders.
+     */
+    fun canonical(path: String): String = path
 }
 
 /**

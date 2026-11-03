@@ -72,6 +72,17 @@ class MemoryFiles : LaunchFiles {
         links.keys.removeAll(under)
     }
 
+    /** [path] with the [links] it goes through followed, the longest first. */
+    override fun canonical(path: String): String {
+        var resolved = path
+        repeat(links.size) {
+            val link = links.keys.filter { resolved == it || below(it, resolved) != null }.maxByOrNull { it.length }
+                ?: return resolved
+            resolved = links.getValue(link) + resolved.removePrefix(link)
+        }
+        return resolved
+    }
+
     /**
      * What follows [path] in [entry], or null when [entry] is not under it. Okio keeps the separator a path was written
      * with (on Windows, `"/tmp".toPath() / "a"` is `/tmp/a`), and Windows takes both: so does this double there. On

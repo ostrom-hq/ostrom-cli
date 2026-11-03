@@ -79,4 +79,14 @@ class LaunchFilesTest {
         assertEquals("x", real.read((folder / "f").toString()))
         real.deleteRecursively(folder.toString())
     }
+
+    @Test
+    fun aFolderIsReadWithItsLinksFollowedOrAsWrittenWhenItDoesNotResolve() {
+        fileSystem.createDirectories("/real/project".toPath())
+        fileSystem.createSymlink("/link".toPath(), "/real".toPath())
+        assertEquals("/real/project", files.canonical("/link/project"))
+        assertEquals("/real/project", files.canonical("/link/../link/project/."))
+        // as Gemini CLI: a path that does not resolve is kept, normalized
+        assertEquals("/nowhere/b", files.canonical("/nowhere/a/../b"))
+    }
 }
