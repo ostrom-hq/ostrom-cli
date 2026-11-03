@@ -151,6 +151,10 @@ jobs:
           --max-hook-p95-ms 20 --max-version-p95-ms 30 --max-cold-ms 300 --max-hook-memory-mb 25
       - name: End to end, the real binary with fake Claude Code and Codex against the contract's server
         run: python3 e2e/run.py --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
+      # What a hook costs the agent at every tool call, median of 20 (e2e/perf.py): first starts, the hook in a session
+      # with no action and with 50 and a gate, the requests to Ostrom a hook waits on, the binary's size.
+      - name: Hook cost in a session (median of 20)
+        run: python3 e2e/perf.py --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe --label linuxX64
       - name: End to end, init, invite, members, policy and harness against the contract's server
         run: python3 e2e/setup_e2e.py --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
       - name: End to end, every command of the real binary (help, exit codes, colours, completion)
@@ -427,6 +431,8 @@ jobs:
           --binary cli/build/bin/macosArm64/releaseExecutable/ostrom.kexe
           --sizes cli/build/bin/macosArm64/releaseExecutable/ostrom.kexe --max-size-mb 15
           --max-hook-ms 30 --max-hook-p95-ms 45 --max-version-p95-ms 60 --max-cold-ms 1500 --max-hook-memory-mb 25
+      - name: Hook cost in a session (median of 20)
+        run: python3 e2e/perf.py --binary cli/build/bin/macosArm64/releaseExecutable/ostrom.kexe --label macosArm64
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ostrom-macosArm64
