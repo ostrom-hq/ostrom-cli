@@ -25,7 +25,7 @@ class PackageChecksTest {
         assertHas(report, Mark.MISSING, "chain", "the yes appr_7d1b4f0 (approved by Lyesbcb) is cited")
         assertEquals(2, report.code, report.render())
         val alone = verify(receipt)
-        assertHas(alone, Mark.MISSING, "package", "p202610280112-7a8ec07b (digest 45410be7cfc1…) is cited, but")
+        assertHas(alone, Mark.MISSING, "package", "p202610280112-d2a4912a (digest 1f0df7767d9f…) is cited, but")
         assertHas(alone, Mark.MISSING, "node", "its receipt rcpt_c0a50d60-82b3-4986-8660-14e7e5ba0d5c is not in the")
     }
 
@@ -44,23 +44,23 @@ class PackageChecksTest {
 
     @Test
     fun aReceiptWithoutAPackageObjectHasNoPackageLines() {
-        val report = verify(bundle.with(listOf("receipt", "package"), "p202610280112-7a8ec07b"))
+        val report = verify(bundle.with(listOf("receipt", "package"), "p202610280112-d2a4912a"))
         assertTrue(report.lines.none { it.what == "package" || it.what == "subject" }, report.render())
     }
 
     @Test
     fun anEnvelopeThatIsNotTheCitedOneIsNotValid() {
         val relabelled = verify(bundle.with(listOf("package", "digest"), "0".repeat(64)))
-        assertHas(relabelled, Mark.BAD, "package", "the envelope's bytes hash to 45410be7cfc1…, the receipt cites")
+        assertHas(relabelled, Mark.BAD, "package", "the envelope's bytes hash to 1f0df7767d9f…, the receipt cites")
         val renamed = bundle.with(listOf("receipt", "package", "version"), "other")
             .with(listOf("receipt", "subject", "id"), "sess-0f3c2a91@other")
         val report = verify(renamed)
-        assertHas(report, Mark.BAD, "package", "is version p202610280112-7a8ec07b, the receipt cites other")
+        assertHas(report, Mark.BAD, "package", "is version p202610280112-d2a4912a, the receipt cites other")
     }
 
     @Test
     fun anEnvelopeTheLauncherWouldRefuseIsNotValidHoweverWellSigned() {
-        val version = "p202610280112-7a8ec07b"
+        val version = "p202610280112-d2a4912a"
         val foreign = verify(bundle.with(listOf("package", "format"), "ostrom.package/0"))
         assertHas(foreign, Mark.BAD, "package", "$version: the envelope is not ostrom.package/1")
         val unsigned = verify(bundle.with(listOf("package", "alg"), null))
@@ -76,7 +76,7 @@ class PackageChecksTest {
     fun anEnvelopeSignatureThatIsUnreadableOrWrongIsNotValid() {
         for (signature in listOf("not base64!", "AAAA")) {
             val report = verify(bundle.with(listOf("package", "signature"), signature))
-            assertHas(report, Mark.BAD, "package", "p202610280112-7a8ec07b: unreadable signature")
+            assertHas(report, Mark.BAD, "package", "p202610280112-d2a4912a: unreadable signature")
         }
         val raw = decodeBase64(envelope.field("signature").strOr("")) ?: ByteArray(0)
         raw[0] = (raw[0].toInt() xor 1).toByte()

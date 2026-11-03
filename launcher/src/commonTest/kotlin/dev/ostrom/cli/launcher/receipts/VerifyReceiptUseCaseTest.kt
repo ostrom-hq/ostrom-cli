@@ -36,10 +36,10 @@ class VerifyReceiptUseCaseTest {
         val report = verify(bundle)
         assertEquals(0, report.code, report.render())
         val expected = """
-            |Receipt rcpt_032d1060-923d-45f0-9c9d-42a3de268f61 · workflow of @Lyesbcb · controlresell-core · 2026-10-27T23:21:01.745Z
-            |  ✓ signature this receipt: Ed25519 valid, key f60d6b29d4cb7c46 (test), digest c056f001e7d0…
-            |  ✓ subject   session sess-0f3c2a91 under package p202610280112-7a8ec07b: digest recomputed from the session, the package digest and the 3 node(s)
-            |  ✓ package   p202610280112-7a8ec07b: envelope signed by key f60d6b29d4cb7c46, digest 45410be7cfc1… over its exact bytes, compiled 2026-10-28T01:12:00.000Z from "Ship a change to controlresell-core"
+            |Receipt rcpt_032d1060-923d-45f0-9c9d-42a3de268f61 · workflow of @Lyesbcb · acme-core · 2026-10-27T23:21:01.745Z
+            |  ✓ signature this receipt: Ed25519 valid, key f60d6b29d4cb7c46 (test), digest 1a4ebd439da5…
+            |  ✓ subject   session sess-0f3c2a91 under package p202610280112-d2a4912a: digest recomputed from the session, the package digest and the 3 node(s)
+            |  ✓ package   p202610280112-d2a4912a: envelope signed by key f60d6b29d4cb7c46, digest 1f0df7767d9f… over its exact bytes, compiled 2026-10-28T01:12:00.000Z from "Ship a change to acme-core"
             |  ✓ chain     gate receipt rcpt_c0a50d60-82b3-4986-8660-14e7e5ba0d5c: Ed25519 valid, key f60d6b29d4cb7c46 (test), digest 485da5b437dd…
             |  ✓ decision  approved by Lyesbcb at 2026-10-28T01:14:09.512Z, the same in both receipts
             |  ✓ node      check "Run the tests before any push": passed
@@ -56,10 +56,10 @@ class VerifyReceiptUseCaseTest {
     @Test
     fun theTitleNamesTheRepositoryOfTheSignedPayloadNeverTheEnvelopeHeader() {
         val title = verify(bundle.with(listOf("package", "repo"), "someone-else")).render().lines().first()
-        assertTrue(title.contains(" · controlresell-core · "), title)
+        assertTrue(title.contains(" · acme-core · "), title)
         assertFalse(title.contains("someone-else"), title)
         val unreadable = verify(bundle.with(listOf("package", "payload"), "not json")).render().lines().first()
-        assertTrue(unreadable.contains(" · subject sess-0f3c2a91@p202610280112-7a8ec07b · "), unreadable)
+        assertTrue(unreadable.contains(" · subject sess-0f3c2a91@p202610280112-d2a4912a · "), unreadable)
     }
 
     @Test

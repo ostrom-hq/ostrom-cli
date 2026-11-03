@@ -25,7 +25,8 @@ jobs:
       - name: Install shellcheck and actionlint
         run: |
           sudo apt-get update && sudo apt-get install -y shellcheck jq
-          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7
+          # the download script at the commit of the v1.7.7 tag, not at the tag, which can move
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/03d0035246f3e81f36aed592ffb4bebf33a03106/scripts/download-actionlint.bash) 1.7.7
           sudo mv actionlint /usr/local/bin/
       - name: shellcheck
         run: shellcheck -x -S warning -s sh install/install.sh scripts/release/*.sh scripts/release/tests/*.sh install/tests/*.sh

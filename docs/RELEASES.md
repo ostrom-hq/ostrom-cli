@@ -15,7 +15,9 @@ A pre-release is any version with a dash (`1.0.0-rc.1`): the release is marked a
 `gh workflow run release.yml`). It does everything except publish: no GitHub Release, no image push, no tap push.
 Without a `version`, the label is the version floor's (`1.0.0-dryrun` for a floor of 1.0.0): a label under the floor
 stops the manifest step, as a real release under it would. The packed and signed files are in the `release-dist`
-artifact of the run.
+artifact of the run. A dry run reads no signing secret: it runs on any branch and anyone can download its artifacts,
+so cosign and the manifest are signed with throwaway keys made in the job (checked against them, openssl included),
+and the macOS and Windows binaries are not code-signed. Only a tag signs with the release keys.
 
 **Draft or public.** While the repository is private the release is created as a **draft** (only the team sees it).
 At the go: make the repositories public, set the repository variable `RELEASE_DRAFT` to `false`
@@ -65,7 +67,10 @@ sha256sum -c --ignore-missing SHA256SUMS
 cosign verify --key cosign.pub --insecure-ignore-tlog ghcr.io/ostrom-hq/ostrom-runner:1.0.0
 ```
 
-(`install.sh` and `install.ps1` do the SHA-256 check always, and the cosign check when `cosign` is installed.)
+(`install.sh` and `install.ps1` check the signature of `SHA256SUMS` against the pinned cosign key, with `cosign` when it
+is installed, else with `openssl` (install.sh) or .NET (install.ps1), then the SHA-256 of the archive. Without either
+tool, install.sh says the signature was not checked. A dry run of the release signs with throwaway keys, never with
+the release keys.)
 
 ## The update manifest, for `ostrom update`
 

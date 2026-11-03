@@ -151,6 +151,51 @@ class InitCommandTest : SetupKit() {
     }
 
     @Test
+    fun aTokenThatCannotReadTheRulesDoesNotFailInit() {
+        // a token made on the console may not hold rules:read: init again with it still exits 0, and says so
+        val denied = """{"error":{"message":"This credential does not allow rules:read."}}"""
+        val refused = mapOf(repos, harness, proposed to (403 to denied))
+        assertEquals(0, run(refused, "init", "--yes", environment = zshAdmin, capture = gitTop()))
+        assertOut("  Rules       this token cannot read them (This credential does not allow rules:read.): without " +
+            "OSTROM_TOKEN, ostrom login's token reads them\n")
+        console.out.clear()
+        assertEquals(0, run(refused, "init", "--json", environment = zshAdmin, capture = gitTop()))
+        assertOut("\"unreadable\":[\"rules\"]")
+        // any other failure of the rules still stops init
+        val broken = mapOf(repos, harness, proposed to (500 to """{"error":{"message":"boom"}}"""))
+        assertEquals(69, run(broken, "init", "--yes", environment = zsh, capture = gitTop()))
+    }
+
+    @Test
+    fun aTokenThatCannotReadTheRepositoriesNorTheHarnessDoesNotFailInit() {
+        val denied = """{"error":{"message":"This credential does not allow repos:read."}}"""
+        val noRepos = mapOf("GET /api/v1/repos?limit=100" to (403 to denied), harness, rules)
+        assertEquals(0, run(noRepos, "init", environment = zsh, capture = gitTop()))
+        assertOut("  Repository  acme-api\n  Harness     git-safety (proposed) · tests (accepted)\n! Coverage    " +
+            "unknown: this token cannot read them (This credential does not allow repos:read.)\n")
+        assertTrue("not among" !in console.out.toString(), "a refused read is not a missing repository")
+        console.out.clear()
+        val workflows = denied.replace("repos", "workflows")
+        val noHarness = mapOf(repos, "GET /api/v1/workflows?repo=acme-api" to (403 to workflows))
+        assertEquals(0, run(noHarness + rules, "init", environment = zshAdmin, capture = gitTop()))
+        assertOut("  Harness     this token cannot read them (This credential does not allow workflows:read.): " +
+            "without OSTROM_TOKEN, ostrom login's token reads them\n")
+    }
+
+    @Test
+    fun anyOtherRefusalStillStopsInit() {
+        // a 403 that is not a missing right (here, no longer a member)
+        val gone = mapOf(repos, harness, proposed to (403 to """{"error":{"message":"You are not a member."}}"""))
+        assertEquals(77, run(gone, "init", "--yes", environment = zshAdmin, capture = gitTop()))
+        assertErr("You are not a member.")
+        // the device's token older than rules:read: told to sign in again, not passed over
+        val older = """{"error":{"message":"This credential does not allow rules:read."}}"""
+        assertEquals(77, run(mapOf(repos, harness, proposed to (403 to older)), "init", environment = zsh,
+            capture = gitTop()))
+        assertErr("run `ostrom login` again")
+    }
+
+    @Test
     fun withoutAnAgentOrAKnownShellInitSaysWhatToDo() {
         assertEquals(0, run(emptyMap(), "init", "--repo", "api", installed = setOf("git")))
         assertOut("! No agent on this device. Install one, e.g. Claude Code: https://docs.claude.com/claude-code\n")

@@ -2,7 +2,9 @@ name: Release
 
 # Cut a release by pushing a bare-semver tag `X.Y.Z` (CONVENTIONS section 12, docs/RELEASES.md). `workflow_dispatch`
 # is a dry run: it builds, packs and signs everything, builds the runner image, and publishes nothing (no release, no
-# image push, no tap push). Never on pull requests (org CI rules, JOURNAL 03:10): rehearse with workflow_dispatch.
+# image push, no tap push). A dry run never reads a signing secret: it runs on any branch and its artifacts can be
+# downloaded, so it signs with throwaway keys made in the job, the same way, and checks itself against them. Only a tag
+# signs with the release keys, and checks itself against the keys the installers and `ostrom update` pin. Never on pull requests (org CI rules, JOURNAL 03:10): rehearse with workflow_dispatch.
 # No cache of any kind (no actions/cache, setup-gradle cache disabled): what is released and signed is built from
 # scratch, never from a cache a pull request could have written (zizmor cache-poisoning).
 
@@ -120,13 +122,14 @@ jobs:
     needs: version
     runs-on: macos-15
     timeout-minutes: 60
+    # A tag only: a dry run neither signs nor notarizes with the Developer ID.
     env:
-      APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+      APPLE_CERTIFICATE_P12: ${{ needs.version.outputs.publish == 'true' && secrets.APPLE_CERTIFICATE_P12 || '' }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ needs.version.outputs.publish == 'true' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+      APPLE_SIGNING_IDENTITY: ${{ needs.version.outputs.publish == 'true' && secrets.APPLE_SIGNING_IDENTITY || '' }}
+      APPLE_ID: ${{ needs.version.outputs.publish == 'true' && secrets.APPLE_ID || '' }}
+      APPLE_TEAM_ID: ${{ needs.version.outputs.publish == 'true' && secrets.APPLE_TEAM_ID || '' }}
+      APPLE_APP_PASSWORD: ${{ needs.version.outputs.publish == 'true' && secrets.APPLE_APP_PASSWORD || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: ostrom-core version
@@ -199,8 +202,10 @@ jobs:
     timeout-minutes: 20
     env:
       VERSION: ${{ needs.version.outputs.version }}
-      WINDOWS_CERTIFICATE_PFX: ${{ secrets.WINDOWS_CERTIFICATE_PFX }}
-      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+      PUBLISH: ${{ needs.version.outputs.publish }}
+      # A tag only: a dry run does not Authenticode-sign.
+      WINDOWS_CERTIFICATE_PFX: ${{ needs.version.outputs.publish == 'true' && secrets.WINDOWS_CERTIFICATE_PFX || '' }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ needs.version.outputs.publish == 'true' && secrets.WINDOWS_CERTIFICATE_PASSWORD || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -245,44 +250,63 @@ jobs:
           cd dist
           sha256sum ostrom-* > SHA256SUMS
           cat SHA256SUMS
+      # The public halves the self-check reads: the pinned ones on a tag, the throwaway ones of a dry run (made here).
+      - name: Signing keys
+        run: |
+          set -eu
+          keys="$RUNNER_TEMP/keys"; mkdir -p "$keys"; chmod 700 "$keys"
+          if [ "$PUBLISH" = true ]; then
+            printf '%s\n' '-----BEGIN PUBLIC KEY-----' 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENbn5GmwW348HxCtTPQbNfcvHmSZG' \
+              'G+IBNKubzv51TIua776a3875eoe5isQYKYmVwe5yTUU0v2k8Pu7WXQWoBg==' '-----END PUBLIC KEY-----' > "$keys/cosign.pub"
+            printf '%s\n' '-----BEGIN PUBLIC KEY-----' 'MCowBQYDK2VwAyEAgWVuEFjR9qPX6DfIJ6Bhs+jT7j00KiwFY6bNwP0fexA=' \
+              '-----END PUBLIC KEY-----' > "$keys/release.pub"
+          else
+            ( umask 077; openssl genpkey -algorithm ed25519 -out "$keys/release.key" )
+            openssl pkey -in "$keys/release.key" -pubout -out "$keys/release.pub"
+            ( cd "$keys" && COSIGN_PASSWORD='' cosign generate-key-pair >/dev/null )
+          fi
       - name: Update manifest, signed with Ed25519
         env:
-          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+          RELEASE_SIGNING_KEY: ${{ needs.version.outputs.publish == 'true' && secrets.RELEASE_SIGNING_KEY || '' }}
           REPO: ${{ github.repository }}
         run: |
           set -eu
+          [ "$PUBLISH" = true ] || RELEASE_SIGNING_KEY=$(cat "$RUNNER_TEMP/keys/release.key")
+          export RELEASE_SIGNING_KEY
           base="https://github.com/$REPO/releases"
           sh scripts/release/latest-json.sh "$VERSION" "$base" dist > dist/latest.json
           jq . dist/latest.json
           sh scripts/release/sign-manifest.sh dist/latest.json
       - name: Sign archives and SHA256SUMS with cosign (key, no transparency log)
         env:
-          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
-          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+          COSIGN_PRIVATE_KEY: ${{ needs.version.outputs.publish == 'true' && secrets.COSIGN_PRIVATE_KEY || '' }}
+          COSIGN_PASSWORD: ${{ needs.version.outputs.publish == 'true' && secrets.COSIGN_PASSWORD || '' }}
         run: |
           set -eu
+          key="env://COSIGN_PRIVATE_KEY"
+          [ "$PUBLISH" = true ] || key="$RUNNER_TEMP/keys/cosign.key"
           cd dist
           for f in ostrom-*.tar.gz ostrom-*.zip SHA256SUMS; do
-            cosign sign-blob --yes --key env://COSIGN_PRIVATE_KEY --tlog-upload=false \
+            cosign sign-blob --yes --key "$key" --tlog-upload=false \
               --output-signature "$f.sig" "$f" >/dev/null
           done
       - name: Self-check the signatures
-        env:
-          RELEASE_PUBLIC_KEY: MCowBQYDK2VwAyEAgWVuEFjR9qPX6DfIJ6Bhs+jT7j00KiwFY6bNwP0fexA=
         run: |
           set -eu
+          keys="$RUNNER_TEMP/keys"
           cd dist
           # cosign: verify with the public half of the key that signed
-          printf '%s\n' '-----BEGIN PUBLIC KEY-----' 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENbn5GmwW348HxCtTPQbNfcvHmSZG' \
-            'G+IBNKubzv51TIua776a3875eoe5isQYKYmVwe5yTUU0v2k8Pu7WXQWoBg==' '-----END PUBLIC KEY-----' > "$RUNNER_TEMP/cosign.pub"
           for f in ostrom-*.tar.gz ostrom-*.zip SHA256SUMS; do
-            cosign verify-blob --key "$RUNNER_TEMP/cosign.pub" --insecure-ignore-tlog --signature "$f.sig" "$f" >/dev/null
+            cosign verify-blob --key "$keys/cosign.pub" --insecure-ignore-tlog --signature "$f.sig" "$f" >/dev/null
           done
+          # SHA256SUMS.sig as install.sh checks it without cosign (openssl); install.ps1 reads the same DER with .NET
+          tr -d ' \r\n' < SHA256SUMS.sig | openssl base64 -d -A -out "$RUNNER_TEMP/sums.der"
+          openssl dgst -sha256 -verify "$keys/cosign.pub" -signature "$RUNNER_TEMP/sums.der" SHA256SUMS
           sha256sum -c SHA256SUMS
           # Ed25519 manifest
-          { printf '%s\n' '-----BEGIN PUBLIC KEY-----' "$RELEASE_PUBLIC_KEY" '-----END PUBLIC KEY-----'; } > "$RUNNER_TEMP/release.pub"
           base64 -d < latest.json.sig > "$RUNNER_TEMP/latest.sig"
-          openssl pkeyutl -verify -pubin -inkey "$RUNNER_TEMP/release.pub" -rawin -in latest.json -sigfile "$RUNNER_TEMP/latest.sig"
+          openssl pkeyutl -verify -pubin -inkey "$keys/release.pub" -rawin -in latest.json -sigfile "$RUNNER_TEMP/latest.sig"
+          rm -f "$keys/release.key" "$keys/cosign.key"
       - name: Package-manager manifests and installers
         env:
           REPO: ${{ github.repository }}
