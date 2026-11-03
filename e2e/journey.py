@@ -1067,6 +1067,7 @@ def main():
     parser.add_argument("--fake-mcp-key", help="2.9: its private key (PEM)")
     # 6.2: the server runs cloud sessions (a runtime driver, as the Docker of the CI's machine); skipped without
     parser.add_argument("--cloud-sessions", action="store_true", help="6.2: the server runs cloud sessions")
+    parser.add_argument("--cloud-machine-image", help="6.2 on a registered runner: the machine's ostrom-runner image")
     # 5.9: what a launch costs, end to end; at most 60 launches an hour and a person (the server's LaunchLimit.DEFAULT)
     parser.add_argument("--launch-runs", type=int, default=20,
                         help="5.9: successive launches of `ostrom claude` timed to the first gated tool (0: none; max 60)")
