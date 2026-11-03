@@ -12,6 +12,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
@@ -203,14 +204,23 @@ class MoreAdaptersTest {
     }
 
     @Test
-    fun geminiLeavesSystemSettingsItCannotReadAndSaysSo() {
-        // Gemini reads comments in its settings, strict JSON does not: an administrator's file is never dropped
-        files.texts[join("/etc", "gemini-cli", "settings.json")] = "{// managed\n}"
-        val launch = GeminiAdapter().prepare(layout(), files)
-        assertNull(launch.environment["GEMINI_CLI_SYSTEM_SETTINGS_PATH"])
+    fun geminiReadsSystemSettingsWithCommentsAndRefusesThoseItCannotRead() {
+        // Gemini reads comments in its settings: an administrator's file with comments is read, never dropped
+        val real = join("/etc", "gemini-cli", "settings.json")
+        files.texts[real] = "{// managed\n\"general\": {\"vimMode\": true}, /* end */}"
+        GeminiAdapter().prepare(layout(), files)
         assertEquals(
-            "gemini: the system settings.json is not plain JSON: a repository's settings could turn Ostrom's hooks off",
-            launch.notes.single(),
+            """{"general":{"vimMode":true},"hooksConfig":{"enabled":true}}""",
+            files.texts[join("/tmp/run", "gemini-system.json")],
+        )
+        // a file Ostrom cannot read at all: starting Gemini would leave a repository free to turn the hooks off
+        files.deleteRecursively(join("/tmp/run", "gemini-home"))
+        files.texts[real] = "[1]"
+        val refused = assertFailsWith<AdapterException> { GeminiAdapter().prepare(layout(), files) }
+        assertEquals(
+            "gemini: the system settings ($real) cannot be read as JSON: Ostrom cannot keep its hooks on, so Gemini " +
+                "is not started; fix that file, or ask its administrator to",
+            refused.reason,
         )
     }
 

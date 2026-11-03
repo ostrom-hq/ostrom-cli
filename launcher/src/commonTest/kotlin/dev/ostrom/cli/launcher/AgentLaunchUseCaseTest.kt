@@ -83,6 +83,23 @@ class AgentLaunchUseCaseTest {
     private val temporary = join("/tmp", "ostrom-run-42")
 
     @Test
+    fun aRepositoryCannotNameTheRunnerThatRunsTheChecks() = runTest {
+        // Gemini CLI loads a repository's .env without replacing a variable already set: the launcher always sets it,
+        // empty on a workstation, so a repository cannot point the checks at a socket of its own
+        serveALaunch()
+        start()
+        assertEquals("", environments.single()["OSTROM_RUNNER_CHECKS"])
+    }
+
+    @Test
+    fun theRunnerOfACloudSessionKeepsItsChecks() = runTest {
+        serveALaunch()
+        variables["OSTROM_RUNNER_CHECKS"] = "/run/ostrom/checks.sock"
+        start()
+        assertEquals("/run/ostrom/checks.sock", environments.single()["OSTROM_RUNNER_CHECKS"])
+    }
+
+    @Test
     fun theAgentRunsWithTheRelayAndNeverWithTheDeviceToken() = runTest {
         serveALaunch()
         installed["git"] = "/usr/local/bin/git"
