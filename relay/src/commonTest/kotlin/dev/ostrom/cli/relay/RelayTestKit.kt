@@ -59,7 +59,7 @@ const val CLIENT_TOKEN = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba
  * @property clock The test's clock.
  * @property refresh How the relay reads it again in the background: by default, never.
  */
-class PolicyClock(
+internal class PolicyClock(
     val freshFor: Duration,
     val clock: TimeSource,
     val refresh: PolicyRefreshLoop = PolicyRefreshLoop { awaitCancellation() },
@@ -70,7 +70,7 @@ class PolicyClock(
  * [clientToken] the agent's capability is the hooks' [TOKEN]; without [policy] the relay keeps its own defaults.
  */
 @Suppress("LongParameterList") // the relay's settings a test may change, all defaulted
-fun relayTest(
+internal fun relayTest(
     ostrom: FakeOstrom,
     config: RelayConfig = relayConfig(),
     hookTimeout: Duration = 5.seconds,
