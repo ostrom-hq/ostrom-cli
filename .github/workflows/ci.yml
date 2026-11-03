@@ -137,11 +137,13 @@ jobs:
           name: coverage-reports
           path: '**/build/reports/**'
           retention-days: 7
-      - name: Hook start-up budget (15 ms median, 40 ms for a git push) and binary sizes
+      # mingwX64 has a budget of its own: 16.3 MB with the options that put the others under 15 (17.6 before);
+      # under 15 means removing code, not a build option (JOURNAL 03/11)
+      - name: Hook start-up budget (15 ms median, 40 ms for a git push) and binary sizes (15 MB, Windows 17)
         run: >-
           python3 scripts/measure.py --label linuxX64 --max-push-ms 40
           --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
-          --sizes cli/build/bin/*/releaseExecutable/ostrom.*
+          --sizes cli/build/bin/*/releaseExecutable/ostrom.* --max-size-mb 15 --size-budget mingwX64=17
       - name: End to end, the real binary with fake Claude Code and Codex against the contract's server
         run: python3 e2e/run.py --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
       - name: End to end, init, invite, members, policy and harness against the contract's server
@@ -397,7 +399,7 @@ jobs:
         run: >-
           python3 scripts/measure.py --label macosArm64
           --binary cli/build/bin/macosArm64/releaseExecutable/ostrom.kexe
-          --sizes cli/build/bin/macosArm64/releaseExecutable/ostrom.kexe
+          --sizes cli/build/bin/macosArm64/releaseExecutable/ostrom.kexe --max-size-mb 15
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ostrom-macosArm64

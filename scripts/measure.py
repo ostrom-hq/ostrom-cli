@@ -3,12 +3,14 @@
 """Measures a built `ostrom` binary: start-up of `ostrom hook gate` and `ostrom version`, and binary sizes.
 
 Usage: measure.py --binary PATH --label TARGET [--runs N] [--max-hook-ms MS] [--max-push-ms MS] [--sizes FILE...]
+                  [--max-size-mb MB] [--size-budget TARGET=MB ...]
 
 The wall time includes Python's own process spawn (well under a millisecond on Linux, more on Windows), so the
 figures are an upper bound of the binary's start-up. `inside` is the time the hook reports itself
 (OSTROM_HOOK_TIMING=1: from entering the hook runner to the reply written). Results go to stdout and, in GitHub
-Actions, to the job summary. Exits 1 when the median hook time is above --max-hook-ms, or the median `git push` time
-above --max-push-ms when given.
+Actions, to the job summary. Exits 1 when the median hook time is above --max-hook-ms, the median `git push` time
+above --max-push-ms when given, or a file of --sizes above its budget: --max-size-mb (the binary a developer downloads,
+15 MB, perf pass of 02/11/2026), or --size-budget for a target whose folder (`bin/<target>/`) has one of its own.
 
 The budget is measured on the hook of an ordinary tool call (`ls`), which is most of an agent's calls. Outside a
 session, as here, there is no relay to read Ostrom's signed policy from, so the gate holds the call (exit 2) after
@@ -66,6 +68,8 @@ def main():
     parser.add_argument("--max-hook-ms", type=float, default=15.0)
     parser.add_argument("--max-push-ms", type=float, default=None)
     parser.add_argument("--sizes", nargs="*", default=[])
+    parser.add_argument("--max-size-mb", type=float, default=None)
+    parser.add_argument("--size-budget", action="append", default=[], metavar="TARGET=MB")
     args = parser.parse_args()
 
     env = dict(os.environ, OSTROM_HOOK_TIMING="1")
@@ -99,6 +103,15 @@ def main():
             handle.write(text + "\n")
     if hook_median > args.max_hook_ms:
         raise SystemExit(f"ostrom hook gate takes {hook_median:.2f} ms (median), above {args.max_hook_ms} ms")
+    own = {target: float(mb) for target, mb in (budget.split("=", 1) for budget in args.size_budget)}
+
+    def budget_of(path):
+        return next((mb for target, mb in own.items() if f"/{target}/" in path), args.max_size_mb)
+
+    too_large = [f"{path}: above {budget_of(path)} MB" for path in sorted(args.sizes)
+                 if budget_of(path) is not None and os.path.getsize(path) / 1e6 > budget_of(path)]
+    if too_large:
+        raise SystemExit("\n".join(too_large))
     if args.max_push_ms is not None and push_median > args.max_push_ms:
         raise SystemExit(
             f"ostrom hook gate on a git push takes {push_median:.2f} ms (median), above {args.max_push_ms} ms"
