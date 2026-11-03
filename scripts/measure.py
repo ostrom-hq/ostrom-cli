@@ -18,9 +18,9 @@ above --max-push-ms when given, or a file of --sizes above its budget: --max-siz
 15 MB, perf pass of 02/11/2026), or --size-budget for a target whose folder (`bin/<target>/`) has one of its own.
 It also exits 1, when they are given, above --max-hook-p95-ms and --max-version-p95-ms (the p95 of the warm starts),
 --max-cold-ms (each command's median start with the file cache emptied: one disk hiccup is not a regression) and
---max-hook-memory-mb, and when one of these is given but cannot be measured here. It lists every budget exceeded, not only the first. On Linux the peak
-memory read for a child is never below this script's own (see `peak_memory_mb`): the summary shows that floor, and
-the memory budget holds as long as the floor stays under it.
+--max-hook-memory-mb, and when one of these is given but cannot be measured here. It lists every budget exceeded, not
+only the first. On Linux the peak memory read for a child is never below this script's own (see `peak_memory_mb`): the
+summary shows that floor, and the memory budget holds as long as the floor stays under it.
 
 The budget is measured on the hook of an ordinary tool call (`ls`), which is most of an agent's calls. Outside a
 session, as here, there is no relay to read Ostrom's signed policy from, so the gate holds the call (exit 2) after
