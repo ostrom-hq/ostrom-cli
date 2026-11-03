@@ -120,6 +120,56 @@ class AdaptersTest {
     }
 
     @Test
+    fun claudeKeepsOstromsHooksOnWhateverTheRepositorySays() {
+        // a repository's .claude/settings.json with "disableAllHooks": true turns off every plugin hook; the settings
+        // Claude Code is started with (--settings) come before the project's, so this one keeps them on
+        val launch = ClaudeAdapter().prepare(layout(arguments = listOf("--resume", "x", "--", "prompt")), files)
+        val settings = join("/tmp/run", "claude-settings.json")
+        assertEquals(
+            listOf("--plugin-dir", join("/tmp/run", "plugin"), "--resume", "x", "--settings", settings, "--", "prompt"),
+            launch.arguments,
+        )
+        assertEquals("""{"disableAllHooks":false}""", files.texts[settings])
+        assertEquals(FileAccess.PRIVATE, files.access[settings])
+        assertEquals(emptyList(), launch.notes)
+    }
+
+    @Test
+    fun claudeKeepsTheDevelopersOwnSettingsBesideOurs() {
+        // Claude Code reads only the last --settings: the developer's is merged into Ostrom's, never dropped
+        val settings = join("/tmp/run", "claude-settings.json")
+        val inline = ClaudeAdapter().prepare(
+            layout(arguments = listOf("--settings", """{"model":"opus","disableAllHooks":true}""", "-p", "hi")),
+            files,
+        )
+        assertEquals(
+            listOf("--plugin-dir", join("/tmp/run", "plugin"), "-p", "hi", "--settings", settings),
+            inline.arguments,
+        )
+        assertEquals("""{"model":"opus","disableAllHooks":false}""", files.texts[settings])
+        files.texts["/home/dev/mine.json"] = """{"permissions":{"allow":["Bash(ls)"]}}"""
+        val file = ClaudeAdapter().prepare(layout(arguments = listOf("--settings=/home/dev/mine.json")), files)
+        assertEquals(listOf("--plugin-dir", join("/tmp/run", "plugin"), "--settings", settings), file.arguments)
+        assertEquals("""{"permissions":{"allow":["Bash(ls)"]},"disableAllHooks":false}""", files.texts[settings])
+        assertEquals(emptyList(), file.notes)
+    }
+
+    @Test
+    fun claudeStartsWithoutSettingsItCannotRead() {
+        val settings = join("/tmp/run", "claude-settings.json")
+        for (value in listOf("/home/dev/missing.json", "{not json", "[1]")) {
+            val launch = ClaudeAdapter().prepare(layout(arguments = listOf("--settings", value)), files)
+            assertEquals(listOf("--plugin-dir", join("/tmp/run", "plugin"), "--settings", settings), launch.arguments)
+            assertEquals("""{"disableAllHooks":false}""", files.texts[settings], value)
+            assertEquals(1, launch.notes.size, value)
+            assertTrue(launch.notes.single().contains(value), value)
+        }
+        // a --settings with no value names nothing: the session gets Ostrom's alone
+        val dangling = ClaudeAdapter().prepare(layout(arguments = listOf("--settings")), files)
+        assertEquals(listOf("--plugin-dir", join("/tmp/run", "plugin"), "--settings", settings), dangling.arguments)
+    }
+
+    @Test
     fun claudesInferenceGoesThroughTheRelayAndNothingElse() {
         val launch = ClaudeAdapter().prepare(layout(inference = true), files)
         assertEquals("http://127.0.0.1:4100", launch.environment["ANTHROPIC_BASE_URL"])
