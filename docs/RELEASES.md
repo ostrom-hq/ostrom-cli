@@ -42,9 +42,14 @@ made public in the organisation's package settings.
 Also published: the image `ghcr.io/ostrom-hq/ostrom-runner:<version>` and `:latest` (linux/amd64 and linux/arm64,
 signed by digest, with an SBOM and max-mode provenance attached by buildx), the Homebrew formula
 (`ostrom-hq/homebrew-tap`, `Formula/ostrom.rb`) and the Scoop manifest (`ostrom-hq/scoop-bucket`, `bucket/ostrom.json`).
-The `taps` job pushes them over SSH trusting only GitHub's published host keys, pinned in `release.yml`; the release
-checks fail when GitHub rotates one (`scripts/release/check-github-host-keys.sh`), and the pins are then updated from
-https://api.github.com/meta. The Scoop manifest's `autoupdate` reads its sum from the release's `SHA256SUMS`.
+The `taps` job pushes them over SSH trusting only GitHub's published host keys, pinned in
+`scripts/release/github_known_hosts` (no first-use trust, no system `known_hosts`).
+`scripts/release/check-github-host-keys.sh` compares the pins with https://api.github.com/meta and checks that they verify github.com: in the release's `version`
+job, before anything is published, and in the release checks. When GitHub rotates a key, both fail; run
+`sh scripts/release/check-github-host-keys.sh --update`, review the diff against GitHub's announcement, and open a
+pull request. The Scoop manifest's `autoupdate` reads the archive's line of the release's `SHA256SUMS` instead of
+hashing the download: it catches a corrupt or swapped download, but is no stronger than the release, since Scoop does
+not check the signature of `SHA256SUMS`.
 
 ## Verifying
 

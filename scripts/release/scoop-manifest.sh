@@ -7,8 +7,9 @@ here=$(cd "$(dirname "$0")" && pwd)
 [ $# -eq 3 ] || die "usage: scoop-manifest.sh <version> <releases-base-url> <dist-dir>"
 version="$1"; base="$2"; dist="$3"
 f=$(archive_of "$dist" "$version" windows-x64)
-# autoupdate (Scoop's checkver -u) reads the sum from the release's SHA256SUMS, next to the archive: without it, Scoop
-# would trust the sum of whatever it downloads (AUDIT-SECU-PUBLIC P9).
+# autoupdate (Scoop's checkver -u) reads the archive's line of the SHA256SUMS published with the release, instead of
+# hashing the download (AUDIT-SECU-PUBLIC P9). It catches a corrupt or swapped download; it is no stronger than the
+# release itself, since Scoop does not check the SHA256SUMS signature (docs/RELEASES.md, Verifying).
 cat <<JSON
 {
   "version": "$version",
@@ -30,7 +31,8 @@ cat <<JSON
       "64bit": {
         "url": "https://github.com/ostrom-hq/ostrom-cli/releases/download/\$version/ostrom-\$version-windows-x64.zip",
         "hash": {
-          "url": "\$baseurl/SHA256SUMS"
+          "url": "\$baseurl/SHA256SUMS",
+          "regex": "\$sha256\\\\s+\$basename"
         }
       }
     }

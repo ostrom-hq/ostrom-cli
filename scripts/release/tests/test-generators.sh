@@ -29,9 +29,17 @@ assert_eq "scoop: url" "$base/download/1.2.3/ostrom-1.2.3-windows-x64.zip" \
 assert_eq "scoop: hash" "$(sum windows-x64.zip)" "$(printf '%s' "$scoop" | jq -r '.architecture["64bit"].hash')"
 assert_eq "scoop: bin" "ostrom.exe" "$(printf '%s' "$scoop" | jq -r .bin)"
 assert_eq "scoop: license" "Apache-2.0" "$(printf '%s' "$scoop" | jq -r .license)"
-# Scoop's autoupdate (checkver -u) takes the sum from the release's SHA256SUMS, never from what it downloads
-assert_eq "scoop: autoupdate hash" '$baseurl/SHA256SUMS' \
-  "$(printf '%s' "$scoop" | jq -r '.autoupdate.architecture["64bit"].hash.url')"
+# Scoop's autoupdate (checkver -u) takes the sum from the SHA256SUMS published next to the archive, as Scoop reads it:
+# $version, $baseurl and $basename come from the autoupdate url; $sha256 is a 64-hex group; \s is a space.
+auto() { printf '%s' "$scoop" | jq -r ".autoupdate.architecture[\"64bit\"]$1"; }
+url=$(auto .url | sed 's/\$version/1.2.3/g')
+baseurl=${url%/*}; basename=${url##*/}
+assert_eq "scoop: autoupdate hash next to the archive" "$baseurl/SHA256SUMS" "$(auto .hash.url | sed "s|\\\$baseurl|$baseurl|")"
+(cd "$tmp/dist" && for f in ostrom-*; do printf '%s  %s\n' "$(sha256_file "$f")" "$f"; done) > "$tmp/SHA256SUMS"
+re=$(auto .hash.regex | sed -e 's/\$sha256/([a-fA-F0-9]{64})/' -e "s/\\\$basename/$(printf '%s' "$basename" | sed 's/[.]/[.]/g')/" \
+  -e 's/\\s/[[:space:]]/g')
+assert_eq "scoop: autoupdate finds the archive's sum in SHA256SUMS" "$(sum windows-x64.zip)" \
+  "$(grep -E "$re" "$tmp/SHA256SUMS" | cut -d' ' -f1)"
 assert_fails "scoop: usage" sh "$rel/scoop-manifest.sh"
 
 # winget
