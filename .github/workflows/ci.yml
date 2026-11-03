@@ -414,11 +414,11 @@ jobs:
         env:
           OSTROM_NETWORK_TESTS: '1'
         run: ./gradlew macosArm64Test :cli:linkReleaseExecutableMacosArm64
-      # macOS runners differ from one machine to the next by about 3 times, with no change to the code: on 03/11, hook
-      # median 7 and p95 10.7 ms in the morning (run 41612349833), 13-15 and 21-25 ms from 10:00 (runs 41617836625,
-      # 41621434860), version p95 10 then 26-32 ms, a start with the file cache emptied up to 805 ms, while Linux and
-      # the hook's own time (0.45-0.75 ms) did not move. Budgets of about twice the slow runner: they catch a start-up
-      # several times slower; the precise budgets are held on Linux, whose runners are steady.
+      # macOS runners differ from one machine to the next by about 3 times, with no change to the code. On 03/11: hook
+      # median 7 and p95 10.7 ms in the morning (run 41612349833), then 13.3-15.3 and 20.5-25.5 ms from 10:00 (runs
+      # 41617836625, 41621223496, 41621434860); version p95 10, then 26-32 ms; a start with the file cache emptied up to
+      # 805 ms. Linux did not move, and the hook's own time stayed under 1 ms (0.45, then 0.75). Budgets of about
+      # twice the slow runner: they catch a start-up several times slower; the precise ones are held on Linux.
       - name: Start-up, first start, memory and size budgets
         run: >-
           python3 scripts/measure.py --label macosArm64
