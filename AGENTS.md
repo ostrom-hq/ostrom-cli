@@ -2,8 +2,8 @@
 
 This is the native command-line tool (Kotlin/Native: macosArm64, linuxX64, linuxArm64, mingwX64; + jvm for tests only). Apache-2.0.
 
-**The conventions are in [ostrom-core `docs/CONVENTIONS.md`](https://github.com/ostrom-hq/ostrom-core/blob/main/docs/CONVENTIONS.md) (local clone: `../ostrom-core/docs/CONVENTIONS.md`).** They follow Nathan Fallet's practices (teamcode, asonar, pkg, the ControlResell
-backend) and bind every contributor, human or agent. This file only summarizes the most important rules; when in
+**The conventions are in [ostrom-core `docs/CONVENTIONS.md`](https://github.com/ostrom-hq/ostrom-core/blob/main/docs/CONVENTIONS.md) (local clone: `../ostrom-core/docs/CONVENTIONS.md`).** They follow Nathan Fallet's practices (teamcode, asonar,
+pkg) and bind every contributor, human or agent. This file only summarizes the most important rules; when in
 doubt, the conventions file wins, and it can be updated: re-read it before each pull request.
 
 All repository content (code, comments, docs, commits, pull requests) is in English.
