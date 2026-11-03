@@ -263,6 +263,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
             LaunchVariables.PACKAGE_SEAL to laid?.seal,
             LaunchVariables.PACKAGE_MANIFEST to laid?.manifest,
             LaunchVariables.MODEL to run.model,
+            LaunchVariables.RUNNER_CHECKS to site.variable(LaunchVariables.RUNNER_CHECKS).orEmpty(),
             // `ostrom wait` must be callable by the agent's shell: this binary's folder goes first on its PATH.
             "PATH" to path.ifEmpty { null },
             // Never in the agent's environment: the device token, and the server the hooks must not call directly.

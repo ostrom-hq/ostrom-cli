@@ -15,7 +15,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** OpenCode, Gemini CLI, Grok CLI, Hermes Agent and Pi: each loads the session's harness its own way. */
@@ -207,7 +206,7 @@ class MoreAdaptersTest {
     fun geminiReadsSystemSettingsWithCommentsAndRefusesThoseItCannotRead() {
         // Gemini reads comments in its settings: an administrator's file with comments is read, never dropped
         val real = join("/etc", "gemini-cli", "settings.json")
-        files.texts[real] = "{// managed\n\"general\": {\"vimMode\": true}, /* end */}"
+        files.texts[real] = "\uFEFF{// managed\n\"general\": {\"vimMode\": true}, /* end */}"
         GeminiAdapter().prepare(layout(), files)
         assertEquals(
             """{"general":{"vimMode":true},"hooksConfig":{"enabled":true}}""",

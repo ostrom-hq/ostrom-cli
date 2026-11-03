@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.launcher
 
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -24,12 +25,16 @@ fun JsonObject.flag(key: String): Boolean? {
     return if (value == null || value.isString) null else value.content.toBooleanStrictOrNull()
 }
 
-/** [text] parsed as a JSON object, or null when it is not one. */
-fun parseObject(text: String?): JsonObject? = if (text == null) {
+/**
+ * [text] parsed as a JSON object, or null when it is not one.
+ *
+ * @param comments Whether `//` and `/* */` comments and trailing commas are read, as Gemini CLI reads its settings.
+ */
+fun parseObject(text: String?, comments: Boolean = false): JsonObject? = if (text == null) {
     null
 } else {
     try {
-        Json.parseToJsonElement(text) as? JsonObject
+        (if (comments) commentedJson else Json).parseToJsonElement(text) as? JsonObject
     } catch (_: SerializationException) {
         null
     }
@@ -53,6 +58,12 @@ fun objectOf(vararg pairs: Pair<String, Any?>): JsonObject =
 
 /** [value] as a JSON string literal, quotes and escapes included: also a valid TOML basic string. */
 fun quoted(value: String): String = JsonPrimitive(value).toString()
+
+@OptIn(ExperimentalSerializationApi::class)
+private val commentedJson = Json {
+    allowComments = true
+    allowTrailingComma = true
+}
 
 private val prettyJson = Json { prettyPrint = true }
 

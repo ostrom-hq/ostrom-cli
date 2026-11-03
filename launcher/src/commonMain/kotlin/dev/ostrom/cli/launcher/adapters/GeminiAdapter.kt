@@ -48,26 +48,31 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
         files.write(join(directory, "settings.json"), pretty(settings(layout, theirs, suffix)), FileAccess.PRIVATE)
         val rules = files.read(join(real, "GEMINI.md")).orEmpty() + "\n" + layout.rules
         files.write(join(directory, "GEMINI.md"), rules)
-        val (system, unreadSystem) = systemSettings(layout, files)
+        val system = systemSettings(layout, files)
         val environment = mapOf(
             "GEMINI_CLI_HOME" to root,
             LaunchVariables.HOOK_DIALECT to "gemini",
             LaunchVariables.HOOK_BUDGET_MS to BUDGET_MILLIS,
         ) + system
-        return AgentLaunch(layout.arguments, environment, notes + unreadSystem)
+        return AgentLaunch(layout.arguments, environment, notes)
     }
 
     /**
      * The session's system settings: the ones Gemini would read on this machine (`GEMINI_CLI_SYSTEM_SETTINGS_PATH`, or
      * the place of this machine's platform) with `hooksConfig.enabled: true`, and the variables that point
-     * Gemini at them, the administrator's defaults kept where they were. Settings that are not plain JSON are left as
-     * they are, and the developer is told.
+     * Gemini at them, the administrator's defaults kept where they were. They are read as Gemini reads them,
+     * comments and trailing commas included.
+     *
+     * @throws AdapterException When they cannot be read even so: without them, a repository could turn the hooks off.
      */
-    private fun systemSettings(layout: SessionLayout, files: LaunchFiles): Pair<Map<String, String>, List<String>> {
+    private fun systemSettings(layout: SessionLayout, files: LaunchFiles): Map<String, String> {
         val real = layout.variable(SYSTEM_SETTINGS) ?: systemPlace(layout, files)
-        val text = files.read(real)
-        val theirs = if (text.isNullOrBlank()) JsonObject(emptyMap()) else parseObject(text)
-            ?: return emptyMap<String, String>() to listOf(UNREAD_SYSTEM)
+        val text = files.read(real)?.removePrefix(BOM)
+        val theirs = if (text.isNullOrBlank()) JsonObject(emptyMap()) else parseObject(text, comments = true)
+            ?: throw AdapterException(
+                "gemini: the system settings ($real) cannot be read as JSON: Ostrom cannot keep its hooks on, so " +
+                    "Gemini is not started; fix that file, or ask its administrator to",
+            )
         val config = theirs.child("hooksConfig").orEmpty() + ("enabled" to JsonPrimitive(true))
         val path = join(layout.temporary, "gemini-system.json")
         files.write(path, JsonObject(theirs + ("hooksConfig" to JsonObject(config))).toString(), FileAccess.PRIVATE)
@@ -75,7 +80,7 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
         val cut = real.lastIndexOfAny(charArrayOf('/', '\\'))
         val beside = if (cut < 0) "." else real.substring(0, maxOf(cut, 1))
         val defaults = layout.variable(SYSTEM_DEFAULTS) ?: join(beside, "system-defaults.json")
-        return mapOf(SYSTEM_SETTINGS to path, SYSTEM_DEFAULTS to defaults) to emptyList()
+        return mapOf(SYSTEM_SETTINGS to path, SYSTEM_DEFAULTS to defaults)
     }
 
     /**
@@ -130,8 +135,7 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
         const val BUDGET_MILLIS = "590000"
         const val UNREAD = "gemini: your settings.json is not plain JSON (comments or a trailing comma?): this " +
             "session starts without your settings"
-        const val UNREAD_SYSTEM =
-            "gemini: the system settings.json is not plain JSON: a repository's settings could turn Ostrom's hooks off"
+        const val BOM = "\uFEFF"
         const val SYSTEM_SETTINGS = "GEMINI_CLI_SYSTEM_SETTINGS_PATH"
         const val SYSTEM_DEFAULTS = "GEMINI_CLI_SYSTEM_DEFAULTS_PATH"
         const val HEX = 16

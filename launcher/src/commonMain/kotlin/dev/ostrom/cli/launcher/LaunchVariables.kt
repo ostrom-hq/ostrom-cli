@@ -61,6 +61,13 @@ object LaunchVariables {
     /** The model asked at launch. */
     const val MODEL = "OSTROM_MODEL"
 
+    /**
+     * The Unix socket of a cloud session's runner, which runs the package checks. Always set by the launcher, empty on
+     * a workstation, so that a repository's `.env` (which Gemini CLI loads without replacing a variable already set)
+     * cannot point the hooks at a runner of its own.
+     */
+    const val RUNNER_CHECKS = "OSTROM_RUNNER_CHECKS"
+
     /** The hook protocol of the agent family (`claude`, `grok`, `gemini`, `hermes`). */
     const val HOOK_DIALECT = "OSTROM_HOOK_DIALECT"
 
