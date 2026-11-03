@@ -88,7 +88,7 @@ cosign verify --key cosign.pub --insecure-ignore-tlog ghcr.io/ostrom-hq/ostrom-r
 
 (`install.sh` and `install.ps1` check the signature of `SHA256SUMS` against the pinned cosign key, with `cosign` when it
 is installed, else with `openssl` (install.sh) or .NET (install.ps1), then the SHA-256 of the archive. Without either
-tool, install.sh says the signature was not checked. A dry run of the release signs with throwaway keys, never with
+tool, install.sh installs nothing unless `OSTROM_SKIP_COSIGN=1`. A dry run of the release signs with throwaway keys, never with
 the release keys.)
 
 ## The update manifest, for `ostrom update`

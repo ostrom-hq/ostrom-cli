@@ -154,8 +154,10 @@ bare="$tmp/bare-path"; mkdir -p "$bare"
 for tool in sh curl wget sha256sum shasum perl uname mktemp rm sed head awk tar gzip mkdir chmod mv grep cut cat; do
   found=$(command -v "$tool" 2>/dev/null) && ln -s "$found" "$bare/$tool"
 done
+served_before=$(grep -c 'GET ' "$tmp/server.log")
 if runi PATH="$bare" OSTROM_VERSION=1.2.3; then ko "without any verifier, refuses"; else ok "without any verifier, refuses"; fi
 assert_contains "says what to install" "$(cat "$tmp/out.log")" 'cosign or openssl'
+assert_eq "refuses before downloading anything" "$served_before" "$(grep -c 'GET ' "$tmp/server.log")"
 assert_eq "nothing installed without a verifier" no "$([ -e "$LAST_HOME/.ostrom/bin/ostrom" ] && echo yes || echo no)"
 runi PATH="$bare" OSTROM_VERSION=1.2.3 OSTROM_SKIP_COSIGN=1 && ok "installs without a verifier when told to skip it" \
   || ko "installs without a verifier when told to skip it"
