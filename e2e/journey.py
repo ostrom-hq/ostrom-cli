@@ -454,9 +454,8 @@ class Journey:
             self.check(device.returncode == 77 and "console" in device.stderr,
                        f"the device's token cannot invite: the console can ({device.returncode})")
             since = time.time()
-            done = self.ostrom(maya, "invite", tom_email, "--role", "member", console=True)
-            self.check(done.returncode == 0, f"a console token invites {who(tom_email)} ({done.returncode}): "
-                                             f"{done.stderr.strip()[:300]}")
+            self.held_member_write(maya, f"a console token invites {who(tom_email)}", "Invited",
+                                   "invite", tom_email, "--role", "member")
             self.begin("2.7", "the invitation, accepted by the person invited")
             if self.needs(("POST", "/api/v1/invitations/accept"), on_main=True):
                 token = self.mail_token(tom_email, "/invite", since)
@@ -480,10 +479,8 @@ class Journey:
                 device = self.ostrom(maya, "members", "role", tom_login, "admin")
                 self.check(device.returncode == 77 and "console" in device.stderr,
                            f"the device's token cannot change a role: the console can ({device.returncode})")
-                done = self.ostrom(maya, "members", "role", tom_login, "admin", console=True)
-                self.check(done.returncode == 0 and f"@{tom_login} is now admin" in done.stdout,
-                           f"a console token makes @{tom_login} admin ({done.returncode}): "
-                           f"{done.stderr.strip()[:300]}")
+                self.held_member_write(maya, f"a console token makes @{tom_login} admin",
+                                       f"@{tom_login} is now admin", "members", "role", tom_login, "admin")
                 # as the server says it, not as the CLI printed it
                 self.check(self.role_of(maya, org, tom_login) == "admin",
                            f"the server lists @{tom_login} as admin ({self.role_of(maya, org, tom_login)})")
@@ -566,13 +563,24 @@ class Journey:
             device = self.ostrom(maya, "members", "remove", self.invitee, "--yes")
             self.check(device.returncode == 77 and "console" in device.stderr,
                        f"the device's token cannot remove a member: the console can ({device.returncode})")
-            done = self.ostrom(maya, "members", "remove", self.invitee, "--yes", console=True)
-            self.check(done.returncode == 0, f"a console token removes @{self.invitee} ({done.returncode}): "
-                                             f"{done.stderr.strip()[:300]}")
+            self.held_member_write(maya, f"a console token removes @{self.invitee}",
+                                   f"@{self.invitee} was removed", "members", "remove", self.invitee, "--yes")
             self.check(self.role_of(maya, org, self.invitee) is None,
                        f"the server no longer lists @{self.invitee}")
             listed = (read_json(self.ostrom(maya, "members", "list", "--json").stdout) or {}).get("items", [])
             self.check(len(listed) == 1, f"members list shows the owner alone ({len(listed)})")
+
+    def held_member_write(self, maya, what, said, *arguments):
+        """
+        A write on the members with the console's token (OSTROM_TOKEN): the server holds it until the owner confirms
+        it on the console (202, audit F1, decision (a) of 03/11/2026), then the CLI says [said] on stdout. Held is
+        checked on every server: a members' write that is written at once is the failure F1 closes.
+        """
+        done = self.governed(maya, *arguments, console=True, must_hold=False)
+        out = self.step["commands"][-1]["stdout"]
+        self.check(self.last_held, f"{what}: held until the owner confirms it on the console (F1)")
+        self.check(done == 0 and said in out,
+                   f"{what} once confirmed ({done}): {(out + self.last_said).strip()[-300:]}")
 
     def role_of(self, maya, org, login):
         """[login]'s role in [org], as `GET /orgs/{org}/members` lists it to the console's token; None if not listed."""
