@@ -8,6 +8,7 @@
     5.6 the asker's own yes refused, 5.4 the second person's yes          5.5 ostrom wait lets it through
     5.7 the signed receipt, pulled and verified                         6.1 ostrom logs
     2.9 ostrom mcp: a server of the organisation, called through the session's relay
+    6.2 ostrom claude --cloud and ostrom attach: a session in Ostrom's cloud, detached and attached again
 
     python3 e2e/journey.py --binary ostrom --server http://127.0.0.1:4600 --mail-dir /tmp/mail \\
         --seed "docker run --rm --network host --env-file server.env ghcr.io/ostrom-hq/ostrom-server:edge \\
@@ -39,7 +40,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from cloud import Cloud
 from mcp_relay import McpRelay
+from rules import Rules
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GENERIC_404 = "Not found."
@@ -458,10 +461,7 @@ class Journey:
                 gates = (read_json(shown.stdout) or {}).get("gates") or {}
                 self.check(gates.get("selfApproval") == "never", f"self-approval is never ({gates})")
 
-        self.begin("3.1", "ostrom policy rules: what the analysis proposed")
-        if self.needs(("GET", "/api/v1/rules"), org=True):
-            done = self.ostrom(maya, "policy", "rules", "list", "--json")
-            self.check(done.returncode == 0, f"rules list exits 0 ({done.returncode}): {done.stderr.strip()[:300]}")
+        self.guarded(Rules(self, maya).run)
 
         self.begin("3.2", "ostrom harness: a workflow added on trial, enforced, shown, removed")
         if self.needs(("GET", "/api/v1/workflows"), ("POST", "/api/v1/workflows"), on_main=True, org=True):
@@ -497,6 +497,7 @@ class Journey:
 
         # a session of its own, after 6.1 (which reads the developer's last session, the one of 5.2)
         self.guarded(McpRelay(self, maya, SESSION_ROUTES).run)
+        self.guarded(Cloud(self, maya).run)
 
         if self.invitee:
             self.begin("2.6", "ostrom members remove")
@@ -1002,6 +1003,8 @@ def main():
     parser.add_argument("--fake-mcp-port", type=int, help="2.9: the port of the fake MCP server")
     parser.add_argument("--fake-mcp-cert", help="2.9: its certificate (PEM), trusted by the server")
     parser.add_argument("--fake-mcp-key", help="2.9: its private key (PEM)")
+    # 6.2: the server runs cloud sessions (a runtime driver, as the Docker of the CI's machine); skipped without
+    parser.add_argument("--cloud-sessions", action="store_true", help="6.2: the server runs cloud sessions")
     options = parser.parse_args()
     if not options.mail_dir:
         parser.error("--mail-dir (or OSTROM_E2E_MAIL_DIR) is needed: people sign in by their e-mailed link")

@@ -6,7 +6,7 @@ import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * Gate policies signed with a TEST ONLY Ed25519 key (seed: SHA-256 of `ostrom-cli test only: gate policy key`), made
- * once with Python's `cryptography` and written here literally (ENG-047).
+ * once with Python's `cryptography` and written here literally.
  */
 object PolicyVectors {
     /** The test key's public half, as the instance publishes it. */

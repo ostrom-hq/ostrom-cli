@@ -29,6 +29,19 @@ assert_eq "scoop: url" "$base/download/1.2.3/ostrom-1.2.3-windows-x64.zip" \
 assert_eq "scoop: hash" "$(sum windows-x64.zip)" "$(printf '%s' "$scoop" | jq -r '.architecture["64bit"].hash')"
 assert_eq "scoop: bin" "ostrom.exe" "$(printf '%s' "$scoop" | jq -r .bin)"
 assert_eq "scoop: license" "Apache-2.0" "$(printf '%s' "$scoop" | jq -r .license)"
+# Scoop's autoupdate (checkver -u) takes the sum from the SHA256SUMS published next to the archive, as Scoop reads it:
+# $version, $baseurl and $basename come from the autoupdate url, $sha256 is a 64-hex group, and the regex runs over
+# the whole file, first match, group 1. A file whose name starts with the archive's comes first, as an SBOM could.
+auto() { printf '%s' "$scoop" | jq -r ".autoupdate.architecture[\"64bit\"]$1"; }
+url=$(auto .url | sed 's/\$version/1.2.3/g')
+baseurl=${url%/*}; basename=${url##*/}
+assert_eq "scoop: autoupdate hash next to the archive" "$baseurl/SHA256SUMS" \
+  "$(auto .hash.url | sed "s|\\\$baseurl|$baseurl|")"
+{ printf '%064d  %s.spdx.json\n' 0 "$basename"; cat "$tmp/dist/SHA256SUMS"; } > "$tmp/SHA256SUMS"
+found=$(REGEX=$(auto .hash.regex) NAME=$basename perl -0777 -ne '
+  ($re = $ENV{REGEX}) =~ s/\$sha256/([a-fA-F0-9]{64})/; $name = quotemeta $ENV{NAME}; $re =~ s/\$basename/$name/;
+  print $1 if /$re/' "$tmp/SHA256SUMS")
+assert_eq "scoop: autoupdate finds the archive's sum in SHA256SUMS" "$(sum windows-x64.zip)" "$found"
 assert_fails "scoop: usage" sh "$rel/scoop-manifest.sh"
 
 # winget
