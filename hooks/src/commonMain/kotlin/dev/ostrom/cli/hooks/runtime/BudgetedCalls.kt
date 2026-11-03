@@ -39,7 +39,7 @@ class BudgetedCalls(
 
         /**
          * [calls] within the budget [variable] names (`OSTROM_HOOK_BUDGET_MS`), or [calls] themselves when there is
-         * none (Claude Code and Codex wait for the hook).
+         * none (a hook run by hand, or by an agent started before the variable).
          */
         fun of(calls: OstromCalls, variable: String?, clock: () -> Long): OstromCalls {
             val budget = variable?.toLongOrNull()?.takeIf { it > 0 }
