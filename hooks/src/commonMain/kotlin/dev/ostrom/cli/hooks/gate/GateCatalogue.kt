@@ -62,7 +62,8 @@ data class GateCatalogue(val actions: List<GateAction>, val failMode: String?) {
             ToolKind.MCP -> listOf(subject.text.substringBefore(' ').lowercase())
             // the words as the shell reads them too: `kube''ctl apply` and `g\it push` are `kubectl apply` (S2-26)
             ToolKind.BASH -> listOf(subject.text, words(subject.text))
-            else -> listOf(subject.text)
+            // a file write: the path the agent gave, and where it really lands (audit of the CLI n°2, M2)
+            else -> listOfNotNull(subject.text, subject.reaches)
         }
         // maxByOrNull keeps the first of equals
         return actions.filter { action ->
