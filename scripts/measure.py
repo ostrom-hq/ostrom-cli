@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Measures a built `ostrom` binary: start-up of `ostrom hook gate` and `ostrom version`, and binary sizes.
+"""Measures a built `ostrom` binary: start-up of `ostrom hook gate` and `ostrom --version`, and binary sizes.
 
 Usage: measure.py --binary PATH --label TARGET [--runs N] [--max-hook-ms MS] [--max-push-ms MS] [--sizes FILE...]
                   [--max-size-mb MB] [--size-budget TARGET=MB ...] [--max-hook-p95-ms MS]
@@ -168,13 +168,13 @@ def main():
     hook_walls, hook_insides = run_many([args.binary, "hook", "gate"], args.runs, stdin=EVENT, env=env, accepted=(0, 2))
     push_walls, _ = run_many([args.binary, "hook", "gate"], args.runs, stdin=PUSH, env=env, accepted=(0, 2))
     push_median, push_p95 = describe(push_walls)
-    version_walls, _ = run_many([args.binary, "version"], args.runs)
+    version_walls, _ = run_many([args.binary, "--version"], args.runs)
     hook_median, hook_p95 = describe(hook_walls)
     inside_median, _ = describe(hook_insides) if hook_insides else (float("nan"), None)
     version_median, version_p95 = describe(version_walls)
     cold_hook, cold_hook_reason = run_cold([args.binary, "hook", "gate"], args.cold_runs, stdin=EVENT, env=env,
                                            accepted=(0, 2))
-    cold_version, cold_version_reason = run_cold([args.binary, "version"], args.cold_runs)
+    cold_version, cold_version_reason = run_cold([args.binary, "--version"], args.cold_runs)
     floor = harness_floor_mb(MEMORY_RUNS)  # first: the script's own memory only grows
     memory = peak_memory_mb([args.binary, "hook", "gate"], MEMORY_RUNS, stdin=EVENT, env=env, accepted=(0, 2))
 
@@ -186,9 +186,9 @@ def main():
         f"| `ostrom hook gate`, ordinary call (wall, {args.runs} runs) | {hook_median:.2f} | {hook_p95:.2f} |",
         f"| `ostrom hook gate`, `git push` (wall, runs `git`) | {push_median:.2f} | {push_p95:.2f} |",
         f"| `ostrom hook gate` (inside the hook) | {inside_median:.3f} | |",
-        f"| `ostrom version` (wall) | {version_median:.2f} | {version_p95:.2f} |",
+        f"| `ostrom --version` (wall) | {version_median:.2f} | {version_p95:.2f} |",
     ]
-    colds = (("ostrom hook gate", cold_hook, cold_hook_reason), ("ostrom version", cold_version, cold_version_reason))
+    colds = (("ostrom hook gate", cold_hook, cold_hook_reason), ("ostrom --version", cold_version, cold_version_reason))
     if cold_hook or cold_version:
         lines += ["", "| Measure | Median (ms) | Max (ms) |", "| --- | --- | --- |"]
     for name, walls, _ in colds:
@@ -216,7 +216,7 @@ def main():
     if args.max_hook_p95_ms is not None and hook_p95 > args.max_hook_p95_ms:
         failed.append(f"ostrom hook gate takes {hook_p95:.2f} ms at p95, above {args.max_hook_p95_ms} ms")
     if args.max_version_p95_ms is not None and version_p95 > args.max_version_p95_ms:
-        failed.append(f"ostrom version takes {version_p95:.2f} ms at p95, above {args.max_version_p95_ms} ms")
+        failed.append(f"ostrom --version takes {version_p95:.2f} ms at p95, above {args.max_version_p95_ms} ms")
     if args.max_cold_ms is not None:
         for name, walls, reason in colds:
             if not walls:
