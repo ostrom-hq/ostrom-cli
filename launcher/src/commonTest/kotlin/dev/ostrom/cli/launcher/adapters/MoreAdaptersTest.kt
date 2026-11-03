@@ -159,7 +159,7 @@ class MoreAdaptersTest {
         assertEquals(FileAccess.PRIVATE, files.access[system])
         // a name a repository cannot know in advance, so it cannot list it in hooksConfig.disabled
         val settings = join("/tmp/run", "gemini-home", ".gemini", "settings.json")
-        val name = Regex(""""name":"(ostrom-BeforeTool-[0-9a-f]{16})"""")
+        val name = Regex(""""name": ?"(ostrom-BeforeTool-[0-9a-f]{16})"""")
         val first = checkNotNull(name.find(files.texts[settings].orEmpty())).groupValues[1]
         files.deleteRecursively(join("/tmp/run", "gemini-home"))
         GeminiAdapter().prepare(layout(), files)
