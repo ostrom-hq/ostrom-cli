@@ -369,10 +369,20 @@ class Journey:
             tom_login = next((m.get("login") for m in members if m.get("role") != "owner"), None)
             self.owner = next((m.get("login") for m in members if m.get("role") == "owner"), None)
             self.invitee = tom_login
+            text = self.ostrom(maya, "members", "list")
+            self.check(text.returncode == 0 and "2 members" in text.stdout and f"@{tom_login}" in text.stdout,
+                       f"and says it in words ({text.returncode}): {text.stdout.strip()[:200]}")
             if tom_login:
+                device = self.ostrom(maya, "members", "role", tom_login, "admin")
+                self.check(device.returncode == 77 and "console" in device.stderr,
+                           f"the device's token cannot change a role: the console can ({device.returncode})")
                 done = self.ostrom(maya, "members", "role", tom_login, "admin", console=True)
-                self.check(done.returncode == 0, f"a console token makes @{tom_login} admin ({done.returncode}): "
-                                                 f"{done.stderr.strip()[:300]}")
+                self.check(done.returncode == 0 and f"@{tom_login} is now admin" in done.stdout,
+                           f"a console token makes @{tom_login} admin ({done.returncode}): "
+                           f"{done.stderr.strip()[:300]}")
+                # as the server says it, not as the CLI printed it
+                self.check(self.role_of(maya, org, tom_login) == "admin",
+                           f"the server lists @{tom_login} as admin ({self.role_of(maya, org, tom_login)})")
 
         self.begin("3.4", "ostrom policy: the models and who may start which agent")
         if self.needs(("GET", "/api/v1/policy/models"), org=True):
@@ -432,9 +442,22 @@ class Journey:
 
         if self.invitee:
             self.begin("2.6", "ostrom members remove")
+            device = self.ostrom(maya, "members", "remove", self.invitee, "--yes")
+            self.check(device.returncode == 77 and "console" in device.stderr,
+                       f"the device's token cannot remove a member: the console can ({device.returncode})")
             done = self.ostrom(maya, "members", "remove", self.invitee, "--yes", console=True)
             self.check(done.returncode == 0, f"a console token removes @{self.invitee} ({done.returncode}): "
                                              f"{done.stderr.strip()[:300]}")
+            self.check(self.role_of(maya, org, self.invitee) is None,
+                       f"the server no longer lists @{self.invitee}")
+            listed = (read_json(self.ostrom(maya, "members", "list", "--json").stdout) or {}).get("items", [])
+            self.check(len(listed) == 1, f"members list shows the owner alone ({len(listed)})")
+
+    def role_of(self, maya, org, login):
+        """[login]'s role in [org], as `GET /orgs/{org}/members` lists it to the console's token; None if not listed."""
+        status, body, _ = self.call("GET", f"/api/v1/orgs/{org['id']}/members", token=maya["token"], org=org["id"])
+        items = body.get("items", []) if status == 200 and isinstance(body, dict) else []
+        return next((m.get("role") for m in items if m.get("login") == login), None)
 
     def logs(self, maya, gated):
         last = self.ostrom(maya, "logs", "--json")
