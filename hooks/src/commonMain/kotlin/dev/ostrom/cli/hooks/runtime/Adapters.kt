@@ -52,11 +52,13 @@ class RelayCalls(
         }
         // the contract's refusal is {"error":{"type","message"}}; the prototype's was {"error":"…"}
         val detail = json?.get("error") as? JsonObject
-        val message = detail?.string("message") ?: json?.string("error") ?: "HTTP ${response.status}"
+        // Ostrom's reason, never blank; the relay's own refusals and a missing route have none
+        val reason = (detail?.string("message") ?: json?.string("error"))?.takeIf { it.isNotBlank() }
+        val message = reason ?: "HTTP ${response.status}"
         return if (response.status in SUCCESS) {
             CallResult.Ok(json ?: JsonObject(emptyMap()))
         } else {
-            CallResult.Failed(message, detail?.string("type"))
+            CallResult.Failed(message, detail?.string("type"), status = response.status, answered = reason != null)
         }
     }
 
