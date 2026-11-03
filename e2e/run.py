@@ -266,7 +266,8 @@ def scenario_codex(binary, work):
         gated = hooks[("PreToolUse", "kubectl apply -f prod.yaml")]
         check(gated["code"] == 2,
               f"without a package Ostrom's catalogue gates (exit {gated['code']}: {gated['stderr'][:200]})")
-        check("--dangerously-bypass-hook-trust" not in report["arguments"], "no package: no hook trust asked")
+        # Codex runs no hook given by -c until it is reviewed: the flag, with or without a package (audit CLI n°2, H2)
+        check("--dangerously-bypass-hook-trust" in report["arguments"], "no package: Ostrom's hooks are trusted too")
         waited = hooks.get(("wait", "G-e2e"))
         check(waited is not None and waited["code"] == 0
               and waited["stdout"].startswith("approved by lena (receipt R-gate). Run the same command again now."),
