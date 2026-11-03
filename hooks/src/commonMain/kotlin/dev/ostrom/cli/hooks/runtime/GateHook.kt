@@ -9,6 +9,7 @@ import dev.ostrom.cli.hooks.gate.GitRunner
 import dev.ostrom.cli.hooks.gate.PatternCache
 import dev.ostrom.cli.hooks.gate.PushReader
 import dev.ostrom.cli.hooks.gate.ScriptTexts
+import dev.ostrom.cli.hooks.gate.ShellPaths
 import dev.ostrom.cli.hooks.gate.ToolKind
 import dev.ostrom.cli.hooks.gate.ToolSubject
 import dev.ostrom.cli.hooks.gate.UnreadablePushException
@@ -69,7 +70,7 @@ class GateHook(
         }
 
     private fun beforeTool(event: JsonObject, written: ToolSubject, cwd: String, catalogue: GateCatalogue): HookReply {
-        val raw = if (written.kind == ToolKind.BASH) withScripts(written, cwd) else written
+        val raw = withWhatItReaches(written, cwd)
         val (subject, landing) = withPushTargets(raw, cwd)
         val action = catalogue.match(subject, patterns)
         val gate = action?.gate
@@ -126,6 +127,25 @@ class GateHook(
             files.readStart(it, ScriptTexts.MAX_CHARS)
         }
         return if (scripts.isEmpty()) subject else subject.copy(text = subject.text + scripts)
+    }
+
+    /**
+     * [written] with what a shell command runs, or with where a file write really lands ([ToolSubject.reaches]) when
+     * that is not the path the agent gave: a relative path, `a/./b`, `a/../b` or a folder linked elsewhere (security
+     * audit of the CLI n°2, M2). The patterns then see it. A file tool expands no `~`: `~/x` is under the working
+     * folder.
+     */
+    private fun withWhatItReaches(written: ToolSubject, cwd: String): ToolSubject {
+        val path = written.path
+        return when {
+            written.kind == ToolKind.BASH -> withScripts(written, cwd)
+            path == null -> written
+            else -> {
+                val absolute = if (ShellPaths.isAbsolute(path)) path else "${cwd.trimEnd('/', '\\')}/$path"
+                val real = ShellPaths.real(absolute, canonical)
+                if (real == path) written else written.copy(reaches = real)
+            }
+        }
     }
 
     // the action ran: Ostrom, not the hook, uses its yes up when it sees the push land (S2-29)
