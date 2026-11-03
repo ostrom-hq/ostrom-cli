@@ -4,7 +4,10 @@ name: Release
 # is a dry run: it builds, packs and signs everything, builds the runner image, and publishes nothing (no release, no
 # image push, no tap push). A dry run never reads a signing secret: it runs on any branch and its artifacts can be
 # downloaded, so it signs with throwaway keys made in the job, the same way, and checks itself against them. Only a tag
-# signs with the release keys, and checks itself against the keys the installers and `ostrom update` pin. Never on pull requests (org CI rules, JOURNAL 03:10): rehearse with workflow_dispatch.
+# signs with the release keys, and checks itself against the keys the installers and `ostrom update` pin.
+# The jobs that sign or publish run in the `release` environment, which holds the signing keys and admits only
+# release tags (docs/RELEASES.md); a dry run enters no environment.
+# Never on pull requests (org CI rules, JOURNAL 03:10): rehearse with workflow_dispatch.
 # No cache of any kind (no actions/cache, setup-gradle cache disabled): what is released and signed is built from
 # scratch, never from a cache a pull request could have written (zizmor cache-poisoning).
 
@@ -120,6 +123,8 @@ jobs:
   build-macos:
     name: build macosArm64
     needs: version
+    # The signing keys live in the `release` environment, which only a release tag may enter; a dry run has none.
+    environment: ${{ needs.version.outputs.publish == 'true' && 'release' || '' }}
     runs-on: macos-15
     timeout-minutes: 60
     # A tag only: a dry run neither signs nor notarizes with the Developer ID.
@@ -198,6 +203,8 @@ jobs:
   package:
     name: package, sign, SBOM
     needs: [version, build-linux, build-macos]
+    # The signing keys live in the `release` environment, which only a release tag may enter; a dry run has none.
+    environment: ${{ needs.version.outputs.publish == 'true' && 'release' || '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -333,6 +340,8 @@ jobs:
   image:
     name: runner image (multi-arch)
     needs: [version, build-linux, package]
+    # The signing keys live in the `release` environment, which only a release tag may enter; a dry run has none.
+    environment: ${{ needs.version.outputs.publish == 'true' && 'release' || '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
@@ -393,6 +402,7 @@ jobs:
     name: GitHub Release
     needs: [version, package, image]
     if: ${{ needs.version.outputs.publish == 'true' }}
+    environment: release
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -423,6 +433,7 @@ jobs:
     needs: [version, publish]
     # Only once the release is public: the formula points at the release assets, which a draft does not serve.
     if: ${{ needs.version.outputs.publish == 'true' && vars.RELEASE_DRAFT == 'false' }}
+    environment: release
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:

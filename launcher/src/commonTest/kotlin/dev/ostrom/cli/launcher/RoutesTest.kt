@@ -20,6 +20,7 @@ class RoutesTest {
         assertEquals("/api/v1/sessions/s1/end", Routes.end("s1"))
         assertEquals("/api/v1/sessions/s1/workflow-receipt", Routes.workflowReceipt("s1"))
         assertEquals("/api/v1/receipts/r%201/bundle", Routes.bundle("r 1"))
+        assertEquals("/api/v1/launches/L%201", Routes.launch("L 1"))
     }
 
     @Test

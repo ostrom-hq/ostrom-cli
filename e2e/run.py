@@ -146,6 +146,9 @@ def scenario_claude(binary, work):
         check(("POST", "/api/v1/launches") in device, "the launch is created with the device token")
         check(("POST", "/api/v1/sessions") in agent, "the session hook reaches Ostrom with the launch's token")
         check(("POST", "/api/v1/gates") in agent, "the gate request goes through the relay")
+        ends = [r for r in seen if (r["method"], r["path"]) == ("DELETE", "/api/v1/launches/L-e2e")]
+        check(bool(ends) and all(r["token"] == "agt_e2e_launch" for r in ends),
+              "the launch is ended with its own token: the agent token is revoked when ostrom ends (R2b)")
         check(not any(r["path"].startswith(("/api/v1/sessions", "/api/v1/gates")) and r["token"] == "ost_e2e_device"
                       for r in seen), "no hook call carries the device token")
         ends = [r for r in seen if r["path"].endswith("/end")]
