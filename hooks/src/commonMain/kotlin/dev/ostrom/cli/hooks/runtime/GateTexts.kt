@@ -86,7 +86,9 @@ object GateTexts {
             "the request: ${sentence(message)} The action was not run. Do not work around this gate; tell the user."
 
     /** [text] ended as a sentence. */
-    private fun sentence(text: String): String = text.trimEnd().let { if (it.endsWith('.')) it else "$it." }
+    private fun sentence(text: String): String = text.trimEnd().let { if (ENDED.containsMatchIn(it)) it else "$it." }
+
+    private val ENDED = Regex("[.!?]$")
 
     /** Ostrom is unreachable or failed (a 5xx) and the organisation fails closed. */
     fun unreachable(action: String, gate: Gate, message: String): String =

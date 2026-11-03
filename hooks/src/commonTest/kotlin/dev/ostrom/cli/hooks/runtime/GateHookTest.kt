@@ -190,7 +190,7 @@ class GateHookTest {
         calls = FakeCalls()
         val closed = hook().handle(bash("git push origin main"))
         assertEquals(2, closed.exitCode)
-        assertContains(closed.stderr, "needs a yes from omar (Main), and Ostrom refused the request: HTTP 404")
+        assertContains(closed.stderr, "needs a yes from omar (Main), and Ostrom is unreachable (HTTP 404)")
         val open = catalogue.replace("\"closed\"", "\"open\"")
         assertEquals(2, hook(catalogueText = open).handle(bash("git push origin main")).exitCode, "a 404 is no outage")
         val outage = CallResult.Failed("Ostrom is unreachable (no connection)", CallResult.UNREACHABLE)
@@ -224,6 +224,25 @@ class GateHookTest {
         val refused = hook(catalogueText = open, ostrom = relay).handle(bash("git push origin main"))
         assertEquals(2, refused.exitCode, "a 4xx is no outage")
         assertContains(refused.stderr, "Ostrom refused the request: $reason")
+        // a reason ended by its own punctuation keeps it
+        val asked = hook(ostrom = relayed(403, "refused", "Is this push yours?")).handle(bash("git push origin main"))
+        assertContains(asked.stderr, "refused the request: Is this push yours? The action was not run.")
+        val bare = hook(ostrom = relayed(422, "refused", "No push to main")).handle(bash("git push origin main"))
+        assertContains(bare.stderr, "refused the request: No push to main. The action was not run.")
+    }
+
+    @Test
+    fun aRefusalOfTheLocalRelayItselfIsNotSaidAsOstroms() {
+        // the relay answers its own refusals in plain text (a capability it does not know, a route it does not
+        // forward): Ostrom never saw the request
+        for (status in listOf(401, 403, 404, 413)) {
+            val reply = hook(ostrom = RelayCalls("http://127.0.0.1:1", "t", Relay(status, "Forbidden."))).handle(
+                bash("git push origin main"),
+            )
+            assertEquals(2, reply.exitCode, "$status")
+            assertFalse("Ostrom refused" in reply.stderr, reply.stderr)
+            assertContains(reply.stderr, "(HTTP $status)", message = "$status")
+        }
     }
 
     @Test
