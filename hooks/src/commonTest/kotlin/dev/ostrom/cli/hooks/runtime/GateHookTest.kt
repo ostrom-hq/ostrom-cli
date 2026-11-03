@@ -377,6 +377,8 @@ class GateHookTest {
         val elsewhere = hook(catalogueText = gated, canonical = canonical)
         assertEquals(HookReply(), elsewhere.handle(event("Write", """{"file_path":"/w/src/x.kt"}""")))
         assertEquals(HookReply(), elsewhere.handle(event("Edit", """{"file_path":"/w/src/./x.kt"}""")))
+        // a patch names no path: its text is matched as it is
+        assertEquals(HookReply(), elsewhere.handle(event("apply_patch", """{"patch":"*** Update File: src/x.kt"}""")))
     }
 
     @Test

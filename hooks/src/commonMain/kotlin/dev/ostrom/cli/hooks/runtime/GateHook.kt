@@ -70,11 +70,7 @@ class GateHook(
         }
 
     private fun beforeTool(event: JsonObject, written: ToolSubject, cwd: String, catalogue: GateCatalogue): HookReply {
-        val raw = when (written.kind) {
-            ToolKind.BASH -> withScripts(written, cwd)
-            ToolKind.WRITE -> withRealPath(written, cwd)
-            else -> written
-        }
+        val raw = withWhatItReaches(written, cwd)
         val (subject, landing) = withPushTargets(raw, cwd)
         val action = catalogue.match(subject, patterns)
         val gate = action?.gate
@@ -131,6 +127,13 @@ class GateHook(
             files.readStart(it, ScriptTexts.MAX_CHARS)
         }
         return if (scripts.isEmpty()) subject else subject.copy(text = subject.text + scripts)
+    }
+
+    /** [written] with what a shell command runs, or where a file write really lands, appended for the patterns. */
+    private fun withWhatItReaches(written: ToolSubject, cwd: String): ToolSubject = when (written.kind) {
+        ToolKind.BASH -> withScripts(written, cwd)
+        ToolKind.WRITE -> withRealPath(written, cwd)
+        else -> written
     }
 
     /**
