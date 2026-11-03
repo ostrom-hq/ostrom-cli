@@ -9,11 +9,10 @@ import dev.ostrom.cli.launcher.quoted
 
 /**
  * Codex: Ostrom's hooks and MCP servers by `-c` overrides, the rules and the package's context in
- * `developer_instructions` (Codex has no session context), and a `CODEX_HOME` made for the session (the developer's
- * files linked, their own `hooks.json` left out, the package's skills and agent roles beside theirs), so that trusting
- * Ostrom's hooks for this run trusts nothing else. Codex runs no hook given by `-c` until it is reviewed: without
- * `--dangerously-bypass-hook-trust`, the gate would not run at all (security audit of the CLI n°2, H2). The tools of
- * the MCP servers keep Codex's own approval: Ostrom never approves them for the developer (security audit S2-37).
+ * `developer_instructions` (Codex has no session context), and with a package, a `CODEX_HOME` made for the session
+ * (the developer's files linked, their own `hooks.json` left out, the package's skills and agent roles beside theirs),
+ * so that trusting the signed package's hooks for this run trusts nothing else. The tools of the MCP servers keep
+ * Codex's own approval: Ostrom never approves them for the developer (security audit S2-37).
  */
 class CodexAdapter : AgentAdapter {
     override val agent = Agent.CODEX
@@ -32,8 +31,12 @@ class CodexAdapter : AgentAdapter {
             overrides += "mcp_servers.${mcpLabel(name)}={url=$url," +
                 "bearer_token_env_var=\"${LaunchVariables.RELAY_TOKEN}\"}"
         }
-        val environment = mapOf("CODEX_HOME" to codexHome(layout, files))
-        val own = listOf("--dangerously-bypass-hook-trust")
+        val environment = mutableMapOf<String, String?>()
+        val own = mutableListOf<String>()
+        if (layout.pack != null) {
+            environment["CODEX_HOME"] = codexHome(layout, files)
+            own += "--dangerously-bypass-hook-trust"
+        }
         // `codex exec …`: the subcommand first, then the overrides
         val (subcommand, rest) = if (layout.arguments.firstOrNull() == "exec") {
             listOf("exec") to layout.arguments.drop(1)
@@ -48,10 +51,7 @@ class CodexAdapter : AgentAdapter {
     private fun hook(layout: SessionLayout, kind: String, seconds: Long) =
         "{hooks=[{type=\"command\",command=${quoted(layout.hookCommand(kind))},timeout=$seconds}]}"
 
-    /**
-     * The CODEX_HOME of one session: the package's sub-agents, when there is one, become Codex roles
-     * (`codex/agents/ostrom_*.toml`).
-     */
+    /** The CODEX_HOME of one session: the package's sub-agents become Codex roles (`codex/agents/ostrom_*.toml`). */
     private fun codexHome(layout: SessionLayout, files: LaunchFiles): String {
         val real = layout.realHome("CODEX_HOME", ".codex")
         val own = setOf("hooks.json", "skills", "agents")
