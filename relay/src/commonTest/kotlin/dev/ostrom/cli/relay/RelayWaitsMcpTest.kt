@@ -63,7 +63,6 @@ class RelayWaitsMcpTest {
             """{"session":{"id":"../x?y=1"}}""" to HttpStatusCode.OK,
             """{"session":{"id":7}}""" to HttpStatusCode.OK,
             """{"session":"claude-session-1"}""" to HttpStatusCode.OK,
-            """{"id":"claude-session-1"}""" to HttpStatusCode.OK,
             """["claude-session-1"]""" to HttpStatusCode.OK,
             "not json" to HttpStatusCode.OK,
         )
@@ -75,6 +74,33 @@ class RelayWaitsMcpTest {
             }
             assertEquals("$SERVER/api/v1/waits/mcp", ostrom.requests.last().url.toString(), answer)
         }
+    }
+
+    @Test
+    fun aReopenOrALaterStartRebindsToTheSegmentOstromAnswered() {
+        var answer = SEGMENT
+        val ostrom = FakeOstrom { request ->
+            val path = request.url.encodedPath
+            respond(if (path.startsWith("/api/v1/sessions")) answer else "{}", HttpStatusCode.OK, JSON)
+        }
+        relayTest(ostrom, ostromServers) {
+            start()
+            // a hook reopens the closed segment: Ostrom's answer is flat here, as the launcher also reads it
+            answer = """{"id":"claude-session-1~r3"}"""
+            client.post("/api/v1/sessions/claude-session-1~r2/reopen") {
+                bearerAuth(TOKEN)
+                contentType(ContentType.Application.Json)
+                setBody("""{"launchId":"launch-1"}""")
+            }
+            client.post("/mcp/ostrom") { bearerAuth(TOKEN) }
+            // a new session in the same launch (/clear) starts again
+            answer = """{"session":{"id":"claude-session-2"}}"""
+            start()
+            client.post("/mcp/ostrom") { bearerAuth(TOKEN) }
+        }
+        val bound = ostrom.requests.filter { it.url.encodedPath == "/api/v1/waits/mcp" }
+            .map { it.url.parameters["session"] }
+        assertEquals(listOf("claude-session-1~r3", "claude-session-2"), bound)
     }
 
     @Test
