@@ -19,6 +19,12 @@ artifact of the run. A dry run reads no signing secret: it runs on any branch an
 so cosign and the manifest are signed with throwaway keys made in the job (checked against them, openssl included),
 and the macOS and Windows binaries are not code-signed. Only a tag signs with the release keys.
 
+**Who can cut a release.** The tag ruleset `release-tags` lets only organisation admins create, move or delete a tag
+`[0-9]*` or `v[0-9]*`. The jobs that sign or publish (`build-macos`, `package`, `image`, `publish`, `taps`) run in the
+`release` environment, which admits only those tags; a dry run enters no environment. The signing keys and the tap
+deploy keys belong in that environment's secrets, not the repository's: a job outside it, a dry run or another
+workflow, then cannot read them.
+
 **Draft or public.** While the repository is private the release is created as a **draft** (only the team sees it).
 At the go: make the repositories public, set the repository variable `RELEASE_DRAFT` to `false`
 (`gh variable set RELEASE_DRAFT --body false -R ostrom-hq/ostrom-cli`), and publish the existing draft
