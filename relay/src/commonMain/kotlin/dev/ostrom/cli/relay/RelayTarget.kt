@@ -39,6 +39,9 @@ private const val ID = "[A-Za-z0-9_-]{1,128}"
  * and `~r<n>` after it for a reopened one. Never a dot first, so never `.` nor `..`.
  */
 private const val SESSION = "[A-Za-z0-9_:~-][A-Za-z0-9_.:~-]{0,127}"
+
+/** A session's id as the hooks name it ([SESSION]): never `.` nor `..`, nothing a URL would read as more. */
+internal val SESSION_ID = Regex(SESSION)
 private const val API_PREFIX = "/api/v1/"
 private const val MCP_PREFIX = "/mcp/"
 private const val GATE_CATALOG = "/api/v1/gates/catalog"

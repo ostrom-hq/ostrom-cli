@@ -80,7 +80,8 @@ alternative: a second private file for `ostrom wait`, which a command of the age
   organisation's gate policy signed by the instance (`GET /api/v1/gates/catalog/signed`, kept 30 s in memory, a failure never kept; the
   hooks check its signature against `OSTROM_INSTANCE_KEYS` and its expiry at every call, and hold every action without
   one, S2-20 and S2-38), `POST /mcp/{server}` for the launch's servers (to `/api/v1/mcp/{server}`, streamed, 401/403 from
-  Ostrom become 502), and with inference `/v1/messages`, `/v1/chat/completions`, `/v1/models` (to
+  Ostrom become 502; Ostrom's own server, `ostrom`, goes to the waits server `/api/v1/waits/mcp`, with
+  `?session=` the session the start hook opened and Ostrom accepted, none before), and with inference `/v1/messages`, `/v1/chat/completions`, `/v1/models` (to
   `/api/v1/inference/…`, 4 MiB, the response streamed, only the provider headers forwarded). Coming soon on the
   server: ostrom-server `main` does not serve `/api/v1/notifications` nor `/api/v1/checks` yet (ostrom-core's
   `api/contract/served-routes.txt`); the sessions and the signed policy are served since ostrom-server d9301e4.

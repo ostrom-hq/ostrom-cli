@@ -83,8 +83,9 @@ private class Relay(
     memory: PolicyMemory,
 ) {
     private val exchange = UpstreamExchange(notices)
-    private val hooks = HookForwarder(config, shared, exchange, timeouts)
-    private val mcp = McpForwarder(config, upstream, exchange)
+    private val session = AgentSession()
+    private val hooks = HookForwarder(config, shared, exchange, timeouts, session)
+    private val mcp = McpForwarder(config, upstream, exchange, session)
     private val inference = InferenceForwarder(config, upstream, exchange)
     private val policy = SignedCatalogForwarder(config, shared, exchange, timeouts.hook, memory)
 

@@ -26,6 +26,11 @@ internal const val HOOK_BODY_LIMIT = 2 * 1024 * 1024
 internal const val INFERENCE_BODY_LIMIT = 4 * 1024 * 1024
 
 private const val MCP_SESSION_HEADER = "Mcp-Session-Id"
+
+/** The MCP server every launch connects (the launcher's built-in one): Ostrom's waits server, not a relayed one. */
+internal const val OSTROM_SERVER = "ostrom"
+private const val WAITS_MCP = "/api/v1/waits/mcp"
+private const val SESSION_PARAMETER = "session"
 private val MCP_REQUEST_HEADERS = listOf("MCP-Protocol-Version", MCP_SESSION_HEADER, HttpHeaders.Accept)
 private val MCP_RESPONSE_HEADERS = listOf(MCP_SESSION_HEADER)
 private val INFERENCE_REQUEST_HEADERS = listOf("anthropic-version", "anthropic-beta", HttpHeaders.Accept)
@@ -47,6 +52,7 @@ internal class HookForwarder(
     private val client: HttpClient,
     private val exchange: UpstreamExchange,
     private val timeouts: RelayTimeouts,
+    private val session: AgentSession,
 ) {
     /** Forwards [call]; [longPoll] when it may wait for a gate. */
     suspend fun forward(call: ApplicationCall, longPoll: Boolean) {
@@ -65,6 +71,7 @@ internal class HookForwarder(
             identify(config)
             if (method == HttpMethod.Post) setBody(ByteArrayContent(body, ContentType.Application.Json))
         }) { response ->
+            if (method == HttpMethod.Post) session.started(call.request.path(), body, response.status)
             val type = response.contentType() ?: ContentType.Application.Json
             call.respondBytes(response.bodyAsBytes(), type, response.status)
         }
@@ -83,6 +90,7 @@ internal class McpForwarder(
     private val config: RelayConfig,
     private val upstream: () -> HttpClient,
     private val exchange: UpstreamExchange,
+    private val session: AgentSession,
 ) {
     /** Forwards [call] to [server]'s gateway. */
     suspend fun forward(call: ApplicationCall, server: String) {
@@ -95,7 +103,13 @@ internal class McpForwarder(
         upstream().use { client ->
             exchange.run(call, client, Duration.INFINITE, {
                 method = HttpMethod.Post
-                url("${config.serverUrl}/api/v1/mcp/$server")
+                if (server == OSTROM_SERVER) {
+                    // Ostrom's own server is the waits server of this session: the agent asks a person there (4.3)
+                    url("${config.serverUrl}$WAITS_MCP")
+                    session.current?.let { url.parameters.append(SESSION_PARAMETER, it) }
+                } else {
+                    url("${config.serverUrl}/api/v1/mcp/$server")
+                }
                 identify(config)
                 copyHeaders(headers, MCP_REQUEST_HEADERS)
                 setBody(ByteArrayContent(body, ContentType.Application.Json))
