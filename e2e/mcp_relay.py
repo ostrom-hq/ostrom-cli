@@ -127,8 +127,8 @@ class McpRelay:
             return
         if not j.needs(*ROUTES, *self.session_routes, on_main=True, org=True):
             return
-        # a change of an MCP server takes a sign-in of the last minutes: the owner signs in again, not the 5.x session
-        self.session = j.sign_in(self.maya["email"])
+        # a change of an MCP server takes a sign-in of the last minutes: a recent one, not the 5.x session
+        self.session = j.recent_sign_in(self.maya["email"])
         if not self.session:
             return
         fake = FakeMcp(self.options.fake_mcp_port, self.options.fake_mcp_cert, self.options.fake_mcp_key)
@@ -188,24 +188,11 @@ class McpRelay:
         journaled = [c for c in items if '"echo"' in json.dumps(c)]
         j.check(status == 200 and journaled, f"the console's journal shows the call of echo ({status}, "
                                              f"{len(journaled)}): {json.dumps(items[:3])[:300]}")
-        builtin = mcp.get("ostrom") or {}
-        # Ostrom's own MCP server, as an agent that starts stdio servers reaches it: said, not checked (4.3)
-        print(f"  note  ostrom mcp --server ostrom: exit {builtin.get('code')}, "
-              f"{json.dumps(builtin.get('answers'))[:400]}", flush=True)
-        j.step["builtin"] = builtin
 
     def session_with_bridge(self):
         """`ostrom claude` with the fake agent in its MCP mode: the agent's report, or None."""
         j = self.journey
-        agents = os.path.join(j.work, "agents")
-        os.makedirs(agents, exist_ok=True)
-        script = os.path.join(agents, "claude.py")
-        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake_agent.py")) as source, \
-                open(script, "w") as target:
-            target.write(source.read())
-        with open(os.path.join(agents, "claude"), "w") as handle:
-            handle.write(f"#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(script)} \"$@\"\n")
-        os.chmod(os.path.join(agents, "claude"), 0o755)
+        agents = fake_claude(j)
         report = os.path.join(j.work, "claude-mcp-report.json")
         extra = {"PATH": agents + os.pathsep + os.environ["PATH"], "E2E_REPORT": report, "E2E_EXIT": "0",
                  "E2E_OSTROM": j.binary, "E2E_MCP": self.name, "E2E_MCP_SAY": SAID}
@@ -229,6 +216,20 @@ class McpRelay:
         status, body, _ = j.call("DELETE", f"/api/v1/mcp/servers/{self.name}", session=self.session, org=j.org_id)
         if status != 404:
             j.check(status == 204, f"the owner removes {self.name} ({status}): {error_text(body)}")
+
+
+def fake_claude(journey):
+    """The fake agent installed as `claude` in a folder of the run: the folder, to put first on PATH."""
+    agents = os.path.join(journey.work, "agents")
+    os.makedirs(agents, exist_ok=True)
+    script = os.path.join(agents, "claude.py")
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake_agent.py")) as source, \
+            open(script, "w") as target:
+        target.write(source.read())
+    with open(os.path.join(agents, "claude"), "w") as handle:
+        handle.write(f"#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(script)} \"$@\"\n")
+    os.chmod(os.path.join(agents, "claude"), 0o755)
+    return agents
 
 
 def error_text(body):
