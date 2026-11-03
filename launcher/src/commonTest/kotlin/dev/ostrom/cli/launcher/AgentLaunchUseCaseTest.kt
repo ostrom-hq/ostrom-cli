@@ -647,7 +647,7 @@ class AgentLaunchUseCaseTest {
     }
 
     @Test
-    fun theMemoryIsGivenBackBeforeTheLaunchIsCreatedAndOnceMoreJustBeforeTheAgent() = runTest {
+    fun theMemoryIsGivenBackBeforeTheLaunchIsCreatedAndOnceMoreBeforeTheRelayStarts() = runTest {
         // PERF-CLI: Kotlin/Native's collector never ran during a launch; without these two, 50-51 MB at the agent
         serveALaunch()
         assertEquals(3, start())
@@ -657,7 +657,7 @@ class AgentLaunchUseCaseTest {
         assertEquals(Triple(listOf(policy), false, false), first, "after the policy, before the launch is created")
         val read = listOf(Routes.PACKAGE, Routes.INSTANCE_KEYS, Routes.MCP_MINE, Routes.INFERENCE_MODELS)
         assertTrue(read.all { route -> second.first.any { it.startsWith(route) } }, "after the reads: ${second.first}")
-        assertEquals(true to false, second.second to second.third, "the relay started, the agent not yet")
+        assertEquals(false to false, second.second to second.third, "before the relay and the agent start")
     }
 
     @Test

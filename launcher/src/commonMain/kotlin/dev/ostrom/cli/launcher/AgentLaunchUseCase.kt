@@ -181,6 +181,10 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         val files = dependencies.files
         files.createPrivateDirectory(run.plugin)
         val laid = run.pack?.let { PackageLayout(files).layDown(it, run.plugin, run.temporary) }
+        // what the reads and the package's layout left, before the relay starts: collected after it, the relay's own
+        // allocations have already grown the heap, whose freed pages are not given back (cli#122's bench: 43.6 MB at
+        // the agent's start against 36-37 collected here)
+        dependencies.reclaim()
         // `ostrom` (rules_for, request_approval, get_receipt) is built into every Ostrom server
         val mcp = (listOf(BUILT_IN_MCP) + run.mcpServers + run.pack?.mcpServers.orEmpty()).distinct()
         val inference = run.inference
@@ -210,9 +214,6 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
                 dependencies.say,
             )
             val every = run.site.variable(ALIVE_VARIABLE).orEmpty().toLongOrNull() ?: ALIVE_MILLIS
-            // what the reads, the package's layout, the relay's start and the agent's preparation left, before the
-            // launcher and its relay live for the whole session
-            dependencies.reclaim()
             val code = runAgent(listOf(run.executable) + prepared.arguments, environment, lifeline, every)
             lifeline.end(code, run.model, run.name, run.pack, join(run.site.configDirectory, "receipts"))
             code
