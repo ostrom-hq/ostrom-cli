@@ -307,7 +307,7 @@ class Journey:
         if self.needs(("GET", "/api/v1/auth/me"), ("GET", "/api/v1/orgs"), on_main=True):
             self.guarded(self.status, maya, org)
         self.team(maya, tom_email, org)
-        TeamCodeImport(self, maya).run()
+        self.guarded(TeamCodeImport(self, maya).run)
 
     def status(self, maya, org):
         # who is signed in, as the server says it: not read back from what status printed

@@ -94,11 +94,14 @@ class TeamCodeImport:
         j.begin("6.6", "ostrom import teamcode: the plan, the import, the owner's cutover")
         missing = missing_options(self.options)
         if missing:
-            j.step["status"] = "skipped"
             j.step["missing"] = missing
-            print(f"  skip  no fake TeamCode team: {', '.join(missing)}", flush=True)
+            if self.options.strict:
+                j.check(False, f"the fake TeamCode team is given ({', '.join(missing)} missing)")
+            else:
+                j.step["status"] = "skipped"
+                print(f"  skip  no fake TeamCode team: {', '.join(missing)}", flush=True)
             return
-        if not j.needs(*ROUTES, on_main=True):
+        if not j.needs(*ROUTES, on_main=True, org=True):
             return
         self.session = j.owner_signed_in(self.maya)
         if not self.session or not self.console_token():
@@ -124,10 +127,11 @@ class TeamCodeImport:
                                    "--key-file", self.options.teamcode_key_file, *arguments, extra=extra)
 
     def accounts(self):
-        """The organisation's shared accounts, as `[label, status]` sorted by label."""
+        """The organisation's shared accounts, as `[label, status]` sorted by label; None when it cannot read them."""
         status, body, _ = self.journey.call("GET", "/api/v1/accounts", session=self.session, org=self.journey.org_id)
-        items = (body or {}).get("items", []) if status == 200 else []
-        return sorted([item.get("label"), item.get("status")] for item in items)
+        if not self.journey.check(status == 200, f"the owner reads the shared accounts ({status})"):
+            return None
+        return sorted([str(item.get("label")), str(item.get("status"))] for item in (body or {}).get("items", []))
 
     def sql(self, statement):
         """[statement] as the superuser of the run's throwaway database: its rows, tab-separated."""
@@ -169,7 +173,7 @@ class TeamCodeImport:
         done = self.ostrom("--cutover", "--confirm", "cutover")
         j.check(done.returncode == 0, f"the owner's cutover exits 0 ({done.returncode}): {done.stderr.strip()[:300]}")
         j.check("updated  account  claude/Claude Max 1" in done.stdout, "it revives the account with TeamCode's tokens")
-        sent = sorted(r.get("refresh_token") for r in tokens.refreshes)
+        sent = sorted(str(r.get("refresh_token")) for r in tokens.refreshes)
         j.check(sent == sorted(ACCOUNTS), f"refreshed at the provider with TeamCode's refresh tokens ({len(sent)})")
         j.check(all(r.get("client_id") == CLAUDE_CODE_CLIENT for r in tokens.refreshes),
                 "as Claude Code refreshes them")
@@ -180,10 +184,12 @@ class TeamCodeImport:
         j.check(left.returncode == 0 and "nothing to do" in left.stdout, f"a second cutover has nothing to do "
                                                                            f"({left.returncode})")
         events = self.audited(org)[before:]
-        me = j.call("GET", "/api/v1/auth/me/account", session=self.session)[1] or {}
+        status, me, _ = j.call("GET", "/api/v1/auth/me/account", session=self.session)
+        owner = me.get("id") if status == 200 and isinstance(me, dict) else None
+        j.check(owner is not None, f"the owner's id is read ({status})")
         j.check(len(events) == 1, f"one audit event import.teamcode.cutover ({len(events)})")
-        j.check(all(actor == me.get("id") and json.loads(details).get("mode") == "cutover"
-                    for actor, details in events), "in the owner's name")
+        j.check(len(events) == 1 and events[0][0] == owner and json.loads(events[0][1]).get("mode") == "cutover",
+                f"in the owner's name ({[actor for actor, _ in events]})")
 
     def audited(self, org):
         rows = self.sql(f"SELECT actor_id, details FROM identity_audit_events WHERE org_id = '{uuid(org)}' "
