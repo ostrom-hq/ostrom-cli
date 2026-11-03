@@ -6,6 +6,22 @@ import kotlinx.serialization.json.JsonObject
 /** A launch created by Ostrom. */
 internal data class Launch(val launchId: String, val agentToken: String)
 
+/** What a launch read of Ostrom before its agent starts ([AgentLaunchUseCase]). */
+internal class LaunchReads(val pack: SessionPackage?, val keys: String, val mcp: List<String>, val inference: Boolean)
+
+/**
+ * [read]'s outcome, to be given later: its value, or the [LaunchStopped] it threw, thrown again when asked, so that a
+ * launch says its stops in its own order. Any other failure, a cancellation included, goes through at once.
+ */
+internal suspend fun <T> stopOf(read: suspend () -> T): () -> T {
+    val value = try {
+        read()
+    } catch (e: LaunchStopped) {
+        return { throw e }
+    }
+    return { value }
+}
+
 /** The calls of a launch to Ostrom before the agent runs, with the device token or the launch's agent token. */
 internal class LaunchCalls(private val dependencies: LaunchDependencies) {
     private val trust = PackageTrust(dependencies.server, dependencies.files, dependencies.clock::now, dependencies.say)
@@ -118,15 +134,15 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
                 stop(UNREACHABLE, "the instance's keys could not be read (${answer.message}): the agent is not started")
         }
 
-    /** The organisation's MCP servers the relay serves to this agent (`?mine=true`), by name. */
-    suspend fun mcpServers(site: LaunchSite): List<String> =
+    /** The organisation's MCP servers the relay serves to this agent (`?mine=true`), by name; [say] tells a failure. */
+    suspend fun mcpServers(site: LaunchSite, say: (String) -> Unit = dependencies.say): List<String> =
         when (val answer = dependencies.server.get(Routes.MCP_MINE, site.credentials.token, MCP_MILLIS)) {
             is ServerAnswer.Ok -> answer.body.list("items").filterIsInstance<JsonObject>()
                 .filter { it.flag("enabled") != false }
                 .mapNotNull { it.text("name") }
                 .filter { MCP_NAME.matches(it) }
             is ServerAnswer.Failed -> emptyList<String>().also {
-                dependencies.say("ostrom: your organisation's MCP servers are not listed (${answer.message})")
+                say("ostrom: your organisation's MCP servers are not listed (${answer.message})")
             }
         }
 

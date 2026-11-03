@@ -13,6 +13,7 @@ import dev.ostrom.cli.platform.ProcessLauncher
 import dev.ostrom.cli.platform.ProcessResult
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -130,15 +131,14 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         // From here on, however the launch ends (the agent's exit, a stop before it starts, a cancellation), its agent
         // token is revoked at once (AUDIT-SECU-RUNNER-2 R2b).
         return try {
-            val pack = calls.packageOf(repo, site, keep = true)
-            val keys = calls.instanceKeys()
+            val reads = reads(request, site, repo, launch)
             val temporary = join(site.temporaryDirectory, "ostrom-run-${dependencies.clock.millis()}")
             try {
                 dependencies.files.createPrivateDirectory(temporary)
             } catch (e: IOException) {
                 stop(CANNOT_WRITE, "cannot create $temporary (${e.message})")
             }
-            val run = Run(request, site, adapter, executable, repo, top, model, launch, pack, keys, temporary)
+            val run = Run(request, site, adapter, executable, repo, top, model, launch, reads, temporary)
             try {
                 session(run)
             } finally {
@@ -160,10 +160,11 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         val top: String,
         val model: String?,
         val launch: Launch,
-        val pack: SessionPackage?,
-        val keys: String,
+        val reads: LaunchReads,
         val temporary: String,
     ) {
+        val pack = reads.pack
+        val keys = reads.keys
         val plugin = join(temporary, "plugin")
         val relayTokenFile = join(temporary, "relay-token")
         val sessionFile = join(temporary, "session-id")
@@ -176,8 +177,8 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         files.createPrivateDirectory(run.plugin)
         val laid = run.pack?.let { PackageLayout(files).layDown(it, run.plugin, run.temporary) }
         // `ostrom` (rules_for, request_approval, get_receipt) is built into every Ostrom server
-        val mcp = (listOf(BUILT_IN_MCP) + calls.mcpServers(run.site) + run.pack?.mcpServers.orEmpty()).distinct()
-        val inference = inferenceRelayed(run)
+        val mcp = (listOf(BUILT_IN_MCP) + run.reads.mcp + run.pack?.mcpServers.orEmpty()).distinct()
+        val inference = run.reads.inference
         val settings = RelaySettings(
             run.site.serverUrl,
             run.launch.agentToken,
@@ -287,14 +288,32 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         }
     }
 
-    private suspend fun inferenceRelayed(run: Run): Boolean {
-        val choice = run.site.variable(INFERENCE_VARIABLE)
+    /**
+     * What a launch reads of Ostrom once it has its agent token: the session package, the instance's keys, the MCP
+     * servers and whether the models are relayed. None depends on another, so they are asked together (PERF-CLI): the
+     * agent waits on one round trip for the four, not four. A refused package stops the launch first, then keys that
+     * cannot be read, as when they were asked one after the other; the notes are said in that order too.
+     */
+    private suspend fun reads(request: LaunchRequest, site: LaunchSite, repo: String, launch: Launch): LaunchReads =
+        coroutineScope {
+            val notes = mutableListOf<String>()
+            val keys = async { stopOf { calls.instanceKeys() } }
+            val mcp = async { calls.mcpServers(site) { notes += it } }
+            val inference = async { inferenceRelayed(request, site, launch) }
+            val pack = calls.packageOf(repo, site, keep = true)
+            val read = keys.await()()
+            notes.forEach(dependencies.say)
+            LaunchReads(pack, read, mcp.await(), inference.await())
+        }
+
+    private suspend fun inferenceRelayed(request: LaunchRequest, site: LaunchSite, launch: Launch): Boolean {
+        val choice = site.variable(INFERENCE_VARIABLE)
         return when {
-            run.request.agent != Agent.CLAUDE -> false
+            request.agent != Agent.CLAUDE -> false
             choice in OFF -> false
             choice in ON -> true
             else -> {
-                val answer = dependencies.server.get(Routes.INFERENCE_MODELS, run.launch.agentToken, INFERENCE_MILLIS)
+                val answer = dependencies.server.get(Routes.INFERENCE_MODELS, launch.agentToken, INFERENCE_MILLIS)
                 answer is ServerAnswer.Ok && answer.body.list("data").isNotEmpty()
             }
         }
