@@ -42,6 +42,9 @@ object Routes {
     /** `POST {digest, agent, model}`: the workflow receipt of the session. */
     fun workflowReceipt(session: String) = "/api/v1/sessions/${encode(session)}/workflow-receipt"
 
+    /** `DELETE`, with the launch's agent token: the end of `ostrom <agent>`, which revokes that token at once. */
+    fun launch(launchId: String) = "/api/v1/launches/${encode(launchId)}"
+
     /** `GET`: a receipt with what it cites, to verify offline. */
     fun bundle(receipt: String) = "/api/v1/receipts/${encode(receipt)}/bundle"
 

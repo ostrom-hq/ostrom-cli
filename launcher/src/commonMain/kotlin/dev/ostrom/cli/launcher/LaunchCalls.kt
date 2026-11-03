@@ -81,6 +81,20 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
         return Launch(id, token)
     }
 
+    /**
+     * Ends the launch when `ostrom <agent>` ends (AUDIT-SECU-RUNNER-2 R2b): its agent token is revoked at once instead
+     * of living out its 24 hours. Never stops anything: a token not revoked expires on its own, and is said. An older
+     * server (404, 405) or a token already refused (401) has nothing to say.
+     */
+    suspend fun endLaunch(launch: Launch) {
+        val path = Routes.launch(launch.launchId)
+        val answer = dependencies.server.call("DELETE", path, null, launch.agentToken, END_MILLIS)
+        if (answer is ServerAnswer.Failed && answer.status !in SILENT_END) {
+            val reason = answer.message
+            dependencies.say("ostrom: the launch's agent token was not revoked ($reason): it expires on its own")
+        }
+    }
+
     /** The verified session package of [repo], null without one; a refused one stops the launch. */
     suspend fun packageOf(repo: String, site: LaunchSite, keep: Boolean): SessionPackage? =
         when (val outcome = trust.fetch(site.serverUrl, site.credentials.token, repo, site.configDirectory, keep)) {
@@ -124,12 +138,16 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
         private const val SIGNATURE_REFUSED = 78
         private const val UNAUTHORIZED = 401
         private const val FORBIDDEN = 403
+        private const val NOT_FOUND = 404
+        private const val NOT_ALLOWED = 405
         private const val USAGE = 64
         private const val ORG_REQUIRED = "org_required"
         private const val POLICY_MILLIS = 5_000L
         private const val LAUNCH_MILLIS = 10_000L
         private const val MCP_MILLIS = 5_000L
         private const val KEYS_MILLIS = 5_000L
+        private const val END_MILLIS = 5_000L
+        private val SILENT_END = setOf<Int?>(UNAUTHORIZED, NOT_FOUND, NOT_ALLOWED)
         private val MCP_NAME = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
     }
 }
