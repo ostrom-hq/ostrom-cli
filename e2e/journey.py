@@ -339,10 +339,10 @@ class Journey:
             written = os.path.exists(bashrc) and "# >>> ostrom:" in open(bashrc, encoding="utf-8").read()
             self.check(written, "the agents start with Ostrom's hooks (~/.bashrc)")
         again = self.ostrom(maya, "init", "--yes", console=True)
-        # a console token without rules:read: init says it cannot read the rules, and the rest is done (exit 0)
-        self.check(again.returncode == 0 and "Rules" in again.stdout,
-                   f"init again, with a console token, exits 0 and says the rules ({again.returncode}): "
-                   f"{again.stderr.strip()[:300]}")
+        # the console token holds no rules:read: init says it cannot read the rules, and the rest is done (exit 0)
+        self.check(again.returncode == 0 and "Rules       this token cannot read them" in again.stdout,
+                   f"init again, with a console token, exits 0 and says it cannot read the rules "
+                   f"({again.returncode}): {(again.stdout + again.stderr).strip()[-300:]}")
 
     def team(self, maya, tom_email, org):
         """2.6, 2.7, then the policy, the rules, the harness and the launch."""
@@ -404,6 +404,10 @@ class Journey:
         if self.needs(("GET", "/api/v1/gates/policy"), ("PUT", "/api/v1/gates/policy"), org=True):
             done = self.ostrom(maya, "policy", "set", "self-approval", "never", console=True)
             self.console_only(done, "policy set self-approval never")
+            # 5.6 relies on it: never is the organisation's default, the refused write changed nothing
+            shown = self.ostrom(maya, "policy", "show", "--json", console=True)
+            gates = (read_json(shown.stdout) or {}).get("gates", {})
+            self.check(gates.get("selfApproval") == "never", f"self-approval stays never ({gates})")
 
         self.begin("3.1", "ostrom policy rules: what the analysis proposed")
         if self.needs(("GET", "/api/v1/rules"), org=True):

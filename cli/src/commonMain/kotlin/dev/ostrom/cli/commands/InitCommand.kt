@@ -37,6 +37,9 @@ internal class InitCommand(private val dependencies: CliDependencies) : CliktCom
     /** What `--json` prints at the end, step by step. */
     private val summary = mutableMapOf<String, Any?>()
 
+    /** Why the server refused a read init makes, by what was read: a token made on the console may lack a scope. */
+    private val unreadable = mutableMapOf<String, String>()
+
     override fun run() {
         dependencies.outsideSessions("init")
         val access = dependencies.orgAccess(server, org, ::choose)
@@ -44,6 +47,7 @@ internal class InitCommand(private val dependencies: CliDependencies) : CliktCom
         repository(access)
         hooks()
         rules(access)
+        summary["unreadable"] = unreadable.keys.toList().ifEmpty { null }
         if (json) {
             val done = JsonObject(summary.filterValues { it != null }.mapValues { jsonOf(it.value) })
             dependencies.console.data("$done\n")
@@ -90,12 +94,13 @@ internal class InitCommand(private val dependencies: CliDependencies) : CliktCom
         // GET /api/v1/repos (SRV-LECTURES), when served. A clone in a folder named otherwise is not found by its name:
         // a warning, never a refusal, so that init still sets the device up.
         // Beyond the first page (100), a repository not found is not known to be missing: no warning.
-        val covered = access.readIfServed("/api/v1/repos?limit=$REPOS_PAGE")?.let { coverage(it, name) }
+        val covered = readIfAllowed(access, "/api/v1/repos?limit=$REPOS_PAGE", "repos")?.let { coverage(it, name) }
         summary["covered"] = covered
-        val workflows = access.readIfServed("/api/v1/workflows?repo=${segment(name)}")
+        val workflows = readIfAllowed(access, "/api/v1/workflows?repo=${segment(name)}", "workflows")
             ?.let { page -> page.list("items").filterIsInstance<JsonObject>() }
         summary["workflows"] = workflows?.size
         val harness = when {
+            "workflows" in unreadable -> cannotRead(access, "workflows")
             workflows == null -> "not on this server yet"
             workflows.isEmpty() -> "no workflow yet (ostrom harness add <file.json>)"
             else -> workflows.joinToString(" · ") { "${it.text("name")} (${it.text("status")})" }
@@ -141,16 +146,29 @@ internal class InitCommand(private val dependencies: CliDependencies) : CliktCom
         }
     }
 
+    /**
+     * `GET` [path] when served, or null; a refusal (403) is noted under [what] rather than failing init, whose link and
+     * hooks are already done: a token made on the console may not hold every read scope.
+     */
+    private fun readIfAllowed(access: OrgAccess, path: String, what: String): JsonObject? = try {
+        access.readIfServed(path)
+    } catch (refused: PrintMessage) {
+        if (refused.statusCode != ExitCode.REFUSED.code) throw refused
+        unreadable[what] = "${refused.message}"
+        null
+    }
+
+    /** What init says of [what] the server refused to read, and how to read it otherwise. */
+    private fun cannotRead(access: OrgAccess, what: String): String {
+        val why = "this token cannot read them (${unreadable.getValue(what)})"
+        return if (access.consoleToken) "$why: without OSTROM_TOKEN, ostrom login's token reads them" else why
+    }
+
     /** The rules the analysis proposed, accepted here by an owner or admin who says yes. */
     private fun rules(access: OrgAccess) {
-        val page = try {
-            access.readIfServed("$RULES?status=proposed")
-        } catch (refused: PrintMessage) {
-            // a token without rules:read (one made on the console may not hold it): said, and init goes on, as the
-            // organisation, the repository and the hooks are already done
-            if (refused.statusCode != ExitCode.REFUSED.code) throw refused
-            say("  Rules       this token cannot read them (${refused.message}): ostrom policy rules list, " +
-                "without OSTROM_TOKEN, shows them")
+        val page = readIfAllowed(access, "$RULES?status=proposed", "rules")
+        if ("rules" in unreadable) {
+            say("  Rules       ${cannotRead(access, "rules")}")
             return
         }
         if (page == null) {

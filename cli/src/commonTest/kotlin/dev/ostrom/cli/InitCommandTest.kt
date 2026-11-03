@@ -152,16 +152,31 @@ class InitCommandTest : SetupKit() {
 
     @Test
     fun aTokenThatCannotReadTheRulesDoesNotFailInit() {
-        // a token made on the console may not hold rules:read: init again with it still exits 0
+        // a token made on the console may not hold rules:read: init again with it still exits 0, and says so
         val denied = """{"error":{"message":"This credential does not allow rules:read."}}"""
-        val refused = mapOf(proposed to (403 to denied))
-        assertEquals(0, run(refused, "init", "--yes", "--repo", "api",
-            environment = withServer + ("OSTROM_TOKEN" to "ost_console")))
-        assertOut("  Rules       this token cannot read them (This credential does not allow rules:read.): ostrom " +
-            "policy rules list, without OSTROM_TOKEN, shows them\n")
-        // any other refusal of the rules still stops init
-        val broken = mapOf(proposed to (500 to """{"error":{"message":"boom"}}"""))
-        assertEquals(69, run(broken, "init", "--yes", "--repo", "api"))
+        val refused = mapOf(repos, harness, proposed to (403 to denied))
+        assertEquals(0, run(refused, "init", "--yes", environment = zshAdmin, capture = gitTop()))
+        assertOut("  Rules       this token cannot read them (This credential does not allow rules:read.): without " +
+            "OSTROM_TOKEN, ostrom login's token reads them\n")
+        console.out.clear()
+        assertEquals(0, run(refused, "init", "--json", environment = zsh, capture = gitTop()))
+        assertOut("\"unreadable\":[\"rules\"]")
+        // any other failure of the rules still stops init
+        val broken = mapOf(repos, harness, proposed to (500 to """{"error":{"message":"boom"}}"""))
+        assertEquals(69, run(broken, "init", "--yes", environment = zsh, capture = gitTop()))
+    }
+
+    @Test
+    fun aTokenThatCannotReadTheRepositoriesNorTheHarnessDoesNotFailInit() {
+        val denied = """{"error":{"message":"no"}}"""
+        val refused = mapOf(
+            "GET /api/v1/repos?limit=100" to (403 to denied),
+            "GET /api/v1/workflows?repo=acme-api" to (403 to denied),
+            rules,
+        )
+        assertEquals(0, run(refused, "init", environment = zsh, capture = gitTop()))
+        assertOut("  Repository  acme-api\n  Harness     this token cannot read them (no)\n")
+        assertTrue("not among" !in console.out.toString(), "a refused read is not a missing repository")
     }
 
     @Test
