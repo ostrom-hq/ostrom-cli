@@ -6,6 +6,7 @@ import dev.ostrom.cli.launcher.FileAccess
 import dev.ostrom.cli.launcher.LaunchFiles
 import dev.ostrom.cli.launcher.LaunchVariables
 import dev.ostrom.cli.launcher.beforeSeparator
+import dev.ostrom.cli.launcher.child
 import dev.ostrom.cli.launcher.join
 import dev.ostrom.cli.launcher.objectOf
 import dev.ostrom.cli.launcher.parseObject
@@ -85,7 +86,10 @@ class ClaudeAdapter : AgentAdapter {
             throw AdapterException(unread(if (!inline && files.exists(theirs)) " $theirs" else ""))
         }
         val off = read?.get(DISABLE_ALL_HOOKS) == JsonPrimitive(true)
-        val merged = JsonObject(read.orEmpty() + (DISABLE_ALL_HOOKS to JsonPrimitive(false)))
+        // a repository's `enabledPlugins` can turn the plugin off too: this layer, before the project's, keeps it on
+        val plugins = JsonObject(read?.child(ENABLED_PLUGINS).orEmpty() + (PLUGIN_ID to JsonPrimitive(true)))
+        val merged = JsonObject(read.orEmpty() + (DISABLE_ALL_HOOKS to JsonPrimitive(false)) +
+            (ENABLED_PLUGINS to plugins))
         val path = join(layout.temporary, "claude-settings.json")
         files.write(path, merged.toString(), FileAccess.PRIVATE)
         return path to if (off) listOf(KEPT_ON) else emptyList()
@@ -147,6 +151,10 @@ class ClaudeAdapter : AgentAdapter {
         private const val END_SECONDS = 30L
         private const val SETTINGS = "--settings"
         private const val DISABLE_ALL_HOOKS = "disableAllHooks"
+        private const val ENABLED_PLUGINS = "enabledPlugins"
+
+        // a plugin loaded by --plugin-dir is `<name>@inline` for Claude Code
+        private const val PLUGIN_ID = "ostrom@inline"
 
         private const val NO_VALUE = "claude: --settings needs a value, a JSON object or a file"
         private const val KEPT_ON =
