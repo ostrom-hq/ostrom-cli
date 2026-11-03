@@ -133,6 +133,8 @@ class RelayPolicyTest {
         val ostrom = FakeOstrom { respond(if (status == HttpStatusCode.OK) signed else "{}", status, json) }
         val loop = PolicyRefreshLoop { refresh -> refreshes.send(refresh).also { awaitCancellation() } }
         relayTest(ostrom, policy = PolicyClock(30.seconds, clock, loop)) {
+            // the application starts at the first request otherwise, and with it the loop
+            startApplication()
             val refresh = refreshes.receive()
             refresh()
             assertEquals(0, ostrom.requests.size, "nothing kept yet, nothing read again")
