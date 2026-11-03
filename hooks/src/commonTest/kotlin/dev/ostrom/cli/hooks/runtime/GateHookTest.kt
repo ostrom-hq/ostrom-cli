@@ -382,6 +382,28 @@ class GateHookTest {
     }
 
     @Test
+    fun theRealPathIsMatchedBesideTheGivenOneNeverInPlaceOfIt() {
+        // an anchored pattern still sees the path the agent gave, and the real one on its own (review of cli#104)
+        val anchored = """{"failMode":"closed","actions":[{"class":"ci","label":"CI workflows","tools":["Write"],""" +
+            """"patterns":["^/w/\\.github/workflows/[^/]+\\.ya?ml$"],"gate":{"enforce":true,"approvers":["omar"]}}]}"""
+        calls = FakeCalls().on("/api/v1/gates", ok("""{"id":"G1","status":"pending"}"""))
+        val links = mapOf("/w/wf" to "/w/.github/workflows", "/w/.github/workflows/ci.yml" to "/w/other.txt")
+        val canonical = { path: String -> links[path] ?: path }
+        for (path in listOf("/w/.github/workflows/ci.yml", "/w/wf/x.yml", "wf/x.yml")) {
+            val reply = hook(catalogueText = anchored, canonical = canonical)
+                .handle(event("Write", """{"file_path":"$path"}"""))
+            assertEquals(2, reply.exitCode, path)
+        }
+        // the yes is asked for the path the agent gave: a link does not change what was approved
+        assertTrue(calls.calls.none { "ostrom: writes to" in it.body.toString() }, "no note in what is approved")
+        // a file tool does not expand ~: `~/x` is a folder named ~ under the working folder
+        val home = """{"failMode":"closed","actions":[{"class":"ci","label":"Home","tools":["Write"],""" +
+            """"patterns":["^/w/~/"],"gate":{"enforce":true,"approvers":["omar"]}}]}"""
+        val tilde = hook(catalogueText = home).handle(event("Write", """{"file_path":"~/.bashrc"}"""))
+        assertEquals(2, tilde.exitCode)
+    }
+
+    @Test
     fun aProgramNamedByAVariableIsRefusedWhileAGateIsEnforced() {
         val reply = hook().handle(bash("G=git; \$G push origin main"))
         assertEquals(2, reply.exitCode)
