@@ -210,7 +210,7 @@ Every pull request marked ready runs one required check on Linux, `ci` (drafts u
 - `linuxX64Test`; the linuxArm64 and mingwX64 test binaries and the release binaries of the three Linux-built targets;
   `scripts/measure.py` measures, on the release binary, `ostrom hook gate` and `ostrom version` start-up, warm (fails
   above a 15 ms median, and a p95 of 20 ms for the hook and 30 ms for `version`) and with the file cache emptied first
-  (500 ms), the hook's peak memory (25 MB; on Linux the figure read is never below the Python
+  (500 ms, median of 5 starts), the hook's peak memory (25 MB; on Linux the figure read is never below the Python
   script's own, about 14 MB, so the budget catches a hook above 25 MB, not a growth under it) and the binary sizes
   (15 MB, Windows 17); `ci/build-linux.sh` leaves `dist/ostrom` for the end-to-end bench. linuxArm64 holds the same
   start-up and memory budgets. macOS runners vary by about 3 times from one machine to the next, so macOS holds about
