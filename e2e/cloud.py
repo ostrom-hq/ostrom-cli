@@ -169,7 +169,7 @@ class Cloud:
         if not j.check(status == 201 and body.get("id") and body.get("token"),
                        f"the owner registers a machine ({status}): {str(body.get('id'))}"):
             return False
-        self.machine = {"id": body["id"], "container": f"ostrom-machine-{body['id'][:8]}"}
+        self.machine = {"id": body["id"], "container": f"ostrom-machine-{body['id'][:8]}", "console": console}
         started = subprocess.run(
             ["docker", "run", "-d", "--name", self.machine["container"], "--network", "host",
              "-e", f"OSTROM_SERVER_URL={j.server}", "-e", f"OSTROM_RUNNER_ID={body['id']}", "-e", "OSTROM_RUNNER_KEY",
@@ -191,13 +191,23 @@ class Cloud:
         return j.check(state == "online", f"the server has the machine online by its heartbeats ({state})")
 
     def machine_removed(self):
-        """The machine and the session containers it made, gone, whatever happened; its last logs said."""
-        logs = subprocess.run(["docker", "logs", "--tail", "40", self.machine["container"]], capture_output=True,
-                              text=True, check=False)
-        print(f"  note  machine {self.machine['id']}: {(logs.stdout + logs.stderr).strip()[-600:]}", flush=True)
-        made = subprocess.run(["docker", "ps", "-aq", "--filter", f"label=ostrom.run/runner={self.machine['id']}"],
-                              capture_output=True, text=True, check=False).stdout.split()
-        subprocess.run(["docker", "rm", "-f", self.machine["container"], *made], capture_output=True, check=False)
+        """
+        The machine, the session containers it made and its registration, gone whatever happened (an error here
+        never hides the step's own); its last logs said.
+        """
+        j = self.journey
+        try:
+            logs = subprocess.run(["docker", "logs", "--tail", "40", self.machine["container"]], capture_output=True,
+                                  text=True, check=False)
+            print(f"  note  machine {self.machine['id']}: {(logs.stdout + logs.stderr).strip()[-600:]}", flush=True)
+            label = f"label=ostrom.run/runner={self.machine['id']}"
+            made = subprocess.run(["docker", "ps", "-aq", "--filter", label], capture_output=True, text=True,
+                                  check=False).stdout.split()
+            subprocess.run(["docker", "rm", "-f", self.machine["container"], *made], capture_output=True, check=False)
+            j.call("DELETE", f"/api/v1/runners/{urllib.parse.quote(self.machine['id'])}",
+                   session=self.machine["console"], org=j.org_id)
+        except OSError as error:
+            print(f"  note  machine {self.machine['id']} not removed: {error}", flush=True)
 
     def path(self):
         return f"/api/v1/cloud/sessions/{urllib.parse.quote(self.session)}"
