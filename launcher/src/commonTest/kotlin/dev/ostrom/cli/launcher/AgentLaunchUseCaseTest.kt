@@ -589,6 +589,7 @@ class AgentLaunchUseCaseTest {
         server.unreachable = setOf("GET ${Routes.INSTANCE_KEYS}")
         server.slower = mapOf("GET ${Routes.PACKAGE}?repo=acme-api" to ROUND_TRIP)
         assertEquals(78, start())
+        assertEquals(1, server.sent("GET ${Routes.INSTANCE_KEYS}").size, "the keys were asked, and failed first")
         assertTrue(said.none { "instance's keys" in it }, "the package's refusal only: $said")
         assertEquals(emptyList(), commands)
     }

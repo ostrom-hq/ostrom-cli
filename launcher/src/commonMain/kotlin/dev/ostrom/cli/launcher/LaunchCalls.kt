@@ -156,14 +156,13 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
      */
     suspend fun reads(request: LaunchRequest, site: LaunchSite, repo: String, launch: Launch): LaunchReads =
         coroutineScope {
-            val notes = mutableListOf<String>()
             val keys = async { stopOf { instanceKeys() } }
-            val mcp = async { mcpServers(site) { notes += it } }
+            // the notes come back with the list they are about: said once it has answered, whichever answer is last
+            val mcp = async { mutableListOf<String>().let { notes -> mcpServers(site) { notes += it } to notes } }
             val inference = async { inferenceRelayed(request, site, launch) }
             val pack = packageOf(repo, site, keep = true)
             val read = keys.await()()
-            // said once the list has come back, whichever answer came last
-            val servers = mcp.await()
+            val (servers, notes) = mcp.await()
             notes.forEach(dependencies.say)
             LaunchReads(pack, read, servers, inference.await())
         }
