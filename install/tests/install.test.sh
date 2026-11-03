@@ -61,7 +61,8 @@ mk_release 2.2.0 "$host"
 printf 'tampered\n' >> "$site/download/2.2.0/ostrom-2.2.0-$host.tar.gz"
 # a release whose SHA256SUMS was changed after it was signed (its archive matches the new checksum)
 mk_release 2.3.0 "$host"
-printf 'tampered\n' >> "$site/download/2.3.0/ostrom-2.3.0-$host.tar.gz"
+mkdir -p "$tmp/pkg-evil"; printf '#!/bin/sh\necho "not ostrom"\n' > "$tmp/pkg-evil/ostrom"; chmod +x "$tmp/pkg-evil/ostrom"
+tar -czf "$site/download/2.3.0/ostrom-2.3.0-$host.tar.gz" -C "$tmp/pkg-evil" ostrom
 ( cd "$site/download/2.3.0" && printf '%s  %s\n' "$(sha256_file "ostrom-2.3.0-$host.tar.gz")" "ostrom-2.3.0-$host.tar.gz" > SHA256SUMS )
 # a release without its signature
 mk_release 2.4.0 "$host"

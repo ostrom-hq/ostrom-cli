@@ -133,7 +133,8 @@ Describe 'install.ps1' {
     (Invoke-Installer @{ OSTROM_VERSION = '2.0.0'; OSTROM_SKIP_COSIGN = '1' }).Ok | Should -BeFalse
   }
   It 'reads a DER signature whose integers carry a leading zero or are short' {
-    . ([scriptblock]::Create((Get-Content -Raw $installer) -replace '(?m)^Install-Ostrom\s*$', ''))
+    $functions = (Get-Content -Raw $installer) -replace '(?m)^Install-Ostrom\s*$', ''
+    . ([scriptblock]::Create($functions))
     $r = [byte[]](@(0x00, 0x80) + @(1) * 31)
     $s = [byte[]](@(5) * 31)
     $der = [byte[]](@(0x30, (2 + $r.Length + 2 + $s.Length), 0x02, $r.Length) + $r + @(0x02, $s.Length) + $s)
