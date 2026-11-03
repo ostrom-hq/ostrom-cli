@@ -69,8 +69,10 @@ def session(binary, actions, spec):
         try:
             home, agents, repo = setup(work)
             try:
-                _, report = launch(binary, server, home, agents, repo, work, "claude", ["-p", "perf"],
-                                   {"E2E_WINDOWS": spec})
+                # macOS keeps the device token in the Keychain, found from the user's own home: a home of the run's
+                # own has no keychain, and the Keychain waits on a question nobody answers (the session never starts)
+                extra = {"E2E_WINDOWS": spec, **({"HOME": os.environ["HOME"]} if sys.platform == "darwin" else {})}
+                _, report = launch(binary, server, home, agents, repo, work, "claude", ["-p", "perf"], extra)
             except subprocess.TimeoutExpired as late:
                 said = late.stderr.decode(errors="replace") if isinstance(late.stderr, bytes) else late.stderr or ""
                 with open(log) as handle:
