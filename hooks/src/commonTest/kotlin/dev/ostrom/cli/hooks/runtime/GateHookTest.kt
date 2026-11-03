@@ -5,6 +5,9 @@ import dev.ostrom.cli.hooks.HookReply
 import dev.ostrom.cli.hooks.gate.FakeGit
 import dev.ostrom.cli.hooks.gate.GateCatalogue
 import dev.ostrom.cli.hooks.gate.ToolSubject
+import dev.ostrom.cli.platform.LoopbackHttp
+import dev.ostrom.cli.platform.LoopbackRequest
+import dev.ostrom.cli.platform.LoopbackResponse
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -76,6 +79,7 @@ class GateHookTest {
         git: Map<String, String> = repository,
         catalogueText: String? = null,
         canonical: (String) -> String = { it.removeSuffix("/") },
+        ostrom: OstromCalls = calls,
     ): GateHook {
         // the verified policy (CatalogueStoreTest checks the signature); an unreadable one holds every action
         val parsed = GateCatalogue.parse(catalogueText ?: catalogue)
@@ -83,7 +87,7 @@ class GateHookTest {
             parsed?.let { CatalogueRead.Verified(it) } ?: CatalogueRead.Held("Ostrom's gate policy cannot be trusted")
         }
         val ids = SessionIds(context.sessionFile, files)
-        return GateHook(context, calls, ids, files, store, checks, FakeGit(git), canonical, "/w")
+        return GateHook(context, ostrom, ids, files, store, checks, FakeGit(git), canonical, "/w")
     }
 
     private fun event(tool: String, input: String, after: Boolean = false, cwd: String? = null) = buildJsonObject {
@@ -196,6 +200,51 @@ class GateHookTest {
         assertContains(reply.stdout, "Ostrom unreachable (Ostrom is unreachable (no connection)): \\\"Push to main\\\"")
         val noLabel = hook(catalogueText = catalogue).handle(event("mcp__github__merge_pr", """{"pr":1}"""))
         assertContains(noLabel.stderr, "\"merge\" needs a yes from the gate owner (gate)")
+    }
+
+    /** The local relay answering every call with [status] and [body], as it relays Ostrom's answer. */
+    private class Relay(private val status: Int, private val body: String) : LoopbackHttp {
+        override fun exchange(port: Int, request: LoopbackRequest, timeoutMillis: Int) =
+            Result.success(LoopbackResponse(status, body))
+    }
+
+    private fun relayed(status: Int, type: String, message: String) =
+        RelayCalls("http://127.0.0.1:1", "t", Relay(status, """{"error":{"type":"$type","message":"$message"}}"""))
+
+    @Test
+    fun aRefusalOfOstromIsSaidAsARefusalWithItsReasonNeverAsAnOutage() {
+        val reason = "This push changes where git reads or sends objects: ask the user to push it themselves."
+        val relay = relayed(403, "push_redirected", reason)
+        val closed = hook(ostrom = relay).handle(bash("git push origin main"))
+        assertEquals(2, closed.exitCode)
+        assertContains(closed.stderr, "needs a yes from omar (Main), and Ostrom refused the request: $reason")
+        assertFalse("unreachable" in closed.stderr, closed.stderr)
+        // the organisation's open fail mode is for an outage only: a refusal is still a refusal
+        val open = catalogue.replace("\"closed\"", "\"open\"")
+        val refused = hook(catalogueText = open, ostrom = relay).handle(bash("git push origin main"))
+        assertEquals(2, refused.exitCode, "a 4xx is no outage")
+        assertContains(refused.stderr, "Ostrom refused the request: $reason")
+    }
+
+    @Test
+    fun onlyAnOutageLetsAnActionThroughAnOpenFailMode() {
+        val open = catalogue.replace("\"closed\"", "\"open\"")
+        val down = relayed(502, CallResult.UNREACHABLE, "Ostrom is unreachable (connection refused)")
+        val outage = hook(catalogueText = open, ostrom = down).handle(bash("git push origin main"))
+        assertEquals(0, outage.exitCode)
+        val said = "Ostrom unreachable (Ostrom is unreachable (connection refused)): \\\"Push to main"
+        assertContains(outage.stdout, said)
+        // an error of Ostrom is said as one, and never lets a gated action through
+        val failing = relayed(500, "internal", "Internal error.")
+        val error = hook(catalogueText = open, ostrom = failing).handle(bash("git push origin main"))
+        assertEquals(2, error.exitCode, "a 5xx is not the relay's outage")
+        assertContains(error.stderr, "and Ostrom is unreachable (Internal error.)")
+        for (status in listOf(401, 403, 404, 422, 429)) {
+            val refusing = relayed(status, "refused", "No.")
+            val no = hook(catalogueText = open, ostrom = refusing).handle(bash("git push origin main"))
+            assertEquals(2, no.exitCode, "$status")
+            assertContains(no.stderr, "Ostrom refused the request: No.", message = "$status")
+        }
     }
 
     @Test
