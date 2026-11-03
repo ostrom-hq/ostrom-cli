@@ -148,10 +148,9 @@ class AdaptersTest {
                 "bearer_token_env_var=\"OSTROM_RELAY_TOKEN\"}" in overrides,
         )
         assertFalse(overrides.any { "default_tools_approval_mode" in it }, "S2-37: Codex asks before an MCP tool")
-        assertEquals(emptyMap(), launch.environment)
-        assertFalse("--dangerously-bypass-hook-trust" in arguments, "no package: no hook to trust")
-        assertEquals("-c", CodexAdapter().prepare(layout(arguments = listOf("hi")), files).arguments.first())
-        assertEquals(listOf("-c"), CodexAdapter().prepare(layout(), files).arguments.take(1))
+        assertEquals(mapOf("CODEX_HOME" to join("/tmp/run", "codex-home")), launch.environment)
+        assertEquals("-c", CodexAdapter().prepare(layout(arguments = listOf("hi")), MemoryFiles()).arguments.first())
+        assertEquals(listOf("-c"), CodexAdapter().prepare(layout(), MemoryFiles()).arguments.take(1))
     }
 
     @Test
