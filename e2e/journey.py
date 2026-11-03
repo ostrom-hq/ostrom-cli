@@ -240,7 +240,8 @@ class Journey:
             out, err = [part.decode(errors="replace") if isinstance(part, bytes) else part or ""
                         for part in (late.stdout, late.stderr)]
             self.record(machine, prefix + shown, f"still running after {timeout} s", out, err)
-            raise
+            # a command that does not return fails its own check (no exit code), not the steps after it
+            return subprocess.CompletedProcess(late.cmd, None, out, f"{err}\n(still running after {timeout} s)")
         self.record(machine, prefix + shown, done.returncode, done.stdout, done.stderr)
         return done
 
@@ -545,9 +546,8 @@ class Journey:
         if not self.check(session.get("endedAt") and any("session ended" in line for line in lines),
                           f"to its end ({session.get('endedAt')})"):
             return
-        try:
-            followed = self.ostrom(maya, "logs", session["id"], "-f", timeout=60)
-        except subprocess.TimeoutExpired:
+        followed = self.ostrom(maya, "logs", session["id"], "-f", timeout=60)
+        if followed.returncode is None:
             self.check(False, "-f on an ended session returns (it was still waiting after 60 s)")
             return
         tail = followed.stdout.splitlines()
