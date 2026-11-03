@@ -8,6 +8,7 @@
     5.6 the asker's own yes refused, 5.4 the second person's yes          5.5 ostrom wait lets it through
     5.7 the signed receipt, pulled and verified                         6.1 ostrom logs
     2.9 ostrom mcp: a server of the organisation, called through the session's relay
+    4.3 ostrom mcp --server ostrom: the agent asks a person, the console answers, the agent reads the answer
     6.2 ostrom claude --cloud and ostrom attach: a session in Ostrom's cloud, detached and attached again
 
     python3 e2e/journey.py --binary ostrom --server http://127.0.0.1:4600 --mail-dir /tmp/mail \\
@@ -42,6 +43,7 @@ import urllib.request
 
 from cloud import Cloud
 from mcp_relay import McpRelay
+from mcp_waits import McpWaits
 from rules import Rules
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -195,9 +197,11 @@ class Journey:
         last = self.recent.get(email)
         if last is not None and time.monotonic() - last[1] < RECENT_SIGN_IN_S:
             return last[0]
+        # its age counts from the request of the link, before the mail and the exchange
+        asked = time.monotonic()
         session = self.sign_in(email)
         if session is not None:
-            self.recent[email] = (session, time.monotonic())
+            self.recent[email] = (session, asked)
         return session
 
     def seed(self, email):
@@ -244,7 +248,8 @@ class Journey:
             out, err = [part.decode(errors="replace") if isinstance(part, bytes) else part or ""
                         for part in (late.stdout, late.stderr)]
             self.record(machine, prefix + shown, f"still running after {timeout} s", out, err)
-            raise
+            # a command that does not return fails its own check (no exit code), not the steps after it
+            return subprocess.CompletedProcess(late.cmd, None, out, f"{err}\n(still running after {timeout} s)")
         self.record(machine, prefix + shown, done.returncode, done.stdout, done.stderr)
         return done
 
@@ -387,6 +392,57 @@ class Journey:
         self.check(personal.returncode == 0 and "Rules       this token cannot read them" in personal.stdout,
                    f"init with a personal token exits 0 and says it cannot read the rules ({personal.returncode}): "
                    f"{(personal.stdout + personal.stderr).strip()[-300:]}")
+        if self.holds():
+            self.init_accepts(maya)
+
+    def init_accepts(self, maya):
+        """
+        init's one governance write (audit H1): the rules proposed, accepted with a token made on the console that
+        reads them. The server holds the write until the owner confirms it on the console; init then says what it
+        accepted. The rule and the token are removed after, so that the steps after this one start as before.
+        """
+        session = self.recent_sign_in(maya["email"])
+        if not self.check(session is not None, "the owner is signed in to the console"):
+            return
+        status, rule, _ = self.call("POST", "/api/v1/rules", {"statement": "Never push to main without a review.",
+                                                              "group": "journey", "status": "proposed"},
+                                    session=session, org=self.org_id)
+        rule_id = rule.get("id") if isinstance(rule, dict) else None
+        if not self.check(status == 201 and rule_id, f"the console proposes a rule ({status}): {error_of(rule)[:200]}"):
+            return
+        # the catalogue's reads (a token holds 1 to 32 scopes): init reads the org, its repositories, workflows and
+        # rules; its one write, the rules' acceptance, needs no scope of the token, as the server holds it anyway (H1)
+        listed, catalogue, _ = self.call("GET", "/api/v1/tokens/scopes", session=session)
+        scopes = [s["scope"] for s in catalogue.get("scopes", []) if s["scope"].endswith(":read")] \
+            if isinstance(catalogue, dict) else []
+        if not self.check(listed == 200 and 0 < len(scopes) <= 32,
+                          f"the console lists the reads a token may hold ({listed}, {len(scopes)})"):
+            return
+        status, made, _ = self.call("POST", "/api/v1/tokens", {"name": "journey init", "scopes": scopes,
+                                                               "expiresInDays": 1}, session=session)
+        secret = made.get("secret") if isinstance(made, dict) else None
+        token_id = ((made or {}).get("token") or {}).get("id") if isinstance(made, dict) else None
+        try:
+            if not self.check(status == 201 and secret and "rules:read" in scopes,
+                              f"the console makes a token that reads the rules ({status}): {error_of(made)[:200]}"):
+                return
+            done = self.governed({**maya, "token": secret}, "init", "--yes", console=True)
+            out = self.step["commands"][-1]["stdout"]
+            # init accepts every rule still proposed: the run's org is new, but its own rule is the one checked below
+            self.check(done == 0 and re.search(r"✓ \d+ rules accepted", out) is not None,
+                       f"init with it accepts the proposed rule once the owner confirms ({done}): "
+                       f"{(out + self.last_said).strip()[-300:]}")
+            status, read, _ = self.call("GET", f"/api/v1/rules/{rule_id}", session=session, org=self.org_id)
+            self.check(status == 200 and (read or {}).get("status") == "accepted",
+                       f"the rule is accepted on the server ({status}, {(read or {}).get('status')})")
+        finally:
+            # the confirmation may have taken minutes: a sign-in recent enough for the console's writes
+            session = self.recent_sign_in(maya["email"]) or session
+            removed, _, _ = self.call("DELETE", f"/api/v1/rules/{rule_id}", session=session, org=self.org_id)
+            self.check(removed in (200, 204), f"the journey's rule is removed on the console ({removed})")
+            if token_id:
+                revoked, _, _ = self.call("DELETE", f"/api/v1/tokens/{token_id}", session=session)
+                self.check(revoked in (200, 204), f"and its token revoked ({revoked})")
 
     def team(self, maya, tom_email, org):
         """2.6, 2.7, then the policy, the rules, the harness and the launch."""
@@ -497,6 +553,7 @@ class Journey:
 
         # a session of its own, after 6.1 (which reads the developer's last session, the one of 5.2)
         self.guarded(McpRelay(self, maya, SESSION_ROUTES).run)
+        self.guarded(McpWaits(self, maya, SESSION_ROUTES).run)
         self.guarded(Cloud(self, maya).run)
 
         if self.invitee:
@@ -546,9 +603,8 @@ class Journey:
         if not self.check(session.get("endedAt") and any("session ended" in line for line in lines),
                           f"to its end ({session.get('endedAt')})"):
             return
-        try:
-            followed = self.ostrom(maya, "logs", session["id"], "-f", timeout=60)
-        except subprocess.TimeoutExpired:
+        followed = self.ostrom(maya, "logs", session["id"], "-f", timeout=60)
+        if followed.returncode is None:
             self.check(False, "-f on an ended session returns (it was still waiting after 60 s)")
             return
         tail = followed.stdout.splitlines()
