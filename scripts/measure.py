@@ -51,14 +51,19 @@ PUSH = event("git push origin main")
 MEMORY_RUNS = 20
 
 
+def checked(command, code, errors, accepted):
+    """Stops the measure when [command] exited with a code outside [accepted]: a broken binary is never measured."""
+    if code not in accepted:
+        raise SystemExit(f"{command} exited {code}: {errors.decode(errors='replace')}")
+
+
 def run_many(command, runs, stdin=None, env=None, accepted=(0,)):
     walls, insides = [], []
     for index in range(runs + 5):
         start = time.perf_counter()
         result = subprocess.run(command, input=stdin, capture_output=True, env=env)
         wall = (time.perf_counter() - start) * 1000
-        if result.returncode not in accepted:
-            raise SystemExit(f"{command} exited {result.returncode}: {result.stderr.decode(errors='replace')}")
+        checked(command, result.returncode, result.stderr, accepted)
         if index < 5:
             continue  # warm-up: page cache, first-run checks of the OS
         walls.append(wall)
@@ -75,28 +80,36 @@ def describe(values):
 
 
 def drop_file_cache():
-    """Empties the system's file cache, so that the next start reads the binary from the disk: False where it cannot."""
+    """Empties the system's file cache, so that the next start reads the binary from the disk.
+
+    Returns None when it is done, else why it cannot be done here."""
     if sys.platform.startswith("linux"):
         command = ["sudo", "-n", "sh", "-c", "sync; echo 3 > /proc/sys/vm/drop_caches"]
     elif sys.platform == "darwin":
         command = ["sudo", "-n", "purge"]
     else:
-        return False
-    return subprocess.run(command, capture_output=True).returncode == 0
+        return f"no way to empty the file cache on {sys.platform}"
+    try:
+        result = subprocess.run(command, capture_output=True)
+    except FileNotFoundError:
+        return "no `sudo` here"
+    return None if result.returncode == 0 else f"`{' '.join(command[:3])}` refused"
 
 
 def run_cold(command, runs, stdin=None, env=None, accepted=(0,)):
-    """Wall times of [command] each started with the file cache empty (a first start of the day); [] where it cannot."""
+    """Wall times of [command] each started with the file cache empty (a first start of the day).
+
+    Returns the times and None, or no time and why they cannot be measured here."""
     walls = []
     for _ in range(runs):
-        if not drop_file_cache():
-            return []
+        reason = drop_file_cache()
+        if reason:
+            return [], reason
         start = time.perf_counter()
         result = subprocess.run(command, input=stdin, capture_output=True, env=env)
         walls.append((time.perf_counter() - start) * 1000)
-        if result.returncode not in accepted:
-            raise SystemExit(f"{command} exited {result.returncode}: {result.stderr.decode(errors='replace')}")
-    return walls
+        checked(command, result.returncode, result.stderr, accepted)
+    return walls, None
 
 
 def peak_memory_mb(command, runs, stdin=None, env=None, accepted=(0,)):
@@ -109,18 +122,18 @@ def peak_memory_mb(command, runs, stdin=None, env=None, accepted=(0,)):
         return None
     peaks = []
     for _ in range(runs):
-        process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
-                                   stderr=subprocess.PIPE, env=env)
-        try:
-            process.stdin.write(stdin or b"")
-            process.stdin.close()
-        except BrokenPipeError:
-            pass  # the command exited before reading: its exit code below says why
-        errors = process.stderr.read()
-        _, status, usage = os.wait4(process.pid, 0)
-        process.returncode = os.waitstatus_to_exitcode(status)
-        if process.returncode not in accepted:
-            raise SystemExit(f"{command} exited {process.returncode}: {errors.decode(errors='replace')}")
+        with subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                              stderr=subprocess.PIPE, env=env) as process:
+            try:
+                process.stdin.write(stdin or b"")
+                process.stdin.close()
+            except BrokenPipeError:
+                pass  # the command exited before reading: its exit code below says why
+            errors = process.stderr.read()
+            _, status, usage = os.wait4(process.pid, 0)
+            # reaped here: the returncode keeps Popen from waiting for it again when the block closes the pipes
+            process.returncode = os.waitstatus_to_exitcode(status)
+        checked(command, process.returncode, errors, accepted)
         # ru_maxrss is in bytes on macOS, in kilobytes on Linux
         peaks.append(usage.ru_maxrss / (1e6 if sys.platform == "darwin" else 1e3))
     return max(peaks)
@@ -157,10 +170,11 @@ def main():
     hook_median, hook_p95 = describe(hook_walls)
     inside_median, _ = describe(hook_insides) if hook_insides else (float("nan"), None)
     version_median, version_p95 = describe(version_walls)
-    cold_hook = run_cold([args.binary, "hook", "gate"], args.cold_runs, stdin=EVENT, env=env, accepted=(0, 2))
-    cold_version = run_cold([args.binary, "version"], args.cold_runs)
+    cold_hook, cold_hook_reason = run_cold([args.binary, "hook", "gate"], args.cold_runs, stdin=EVENT, env=env,
+                                           accepted=(0, 2))
+    cold_version, cold_version_reason = run_cold([args.binary, "version"], args.cold_runs)
+    floor = harness_floor_mb(MEMORY_RUNS)  # first: the script's own memory only grows
     memory = peak_memory_mb([args.binary, "hook", "gate"], MEMORY_RUNS, stdin=EVENT, env=env, accepted=(0, 2))
-    floor = harness_floor_mb(MEMORY_RUNS) if memory is not None else None
 
     lines = [
         f"### ostrom on {args.label}",
@@ -172,10 +186,10 @@ def main():
         f"| `ostrom hook gate` (inside the hook) | {inside_median:.3f} | |",
         f"| `ostrom version` (wall) | {version_median:.2f} | {version_p95:.2f} |",
     ]
-    colds = (("ostrom hook gate", cold_hook), ("ostrom version", cold_version))
+    colds = (("ostrom hook gate", cold_hook, cold_hook_reason), ("ostrom version", cold_version, cold_version_reason))
     if cold_hook or cold_version:
         lines += ["", "| Measure | Median (ms) | Max (ms) |", "| --- | --- | --- |"]
-    for name, walls in colds:
+    for name, walls, _ in colds:
         if walls:
             lines.append(f"| `{name}`, file cache emptied first ({len(walls)} runs) | "
                          f"{statistics.median(walls):.2f} | {max(walls):.2f} |")
@@ -202,9 +216,9 @@ def main():
     if args.max_version_p95_ms is not None and version_p95 > args.max_version_p95_ms:
         failed.append(f"ostrom version takes {version_p95:.2f} ms at p95, above {args.max_version_p95_ms} ms")
     if args.max_cold_ms is not None:
-        for name, walls in colds:
+        for name, walls, reason in colds:
             if not walls:
-                failed.append(f"{name} cannot be started with the file cache emptied here (`sudo -n` refused), "
+                failed.append(f"{name} cannot be started with the file cache emptied here ({reason}), "
                               f"so --max-cold-ms {args.max_cold_ms} cannot be held")
             elif max(walls) > args.max_cold_ms:
                 failed.append(f"{name} takes {max(walls):.2f} ms with the file cache emptied, "
@@ -213,7 +227,10 @@ def main():
         if memory is None:
             failed.append(f"this system does not give a process's peak memory (wait4), "
                           f"so --max-hook-memory-mb {args.max_hook_memory_mb} cannot be held")
-        elif floor is not None and floor >= args.max_hook_memory_mb:
+        elif floor is None:
+            failed.append(f"`true` is not on the PATH, so the floor of this harness is unknown and "
+                          f"--max-hook-memory-mb {args.max_hook_memory_mb} cannot be held")
+        elif floor >= args.max_hook_memory_mb:
             failed.append(f"`true` alone shows {floor:.2f} MB here, so --max-hook-memory-mb "
                           f"{args.max_hook_memory_mb} cannot be held")
         elif memory > args.max_hook_memory_mb:
