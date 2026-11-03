@@ -16,8 +16,8 @@ internal sealed interface RelayTarget {
 
     /**
      * `GET /api/v1/gates/catalog/signed`: the organisation's gate policy signed by the instance, forwarded to Ostrom
-     * and kept in memory for a few seconds; the hook checks its signature and expiry at every call (security audit
-     * S2-20).
+     * and kept in memory for 30 s, read again in the background in an active session; the hook checks its signature
+     * and expiry at every call (security audit S2-20).
      */
     data object SignedCatalog : RelayTarget
 
@@ -48,7 +48,7 @@ internal val SESSION_REOPEN = Regex("/api/v1/sessions/$SESSION/reopen")
 private const val API_PREFIX = "/api/v1/"
 private const val MCP_PREFIX = "/mcp/"
 private const val GATE_CATALOG = "/api/v1/gates/catalog"
-private const val SIGNED_GATE_CATALOG = "/api/v1/gates/catalog/signed"
+internal const val SIGNED_GATE_CATALOG = "/api/v1/gates/catalog/signed"
 
 /**
  * The hook routes the relay forwards (CLI-AGENTS, `api/openapi.yaml` of ostrom-core), by method. Ending a session,

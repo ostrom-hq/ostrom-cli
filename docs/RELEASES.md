@@ -88,7 +88,7 @@ cosign verify --key cosign.pub --insecure-ignore-tlog ghcr.io/ostrom-hq/ostrom-r
 
 (`install.sh` and `install.ps1` check the signature of `SHA256SUMS` against the pinned cosign key, with `cosign` when it
 is installed, else with `openssl` (install.sh) or .NET (install.ps1), then the SHA-256 of the archive. Without either
-tool, install.sh says the signature was not checked. A dry run of the release signs with throwaway keys, never with
+tool, install.sh installs nothing unless `OSTROM_SKIP_COSIGN=1`. A dry run of the release signs with throwaway keys, never with
 the release keys.)
 
 ## The update manifest, for `ostrom update`
@@ -158,6 +158,10 @@ scoop bucket add ostrom https://github.com/ostrom-hq/scoop-bucket; scoop install
 Installer variables: `OSTROM_VERSION` (default: the latest, through `latest.json`), `OSTROM_INSTALL_DIR` (default
 `~/.ostrom/bin`; never needs root), `OSTROM_DOWNLOAD_BASE` (default `https://github.com/ostrom-hq/ostrom-cli/releases`),
 `OSTROM_NO_MODIFY_PATH=1`, `OSTROM_SKIP_COSIGN=1`.
+
+Both installers check the signature of `SHA256SUMS` before the archive's checksum. `install.sh` does it with `cosign`
+or, without it, `openssl`. With neither, it installs nothing: the checksum alone comes from the same place as the
+archive. Set `OSTROM_SKIP_COSIGN=1` to install on the checksum alone. `install.ps1` always has .NET to check it.
 
 ## Signing the binaries themselves
 

@@ -88,12 +88,13 @@ class AdaptersTest {
             listOf("--plugin-dir", join("/tmp/run", "plugin"), "--resume", "x", "--mcp-config", mcp, "--", "prompt"),
             launch.arguments,
         )
-        assertEquals(emptyMap(), launch.environment)
+        assertEquals(mapOf("OSTROM_HOOK_BUDGET_MS" to "18000"), launch.environment)
         val hooks = checkNotNull(parseObject(files.texts[join("/tmp/run", "plugin", "hooks", "hooks.json")]))
         val pre = hooks.child("hooks")?.let { it["PreToolUse"].toString() }
         assertEquals(
             """[{"matcher":"Bash|Write|Edit|MultiEdit|mcp__.*",""" +
-                """"hooks":[{"type":"command","command":"\"/opt/ostrom\" hook gate","timeout":20}]}]""",
+                """"hooks":[{"type":"command","command":"\"/opt/ostrom\" hook gate","timeout":20,""" +
+                """"onFailure":"block"}]}]""",
             pre,
         )
         assertTrue(hooks.child("hooks").toString().contains("mcp__.*|Skill|Task|Agent"))
@@ -117,6 +118,34 @@ class AdaptersTest {
         assertEquals(listOf("--plugin-dir", join("/tmp/run", "plugin"), "-p", "hi"), launch.arguments)
         assertEquals("""{"name":"acme"}""", files.texts[manifest])
         assertNull(files.texts[join("/tmp/run", "mcp.json")])
+    }
+
+    @Test
+    fun claudeBlocksTheToolWhenTheGateHookFailsOrRunsPastItsLimit() {
+        // a hook that times out or fails is a non-blocking error for Claude Code unless it says "onFailure": "block"
+        ClaudeAdapter().prepare(layout(), files)
+        val hooks = checkNotNull(parseObject(files.texts[join("/tmp/run", "plugin", "hooks", "hooks.json")]))
+        val pre = hooks.child("hooks")?.get("PreToolUse").toString()
+        assertTrue(""""onFailure":"block"""" in pre, pre)
+        val after = hooks.child("hooks")?.get("PostToolUse").toString()
+        assertFalse("onFailure" in after, "after the tool, a failure stops nothing")
+    }
+
+    @Test
+    fun claudeAndCodexGateHooksAnswerWithinTheLimitTheAgentGivesThem() {
+        // both agents stop waiting at the hook's timeout: the hook must refuse before, not be cut off
+        // a little under it: the agent counts from the hook's spawn
+        val claude = ClaudeAdapter().prepare(layout(), files)
+        assertEquals("18000", claude.environment["OSTROM_HOOK_BUDGET_MS"])
+        val codex = CodexAdapter().prepare(layout(), files)
+        assertEquals("18000", codex.environment["OSTROM_HOOK_BUDGET_MS"])
+        // with a package's enforced checks, the limit is theirs: 120 s and 20 s of margin
+        val pack = SessionPackage(objectOf("scripts" to listOf(mapOf("mode" to "enforce", "timeoutSec" to 120))), "d")
+        assertEquals("138000", ClaudeAdapter().prepare(layout(pack = pack), files).environment["OSTROM_HOOK_BUDGET_MS"])
+        assertEquals(
+            "138000",
+            CodexAdapter().prepare(layout(pack = pack), MemoryFiles()).environment["OSTROM_HOOK_BUDGET_MS"],
+        )
     }
 
     @Test
@@ -148,7 +177,7 @@ class AdaptersTest {
                 "bearer_token_env_var=\"OSTROM_RELAY_TOKEN\"}" in overrides,
         )
         assertFalse(overrides.any { "default_tools_approval_mode" in it }, "S2-37: Codex asks before an MCP tool")
-        assertEquals(emptyMap(), launch.environment)
+        assertEquals(mapOf("OSTROM_HOOK_BUDGET_MS" to "18000"), launch.environment)
         assertFalse("--dangerously-bypass-hook-trust" in arguments, "no hook is trusted blindly")
         assertEquals("-c", CodexAdapter().prepare(layout(arguments = listOf("hi")), files).arguments.first())
         assertEquals(listOf("-c"), CodexAdapter().prepare(layout(), files).arguments.take(1))

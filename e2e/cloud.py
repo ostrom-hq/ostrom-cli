@@ -4,8 +4,11 @@
 `ostrom claude --cloud`, with the token of `ostrom login`, asks the server for a cloud session (no repository: the
 machine's folder has no GitHub origin), waits until it runs, then gives it this terminal: the session's bytes come to
 stdout. Ctrl-] (0x1d on stdin) detaches and leaves it running. `ostrom attach <id>` gives it the terminal again, and
-detaches the same way. The owner stops it (`DELETE /api/v1/cloud/sessions/{id}`, as the console's Stop does), and
-`ostrom attach` then says it is terminated. Every state is read back from the server.
+the keys typed reach the session: Ctrl-C ends Claude Code (no account in the CI: it waits in its first-run
+screens), the session's script leaves a login shell, and a command typed in it comes back computed (`$((6*7))` read
+as 42), which only the session's shell can have done. It detaches the same way. The owner stops it
+(`DELETE /api/v1/cloud/sessions/{id}`, as the console's Stop does), and `ostrom attach` then says it is terminated.
+Every state is read back from the server.
 
 The server must run cloud sessions somewhere: ostrom-server's cli-journey.yml gives it a runtime driver (the Docker of
 the CI's machine, as its console-journey.yml) and says so with --cloud-sessions; without it, the step is skipped and
@@ -24,6 +27,10 @@ ROUTES = (("POST", "/api/v1/cloud/sessions"), ("GET", "/api/v1/cloud/sessions"),
           ("GET", "/api/v1/cloud/sessions/journey"), ("DELETE", "/api/v1/cloud/sessions/journey"))
 STARTED = re.compile(r"in Ostrom's cloud \(session (\S+)\)")
 DETACH = b"\x1d"
+INTERRUPT = b"\x03"
+# a shell reading a command: the end of bash's prompt (the session's script leaves one when the agent ends, or starts
+# one again when Ctrl-C ended the script too, ostrom-server runner/RunnerConfig.kt, SessionScript)
+PROMPT = b"$ "
 # a session's image is on the machine already; its three containers start in about a minute, the CLI waits up to 10
 START_S = 420
 OUTPUT_S = 120
@@ -177,17 +184,35 @@ class Cloud:
         j.check(status == 200 and body.get("status") == "running",
                 f"the session keeps running after the detach ({status}: {body.get('status')})")
         attach = self.terminal("attach", self.session)
-        # keys the agent shows back: a letter in its prompt, an arrow in its menus (a shell echoes the letter)
-        time.sleep(5)
-        attach.type(b"x")
-        attach.type(b"\x1b[B")
         shown = attach.wait_until(lambda: len(attach.output) > 0, OUTPUT_S)
-        j.check(shown, f"ostrom attach {self.session} relays the keys typed and shows the session "
-                       f"({len(attach.output)} bytes)")
+        j.check(shown, f"ostrom attach {self.session} shows the session again ({len(attach.output)} bytes)")
+        # Ctrl-C twice ends Claude Code; again every few seconds until a shell's prompt shows after this attach's
+        # first key (never in the screen replayed on attaching)
+        interrupted_at = len(attach.output)
+
+        def exited():
+            return attach.output.find(PROMPT, interrupted_at) >= 0
+
+        deadline = time.monotonic() + OUTPUT_S
+        while not exited() and attach.process.poll() is None and time.monotonic() < deadline:
+            attach.type(INTERRUPT)
+            time.sleep(0.3)
+            attach.type(INTERRUPT)
+            attach.wait_until(exited, 5)
+        # said, not checked: the proof is the command below, whichever shell takes it
+        print(f"  note  a shell after Ctrl-C: {exited()} ({tail(attach.output[interrupted_at:])})", flush=True)
+        # the shell's prompt comes before the command; its echo shows `$((6*7))`, only its run shows 42
+        attach.wait_until(lambda: False, 2)
+        computed = f"ostrom-{6 * 7}-{j.stamp}".encode()
+        typed_at = len(attach.output)
+        attach.type(f"echo ostrom-$((6*7))-{j.stamp}\r".encode())
+        ran = attach.wait_until(lambda: attach.output.find(computed, typed_at) >= 0, OUTPUT_S)
+        j.check(ran, f"a command typed through ostrom attach runs in the session's shell ({computed.decode()} came "
+                     f"back): {tail(attach.output[typed_at:])}")
         attach.type(DETACH)
         code = attach.end()
         return j.check(code == 0 and f"Detached: session {self.session} keeps running" in attach.stderr(),
-                       f"Ctrl-] detaches again, exit 0 ({code}): {attach.stderr().strip()[-300:]}") and shown
+                       f"Ctrl-] detaches again, exit 0 ({code}): {attach.stderr().strip()[-300:]}") and shown and ran
 
     def stopped(self):
         """The owner stops it, as the console's Stop does; `ostrom attach` then says it is over."""
@@ -208,3 +233,9 @@ class Cloud:
         j.check(code == 1 and f"session {self.session} is terminated" in attach.stderr(),
                 f"ostrom attach says it is terminated, exit 1 ({code}): {attach.stderr().strip()[-300:]}")
         self.session = None
+
+
+def tail(output):
+    """The end of a terminal's bytes, readable in a check: escape sequences dropped."""
+    text = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07", "", bytes(output).decode(errors="replace"))
+    return " ".join(text.split())[-200:]

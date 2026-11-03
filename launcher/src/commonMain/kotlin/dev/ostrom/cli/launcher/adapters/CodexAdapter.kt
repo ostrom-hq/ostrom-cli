@@ -43,7 +43,8 @@ class CodexAdapter : AgentAdapter {
             overrides += "mcp_servers.${mcpLabel(name)}={url=$url," +
                 "bearer_token_env_var=\"${LaunchVariables.RELAY_TOKEN}\"}"
         }
-        val environment = if (layout.pack == null) emptyMap() else mapOf("CODEX_HOME" to codexHome(layout, files))
+        val home = if (layout.pack == null) emptyMap() else mapOf("CODEX_HOME" to codexHome(layout, files))
+        val environment = gateBudget(layout) + home
         // `codex exec …`: the subcommand first, then the overrides
         val (subcommand, rest) = if (layout.arguments.firstOrNull() == "exec") {
             listOf("exec") to layout.arguments.drop(1)

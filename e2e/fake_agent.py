@@ -18,6 +18,10 @@ With $E2E_WAITS (a path), the session asks a person through Ostrom's own server,
 ostrom` ([waits]): two `ask_human`, whose answers it writes to $E2E_WAITS.asked; then it reads the first with
 `get_wait` until a person answers it on the console (150 s at most), cancels the second with `cancel_wait` and reads it.
 
+With $E2E_LAUNCH_ONLY, the session only plays what a launch costs (5.9): it writes the epoch time it started at, fires
+SessionStart, then one gated PreToolUse, each with the epoch time it began and ended at, and writes $E2E_REPORT
+({"started", "hooks": [{"event", "tool", "code", "begin", "end"}]}); it exits 0. Nothing else is fired.
+
 Installed by the run as `claude` and `codex` (the name it is started under picks the dialect).
 """
 import json
@@ -250,13 +254,32 @@ def bridge(settings, server, messages):
     return {"code": done.returncode, "answers": answers, "stderr": done.stderr[-1000:]}
 
 
+def launch_only(hooks, base, started):
+    """E2E_LAUNCH_ONLY: SessionStart, then one gated tool; each hook's begin and end in epoch seconds (5.9)."""
+    played = []
+    for event, tool in (("SessionStart", None), ("PreToolUse", "kubectl apply -f prod.yaml")):
+        payload = {**base, "hook_event_name": event}
+        payload.update({"source": "startup"} if tool is None else
+                       {"tool_name": "Bash", "tool_input": {"command": tool}})
+        begin = time.time()
+        done = fire(hooks[event], payload)
+        played.append({"event": event, "tool": tool, "code": done["code"], "begin": begin, "end": time.time(),
+                       "millis": done["millis"], "stderr": done["stderr"][-300:]})
+    with open(os.environ["E2E_REPORT"], "w") as handle:
+        json.dump({"started": started, "hooks": played}, handle)
+    sys.exit(0)
+
+
 def main():
+    started = time.time()
     name = os.path.basename(sys.argv[0]).split(".")[0]
     arguments = sys.argv[1:]
     hooks = claude_hooks(arguments) if name == "claude" else codex_hooks(arguments)
     cwd = os.getcwd()
     session = f"{name}-session-1"
     base = {"session_id": session, "cwd": cwd, "transcript_path": os.path.join(cwd, "transcript.jsonl")}
+    if os.environ.get("E2E_LAUNCH_ONLY"):
+        launch_only(hooks, base, started)
     fired = [fire(hooks["SessionStart"], {**base, "hook_event_name": "SessionStart", "source": "startup"})]
     if os.environ.get("E2E_MCP") or os.environ.get("E2E_WAITS"):
         relayed = mcp(arguments, os.environ["E2E_MCP"], os.environ.get("E2E_MCP_SAY", "")) \
