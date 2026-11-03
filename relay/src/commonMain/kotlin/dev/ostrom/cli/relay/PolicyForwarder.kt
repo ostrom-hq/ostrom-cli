@@ -45,7 +45,8 @@ internal class PolicyMemory(private val freshFor: Duration, private val clock: T
 
     /** The query of the policy kept, to read again while a hook asked within [activeFor]; else null. */
     suspend fun toReadAgain(activeFor: Duration): String? = lock.withLock {
-        kept?.query?.takeIf { asked.elapsedNow() < activeFor }
+        val held = kept ?: return@withLock null
+        if (asked.elapsedNow() < activeFor) held.query else null
     }
 }
 
