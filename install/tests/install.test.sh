@@ -3,11 +3,27 @@
 # Tests of install.sh against a fake release served by python3 -m http.server on localhost.
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/../../scripts/release/tests/lib.sh"
-installer="$here/../install.sh"
+source_installer="$here/../install.sh"
 tmp=$(mktemp -d)
 server_pid=""
 cleanup() { [ -z "$server_pid" ] || kill "$server_pid" 2>/dev/null; rm -rf "$tmp"; }
 trap cleanup EXIT
+
+# The release's cosign key, played by a key made here: the installer under test is install.sh with this public key in
+# place of the pinned one. cosign signs a blob as ECDSA P-256 over its SHA-256, DER, in base64: openssl makes the same.
+openssl ecparam -name prime256v1 -genkey -noout -out "$tmp/cosign.key" 2>/dev/null
+openssl ec -in "$tmp/cosign.key" -pubout -out "$tmp/cosign.pub" 2>/dev/null
+installer="$tmp/install.sh"
+awk -v pub="$tmp/cosign.pub" '
+  /^COSIGN_PUB=/ { skipping = 1; printf "COSIGN_PUB=\047"; while ((getline line < pub) > 0) { if (n++) printf "\n"; printf "%s", line }; next }
+  skipping && /-----END PUBLIC KEY-----\047/ { skipping = 0; print "\047"; next }
+  skipping { next }
+  { print }
+' "$source_installer" > "$installer"
+grep -q 'BEGIN PUBLIC KEY' "$installer" || { echo "the test key was not put in the installer" >&2; exit 1; }
+sign() { # <file>: <file>.sig as cosign writes it
+  openssl dgst -sha256 -sign "$tmp/cosign.key" "$1" | openssl base64 -A > "$1.sig"
+}
 
 # Host target, computed independently of the installer.
 case "$(uname -s)-$(uname -m)" in
@@ -26,7 +42,7 @@ mk_release() { # <version> <target>
   printf 'Apache\n' > "$tmp/pkg-$v/LICENSE"
   tar -czf "$d/ostrom-$v-$t.tar.gz" -C "$tmp/pkg-$v" ostrom LICENSE
   ( cd "$d" && printf '%s  %s\n' "$(sha256_file "ostrom-$v-$t.tar.gz")" "ostrom-$v-$t.tar.gz" > SHA256SUMS )
-  printf 'sig\n' > "$d/SHA256SUMS.sig"
+  sign "$d/SHA256SUMS"
 }
 mk_release 1.2.3 "$host"
 mk_release 1.3.0 "$host"
@@ -35,12 +51,21 @@ printf '{"version":"1.3.0","date":"2026-10-30T10:00:00Z","assets":{}}\n' > "$sit
 # a release whose checksum file lies
 mk_release 2.0.0 "$host"
 printf '%s  ostrom-2.0.0-%s.tar.gz\n' "0000000000000000000000000000000000000000000000000000000000000000" "$host" > "$site/download/2.0.0/SHA256SUMS"
+sign "$site/download/2.0.0/SHA256SUMS"
 # a release whose checksum file has no line for our archive
 mk_release 2.1.0 "$host"
 printf '%s  something-else.tar.gz\n' "0000000000000000000000000000000000000000000000000000000000000000" > "$site/download/2.1.0/SHA256SUMS"
+sign "$site/download/2.1.0/SHA256SUMS"
 # a release whose archive was swapped after the checksum was published
 mk_release 2.2.0 "$host"
 printf 'tampered\n' >> "$site/download/2.2.0/ostrom-2.2.0-$host.tar.gz"
+# a release whose SHA256SUMS was changed after it was signed (its archive matches the new checksum)
+mk_release 2.3.0 "$host"
+printf 'tampered\n' >> "$site/download/2.3.0/ostrom-2.3.0-$host.tar.gz"
+( cd "$site/download/2.3.0" && printf '%s  %s\n' "$(sha256_file "ostrom-2.3.0-$host.tar.gz")" "ostrom-2.3.0-$host.tar.gz" > SHA256SUMS )
+# a release without its signature
+mk_release 2.4.0 "$host"
+rm "$site/download/2.4.0/SHA256SUMS.sig"
 
 ( cd "$site" && python3 -u -m http.server 0 --bind 127.0.0.1 > "$tmp/server.log" 2>&1 & echo $! > "$tmp/server.pid" )
 server_pid=$(cat "$tmp/server.pid")
@@ -110,6 +135,34 @@ stub2="$tmp/stub-bad"; mkdir -p "$stub2"; printf '#!/bin/sh\nexit 1\n' > "$stub2
 if runi PATH="$stub2:$PATH" OSTROM_VERSION=1.2.3; then ko "failing cosign must refuse"; else ok "failing cosign refuses"; fi
 assert_eq "nothing installed after a bad signature" no "$([ -e "$LAST_HOME/.ostrom/bin/ostrom" ] && echo yes || echo no)"
 runi PATH="$stub2:$PATH" OSTROM_VERSION=1.2.3 OSTROM_SKIP_COSIGN=1 && ok "cosign can be skipped explicitly" || ko "cosign can be skipped explicitly"
+
+# the signature, without cosign: openssl checks it against the pinned key
+runi OSTROM_VERSION=1.2.3 && ok "a signed release installs" || ko "a signed release installs"
+assert_contains "says the signature was checked" "$(cat "$tmp/out.log")" 'Signature verified'
+if runi OSTROM_VERSION=2.3.0; then ko "a SHA256SUMS changed after signing must be refused"; else ok "a SHA256SUMS changed after signing is refused"; fi
+assert_contains "says the signature does not verify" "$(cat "$tmp/out.log")" 'signature'
+assert_eq "nothing installed after a bad signature (openssl)" no "$([ -e "$LAST_HOME/.ostrom/bin/ostrom" ] && echo yes || echo no)"
+if runi OSTROM_VERSION=2.4.0; then ko "a release without its signature must be refused"; else ok "a release without its signature is refused"; fi
+assert_eq "nothing installed without a signature" no "$([ -e "$LAST_HOME/.ostrom/bin/ostrom" ] && echo yes || echo no)"
+runi OSTROM_VERSION=2.3.0 OSTROM_SKIP_COSIGN=1 && ok "the signature check can be skipped explicitly" \
+  || ko "the signature check can be skipped explicitly"
+
+# no verifier at all (neither cosign nor openssl on the PATH): installs on the checksum, and says so
+bare="$tmp/bare-path"; mkdir -p "$bare"
+for tool in sh curl wget sha256sum shasum perl uname mktemp rm sed head awk tar gzip mkdir chmod mv grep cut cat; do
+  found=$(command -v "$tool" 2>/dev/null) && ln -s "$found" "$bare/$tool"
+done
+runi PATH="$bare" OSTROM_VERSION=1.2.3 && ok "installs without any verifier" || ko "installs without any verifier"
+assert_contains "warns that the signature was not checked" "$(cat "$tmp/out.log")" 'was not checked'
+
+# a download cut short runs nothing: the script only acts from its last line
+cut_at=$(grep -n 'mv -f' "$installer" | head -1 | cut -d: -f1)
+head -n "$cut_at" "$installer" > "$tmp/truncated.sh"
+HOME_N=$((HOME_N + 1)); cut_home="$tmp/home-$HOME_N"; mkdir -p "$cut_home"
+served=$(grep -c 'GET ' "$tmp/server.log")
+HOME="$cut_home" OSTROM_DOWNLOAD_BASE="$base" OSTROM_VERSION=1.2.3 sh "$tmp/truncated.sh" > "$tmp/out.log" 2>&1
+assert_eq "a truncated installer installs nothing" no "$([ -e "$cut_home/.ostrom/bin/ostrom" ] && echo yes || echo no)"
+assert_eq "a truncated installer downloads nothing" "$served" "$(grep -c 'GET ' "$tmp/server.log")"
 
 # never asks for root
 assert_eq "no sudo in the installer" 0 "$(grep -c 'sudo' "$installer" | tr -d ' ')"
