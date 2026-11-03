@@ -46,7 +46,8 @@ The `taps` job pushes them over SSH trusting only GitHub's published host keys, 
 `scripts/release/github_known_hosts` (no first-use trust, no system `known_hosts`); it takes its ssh options from
 `scripts/release/check-github-host-keys.sh --ssh-options`. The same script checks that every pinned key is still
 published at https://api.github.com/meta and that each pinned key type verifies github.com: in the release checks,
-and in the release's `version` job before a public release is published. When GitHub rotates a key, run
+and in the release's `version` job before a public release is published (`RELEASE_DRAFT` set to `false`: a draft
+release, and a dry run, run no taps job and skip the check). When GitHub rotates a key, run
 `sh scripts/release/check-github-host-keys.sh --update`, compare the diff with GitHub's announcement and merge it by
 pull request. A tag pushed before that does not publish: once the pins are on `main`, tag the next patch version. A
 key GitHub adds is only a warning until it is pinned.

@@ -40,15 +40,24 @@ grep -v '^#' "$pins" | sort -u > "$tmp/pinned" || true
 stale=$(comm -23 "$tmp/pinned" "$tmp/published")
 [ -z "$stale" ] || die "GitHub no longer publishes these pinned keys (rotated): run $0 --update and review the change:
 $stale"
-added=$(comm -13 "$tmp/pinned" "$tmp/published")
-[ -z "$added" ] || echo "::warning::GitHub publishes host keys not pinned yet (run $0 --update): $added"
+comm -13 "$tmp/pinned" "$tmp/published" | while IFS= read -r key; do
+  echo "::warning::GitHub publishes a host key not pinned yet (run $0 --update): $key"
+done
 # One connection per pinned key type, with no identity: it stops at authentication, after the host key is checked.
 for type in $(cut -d' ' -f2 "$tmp/pinned" | sort -u); do
   case "$type" in ssh-rsa) algorithms=rsa-sha2-512,rsa-sha2-256 ;; *) algorithms=$type ;; esac
-  # shellcheck disable=SC2086 # $strict is a list of options
-  if ssh -o BatchMode=yes -o ConnectTimeout=15 -o IdentitiesOnly=yes -o IdentityFile=/dev/null \
-    -o HostKeyAlgorithms="$algorithms" $strict -T git@github.com 2> "$tmp/ssh.log"; then :; fi
-  grep -q 'Permission denied (publickey)' "$tmp/ssh.log" \
-    || { cat "$tmp/ssh.log" >&2; die "the pinned $type key does not verify github.com"; }
+  for attempt in 1 2 3; do
+    # shellcheck disable=SC2086 # $strict is a list of options
+    if ssh -o BatchMode=yes -o ConnectTimeout=15 -o IdentitiesOnly=yes -o IdentityFile=/dev/null \
+      -o HostKeyAlgorithms="$algorithms" $strict -T git@github.com 2> "$tmp/ssh.log"; then :; fi
+    # a refused host key is final; a network failure is retried
+    if grep -q 'Permission denied (publickey)' "$tmp/ssh.log" || grep -q 'Host key verification failed' "$tmp/ssh.log"
+    then break; fi
+    [ "$attempt" = 3 ] || sleep 5
+  done
+  grep -q 'Permission denied (publickey)' "$tmp/ssh.log" && continue
+  cat "$tmp/ssh.log" >&2
+  grep -q 'Host key verification failed' "$tmp/ssh.log" && die "the pinned $type key does not verify github.com"
+  die "github.com could not be reached over SSH to check the pinned $type key (network, not the pins)"
 done
 echo "GitHub host keys: $(wc -l < "$tmp/pinned" | tr -d ' ') pinned, all published, each type verifies github.com"
