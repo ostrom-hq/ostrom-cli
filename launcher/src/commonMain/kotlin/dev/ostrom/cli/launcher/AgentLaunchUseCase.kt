@@ -83,6 +83,8 @@ class LaunchDependencies(
     val say: (String) -> Unit,
     val blocking: CoroutineDispatcher,
     val userAgent: String,
+    // gives back the memory the launch no longer holds, before the agent's long session (PERF-CLI, reclaimMemory)
+    val reclaim: () -> Unit = ::reclaimMemory,
 )
 
 /** The launch stops before the agent runs, with an exit code of the spec (CLI.md § 2.3). */
