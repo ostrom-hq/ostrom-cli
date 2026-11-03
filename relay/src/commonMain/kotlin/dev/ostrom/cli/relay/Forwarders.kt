@@ -2,6 +2,7 @@
 package dev.ostrom.cli.relay
 
 import io.ktor.client.HttpClient
+import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.setBody
 import io.ktor.client.request.url
 import io.ktor.client.statement.bodyAsBytes
@@ -103,13 +104,7 @@ internal class McpForwarder(
         upstream().use { client ->
             exchange.run(call, client, Duration.INFINITE, {
                 method = HttpMethod.Post
-                if (server == OSTROM_SERVER) {
-                    // Ostrom's own server is the waits server of this session: the agent asks a person there (4.3)
-                    url("${config.serverUrl}$WAITS_MCP")
-                    session.current?.let { url.parameters.append(SESSION_PARAMETER, it) }
-                } else {
-                    url("${config.serverUrl}/api/v1/mcp/$server")
-                }
+                target(server)
                 identify(config)
                 copyHeaders(headers, MCP_REQUEST_HEADERS)
                 setBody(ByteArrayContent(body, ContentType.Application.Json))
@@ -122,6 +117,13 @@ internal class McpForwarder(
                 }
             }
         }
+    }
+
+    /** Where [server]'s messages go: its gateway, or for Ostrom's own server the waits server of this session (4.3). */
+    private fun HttpRequestBuilder.target(server: String) {
+        if (server != OSTROM_SERVER) return url("${config.serverUrl}/api/v1/mcp/$server")
+        url("${config.serverUrl}$WAITS_MCP")
+        session.current?.let { url.parameters.append(SESSION_PARAMETER, it) }
     }
 }
 
