@@ -87,7 +87,8 @@ class AgentLaunchUseCaseTest {
         serveALaunch()
         installed["git"] = "/usr/local/bin/git"
         assertEquals(3, start(), "the agent's exit code is the CLI's")
-        val (mcp, claudeSettings, plugin) = listOf("mcp.json", "claude-settings.json", "plugin").map { join(temporary, it) }
+        val (mcp, claudeSettings, plugin) =
+            listOf("mcp.json", "claude-settings.json", "plugin").map { join(temporary, it) }
         assertEquals(
             listOf("/usr/bin/claude", "--plugin-dir", plugin, "--settings", claudeSettings, "--mcp-config", mcp),
             commands.single(),
