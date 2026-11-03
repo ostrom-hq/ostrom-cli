@@ -92,7 +92,7 @@ jobs:
       # libcurl for Ktor's Linux engine; GNOME Keyring for the Secret Service test of the secret store.
       - name: Install native link and test dependencies
         run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev gnome-keyring dbus libsecret-1-0
-      - name: Never serve a test task from the cache (ENG-032)
+      - name: Never serve a test task from the cache
         run: |
           mkdir -p ~/.gradle/init.d
           cat > ~/.gradle/init.d/always-run-tests.gradle.kts <<'KTS'
