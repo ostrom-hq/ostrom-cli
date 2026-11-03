@@ -104,7 +104,7 @@ internal class PolicySetCommand(private val dependencies: CliDependencies) : Cli
 
     /** The model policy with [value] set, the default kept when it is still allowed, the members' lists kept. */
     private fun models(access: OrgAccess): JsonObject {
-        val current = access.read(MODELS, "No model policy in ${access.org.slug}.")
+        val current = access.readToGovern(MODELS, "No model policy in ${access.org.slug}.")
         val allowed = if (key == MODELS_KEY) value.split(',').map(String::trim).filter(String::isNotEmpty) else
             current.texts("allowed")
         if (allowed.isEmpty()) throw stopWith(ExitCode.USAGE, "Name at least one model.")
