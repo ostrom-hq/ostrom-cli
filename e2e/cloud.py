@@ -28,8 +28,9 @@ ROUTES = (("POST", "/api/v1/cloud/sessions"), ("GET", "/api/v1/cloud/sessions"),
 STARTED = re.compile(r"in Ostrom's cloud \(session (\S+)\)")
 DETACH = b"\x1d"
 INTERRUPT = b"\x03"
-# what the session's script says when the agent ends (ostrom-server runner/RunnerConfig.kt, SessionScript.FIRST)
-AGENT_EXITED = b"The agent exited."
+# a shell reading a command: the end of bash's prompt (the session's script leaves one when the agent ends, or starts
+# one again when Ctrl-C ended the script too, ostrom-server runner/RunnerConfig.kt, SessionScript)
+PROMPT = b"$ "
 # a session's image is on the machine already; its three containers start in about a minute, the CLI waits up to 10
 START_S = 420
 OUTPUT_S = 120
@@ -185,20 +186,27 @@ class Cloud:
         attach = self.terminal("attach", self.session)
         shown = attach.wait_until(lambda: len(attach.output) > 0, OUTPUT_S)
         j.check(shown, f"ostrom attach {self.session} shows the session again ({len(attach.output)} bytes)")
-        # Ctrl-C twice ends Claude Code; again every few seconds until the session's script says so
+        # Ctrl-C twice ends Claude Code; again every few seconds until a shell's prompt shows after this attach's
+        # first key (never in the screen replayed on attaching)
+        interrupted_at = len(attach.output)
+
+        def exited():
+            return attach.output.find(PROMPT, interrupted_at) >= 0
+
         deadline = time.monotonic() + OUTPUT_S
-        while AGENT_EXITED not in attach.output and attach.process.poll() is None and time.monotonic() < deadline:
+        while not exited() and attach.process.poll() is None and time.monotonic() < deadline:
             attach.type(INTERRUPT)
             time.sleep(0.3)
             attach.type(INTERRUPT)
-            attach.wait_until(lambda: AGENT_EXITED in attach.output, 5)
+            attach.wait_until(exited, 5)
         # said, not checked: the proof is the command below, whichever shell takes it
-        print(f"  note  Claude Code ended by Ctrl-C: {AGENT_EXITED in attach.output} ({tail(attach.output)})",
-              flush=True)
+        print(f"  note  a shell after Ctrl-C: {exited()} ({tail(attach.output[interrupted_at:])})", flush=True)
+        # the shell's prompt comes before the command; its echo shows `$((6*7))`, only its run shows 42
+        attach.wait_until(lambda: False, 2)
         computed = f"ostrom-{6 * 7}-{j.stamp}".encode()
         typed_at = len(attach.output)
         attach.type(f"echo ostrom-$((6*7))-{j.stamp}\r".encode())
-        ran = attach.wait_until(lambda: computed in bytes(attach.output[typed_at:]), OUTPUT_S)
+        ran = attach.wait_until(lambda: attach.output.find(computed, typed_at) >= 0, OUTPUT_S)
         j.check(ran, f"a command typed through ostrom attach runs in the session's shell ({computed.decode()} came "
                      f"back): {tail(attach.output[typed_at:])}")
         attach.type(DETACH)
