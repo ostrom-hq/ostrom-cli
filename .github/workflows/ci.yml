@@ -455,7 +455,8 @@ jobs:
       # The ~550 ms with the file cache emptied are `purge` emptying the system libraries too (Foundation, Security:
       # 424 ms for a C program linked with the same 13 libraries), which a running Mac keeps in memory (cli#111, run
       # 41659088187). What a developer pays after an install or an update is the fresh copy's first start, its
-      # signature checked: 39 ms there, 26 ms in run 41660879786, budget 100 ms. Gatekeeper is not measured here (docs/RELEASES.md).
+      # signature checked: 39 ms there, 26 ms in run 41660879786, budget 100 ms. Gatekeeper is not measured here
+      # (docs/RELEASES.md).
       - name: Hook cost in a session (median of 20)
         run: |
           login=$(security default-keychain -d user | tr -d ' "')
