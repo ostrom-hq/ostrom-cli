@@ -87,9 +87,9 @@ class AgentLaunchUseCaseTest {
         serveALaunch()
         installed["git"] = "/usr/local/bin/git"
         assertEquals(3, start(), "the agent's exit code is the CLI's")
-        val mcp = join(temporary, "mcp.json")
+        val (mcp, settings, plugin) = listOf("mcp.json", "claude-settings.json", "plugin").map { join(temporary, it) }
         assertEquals(
-            listOf("/usr/bin/claude", "--plugin-dir", join(temporary, "plugin"), "--mcp-config", mcp),
+            listOf("/usr/bin/claude", "--plugin-dir", plugin, "--settings", settings, "--mcp-config", mcp),
             commands.single(),
             "Ostrom's own MCP server is relayed to every session",
         )
@@ -129,10 +129,10 @@ class AgentLaunchUseCaseTest {
         assertEquals("""{"repo":"acme-api","agent":"claude-code"}""", created.body)
         assertEquals("dev-token", created.token)
         assertEquals("agent-token", server.sent("POST /api/v1/sessions/s1/end").single().token)
-        val settings = checkNotNull(parseObject(filesWhileRunning[join(temporary, "session-env.json")]))
+        val sessionEnv = checkNotNull(parseObject(filesWhileRunning[join(temporary, "session-env.json")]))
         assertEquals(FileAccess.PRIVATE, files.access[join(temporary, "session-env.json")])
-        assertEquals("client-token", settings.text(LaunchVariables.RELAY_TOKEN))
-        assertFalse(settings.containsKey("PATH") || settings.containsKey(LaunchVariables.DEVICE_TOKEN))
+        assertEquals("client-token", sessionEnv.text(LaunchVariables.RELAY_TOKEN))
+        assertFalse(sessionEnv.containsKey("PATH") || sessionEnv.containsKey(LaunchVariables.DEVICE_TOKEN))
         // S2-20: no catalogue is written where the agent could empty it; without a package the relay asks Ostrom
         assertNull(filesWhileRunning[join(temporary, "plugin", "ostrom", "gates.json")])
         assertNull(relaySettings.single().gateCatalog)
@@ -162,7 +162,7 @@ class AgentLaunchUseCaseTest {
         variables["OSTROM_ALIVE_MS"] = "5000"
         assertEquals(3, start(arguments = listOf("-p", "hi"), model = "opus"))
         val command = commands.single()
-        assertEquals(listOf("-p", "hi", "--model", "opus", "--mcp-config"), command.drop(3).take(5))
+        assertEquals(listOf("-p", "hi", "--model", "opus", "--settings"), command.drop(3).take(5))
         val environment = environments.single()
         assertEquals("http://127.0.0.1:4100", environment["ANTHROPIC_BASE_URL"])
         assertEquals(join(temporary, "package.json"), environment[LaunchVariables.PACKAGE])
