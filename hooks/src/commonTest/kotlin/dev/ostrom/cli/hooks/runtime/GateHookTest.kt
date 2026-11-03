@@ -75,6 +75,7 @@ class GateHookTest {
         checks: WorkflowChecks = Checks(),
         git: Map<String, String> = repository,
         catalogueText: String? = null,
+        canonical: (String) -> String = { it.removeSuffix("/") },
     ): GateHook {
         // the verified policy (CatalogueStoreTest checks the signature); an unreadable one holds every action
         val parsed = GateCatalogue.parse(catalogueText ?: catalogue)
@@ -82,7 +83,7 @@ class GateHookTest {
             parsed?.let { CatalogueRead.Verified(it) } ?: CatalogueRead.Held("Ostrom's gate policy cannot be trusted")
         }
         val ids = SessionIds(context.sessionFile, files)
-        return GateHook(context, calls, ids, files, store, checks, FakeGit(git), { it.removeSuffix("/") }, "/w")
+        return GateHook(context, calls, ids, files, store, checks, FakeGit(git), canonical, "/w")
     }
 
     private fun event(tool: String, input: String, after: Boolean = false, cwd: String? = null) = buildJsonObject {
@@ -349,6 +350,33 @@ class GateHookTest {
         }
         assertEquals(HookReply(), held.handle(event("Read", """{"file_path":"/w/a.txt"}""")), "not a gated tool")
         assertTrue(calls.calls.isEmpty(), "nobody is asked for a yes")
+    }
+
+    @Test
+    fun aWriteIsGatedWhereverItsPathReallyLeads() {
+        // a pattern on a path holds for every spelling of it, and through a folder linked to it (audit CLI n°2, M2)
+        val gated = """{"failMode":"closed","actions":[{"class":"ci","label":"CI workflows","tools":["Write"],""" +
+            """"patterns":["\\.github/workflows/"],"gate":{"enforce":true,"approvers":["omar"]}}]}"""
+        calls = FakeCalls().on("/api/v1/gates", ok("""{"id":"G1","status":"pending"}"""))
+        val links = mapOf("/w/wf" to "/w/.github/workflows")
+        val canonical = { path: String -> links[path] ?: path }
+        val paths = listOf(
+            "/w/.github/workflows/x.yml",
+            "/w/.github/./workflows/x.yml",
+            "/w/.github//workflows/x.yml",
+            "/w/src/../.github/workflows/x.yml",
+            "/w/wf/x.yml",
+            "wf/x.yml",
+        )
+        for (path in paths) {
+            val reply = hook(catalogueText = gated, canonical = canonical)
+                .handle(event("Write", """{"file_path":"$path"}"""))
+            assertEquals(2, reply.exitCode, path)
+        }
+        assertEquals(paths.size, calls.paths().count { it.startsWith("/api/v1/gates") }, "each one is asked for a yes")
+        val elsewhere = hook(catalogueText = gated, canonical = canonical)
+        assertEquals(HookReply(), elsewhere.handle(event("Write", """{"file_path":"/w/src/x.kt"}""")))
+        assertEquals(HookReply(), elsewhere.handle(event("Edit", """{"file_path":"/w/src/./x.kt"}""")))
     }
 
     @Test
