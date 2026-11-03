@@ -32,12 +32,19 @@ sealed interface StandardInput {
 /**
  * The standard streams, written to directly (no buffer to flush before exit): a hook answers on stdout and exits
  * within milliseconds, and the MCP server must never mix logs into its JSON-RPC stream.
+ *
+ * Two kinds of text (security audits M2 and L8). What is written for a person ([out], [err]) holds what others wrote (a
+ * commit title, a server's message, an organisation's name) and is cleaned by [terminalSafe] wherever it goes: a
+ * terminal, or a pipe or a file a person reads later (`| cat`, `| tee`, `> log`). What is written for a program
+ * ([data], [dataErr]: `--json`, a hook's answer, the MCP stream) goes as it is to a pipe or a file: a program needs the
+ * exact bytes, and whoever shows them to a person cleans them. At a terminal no program reads it, a person does
+ * (`ostrom inbox --json` typed at the prompt): it is cleaned there too.
  */
 interface Console {
-    /** Writes [text] to stdout as UTF-8, as is (no newline added; on a terminal, [terminalSafe]). */
+    /** Writes [text] for a person to stdout as UTF-8 (no newline added), cleaned by [terminalSafe]. */
     fun out(text: String)
 
-    /** Writes [text] to stderr as UTF-8, as is (no newline added; on a terminal, [terminalSafe]). */
+    /** Writes [text] for a person to stderr as UTF-8 (no newline added), cleaned by [terminalSafe]. */
     fun err(text: String)
 
     /**
@@ -45,6 +52,12 @@ interface Console {
      * not. Nothing another wrote (an argument, a server's answer) goes there.
      */
     fun help(text: String) = out(text)
+
+    /** Writes [text] for a program to stdout (`--json`, a hook's answer, the MCP stream): raw, but at a terminal. */
+    fun data(text: String) = out(text)
+
+    /** Writes [text] for a program to stderr (a hook's reason, which the agent reads): raw, but at a terminal. */
+    fun dataErr(text: String) = err(text)
 
     /** True when stdout is a terminal (colours and questions are allowed), false in a pipe, a CI log or an agent. */
     val isInteractive: Boolean
@@ -62,10 +75,8 @@ interface Console {
 }
 
 /**
- * [Console] over the file descriptors (POSIX) or the standard handles (Windows). What goes to a terminal is cleaned
- * ([terminalSafe]), `--json` included; what goes to a pipe or a file (a hook's answer, the MCP stream, `--json`
- * redirected) is written as it is: those streams are for programs, which need the bytes. Output piped on to a
- * terminal by the user (`| cat`, `| tee`, `| less -R`) is therefore not cleaned.
+ * [Console] over the file descriptors (POSIX) or the standard handles (Windows): [out] and [err] are cleaned
+ * ([terminalSafe]) wherever they go, [data] and [dataErr] only at a terminal, [help] never.
  *
  * @param terminal Whether a descriptor is a terminal, asked once per descriptor.
  * @param write Writes bytes to a descriptor.
@@ -77,13 +88,15 @@ class ConsoleImpl(
     private val stdoutTerminal by lazy { terminal(1) }
     private val stderrTerminal by lazy { terminal(2) }
 
-    override fun out(text: String) = writeTo(1, text)
+    override fun out(text: String) = written(1, terminalSafe(text))
 
-    override fun err(text: String) = writeTo(2, text)
+    override fun err(text: String) = written(2, terminalSafe(text))
 
-    override fun help(text: String) {
-        if (text.isNotEmpty()) write(1, text.encodeToByteArray())
-    }
+    override fun help(text: String) = written(1, text)
+
+    override fun data(text: String) = written(1, if (stdoutTerminal) terminalSafe(text) else text)
+
+    override fun dataErr(text: String) = written(2, if (stderrTerminal) terminalSafe(text) else text)
 
     override val isInteractive: Boolean
         get() = stdoutTerminal
@@ -92,11 +105,8 @@ class ConsoleImpl(
         return readGrowing(maxBytes, timeoutMillis, ::readStdin, TimeSource.Monotonic.markNow())
     }
 
-    private fun writeTo(descriptor: Int, text: String) {
-        if (text.isEmpty()) return
-        val onTerminal = if (descriptor == 1) stdoutTerminal else stderrTerminal
-        val shown = if (onTerminal) terminalSafe(text) else text
-        write(descriptor, shown.encodeToByteArray())
+    private fun written(descriptor: Int, text: String) {
+        if (text.isNotEmpty()) write(descriptor, text.encodeToByteArray())
     }
 }
 

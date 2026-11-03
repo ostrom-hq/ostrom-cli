@@ -62,7 +62,7 @@ private fun CliDependencies.showPolicy(org: String?, server: String?, json: Bool
     // the gate policy is served by SRV-REGLES: a server without it still shows the models
     val gates = access.readIfServed(GATE_POLICY)
     if (json) {
-        console.out("${objectOf("models" to models, "gates" to gates)}\n")
+        console.data("${objectOf("models" to models, "gates" to gates)}\n")
         return
     }
     val allowed = models.texts("allowed")
@@ -139,7 +139,7 @@ internal class PolicyCheckCommand(private val dependencies: CliDependencies) : C
             model?.let { "&model=${segment(it)}" }.orEmpty()
         val body = access.read("$AGENTS?$query", "No agent policy in ${access.org.slug}.")
         val allowed = body.flag("allowed") == true
-        if (json) dependencies.console.out("$body\n")
+        if (json) dependencies.console.data("$body\n")
         val with = model?.let { " with $it" }.orEmpty()
         if (!allowed) {
             throw stopWith(ExitCode.REFUSED, "✗ @$who may not start ${known.displayName}$with: " +

@@ -92,7 +92,7 @@ internal class RulesListCommand(private val dependencies: CliDependencies) : Cli
         val rules = body.list("items").filterIsInstance<JsonObject>()
         val console = dependencies.console
         when {
-            json -> console.out("$body\n")
+            json -> console.data("$body\n")
             rules.isEmpty() -> console.out("No rules yet. The analysis of ${access.org.name} proposes them.\n")
             else -> {
                 console.out("${if (rules.size == 1) "1 rule" else "${rules.size} rules"} in ${access.org.name}\n")
@@ -118,7 +118,7 @@ internal class RulesShowCommand(private val dependencies: CliDependencies) : Cli
         val body = access.read(rule(id), "No rule $id in ${access.org.slug}.")
         val console = dependencies.console
         if (json) {
-            console.out("$body\n")
+            console.data("$body\n")
             return
         }
         console.out("${body.text("statement")}\n")

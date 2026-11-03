@@ -3,7 +3,6 @@ package dev.ostrom.cli.platform
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.time.TimeSource
 
@@ -109,52 +108,60 @@ class TerminalTextTest {
     }
 
     @Test
-    fun theConsoleCleansWhatGoesToATerminalOnlyAndAsksOncePerStream() {
-        val written = mutableListOf<Pair<Int, String>>()
-        val asked = mutableListOf<Int>()
-        fun console(terminal: Boolean) = ConsoleImpl({ asked += it; terminal }) { descriptor, bytes ->
-            written += descriptor to bytes.decodeToString()
+    fun theConsoleCleansWhatAPersonReadsWhereverItGoesAndAProgramsStreamOnlyAtATerminal() {
+        // L8: `ostrom logs | cat`, `| tee` or `> log` shows the text to a person later, through no terminal of ours;
+        // a stream for programs keeps its bytes in a pipe, and is a person's at a terminal (M2)
+        val title = "{\"title\":\"$esc[2K\u202E\"}\n"
+        for (terminal in listOf(true, false)) {
+            val written = mutableListOf<Pair<Int, String>>()
+            val asked = mutableListOf<Int>()
+            val console = ConsoleImpl({ asked += it; terminal }) { descriptor, bytes ->
+                written += descriptor to bytes.decodeToString()
+            }
+            console.out("$esc[2Kout\n")
+            console.err("$esc[2Kerr\n")
+            console.out("")
+            assertEquals(emptyList(), asked, "a person's text is cleaned without asking")
+            // the CLI's own help keeps its links
+            console.help("$esc]8;;https://ostrom.dev\u0007docs$esc]8;;\u0007\n")
+            console.help("")
+            console.data(title)
+            console.data("")
+            console.dataErr("$esc[2Kreason\n")
+            console.dataErr("")
+            assertEquals(terminal, console.isInteractive)
+            assertEquals(listOf(1, 2), asked, "once per descriptor")
+            assertEquals(
+                listOf(
+                    1 to "out\n",
+                    2 to "err\n",
+                    1 to "$esc]8;;https://ostrom.dev\u0007docs$esc]8;;\u0007\n",
+                    1 to if (terminal) "{\"title\":\"\"}\n" else title,
+                    2 to if (terminal) "reason\n" else "$esc[2Kreason\n",
+                ),
+                written,
+            )
         }
-        val onTerminal = console(true)
-        onTerminal.out("$esc[2Kout\n")
-        onTerminal.err("$esc[2Kerr\n")
-        onTerminal.out("")
-        onTerminal.out("again\n")
-        // the CLI's own help keeps its links on a terminal
-        onTerminal.help("$esc]8;;https://ostrom.dev\u0007docs$esc]8;;\u0007\n")
-        onTerminal.help("")
-        assertTrue(onTerminal.isInteractive)
-        val piped = console(false)
-        piped.out("$esc[2Kas is\n")
-        piped.err("$esc[2Kas is\n")
-        assertFalse(piped.isInteractive)
-        assertEquals(
-            listOf(
-                1 to "out\n",
-                2 to "err\n",
-                1 to "again\n",
-                1 to "$esc]8;;https://ostrom.dev\u0007docs$esc]8;;\u0007\n",
-                1 to "$esc[2Kas is\n",
-                2 to "$esc[2Kas is\n",
-            ),
-            written,
-        )
-        assertEquals(listOf(1, 2, 1, 2), asked, "once per descriptor and console")
     }
 
     @Test
-    fun anotherConsoleWritesHelpAsItsOtherText() {
+    fun anotherConsoleWritesHelpAndDataAsItsOtherText() {
         val said = StringBuilder()
         val console = object : Console {
             override fun out(text: String) {
                 said.append(text)
             }
 
-            override fun err(text: String) = error("help is not an error")
+            override fun err(text: String) {
+                said.append("err:").append(text)
+            }
+
             override val isInteractive = false
             override fun readStandardInput(maxBytes: Int, timeoutMillis: Int): StandardInput = error("no input")
         }
         console.help("Usage: ostrom\n")
-        assertEquals("Usage: ostrom\n", said.toString())
+        console.data("{}\n")
+        console.dataErr("reason\n")
+        assertEquals("Usage: ostrom\n{}\nerr:reason\n", said.toString())
     }
 }

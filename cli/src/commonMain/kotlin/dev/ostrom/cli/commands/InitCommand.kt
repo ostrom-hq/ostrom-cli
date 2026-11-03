@@ -45,7 +45,7 @@ internal class InitCommand(private val dependencies: CliDependencies) : CliktCom
         rules(access)
         if (json) {
             val done = JsonObject(summary.filterValues { it != null }.mapValues { jsonOf(it.value) })
-            dependencies.console.out("$done\n")
+            dependencies.console.data("$done\n")
         } else {
             say("Nothing is written in this repository. Next: ostrom claude")
         }

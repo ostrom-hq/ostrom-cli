@@ -101,7 +101,7 @@ internal class HarnessListCommand(private val dependencies: CliDependencies) : C
         val console = dependencies.console
         val where = target ?: access.org.name
         when {
-            json -> console.out("$body\n")
+            json -> console.data("$body\n")
             workflows.isEmpty() ->
                 console.out("Nothing applies to $where yet. Add a workflow: ostrom harness add <file.json>\n")
             else -> {
@@ -127,7 +127,7 @@ internal class HarnessShowCommand(private val dependencies: CliDependencies) : C
         val body = access.read(workflow(id), "No workflow $id in ${access.org.slug}.")
         val console = dependencies.console
         if (json) {
-            console.out("$body\n")
+            console.data("$body\n")
             return
         }
         console.out("${line(body)}\n")

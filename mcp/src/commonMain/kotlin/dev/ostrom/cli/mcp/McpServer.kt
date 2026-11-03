@@ -148,7 +148,7 @@ class McpServerImpl(
         while (true) {
             val line = readLine() ?: return 0
             if (line.isBlank()) continue
-            dispatcher.handle(line)?.let { console.out(it + "\n") }
+            dispatcher.handle(line)?.let { console.data(it + "\n") }
         }
     }
 }
