@@ -54,7 +54,7 @@ interface LaunchFiles {
      * [path] with its links followed (realpath), or as written, normalized, when it does not resolve: a folder as
      * Gemini CLI reads it before matching it with the trusted folders.
      */
-    fun canonical(path: String): String = path
+    fun canonical(path: String): String
 }
 
 /**
@@ -114,4 +114,10 @@ class LaunchFilesImpl(
     }
 
     override fun deleteRecursively(path: String) = fileSystem.deleteRecursively(path.toPath(), mustExist = false)
+
+    override fun canonical(path: String): String = try {
+        fileSystem.canonicalize(path.toPath()).toString()
+    } catch (_: IOException) {
+        path.toPath(normalize = true).toString()
+    }
 }

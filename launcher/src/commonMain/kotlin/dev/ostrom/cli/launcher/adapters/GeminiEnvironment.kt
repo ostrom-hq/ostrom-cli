@@ -61,21 +61,26 @@ internal object GeminiEnvironment {
 
     /**
      * Stops the launch in a folder the developer's trusted folders do not trust (`DO_NOT_TRUST`), matched as Gemini
-     * matches them: the longest rule holding the folder wins, `TRUST_PARENT` names the rule's parent, and case is not
-     * told apart (it is not on macOS and Windows). Paths are compared as written, links not followed.
+     * matches them: the folder and each rule with their links followed (a path that does not resolve is kept as
+     * written), the longest rule holding the folder wins, `TRUST_PARENT` names the rule's parent, and case is not told
+     * apart (it is not on macOS and Windows).
      */
     private fun refuseDistrust(layout: SessionLayout, files: LaunchFiles, real: String) {
         val path = layout.variable(TRUSTED_FOLDERS) ?: join(real, "trustedFolders.json")
         val text = files.read(path)
         if (text.isNullOrBlank()) return
-        val rules = parseObject(text, comments = true) ?: refuse(
+        val parsed = parseObject(text, comments = true) ?: refuse(
             "$path cannot be read as JSON: Ostrom cannot tell whether it takes the trust away from this folder, so " +
                 "Gemini is not started",
         )
+        // Gemini takes a TRUST_PARENT rule's parent as written, then follows its links
+        val rules = parsed.entries.map { (rule, level) ->
+            Triple(rule, level, files.canonical(if (level == PARENT) parent(rule) else rule))
+        }
         for (folder in layout.workspace) {
-            val level = rules.entries
-                .filter { (rule, level) -> within(folder, if (level == PARENT) parent(rule) else rule) }
-                .maxByOrNull { (rule, _) -> rule.length }?.value
+            val followed = files.canonical(folder)
+            val level = rules.filter { (_, _, resolved) -> within(followed, resolved) }
+                .maxByOrNull { (rule, _, _) -> rule.length }?.second
             if (level == JsonPrimitive("DO_NOT_TRUST")) {
                 refuse(
                     "$path does not trust $folder (DO_NOT_TRUST), and Gemini then runs none of the settings' hooks, " +
