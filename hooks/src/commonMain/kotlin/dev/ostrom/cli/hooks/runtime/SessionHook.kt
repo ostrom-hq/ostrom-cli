@@ -24,14 +24,14 @@ class SessionHook(
     fun handle(event: JsonObject): HookReply {
         val agentSession = event.string("session_id").orEmpty()
         return when (event.string("hook_event_name")) {
-            "SessionStart" -> start(event, agentSession).fold(
-                onSuccess = { text ->
+            "SessionStart" -> when (val started = start(event, agentSession)) {
+                is Started.Recorded -> {
                     // Grok and Hermes take the rules elsewhere (--rules, pre_llm_call): nothing on stdout for them
                     val quiet = context.dialect == "grok" || context.dialect == "hermes"
-                    if (quiet) HookReply() else HookReply(stdout = startOutput(text))
-                },
-                onFailure = { HookReply(stderr = "Ostrom unreachable (${it.message}): session not recorded.\n") },
-            )
+                    if (quiet) HookReply() else HookReply(stdout = startOutput(started.text))
+                }
+                is Started.NotRecorded -> started.reply()
+            }
             // Hermes: its session events cannot add context, so the rules go in on the first model call
             "PreLLMCall" -> firstModelCall(event, agentSession)
             else -> HookReply()
@@ -44,17 +44,32 @@ class SessionHook(
         return if (mark == null) {
             HookReply()
         } else {
-            start(event, agentSession).fold(
-                onSuccess = { text ->
+            when (val started = start(event, agentSession)) {
+                is Started.Recorded -> {
                     files.write(mark, "1")
-                    HookReply(stdout = JsonObject(mapOf("context" to JsonPrimitive(text))).toString() + "\n")
-                },
-                onFailure = { HookReply(stderr = "Ostrom unreachable (${it.message}): session not recorded.\n") },
-            )
+                    HookReply(stdout = JsonObject(mapOf("context" to JsonPrimitive(started.text))).toString() + "\n")
+                }
+                is Started.NotRecorded -> started.reply()
+            }
         }
     }
 
-    private fun start(event: JsonObject, agentSession: String): Result<String> {
+    /** What the session's start came to. */
+    private sealed interface Started {
+        /** Recorded: [text] is the context the agent is handed. */
+        class Recorded(val text: String) : Started
+
+        /** Not recorded: Ostrom refused it (a 4xx with its reason), or could not be reached, or failed. */
+        class NotRecorded(val answer: CallResult.Failed) : Started {
+            /** Said to the developer; the agent goes on, handed no context, and every gate still asks Ostrom. */
+            fun reply(): HookReply {
+                val why = if (answer.refused) "Ostrom refused" else "Ostrom unreachable"
+                return HookReply(stderr = "$why (${answer.message}): session not recorded.\n")
+            }
+        }
+    }
+
+    private fun start(event: JsonObject, agentSession: String): Started {
         ids.adopt(agentSession, agentSession)
         val body = jsonOf(
             "id" to agentSession,
@@ -68,13 +83,13 @@ class SessionHook(
             "packageDigest" to checks.digest,
         )
         val answer = calls.call(Routes.SESSIONS, body, START_MILLIS)
-        if (answer is CallResult.Failed) return Result.failure(IllegalStateException(answer.message))
+        if (answer is CallResult.Failed) return Started.NotRecorded(answer)
         val reply = (answer as CallResult.Ok).body
         // a resumed session is a new segment on Ostrom's side: its id is the one every hook of this launch sends
         val segment = (reply["session"] as? JsonObject)?.string("id")
         if (!segment.isNullOrEmpty()) writes.adopt(agentSession, segment)
         val text = listOfNotNull(reply.string("context").orEmpty(), checks.context).joinToString("\n")
-        return Result.success(text)
+        return Started.Recorded(text)
     }
 
     private fun startOutput(text: String): String {
