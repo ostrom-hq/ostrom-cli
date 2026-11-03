@@ -12,11 +12,15 @@ import dev.ostrom.cli.launcher.text
 import kotlinx.serialization.json.JsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** What every adapter shares: the layout of a session, the overlay of a config home, skills, MCP names. */
+/** Ostrom's plugin kept on in the session's Claude settings. */
+private const val ON = """"enabledPlugins":{"ostrom@inline":true}"""
+
 class AdaptersTest {
     private val files = MemoryFiles()
 
@@ -85,7 +89,10 @@ class AdaptersTest {
         val launch = ClaudeAdapter().prepare(layout, files)
         val mcp = join("/tmp/run", "mcp.json")
         assertEquals(
-            listOf("--plugin-dir", join("/tmp/run", "plugin"), "--resume", "x", "--mcp-config", mcp, "--", "prompt"),
+            listOf(
+                "--plugin-dir", join("/tmp/run", "plugin"), "--resume", "x",
+                "--settings", join("/tmp/run", "claude-settings.json"), "--mcp-config", mcp, "--", "prompt",
+            ),
             launch.arguments,
         )
         assertEquals(mapOf("OSTROM_HOOK_BUDGET_MS" to "18000"), launch.environment)
@@ -115,7 +122,11 @@ class AdaptersTest {
         val manifest = join("/tmp/run", "plugin", ".claude-plugin", "plugin.json")
         files.texts[manifest] = """{"name":"acme"}"""
         val launch = ClaudeAdapter().prepare(layout(arguments = listOf("-p", "hi")), files)
-        assertEquals(listOf("--plugin-dir", join("/tmp/run", "plugin"), "-p", "hi"), launch.arguments)
+        val settings = join("/tmp/run", "claude-settings.json")
+        assertEquals(
+            listOf("--plugin-dir", join("/tmp/run", "plugin"), "-p", "hi", "--settings", settings),
+            launch.arguments,
+        )
         assertEquals("""{"name":"acme"}""", files.texts[manifest])
         assertNull(files.texts[join("/tmp/run", "mcp.json")])
     }
@@ -130,6 +141,7 @@ class AdaptersTest {
         val after = hooks.child("hooks")?.get("PostToolUse").toString()
         assertFalse("onFailure" in after, "after the tool, a failure stops nothing")
     }
+
 
     @Test
     fun claudeAndCodexGateHooksAnswerWithinTheLimitTheAgentGivesThem() {
@@ -146,6 +158,110 @@ class AdaptersTest {
             "138000",
             CodexAdapter().prepare(layout(pack = pack), MemoryFiles()).environment["OSTROM_HOOK_BUDGET_MS"],
         )
+    }
+
+
+    @Test
+    fun claudeKeepsOstromsHooksOnWhateverTheRepositorySays() {
+        // a repository's .claude/settings.json with "disableAllHooks": true turns off every plugin hook; the settings
+        // Claude Code is started with (--settings) come before the project's, so this one keeps them on
+        val launch = ClaudeAdapter().prepare(layout(arguments = listOf("--resume", "x", "--", "prompt")), files)
+        val settings = join("/tmp/run", "claude-settings.json")
+        assertEquals(
+            listOf("--plugin-dir", join("/tmp/run", "plugin"), "--resume", "x", "--settings", settings, "--", "prompt"),
+            launch.arguments,
+        )
+        assertEquals("""{"disableAllHooks":false,$ON}""", files.texts[settings])
+        assertEquals(FileAccess.PRIVATE, files.access[settings])
+        assertEquals(emptyList(), launch.notes)
+    }
+
+    @Test
+    fun claudeKeepsOstromsPluginOnWhateverTheRepositorySays() {
+        // a repository's "enabledPlugins": {"ostrom@inline": false} turns the plugin, and so its hooks, off; the
+        // session's settings come before the project's, so this one keeps it on, beside the developer's own choices
+        val settings = join("/tmp/run", "claude-settings.json")
+        val theirs = """{"enabledPlugins":{"ostrom@inline":false,"other@market":false}}"""
+        ClaudeAdapter().prepare(layout(arguments = listOf("--settings", theirs)), files)
+        assertEquals(
+            """{"enabledPlugins":{"ostrom@inline":true,"other@market":false},"disableAllHooks":false}""",
+            files.texts[settings],
+        )
+    }
+
+    @Test
+    fun claudeKeepsTheDevelopersOwnSettingsBesideOurs() {
+        // Claude Code reads only the last --settings: the developer's is merged into Ostrom's, never dropped
+        val settings = join("/tmp/run", "claude-settings.json")
+        val inline = ClaudeAdapter().prepare(
+            layout(arguments = listOf("--settings", """{"model":"opus","disableAllHooks":true}""", "-p", "hi")),
+            files,
+        )
+        assertEquals(
+            listOf("--plugin-dir", join("/tmp/run", "plugin"), "-p", "hi", "--settings", settings),
+            inline.arguments,
+        )
+        assertEquals("""{"model":"opus","disableAllHooks":false,$ON}""", files.texts[settings])
+        assertEquals(
+            listOf("claude: your --settings turns hooks off (disableAllHooks): Ostrom keeps them on for this session"),
+            inline.notes,
+        )
+        files.texts["/home/dev/mine.json"] = """{"permissions":{"allow":["Bash(ls)"]}}"""
+        val file = ClaudeAdapter().prepare(layout(arguments = listOf("--settings=/home/dev/mine.json")), files)
+        assertEquals(listOf("--plugin-dir", join("/tmp/run", "plugin"), "--settings", settings), file.arguments)
+        assertEquals(
+            """{"permissions":{"allow":["Bash(ls)"]},"disableAllHooks":false,$ON}""",
+            files.texts[settings],
+        )
+        assertEquals(emptyList(), file.notes)
+    }
+
+    @Test
+    fun claudeReadsTheLastSettingsBeforeThePromptOnly() {
+        val settings = join("/tmp/run", "claude-settings.json")
+        files.texts["/home/dev/last.json"] = """{"model":"haiku"}"""
+        val arguments = listOf("--settings", """{"model":"opus"}""", "--settings", "/home/dev/last.json")
+        val last = ClaudeAdapter().prepare(layout(arguments = arguments + listOf("--", "--settings", "x")), files)
+        assertEquals("""{"model":"haiku","disableAllHooks":false,$ON}""", files.texts[settings], "the last one wins")
+        assertEquals(
+            listOf("--plugin-dir", join("/tmp/run", "plugin"), "--settings", settings, "--", "--settings", "x"),
+            last.arguments,
+            "after --, it is the prompt's text",
+        )
+    }
+
+    @Test
+    fun claudeRefusesSettingsItCannotRead() {
+        // starting without them would drop the developer's own rules (permissions.deny, the sandbox)
+        files.texts["/home/dev/list.json"] = "[1]"
+        files.texts["/home/dev/broken.json"] = """{"permissions":{"deny":["Bash(rm:*)"]},}"""
+        val refusals = listOf(
+            "/home/dev/missing.json" to "claude: your --settings is not a JSON object Ostrom can read",
+            "{not json" to "claude: your --settings is not a JSON object Ostrom can read",
+            "[1]" to "claude: your --settings is not a JSON object Ostrom can read",
+            "/home/dev/list.json" to "claude: your --settings /home/dev/list.json is not a JSON object Ostrom can read",
+            "/home/dev/broken.json" to
+                "claude: your --settings /home/dev/broken.json is not a JSON object Ostrom can read",
+        )
+        for ((value, reason) in refusals) {
+            val refused = assertFailsWith<AdapterException>(value) {
+                ClaudeAdapter().prepare(layout(arguments = listOf("--settings", value)), files)
+            }
+            assertEquals("$reason: fix it, or start without it", refused.reason, value)
+        }
+        assertNull(files.texts[join("/tmp/run", "claude-settings.json")], "nothing is written")
+    }
+
+    @Test
+    fun claudeRefusesASettingsWithoutAValue() {
+        for (arguments in listOf(listOf("--settings"), listOf("--settings", "--", "hi"), listOf("--settings="))) {
+            val refused = assertFailsWith<AdapterException>(arguments.toString()) {
+                ClaudeAdapter().prepare(layout(arguments = arguments), files)
+            }
+            assertEquals("claude: --settings needs a value, a JSON object or a file", refused.reason)
+        }
+        val other = ClaudeAdapter().prepare(layout(arguments = listOf("--settings-sources", "user")), files)
+        assertTrue("--settings-sources" in other.arguments, "an option that only starts the same is the developer's")
     }
 
     @Test

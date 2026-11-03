@@ -10,10 +10,18 @@
     2.9 ostrom mcp: a server of the organisation, called through the session's relay
     4.3 ostrom mcp --server ostrom: the agent asks a person, the console answers, the agent reads the answer
     6.2 ostrom claude --cloud and ostrom attach: a session in Ostrom's cloud, detached and attached again
+    6.6 ostrom import teamcode: a TeamCode team into Ostrom, read back by its API
 
     python3 e2e/journey.py --binary ostrom --server http://127.0.0.1:4600 --mail-dir /tmp/mail \\
         --seed "docker run --rm --network host --env-file server.env ghcr.io/ostrom-hq/ostrom-server:edge \\
                 seed-test-account"
+
+6.6 imports ostrom-helm's fake TeamCode team (compose/demo/teamcode, its MySQL at 127.0.0.1:3307) when given it;
+without, it is skipped, and ostrom-server's cli-journey.yml, which gives it, fails a run where 6.6 was not played and
+passed:
+
+    OSTROM_E2E_TEAMCODE_PASSWORD=demo-teamcode-ro python3 e2e/journey.py … \\
+        --teamcode-db mysql://teamcode_ro@127.0.0.1:3307/teamcode --teamcode-key-file demo/teamcode/key.txt
 
 Nothing is faked on the server side: people sign in by their e-mailed link (read from the server's OSTROM_MAIL_DIR),
 the owner is made by `ostrom-server seed-test-account` (its personal token stands for a token made on the console,
@@ -46,6 +54,7 @@ from launch import LaunchLatency
 from mcp_relay import McpRelay
 from mcp_waits import McpWaits
 from rules import Rules
+from teamcode import TeamCode
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GENERIC_404 = "Not found."
@@ -559,6 +568,7 @@ class Journey:
         self.guarded(McpRelay(self, maya, SESSION_ROUTES).run)
         self.guarded(McpWaits(self, maya, SESSION_ROUTES).run)
         self.guarded(Cloud(self, maya).run)
+        self.guarded(TeamCode(self, maya).run)
 
         if self.invitee:
             self.begin("2.6", "ostrom members remove")
@@ -1081,6 +1091,11 @@ def main():
     parser.add_argument("--fake-mcp-key", help="2.9: its private key (PEM)")
     # 6.2: the server runs cloud sessions (a runtime driver, as the Docker of the CI's machine); skipped without
     parser.add_argument("--cloud-sessions", action="store_true", help="6.2: the server runs cloud sessions")
+    parser.add_argument("--cloud-machine-image", help="6.2 on a registered runner: the machine's ostrom-runner image")
+    # 6.6: a TeamCode team to import (ostrom-helm compose/demo/teamcode); skipped without, even with --strict
+    parser.add_argument("--teamcode-db", help="6.6: mysql://user@host[:port]/database of a TeamCode team (its "
+                                              "password in OSTROM_E2E_TEAMCODE_PASSWORD)")
+    parser.add_argument("--teamcode-key-file", help="6.6: the file of its credential key")
     # 5.9: what a launch costs, end to end; at most 60 launches an hour and a person (the server's LaunchLimit.DEFAULT)
     parser.add_argument("--launch-runs", type=int, default=20,
                         help="5.9: successive launches of `ostrom claude` timed to the first gated tool (0: none; max 60)")

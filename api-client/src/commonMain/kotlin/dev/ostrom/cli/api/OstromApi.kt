@@ -67,7 +67,8 @@ class ServerUnreachableException(val url: String, cause: Throwable) : Exception(
 
 /**
  * The Ostrom server, over HTTPS. Typed endpoints come with the contract of ostrom-core. Closing it releases the HTTP
- * engine and its thread: use it with `use { }`, or close it once the command is done.
+ * engine and its thread: use it with `use { }`, or close it once the command is done. The CLI's wiring hands out one
+ * per server for the whole command, whose close() is left to the end of the process (`CliDependencies.create`).
  */
 interface OstromApi : AutoCloseable {
     /**

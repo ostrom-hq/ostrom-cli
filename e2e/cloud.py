@@ -10,6 +10,11 @@ as 42), which only the session's shell can have done. It detaches the same way. 
 (`DELETE /api/v1/cloud/sessions/{id}`, as the console's Stop does), and `ostrom attach` then says it is terminated.
 Every state is read back from the server.
 
+With --cloud-machine-image, the session runs on a machine of the organisation instead (the server's `registered`
+driver): the owner registers a runner (`POST /api/v1/runners`), `ostrom-runner machine` starts on this machine's Docker
+with its key, and once it is online the session must be placed on it, read from the API (`runnerId` of the session),
+never from the screen.
+
 The server must run cloud sessions somewhere: ostrom-server's cli-journey.yml gives it a runtime driver (the Docker of
 the CI's machine, as its console-journey.yml) and says so with --cloud-sessions; without it, the step is skipped and
 says why (failed with --strict, as 2.9 without its fake MCP server).
@@ -25,6 +30,10 @@ import urllib.parse
 
 ROUTES = (("POST", "/api/v1/cloud/sessions"), ("GET", "/api/v1/cloud/sessions"),
           ("GET", "/api/v1/cloud/sessions/journey"), ("DELETE", "/api/v1/cloud/sessions/journey"))
+RUNNER_ROUTES = (("POST", "/api/v1/runners"), ("GET", "/api/v1/runners"))
+# the Engine API the machine creates the session's containers through (the workflow's socket proxy, on loopback)
+DOCKER_API_URL = "http://127.0.0.1:2375"
+ONLINE_S = 60
 STARTED = re.compile(r"in Ostrom's cloud \(session (\S+)\)")
 DETACH = b"\x1d"
 INTERRUPT = b"\x03"
@@ -108,6 +117,7 @@ class Cloud:
         self.maya = maya
         self.session = None
         self.terminals = []
+        self.machine = None
 
     def terminal(self, *arguments):
         """A command given the terminal, killed at the end of the step if it is still running."""
@@ -126,10 +136,11 @@ class Cloud:
                 j.step["status"] = "skipped"
                 print("  skip  the server runs no cloud session here (--cloud-sessions not given)", flush=True)
             return
-        if not j.needs(*ROUTES, on_main=True, org=True):
+        image = getattr(j.options, "cloud_machine_image", None)
+        if not j.needs(*ROUTES, *(RUNNER_ROUTES if image else ()), on_main=True, org=True):
             return
         try:
-            if self.started() and self.attached():
+            if (not image or self.machine_online(image)) and self.started() and self.attached():
                 self.stopped()
         finally:
             for left in self.terminals:
@@ -142,6 +153,61 @@ class Cloud:
                     j.call("DELETE", self.path(), token=self.maya["token"], org=j.org_id)
                 except OSError as error:
                     print(f"  note  the cloud session {self.session} could not be stopped: {error}", flush=True)
+            if self.machine:
+                self.machine_removed()
+
+    def machine_online(self, image):
+        """The owner registers a runner and `ostrom-runner machine` starts with its key: True once it is online."""
+        j = self.journey
+        renew = getattr(j, "recent_sign_in", None) or j.sign_in
+        console = renew(self.maya["email"])
+        if not j.check(bool(console), "the owner has a browser session to register a machine"):
+            return False
+        status, body, _ = j.call("POST", "/api/v1/runners", {"name": f"journey-{j.stamp}", "labels": ["docker"]},
+                                 session=console, org=j.org_id)
+        body = body if isinstance(body, dict) else {}
+        if not j.check(status == 201 and body.get("id") and body.get("token"),
+                       f"the owner registers a machine ({status}): {str(body.get('id'))}"):
+            return False
+        self.machine = {"id": body["id"], "container": f"ostrom-machine-{body['id'][:8]}", "console": console}
+        started = subprocess.run(
+            ["docker", "run", "-d", "--name", self.machine["container"], "--network", "host",
+             "-e", f"OSTROM_SERVER_URL={j.server}", "-e", f"OSTROM_RUNNER_ID={body['id']}", "-e", "OSTROM_RUNNER_KEY",
+             "-e", "OSTROM_RUNNER_INTERVAL_SECONDS=5", "-e", f"OSTROM_DOCKER_API_URL={DOCKER_API_URL}",
+             "-e", f"OSTROM_RUNNER_SESSION_IMAGE={image}", image, "machine"],
+            env={**os.environ, "OSTROM_RUNNER_KEY": body["token"]}, capture_output=True, text=True, check=False)
+        if not j.check(started.returncode == 0, f"ostrom-runner machine starts with its key ({started.returncode}): "
+                                                f"{started.stderr.strip()[-200:]}"):
+            return False
+        deadline = time.monotonic() + ONLINE_S
+        state = None
+        while time.monotonic() < deadline:
+            status, listed, _ = j.call("GET", "/api/v1/runners", session=console, org=j.org_id)
+            items = listed.get("items", []) if isinstance(listed, dict) else []
+            state = next((r.get("status") for r in items if r.get("id") == self.machine["id"]), None)
+            if state == "online":
+                break
+            time.sleep(2)
+        return j.check(state == "online", f"the server has the machine online by its heartbeats ({state})")
+
+    def machine_removed(self):
+        """
+        The machine, the session containers it made and its registration, gone whatever happened (an error here
+        never hides the step's own); its last logs said.
+        """
+        j = self.journey
+        try:
+            logs = subprocess.run(["docker", "logs", "--tail", "40", self.machine["container"]], capture_output=True,
+                                  text=True, check=False)
+            print(f"  note  machine {self.machine['id']}: {(logs.stdout + logs.stderr).strip()[-600:]}", flush=True)
+            label = f"label=ostrom.run/runner={self.machine['id']}"
+            made = subprocess.run(["docker", "ps", "-aq", "--filter", label], capture_output=True, text=True,
+                                  check=False).stdout.split()
+            subprocess.run(["docker", "rm", "-f", self.machine["container"], *made], capture_output=True, check=False)
+            j.call("DELETE", f"/api/v1/runners/{urllib.parse.quote(self.machine['id'])}",
+                   session=self.machine["console"], org=j.org_id)
+        except OSError as error:
+            print(f"  note  machine {self.machine['id']} not removed: {error}", flush=True)
 
     def path(self):
         return f"/api/v1/cloud/sessions/{urllib.parse.quote(self.session)}"
@@ -168,6 +234,9 @@ class Cloud:
         status, body = self.state()
         j.check(status == 200 and body.get("status") == "running" and body.get("agent") == "claude",
                 f"the server has it running, with Claude Code ({status}: {body.get('status')}, {body.get('agent')})")
+        if self.machine:
+            j.check(body.get("runnerId") == self.machine["id"],
+                    f"on the organisation's machine, read from the API (runnerId {body.get('runnerId')})")
         status, listed, _ = j.call("GET", "/api/v1/cloud/sessions", token=self.maya["token"], org=j.org_id)
         items = listed.get("items", []) if isinstance(listed, dict) else []
         j.check(status == 200 and any(s.get("id") == self.session for s in items),

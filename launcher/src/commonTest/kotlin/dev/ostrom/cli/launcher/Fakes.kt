@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.launcher
 
+import kotlinx.coroutines.delay
 import okio.IOException
 import okio.Path
 
@@ -9,6 +10,12 @@ class FakeServer(private val routes: MutableMap<String, ServerReply> = mutableMa
     val requests = mutableListOf<ServerCall>()
     var unreachable: Set<String> = emptySet()
 
+    /** How long each answer takes, in (virtual) milliseconds: a round trip to a server far away. */
+    var roundTripMillis = 0L
+
+    /** Routes that answer later than the others, by how many more (virtual) milliseconds. */
+    var slower: Map<String, Long> = emptyMap()
+
     operator fun set(route: String, answer: Pair<Int, String>) {
         routes[route] = ServerReply(answer.first, answer.second)
     }
@@ -16,6 +23,8 @@ class FakeServer(private val routes: MutableMap<String, ServerReply> = mutableMa
     override suspend fun send(call: ServerCall): ServerReply {
         requests += call
         val route = "${call.method} ${call.path}"
+        val wait = roundTripMillis + (slower[route] ?: 0L)
+        if (wait > 0) delay(wait)
         if (route in unreachable) return ServerReply(null, "connection refused")
         return routes[route] ?: ServerReply(NOT_FOUND, """{"error":{"type":"not_found","message":"no $route"}}""")
     }
