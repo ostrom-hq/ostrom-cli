@@ -129,21 +129,21 @@ class GateHook(
         return if (scripts.isEmpty()) subject else subject.copy(text = subject.text + scripts)
     }
 
-    /** [written] with what a shell command runs, or where a file write really lands, appended for the patterns. */
-    private fun withWhatItReaches(written: ToolSubject, cwd: String): ToolSubject = when (written.kind) {
-        ToolKind.BASH -> withScripts(written, cwd)
-        ToolKind.WRITE -> withRealPath(written, cwd)
-        else -> written
-    }
-
     /**
-     * A file write with where it really lands appended (`# ostrom: writes to: …`) when that is not the path the agent
-     * gave: a relative path, `a/./b`, `a/../b` or a folder linked elsewhere (security audit of the CLI n°2, M2).
+     * [written] with what a shell command runs, or with where a file write really lands (`# ostrom: writes to: …`)
+     * when that is not the path the agent gave: a relative path, `a/./b`, `a/../b` or a folder linked elsewhere
+     * (security audit of the CLI n°2, M2). The patterns then see it.
      */
-    private fun withRealPath(subject: ToolSubject, cwd: String): ToolSubject {
-        val path = subject.path ?: return subject
-        val real = ShellPaths.real(ShellPaths.join(cwd, path, context.home), canonical)
-        return if (real == path) subject else subject.copy(text = "${subject.text}$WRITES_NOTE $real")
+    private fun withWhatItReaches(written: ToolSubject, cwd: String): ToolSubject {
+        val path = written.path
+        return when {
+            written.kind == ToolKind.BASH -> withScripts(written, cwd)
+            path == null -> written
+            else -> {
+                val real = ShellPaths.real(ShellPaths.join(cwd, path, context.home), canonical)
+                if (real == path) written else written.copy(text = "${written.text}$WRITES_NOTE $real")
+            }
+        }
     }
 
     // the action ran: Ostrom, not the hook, uses its yes up when it sees the push land (S2-29)
