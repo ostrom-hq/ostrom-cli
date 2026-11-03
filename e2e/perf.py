@@ -13,8 +13,10 @@ It measures:
   hook), then with 50 actions that gate nothing and the deployment's gate (50 rules and a gate: the hook matches the
   call against all of them);
 - the requests the hook makes to Ostrom: the server's requests that arrived while a hook ran (the log's arrival time
-  against the hook's start and end), 20 calls in a row, then 3 calls 31 s apart (the relay keeps the signed policy 30
-  s, POLICY_FRESH_FOR: past that, a hook waits on the network);
+  against the hook's start and end), 20 calls in a row (after 5 of warm-up), then 3 calls 31 s apart: past the 30 s
+  the relay keeps the signed policy (POLICY_FRESH_FOR), a hook would wait on Ostrom for it, which the relay's read in
+  the background spares it (cli#99). The relay's own background read may land inside a hook's few milliseconds: the
+  budgets leave that room (a hook that waits on Ostrom counts 1 each time), and the spaced hooks' time has a budget too;
 - the size of the binary.
 
 Results go to stdout, to the job summary in GitHub Actions, and to --out (JSON). Exits 1 when a figure is above the
@@ -28,34 +30,20 @@ import statistics
 import subprocess
 import sys
 import tempfile
-import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "scripts"))
 
 from measure import run_cold  # noqa: E402
-from run import launch, setup  # noqa: E402
+from run import launch, requests, setup, start_server  # noqa: E402
 
 RUNS = 20
-# The relay keeps the signed policy 30 s (relay/RelayModule.kt, POLICY_FRESH_FOR): one second more, each call is past it
+# Past the 30 s the relay keeps the signed policy (relay/RelayModule.kt, POLICY_FRESH_FOR): one second more
 SPACED = "3:31"
+WARM_UP = 5
 HOOK_EVENT = json.dumps({"hook_event_name": "PreToolUse", "session_id": "s", "cwd": "/repo", "tool_name": "Bash",
                          "tool_input": {"command": "ls -la"}}).encode()
-
-
-def start_server(work, actions):
-    """The contract server signing a policy of [actions] (e2e/contract_server.py `--actions`), with its request log."""
-    log, ready = os.path.join(work, "requests.jsonl"), os.path.join(work, "ready.txt")
-    command = [sys.executable, os.path.join(HERE, "contract_server.py"), "--log", log, "--ready", ready,
-               "--package", os.path.join(HERE, "vectors", "package.json"), "--actions", str(actions)]
-    process = subprocess.Popen(command)
-    for _ in range(100):
-        if os.path.exists(ready) and open(ready).read():
-            return process, open(ready).read(), log
-        time.sleep(0.05)
-    process.kill()
-    raise SystemExit("the contract server did not start")
 
 
 def session(binary, actions, spec):
@@ -65,9 +53,11 @@ def session(binary, actions, spec):
     not end, why (what `ostrom` printed last).
     """
     with tempfile.TemporaryDirectory(prefix="ostrom-perf-") as work:
-        process, server, log = start_server(work, actions)
+        process, server, log = start_server(work, True, actions)
         try:
             home, agents, repo = setup(work)
+            if sys.platform == "darwin" and not os.environ.get("CI"):
+                return None, "on macOS, measured in CI only: the session writes a device token to the user's Keychain"
             try:
                 # macOS keeps the device token in the Keychain, found from the user's own home: a home of the run's
                 # own has no keychain, and the Keychain waits on a question nobody answers (the session never starts)
@@ -75,13 +65,11 @@ def session(binary, actions, spec):
                 _, report = launch(binary, server, home, agents, repo, work, "claude", ["-p", "perf"], extra)
             except subprocess.TimeoutExpired as late:
                 said = late.stderr.decode(errors="replace") if isinstance(late.stderr, bytes) else late.stderr or ""
-                with open(log) as handle:
-                    seen = [f"{r['method']} {r['path']}" for r in map(json.loads, filter(str.strip, handle))]
+                seen = [f"{r['method']} {r['path']}" for r in requests(log)]
                 reported = os.path.exists(os.path.join(work, "report-claude.json"))
                 return None, (f"the session did not end in 120 s: {said.strip()[-300:] or 'nothing on stderr'}; "
                               f"the agent reported: {reported}; the server saw {len(seen)} requests, last {seen[-4:]}")
-            with open(log) as handle:
-                arrived = [json.loads(line)["at"] for line in handle if line.strip()]
+            arrived = [r["at"] for r in requests(log)]
         finally:
             process.kill()
     hooks = report.get("windows") or []
@@ -116,18 +104,19 @@ def main():
     parser.add_argument("--max-size-mb", type=float)
     parser.add_argument("--max-burst-requests", type=float, help="requests to Ostrom per hook, 20 calls in a row")
     parser.add_argument("--max-spaced-requests", type=float, help="requests to Ostrom per hook, calls 31 s apart")
+    parser.add_argument("--max-spaced-ms", type=float, help="median of a hook 31 s after the last one")
     args = parser.parse_args()
     binary = os.path.abspath(args.binary)
 
     version, version_why = cold([binary, "version"])
     hook, hook_why = cold([binary, "hook", "gate"], HOOK_EVENT)
-    empty, empty_why = session(binary, 0, f"{RUNS}:0")
-    ruled, ruled_why = session(binary, 50, f"{RUNS}:0")
+    empty, empty_why = session(binary, 0, f"{RUNS + WARM_UP}:0")
+    ruled, ruled_why = session(binary, 50, f"{RUNS + WARM_UP}:0")
     spaced, spaced_why = session(binary, 50, SPACED)
     # the first call follows the session's own hooks: not 31 s apart
     spaced = spaced[1:] if spaced else None
     unmeasured = empty is None or ruled is None or spaced is None
-    empty, ruled, spaced = empty or [], ruled or [], spaced or []
+    empty, ruled, spaced = (empty or [])[WARM_UP:], (ruled or [])[WARM_UP:], spaced or []
     size = round(os.path.getsize(binary) / 1024 / 1024, 2)
     figures = {
         "label": args.label,
@@ -135,7 +124,7 @@ def main():
         "hook_empty_ms": median(empty, "millis"), "hook_50_rules_gate_ms": median(ruled, "millis"),
         "requests_per_hook_burst": per_hook(empty + ruled),
         "requests_per_hook_spaced": per_hook(spaced),
-        "spaced_ms": [h["millis"] for h in spaced],
+        "spaced_ms": [h["millis"] for h in spaced], "hook_spaced_ms": median(spaced, "millis"),
         "size_mb": size,
         "codes": sorted({h["code"] for h in empty + ruled + spaced}),
     }
@@ -146,6 +135,7 @@ def main():
         ("hook in a session, 50 actions and a gate (median of 20)", figures["hook_50_rules_gate_ms"], "ms", ruled_why),
         ("requests to Ostrom per hook, 20 in a row", figures["requests_per_hook_burst"], "", empty_why or ruled_why),
         ("requests to Ostrom per hook, 31 s apart", figures["requests_per_hook_spaced"], "", spaced_why),
+        ("hook in a session, 31 s apart (median of 2)", figures["hook_spaced_ms"], "ms", spaced_why),
         ("binary size", size, "MB", None),
     ]
     lines = [f"### Hook cost, {args.label}", "", "| Figure | Value |", "| --- | --- |"]
@@ -162,9 +152,10 @@ def main():
             json.dump(figures, handle, indent=2)
 
     over = []
+    in_a_row = (figures["hook_empty_ms"], figures["hook_50_rules_gate_ms"])
     budgets = [
-        (args.max_hook_ms, max(filter(None, [figures["hook_empty_ms"], figures["hook_50_rules_gate_ms"]]),
-                               default=None), "hook in a session (median)"),
+        (args.max_hook_ms, max([m for m in in_a_row if m is not None], default=None), "hook in a session (median)"),
+        (args.max_spaced_ms, figures["hook_spaced_ms"], "hook 31 s after the last one (median)"),
         (args.max_cold_version_ms, version, f"`ostrom version` with the file cache emptied ({version_why})"),
         (args.max_cold_hook_ms, hook, f"the hook with the file cache emptied ({hook_why})"),
         (args.max_size_mb, size, "binary size"),
