@@ -71,6 +71,7 @@ class Journey:
         self.held_writes = None
         self.last_held = False
         self.last_said = ""
+        self.last_out = ""
         self.owner_session = None
         self.recent = {}
         self.temporary = options.work is None
@@ -428,7 +429,7 @@ class Journey:
                               f"the console makes a token that reads the rules ({status}): {error_of(made)[:200]}"):
                 return
             done = self.governed({**maya, "token": secret}, "init", "--yes", console=True)
-            out = self.step["commands"][-1]["stdout"]
+            out = self.last_out
             # init accepts every rule still proposed: the run's org is new, but its own rule is the one checked below
             self.check(done == 0 and re.search(r"✓ \d+ rules accepted", out) is not None,
                        f"init with it accepts the proposed rule once the owner confirms ({done}): "
@@ -454,7 +455,8 @@ class Journey:
             self.check(device.returncode == 77 and "console" in device.stderr,
                        f"the device's token cannot invite: the console can ({device.returncode})")
             since = time.time()
-            self.held_member_write(maya, f"a console token invites {who(tom_email)}", "Invited",
+            self.held_member_write(maya, f"a console token invites {who(tom_email)}",
+                                   f"Invited {tom_email} to {org.get('name')} as member",
                                    "invite", tom_email, "--role", "member")
             self.begin("2.7", "the invitation, accepted by the person invited")
             if self.needs(("POST", "/api/v1/invitations/accept"), on_main=True):
@@ -573,14 +575,17 @@ class Journey:
     def held_member_write(self, maya, what, said, *arguments):
         """
         A write on the members with the console's token (OSTROM_TOKEN): the server holds it until the owner confirms
-        it on the console (202, audit F1, decision (a) of 03/11/2026), then the CLI says [said] on stdout. Held is
-        checked on every server: a members' write that is written at once is the failure F1 closes.
+        it on the console (202, audit F1, decision (a) of 03/11/2026), then the CLI says [said] on stdout. On a server
+        that holds the governance writes (H1), a members' write written at once is the failure F1 closes, said once.
         """
         done = self.governed(maya, *arguments, console=True, must_hold=False)
-        out = self.step["commands"][-1]["stdout"]
-        self.check(self.last_held, f"{what}: held until the owner confirms it on the console (F1)")
-        self.check(done == 0 and said in out,
-                   f"{what} once confirmed ({done}): {(out + self.last_said).strip()[-300:]}")
+        if self.holds() and not self.last_held:
+            self.check(False, f"{what}: held until the owner confirms it on the console (F1), not written at once "
+                              f"({done}): {(self.last_out + self.last_said).strip()[-300:]}")
+            return
+        way = "once confirmed on the console" if self.last_held else "on a server that holds no governance write"
+        self.check(done == 0 and said in self.last_out,
+                   f"{what}, {way} ({done}): {(self.last_out + self.last_said).strip()[-300:]}")
 
     def role_of(self, maya, org, login):
         """[login]'s role in [org], as `GET /orgs/{org}/members` lists it to the console's token; None if not listed."""
@@ -726,6 +731,7 @@ class Journey:
         self.record(maya, shown, process.returncode, out, "".join(said))
         self.last_held = held.is_set()
         self.last_said = "".join(said).strip()
+        self.last_out = out
         if must_hold and self.holds():
             # a server that holds the governance writes holds this one: the confirmation was played, not skipped
             self.check(held.is_set(), f"{shown} is held until the console confirms it (H1)")
