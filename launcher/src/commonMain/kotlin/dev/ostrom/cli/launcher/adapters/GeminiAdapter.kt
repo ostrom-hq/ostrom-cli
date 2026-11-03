@@ -14,7 +14,6 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import okio.Path.Companion.toPath
 import kotlin.random.Random
 import kotlin.random.nextULong
 
@@ -73,7 +72,8 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
         val path = join(layout.temporary, "gemini-system.json")
         files.write(path, JsonObject(theirs + ("hooksConfig" to JsonObject(config))).toString(), FileAccess.PRIVATE)
         // Gemini looks for the defaults beside the system settings it is given: they stay beside the real ones
-        val beside = real.toPath().parent?.toString() ?: "."
+        val cut = real.lastIndexOfAny(charArrayOf('/', '\\'))
+        val beside = if (cut < 0) "." else real.substring(0, maxOf(cut, 1))
         val defaults = layout.variable(SYSTEM_DEFAULTS) ?: join(beside, "system-defaults.json")
         return mapOf(SYSTEM_SETTINGS to path, SYSTEM_DEFAULTS to defaults) to emptyList()
     }
