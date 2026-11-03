@@ -73,7 +73,11 @@ def session(binary, actions, spec):
                                    {"E2E_WINDOWS": spec})
             except subprocess.TimeoutExpired as late:
                 said = late.stderr.decode(errors="replace") if isinstance(late.stderr, bytes) else late.stderr or ""
-                return None, f"the session did not end in 120 s: {said.strip()[-300:] or 'nothing on stderr'}"
+                with open(log) as handle:
+                    seen = [f"{r['method']} {r['path']}" for r in map(json.loads, filter(str.strip, handle))]
+                reported = os.path.exists(os.path.join(work, "report-claude.json"))
+                return None, (f"the session did not end in 120 s: {said.strip()[-300:] or 'nothing on stderr'}; "
+                              f"the agent reported: {reported}; the server saw {len(seen)} requests, last {seen[-4:]}")
             with open(log) as handle:
                 arrived = [json.loads(line)["at"] for line in handle if line.strip()]
         finally:
