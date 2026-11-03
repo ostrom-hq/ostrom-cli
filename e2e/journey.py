@@ -402,8 +402,12 @@ class Journey:
         rule_id = rule.get("id") if isinstance(rule, dict) else None
         if not self.check(status == 201 and rule_id, f"the console proposes a rule ({status}): {error_of(rule)[:200]}"):
             return
-        status, catalogue, _ = self.call("GET", "/api/v1/tokens/scopes", session=session)
-        scopes = [s["scope"] for s in (catalogue or {}).get("scopes", [])][:32] if isinstance(catalogue, dict) else []
+        # every scope a personal token may hold (1 to 32, the server's catalogue): init reads the org, its repositories,
+        # workflows and rules; a write scope is never on a personal token, and its governance write is held anyway
+        listed, catalogue, _ = self.call("GET", "/api/v1/tokens/scopes", session=session)
+        scopes = [s["scope"] for s in catalogue.get("scopes", [])] if isinstance(catalogue, dict) else []
+        if not self.check(listed == 200 and scopes, f"the console lists the scopes of a token ({listed})"):
+            return
         status, made, _ = self.call("POST", "/api/v1/tokens", {"name": "journey init", "scopes": scopes,
                                                                "expiresInDays": 1}, session=session)
         secret = made.get("secret") if isinstance(made, dict) else None
@@ -414,13 +418,16 @@ class Journey:
                 return
             done = self.governed({**maya, "token": secret}, "init", "--yes", console=True)
             out = self.step["commands"][-1]["stdout"]
-            self.check(done == 0 and "✓ 1 rules accepted" in out,
+            # init accepts every rule still proposed: the run's org is new, but its own rule is the one checked below
+            self.check(done == 0 and re.search(r"✓ \d+ rules accepted", out) is not None,
                        f"init with it accepts the proposed rule once the owner confirms ({done}): "
                        f"{(out + self.last_said).strip()[-300:]}")
             status, read, _ = self.call("GET", f"/api/v1/rules/{rule_id}", session=session, org=self.org_id)
             self.check(status == 200 and (read or {}).get("status") == "accepted",
                        f"the rule is accepted on the server ({status}, {(read or {}).get('status')})")
         finally:
+            # the confirmation may have taken minutes: a sign-in recent enough for the console's writes
+            session = self.recent_sign_in(maya["email"]) or session
             removed, _, _ = self.call("DELETE", f"/api/v1/rules/{rule_id}", session=session, org=self.org_id)
             self.check(removed in (200, 204), f"the journey's rule is removed on the console ({removed})")
             if token_id:
