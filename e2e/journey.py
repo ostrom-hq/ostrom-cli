@@ -103,8 +103,10 @@ class Journey:
 
     # ---- the server ----------------------------------------------------------------------------------------------
 
-    def call(self, method, path, body=None, token=None, session=None, org=None):
+    def call(self, method, path, body=None, token=None, session=None, org=None, cookie=None):
         headers = {"accept": "application/json"}
+        if cookie:
+            headers["cookie"] = cookie
         if org:
             headers["ostrom-org"] = org
         data = None
@@ -157,14 +159,17 @@ class Journey:
     def sign_in(self, email):
         """A browser session of [email], by the link the server e-mailed: its cookie and CSRF token."""
         since = time.time()
-        status, _, _ = self.call("POST", "/api/v1/auth/email", {"email": email})
+        status, _, asked = self.call("POST", "/api/v1/auth/email", {"email": email})
         if not self.check(status < 300, f"a sign-in link is e-mailed to {who(email)} ({status})"):
             return None
+        # one browser: the link opens only where it was asked for, by the cookie POST /auth/email sets
+        # (ostrom_email_link, server#176; without it, 403 email_link_other_browser)
+        jar = cookies(asked)
         token = self.mail_token(email, "/auth/email", since)
         if not self.check(token is not None, f"the link reached {self.options.mail_dir}"):
             return None
-        status, body, headers = self.call("POST", "/api/v1/auth/email/verify", {"token": token})
-        cookie = "; ".join(c.split(";", 1)[0] for c in headers.get_all("set-cookie") or [])
+        status, body, headers = self.call("POST", "/api/v1/auth/email/verify", {"token": token}, cookie=jar)
+        cookie = cookies(headers)
         csrf = body.get("csrfToken") if isinstance(body, dict) else None
         if not self.check(status == 200 and cookie and csrf, f"{who(email)} has a browser session ({status})"):
             return None
@@ -899,6 +904,11 @@ def read_json(raw):
         return json.loads(raw) if raw else None
     except ValueError:
         return None
+
+
+def cookies(headers):
+    """The cookies an answer sets, as a request's cookie header (name=value; ...); empty when it sets none."""
+    return "; ".join(c.split(";", 1)[0] for c in (headers.get_all("set-cookie") if headers else None) or [])
 
 
 def error_of(body):
