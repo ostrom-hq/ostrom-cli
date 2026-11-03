@@ -184,11 +184,14 @@ class GeminiEnvironmentTest {
         files.links["/raccourci"] = "/vrai"
         files.texts[trusted] = """{"/raccourci/projet": "DO_NOT_TRUST"}"""
         assertTrue("does not trust /vrai/projet" in refusal(layout(workspace = listOf("/vrai/projet"))))
-        // `..` through a link is the parent of where it leads, as realpath reads it: /b/projet, not /a/projet
+        // `..` is taken as written, then links followed, as Node's realpathSync: /a/lien/../projet is /a/projet, even
+        // where /a/lien leads to /b/x
         files.links["/a/lien"] = "/b/x"
-        files.texts[trusted] = """{"/b/projet": "DO_NOT_TRUST"}"""
-        assertTrue("does not trust /a/lien/../projet" in refusal(layout(workspace = listOf("/a/lien/../projet"))))
         files.texts[trusted] = """{"/a/projet": "DO_NOT_TRUST"}"""
+        assertTrue("does not trust /a/lien/../projet" in refusal(layout(workspace = listOf("/a/lien/../projet"))))
+        files.texts[trusted] = """{"/a/lien/../projet": "DO_NOT_TRUST"}"""
+        assertTrue("does not trust /a/projet" in refusal(layout(workspace = listOf("/a/projet"))))
+        files.texts[trusted] = """{"/b/projet": "DO_NOT_TRUST"}"""
         assertNull(started(layout(workspace = listOf("/a/lien/../projet"))))
         // TRUST_PARENT through a link names the folder, longer than the rule that distrusts its parent
         files.texts[trusted] = """{"/vrai": "DO_NOT_TRUST", "/raccourci/projet/x": "TRUST_PARENT"}"""

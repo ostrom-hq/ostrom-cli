@@ -73,12 +73,19 @@ class MemoryFiles : LaunchFiles {
     }
 
     /**
-     * [path] as realpath reads it: each name in turn, a link replaced by where it leads, `..` the parent of that, not
-     * of the link. Only POSIX paths are followed; others are kept.
+     * [path] as Node's realpathSync reads it: `.` and `..` from the path as written, then each name in turn, a link
+     * replaced by where it leads. Only POSIX paths are followed; others are kept.
      */
     override fun canonical(path: String): String {
         if (!path.startsWith("/")) return path
-        val pending = ArrayDeque(names(path))
+        val written = names(path).fold(listOf<String>()) { kept, name ->
+            when (name) {
+                "." -> kept
+                ".." -> kept.dropLast(1)
+                else -> kept + name
+            }
+        }
+        val pending = ArrayDeque(written)
         var resolved = ""
         var hops = 0
         while (pending.isNotEmpty()) {
