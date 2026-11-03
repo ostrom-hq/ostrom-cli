@@ -15,6 +15,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** OpenCode, Gemini CLI, Grok CLI, Hermes Agent and Pi: each loads the session's harness its own way. */
@@ -200,6 +201,14 @@ class MoreAdaptersTest {
         val named = mapOf("GEMINI_CLI_SYSTEM_SETTINGS_PATH" to "s.json")
         val relative = GeminiAdapter().prepare(layout(variables = named), files)
         assertEquals(join(".", "system-defaults.json"), relative.environment["GEMINI_CLI_SYSTEM_DEFAULTS_PATH"])
+    }
+
+    @Test
+    fun geminiNeedsTheVersionThatKeepsTheSystemSettingsOverTheWorkspace() {
+        val minimum = checkNotNull(GeminiAdapter().minimum)
+        assertEquals("0.66.0", minimum.version)
+        assertEquals("npm install -g @google/gemini-cli@latest", minimum.update)
+        assertNull(ClaudeAdapter().minimum, "no minimum known for the other agents")
     }
 
     @Test

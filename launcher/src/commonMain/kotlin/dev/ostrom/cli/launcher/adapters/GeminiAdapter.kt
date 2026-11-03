@@ -31,6 +31,7 @@ import kotlin.random.nextULong
 class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toString(HEX).padStart(NONCE, '0') }) :
     AgentAdapter {
     override val agent = Agent.GEMINI
+    override val minimum = MinimumVersion("", "")
 
     override fun prepare(layout: SessionLayout, files: LaunchFiles): AgentLaunch {
         val real = join(layout.variable("GEMINI_CLI_HOME") ?: layout.home, ".gemini")

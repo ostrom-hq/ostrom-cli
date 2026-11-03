@@ -88,6 +88,10 @@ interface AgentAdapter {
     /** The agent this adapter is for. */
     val agent: Agent
 
+    /** The oldest version of the agent in which Ostrom's hooks stay on; null when every version is started. */
+    val minimum: MinimumVersion?
+        get() = null
+
     /**
      * Writes what the session needs under [SessionLayout.temporary] and says how to start the agent.
      *

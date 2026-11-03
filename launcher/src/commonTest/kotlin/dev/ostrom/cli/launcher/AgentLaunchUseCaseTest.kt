@@ -2,10 +2,11 @@
 package dev.ostrom.cli.launcher
 
 import dev.ostrom.cli.launcher.adapters.AdapterException
-import dev.ostrom.cli.launcher.adapters.AgentLaunch
 import dev.ostrom.cli.launcher.adapters.AgentAdapter
+import dev.ostrom.cli.launcher.adapters.AgentLaunch
 import dev.ostrom.cli.launcher.adapters.ClaudeAdapter
 import dev.ostrom.cli.launcher.adapters.CodexAdapter
+import dev.ostrom.cli.launcher.adapters.MinimumVersion
 import dev.ostrom.cli.platform.CaptureResult
 import dev.ostrom.cli.platform.ExecutableFinder
 import dev.ostrom.cli.platform.ProcessCapture
@@ -32,10 +33,12 @@ class AgentLaunchUseCaseTest {
     private val warned = mutableListOf<String>()
     private val variables = mutableMapOf("PATH" to "/usr/bin")
     private var gitAnswer: CaptureResult = CaptureResult.Exited(0, "/work/acme-api\n")
+    private var versionAnswer: CaptureResult = CaptureResult.Exited(0, "0.65.0\n")
     private var originAnswer: CaptureResult = CaptureResult.Exited(2, "error: No such remote 'origin'\n")
     private var installed = mutableMapOf("claude" to "/usr/bin/claude", "codex" to "/usr/bin/codex")
     private var agentResult: ProcessResult = ProcessResult.Exited(3)
     private val commands = mutableListOf<List<String>>()
+    private val versionAsked = mutableListOf<List<String>>()
     private val environments = mutableListOf<Map<String, String?>>()
     private val filesWhileRunning = mutableMapOf<String, String>()
     private val relaySettings = mutableListOf<RelaySettings>()
@@ -56,7 +59,11 @@ class AgentLaunchUseCaseTest {
 
     private val capture = object : ProcessCapture {
         override fun capture(command: List<String>, timeoutMillis: Int) =
-            if ("get-url" in command) originAnswer else gitAnswer
+            when {
+                "--version" in command -> versionAnswer.also { versionAsked += command }
+                "get-url" in command -> originAnswer
+                else -> gitAnswer
+            }
 
         override fun detach(command: List<String>) = false
     }
@@ -443,6 +450,32 @@ class AgentLaunchUseCaseTest {
         assertEquals(3, start())
         assertTrue("ostrom: your config has hooks too" in said, said.toString())
         assertEquals(listOf("/usr/bin/claude", "-x"), commands.single())
+    }
+
+    @Test
+    fun anAgentOlderThanItsAdaptersMinimumIsNotStartedNorLaunched() = runTest {
+        serveALaunch()
+        installed["gemini"] = "/usr/bin/gemini"
+        val gemini = object : AgentAdapter {
+            override val agent = Agent.GEMINI
+            override val minimum = MinimumVersion("0.66.0", "npm install -g @google/gemini-cli@latest")
+
+            override fun prepare(layout: dev.ostrom.cli.launcher.adapters.SessionLayout, files: LaunchFiles) =
+                AgentLaunch(emptyList(), emptyMap())
+        }
+        adapters = listOf(gemini)
+        assertEquals(70, start(Agent.GEMINI))
+        assertEquals(
+            "ostrom: Gemini CLI 0.65.0 is older than 0.66.0: a repository could turn Ostrom's hooks off in it, so it " +
+                "is not started. Update it: npm install -g @google/gemini-cli@latest",
+            said.last(),
+        )
+        assertEquals(listOf(listOf("/usr/bin/gemini", "--version")), versionAsked)
+        assertTrue(commands.isEmpty(), "the agent never starts")
+        assertTrue(relaySettings.isEmpty(), "no launch is asked of Ostrom")
+        server["GET ${Routes.POLICY}?agent=gemini&dev=alice"] = 200 to """{"allowed":true}"""
+        versionAnswer = CaptureResult.Exited(0, "0.66.0\n")
+        assertEquals(3, start(Agent.GEMINI), "a recent enough agent starts")
     }
 
     @Test
