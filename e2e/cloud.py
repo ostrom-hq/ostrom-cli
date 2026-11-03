@@ -7,8 +7,9 @@ stdout. Ctrl-] (0x1d on stdin) detaches and leaves it running. `ostrom attach <i
 detaches the same way. The owner stops it (`DELETE /api/v1/cloud/sessions/{id}`, as the console's Stop does), and
 `ostrom attach` then says it is terminated. Every state is read back from the server.
 
-The server must run cloud sessions somewhere: the workflow gives it a runtime driver (the Docker of the CI's machine,
-as console-journey.yml) and says so with --cloud-sessions; without it, the step is skipped and says why.
+The server must run cloud sessions somewhere: ostrom-server's cli-journey.yml gives it a runtime driver (the Docker of
+the CI's machine, as its console-journey.yml) and says so with --cloud-sessions; without it, the step is skipped and
+says why (failed with --strict, as 2.9 without its fake MCP server).
 """
 import json
 import os
@@ -99,6 +100,13 @@ class Cloud:
         self.journey = journey
         self.maya = maya
         self.session = None
+        self.terminals = []
+
+    def terminal(self, *arguments):
+        """A command given the terminal, killed at the end of the step if it is still running."""
+        started = Terminal(self.journey, self.maya, *arguments)
+        self.terminals.append(started)
+        return started
 
     def run(self):
         j = self.journey
@@ -117,9 +125,16 @@ class Cloud:
             if self.started() and self.attached():
                 self.stopped()
         finally:
+            for left in self.terminals:
+                if left.process.poll() is None:
+                    left.process.kill()
+                    left.process.wait()
             if self.session:
-                # whatever happened, the session does not outlive the step
-                j.call("DELETE", self.path(), token=self.maya["token"], org=j.org_id)
+                # whatever happened, the session does not outlive the step (an error here never hides the step's own)
+                try:
+                    j.call("DELETE", self.path(), token=self.maya["token"], org=j.org_id)
+                except OSError as error:
+                    print(f"  note  the cloud session {self.session} could not be stopped: {error}", flush=True)
 
     def path(self):
         return f"/api/v1/cloud/sessions/{urllib.parse.quote(self.session)}"
@@ -131,10 +146,11 @@ class Cloud:
     def started(self):
         """`ostrom claude --cloud` with the device's token: the session starts, its terminal shows here, Ctrl-]."""
         j = self.journey
-        claude = Terminal(j, self.maya, "claude", "--cloud")
+        claude = self.terminal("claude", "--cloud")
         named = claude.wait_until(lambda: STARTED.search(claude.stderr()), 60)
-        if named:
-            self.session = STARTED.search(claude.stderr()).group(1)
+        found = STARTED.search(claude.stderr())
+        if named and found:
+            self.session = found.group(1)
         if not j.check(named, f"ostrom claude --cloud asks Ostrom for a session ({self.session})"):
             claude.type(DETACH)
             claude.end(10)
@@ -160,7 +176,7 @@ class Cloud:
         status, body = self.state()
         j.check(status == 200 and body.get("status") == "running",
                 f"the session keeps running after the detach ({status}: {body.get('status')})")
-        attach = Terminal(j, self.maya, "attach", self.session)
+        attach = self.terminal("attach", self.session)
         # keys the agent shows back: a letter in its prompt, an arrow in its menus (a shell echoes the letter)
         time.sleep(5)
         attach.type(b"x")
@@ -187,7 +203,7 @@ class Cloud:
             time.sleep(2)
         if not j.check(state == "terminated", f"the server has it terminated ({state})"):
             return
-        attach = Terminal(j, self.maya, "attach", self.session)
+        attach = self.terminal("attach", self.session)
         code = attach.end(60)
         j.check(code == 1 and f"session {self.session} is terminated" in attach.stderr(),
                 f"ostrom attach says it is terminated, exit 1 ({code}): {attach.stderr().strip()[-300:]}")

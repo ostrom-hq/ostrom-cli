@@ -152,6 +152,9 @@ class Rules:
             pass
         if held.is_set():
             confirmation = next(CONFIRM.search(line).group(1) for line in said if CONFIRM.search(line))
+            # a confirmation takes a sign-in of less than 5 minutes: renewed when the journey keeps one (recent_sign_in)
+            renew = getattr(j, "recent_sign_in", None)
+            self.session = (renew(self.maya["email"]) if renew else None) or self.session
             status, body, _ = j.call("POST", f"/api/v1/confirmations/{urllib.parse.quote(confirmation)}/answer",
                                      {"answer": "confirm"}, session=self.session, org=j.org_id)
             j.check(status == 200, f"the owner confirms {shown} on the console ({status}): {json.dumps(body)[:200]}")
