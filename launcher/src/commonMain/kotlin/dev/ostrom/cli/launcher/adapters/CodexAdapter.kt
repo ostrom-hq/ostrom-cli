@@ -68,7 +68,9 @@ class CodexAdapter : AgentAdapter {
             mapOf("event_name" to JsonPrimitive(hook.label), "hooks" to JsonArray(listOf(normalized))),
         )
         val hash = "sha256:" + sha256Hex(identity.toString().encodeToByteArray())
-        FLAG_LAYERS.map { layer -> "${quoted("$layer:${hook.label}:0:0")}={trusted_hash=${quoted(hash)},enabled=true}" }
+        listOf(POSIX_FLAGS, WINDOWS_FLAGS).map { layer ->
+            "${quoted("$layer:${hook.label}:0:0")}={trusted_hash=${quoted(hash)},enabled=true}"
+        }
     }.joinToString(",", "{", "}")
 
     /** One hook's handler: the one source of both its `-c` override and the identity whose hash is trusted. */
@@ -105,7 +107,8 @@ class CodexAdapter : AgentAdapter {
 
     private companion object {
         // the path Codex gives the `-c` layer in hook keys, on POSIX then on Windows
-        val FLAG_LAYERS = listOf("/<session-flags>/config.toml", "C:\\<session-flags>\\config.toml")
+        const val POSIX_FLAGS = "/<session-flags>/config.toml"
+        const val WINDOWS_FLAGS = "C:\\<session-flags>\\config.toml"
         const val AFTER_SECONDS = 10L
         const val START_SECONDS = 20L
         const val END_SECONDS = 3L
