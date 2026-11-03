@@ -85,7 +85,10 @@ class AdaptersTest {
         val launch = ClaudeAdapter().prepare(layout, files)
         val mcp = join("/tmp/run", "mcp.json")
         assertEquals(
-            listOf("--plugin-dir", join("/tmp/run", "plugin"), "--resume", "x", "--mcp-config", mcp, "--", "prompt"),
+            listOf(
+                "--plugin-dir", join("/tmp/run", "plugin"), "--resume", "x",
+                "--settings", join("/tmp/run", "claude-settings.json"), "--mcp-config", mcp, "--", "prompt",
+            ),
             launch.arguments,
         )
         assertEquals(emptyMap(), launch.environment)
@@ -114,7 +117,11 @@ class AdaptersTest {
         val manifest = join("/tmp/run", "plugin", ".claude-plugin", "plugin.json")
         files.texts[manifest] = """{"name":"acme"}"""
         val launch = ClaudeAdapter().prepare(layout(arguments = listOf("-p", "hi")), files)
-        assertEquals(listOf("--plugin-dir", join("/tmp/run", "plugin"), "-p", "hi"), launch.arguments)
+        val settings = join("/tmp/run", "claude-settings.json")
+        assertEquals(
+            listOf("--plugin-dir", join("/tmp/run", "plugin"), "-p", "hi", "--settings", settings),
+            launch.arguments,
+        )
         assertEquals("""{"name":"acme"}""", files.texts[manifest])
         assertNull(files.texts[join("/tmp/run", "mcp.json")])
     }
@@ -157,16 +164,25 @@ class AdaptersTest {
     @Test
     fun claudeStartsWithoutSettingsItCannotRead() {
         val settings = join("/tmp/run", "claude-settings.json")
-        for (value in listOf("/home/dev/missing.json", "{not json", "[1]")) {
+        files.texts["/home/dev/list.json"] = "[1]"
+        for (value in listOf("/home/dev/missing.json", "{not json", "/home/dev/list.json")) {
             val launch = ClaudeAdapter().prepare(layout(arguments = listOf("--settings", value)), files)
             assertEquals(listOf("--plugin-dir", join("/tmp/run", "plugin"), "--settings", settings), launch.arguments)
             assertEquals("""{"disableAllHooks":false}""", files.texts[settings], value)
             assertEquals(1, launch.notes.size, value)
-            assertTrue(launch.notes.single().contains(value), value)
+            // a file is named; an inline value is not repeated, it may hold secrets
+            assertEquals(value.startsWith("/"), launch.notes.single().contains(value), value)
         }
         // a --settings with no value names nothing: the session gets Ostrom's alone
         val dangling = ClaudeAdapter().prepare(layout(arguments = listOf("--settings")), files)
         assertEquals(listOf("--plugin-dir", join("/tmp/run", "plugin"), "--settings", settings), dangling.arguments)
+        // nor does one right before `--`, whose prompt stays a prompt
+        val beforePrompt = ClaudeAdapter().prepare(layout(arguments = listOf("--settings", "--", "hi")), files)
+        assertEquals(
+            listOf("--plugin-dir", join("/tmp/run", "plugin"), "--settings", settings, "--", "hi"),
+            beforePrompt.arguments,
+        )
+        assertEquals(emptyList(), beforePrompt.notes)
     }
 
     @Test

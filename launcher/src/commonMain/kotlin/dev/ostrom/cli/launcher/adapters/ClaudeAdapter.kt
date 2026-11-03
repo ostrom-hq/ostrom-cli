@@ -8,12 +8,20 @@ import dev.ostrom.cli.launcher.LaunchVariables
 import dev.ostrom.cli.launcher.beforeSeparator
 import dev.ostrom.cli.launcher.join
 import dev.ostrom.cli.launcher.objectOf
+import dev.ostrom.cli.launcher.parseObject
 import dev.ostrom.cli.launcher.pretty
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * Claude Code: the session's plugin by `--plugin-dir` (the package's skills, agents and rules, Ostrom's hooks in
  * `hooks/hooks.json`), the organisation's MCP servers through the local relay by `--mcp-config`, and, when the
  * organisation relays inference, `ANTHROPIC_BASE_URL` on the relay (as `teamcode run` does).
+ *
+ * The session's settings (`--settings`) say `"disableAllHooks": false`: a repository's `.claude/settings.json` that
+ * turns hooks off would otherwise switch Ostrom off with them, and command-line settings come before the project's
+ * (security audit of the CLI n°2, H1). Claude Code reads only the last `--settings`, so the developer's own is merged
+ * into them.
  */
 class ClaudeAdapter : AgentAdapter {
     override val agent = Agent.CLAUDE
@@ -24,12 +32,54 @@ class ClaudeAdapter : AgentAdapter {
         if (!files.exists(manifest)) {
             files.write(manifest, pretty(objectOf("name" to "ostrom", "description" to DESCRIPTION, "version" to "1")))
         }
+        val (theirs, rest) = developersSettings(layout.arguments)
+        val (settings, notes) = settings(layout, files, theirs)
         // `--mcp-config` takes several values: after the developer's options and before a literal `--`, never first,
         // where it would swallow a prompt.
         val arguments = mutableListOf("--plugin-dir", layout.plugin)
         val mcp = mcpConfig(layout, files)
-        arguments += beforeSeparator(layout.arguments, if (mcp == null) emptyList() else listOf("--mcp-config", mcp))
-        return AgentLaunch(arguments, inference(layout))
+        val ours = listOf("--settings", settings) + if (mcp == null) emptyList() else listOf("--mcp-config", mcp)
+        arguments += beforeSeparator(rest, ours)
+        return AgentLaunch(arguments, inference(layout), notes)
+    }
+
+    /**
+     * The value of the developer's last `--settings` (`--settings x` or `--settings=x`) before a literal `--`, or null,
+     * and their arguments without any `--settings`.
+     */
+    private fun developersSettings(arguments: List<String>): Pair<String?, List<String>> {
+        val end = arguments.indexOf("--").takeIf { it >= 0 } ?: arguments.size
+        var value: String? = null
+        val rest = mutableListOf<String>()
+        var index = 0
+        while (index < end) {
+            val argument = arguments[index]
+            when {
+                argument == SETTINGS -> {
+                    value = arguments.getOrNull(index + 1)?.takeIf { index + 1 < end } ?: value
+                    index++
+                }
+                argument.startsWith("$SETTINGS=") -> value = argument.removePrefix("$SETTINGS=")
+                else -> rest += argument
+            }
+            index++
+        }
+        return value to rest + arguments.drop(end)
+    }
+
+    /**
+     * Writes the session's settings: the developer's ([theirs], inline JSON or a file), with hooks on. Settings that
+     * cannot be read are left out, and the developer is told. The path, and what to tell.
+     */
+    private fun settings(layout: SessionLayout, files: LaunchFiles, theirs: String?): Pair<String, List<String>> {
+        val inline = theirs?.trimStart()?.startsWith("{") == true
+        val read = theirs?.let { parseObject(if (inline) it else files.read(it)) }
+        // an inline value may hold secrets (`env`): only a file is named
+        val notes = if (theirs != null && read == null) listOf(unread(if (inline) "" else " $theirs")) else emptyList()
+        val merged = JsonObject(read.orEmpty() + (DISABLE_ALL_HOOKS to JsonPrimitive(false)))
+        val path = join(layout.temporary, "claude-settings.json")
+        files.write(path, merged.toString(), FileAccess.PRIVATE)
+        return path to notes
     }
 
     private fun writeHooks(layout: SessionLayout, files: LaunchFiles) {
@@ -84,6 +134,11 @@ class ClaudeAdapter : AgentAdapter {
         private const val AFTER_SECONDS = 10L
         private const val START_SECONDS = 20L
         private const val END_SECONDS = 30L
+        private const val SETTINGS = "--settings"
+        private const val DISABLE_ALL_HOOKS = "disableAllHooks"
+
+        private fun unread(file: String) =
+            "claude: your --settings$file is not a JSON object Ostrom can read: this session starts without it"
         private val PROVIDER_OVERRIDES = listOf(
             "ANTHROPIC_API_KEY",
             "CLAUDE_CODE_OAUTH_TOKEN",
