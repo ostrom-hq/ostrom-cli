@@ -108,7 +108,7 @@ class OstromCliTest : CliKit() {
 
     @Test
     fun theVersionOptionIsTheVersionCommand() {
-        // `ostrom --version`, as any command-line tool: the line of `ostrom version`, code 0 (CONVENTIONS § 16.3 times it)
+        // `ostrom --version`, as any command-line tool: the line of `ostrom version`, code 0 (CONVENTIONS 16.3)
         assertEquals(0, cli().run(arrayOf("--version")))
         assertEquals("ostrom ${BuildInfo.VERSION} (kotlin-native, Linux x64)\n", console.out.toString())
     }
