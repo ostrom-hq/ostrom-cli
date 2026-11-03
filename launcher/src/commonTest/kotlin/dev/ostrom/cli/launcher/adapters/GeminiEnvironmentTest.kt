@@ -148,6 +148,10 @@ class GeminiEnvironmentTest {
                 "hooks, Ostrom's included, so it is not started. Remove that entry to work with Ostrom",
             refusal(layout(workspace = listOf("/work/repo"))),
         )
+        prepare(layout(workspace = listOf("/other")))
+        files.texts[trusted] = """{"C:\\Work": "DO_NOT_TRUST"}"""
+        assertTrue("(DO_NOT_TRUST)" in refusal(layout(workspace = listOf("c:\\work\\repo"))))
+        files.texts[trusted] = """{"/work": "DO_NOT_TRUST"}"""
         // as Gemini matches: the longest rule wins, a parent's TRUST_PARENT names the parent, and case is not told
         files.texts[trusted] = """{"/work": "DO_NOT_TRUST", "/work/repo/x": "TRUST_PARENT"}"""
         prepare(layout(workspace = listOf("/work/repo")))

@@ -25,8 +25,9 @@ import kotlin.random.nextULong
  * hooks off, and its `hooksConfig.disabled` adds hook names to skip (Gemini CLI 0.66, security audit of the CLI n°2,
  * H3). Only the system settings win over the workspace, and Gemini ignores system settings not owned by root, so a
  * session cannot write its own: Gemini is not started where the workspace's settings touch `hooks` or `hooksConfig`.
- * The system settings stay the administrator's, named by Ostrom so that a repository's `.env` cannot name others, and
- * Ostrom's hooks get names no repository can know in advance.
+ * The system settings stay the administrator's, named by Ostrom so that a repository's `.env` cannot name others,
+ * Ostrom's hooks get names no repository can know in advance, and the variables that decide the folder's trust or the
+ * shell of the hooks are Ostrom's too ([GeminiEnvironment]).
  *
  * @param nonce A value of the session no repository can guess, for the names of Ostrom's hooks.
  */
@@ -40,7 +41,7 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
 
     override fun prepare(layout: SessionLayout, files: LaunchFiles): AgentLaunch {
         val real = join(layout.variable("GEMINI_CLI_HOME") ?: layout.home, ".gemini")
-        val trust = trust(layout)
+        val pinned = GeminiEnvironment.of(layout, files, real)
         refuseWorkspaceHooks(layout, files, real)
         val root = join(layout.temporary, "gemini-home")
         files.createPrivateDirectory(root)
@@ -58,11 +59,11 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
         val rules = files.read(join(real, "GEMINI.md")).orEmpty() + "\n" + layout.rules
         files.write(join(directory, "GEMINI.md"), rules)
         val system = systemSettings(layout, files)
-        val environment = mapOf(
+        val environment = pinned + mapOf(
             "GEMINI_CLI_HOME" to root,
             LaunchVariables.HOOK_DIALECT to "gemini",
             LaunchVariables.HOOK_BUDGET_MS to BUDGET_MILLIS,
-        ) + system + trust
+        ) + system
         return AgentLaunch(layout.arguments, environment, notes)
     }
 
@@ -118,25 +119,6 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
                     "another event, or remove it, to work with Ostrom",
             )
         }
-    }
-
-    /**
-     * The variables that decide whether Gemini trusts the folder, as the developer set them or empty: Gemini loads a
-     * repository's `.env` without replacing a variable already set, and an untrusted folder runs none of the
-     * settings' hooks, Ostrom's included (Gemini CLI 0.66, `checkPathTrust`).
-     *
-     * @throws AdapterException When the developer's own take the trust away.
-     */
-    private fun trust(layout: SessionLayout): Map<String, String> {
-        val untrusting = UNTRUSTING.firstOrNull { (name, value) -> layout.variable(name) == value }
-        if (untrusting != null) {
-            throw AdapterException(
-                "gemini: ${untrusting.first}=${untrusting.second} takes the trust away from this folder, and Gemini " +
-                    "then runs none of the settings' hooks, Ostrom's included, so it is not started. Unset it to " +
-                    "work with Ostrom",
-            )
-        }
-        return TRUST.associateWith { layout.variable(it).orEmpty() }
     }
 
     /**
@@ -212,22 +194,5 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
         const val NONCE = 16
 
         const val MACOS_ROOT = "/Library/Application Support"
-
-        // what takes the trust away from a folder: restricted mode, or the workspace's trust turned off
-        val UNTRUSTING = listOf("GEMINI_RESTRICTED_MODE" to "true", "GEMINI_CLI_TRUST_WORKSPACE" to "false")
-
-        // what decides the folder's trust: the two above, the trusted folders' file, and an IDE's connection, which
-        // tells Gemini whether the IDE trusts the folder
-        val TRUST = listOf(
-            "GEMINI_RESTRICTED_MODE",
-            "GEMINI_CLI_TRUST_WORKSPACE",
-            "GEMINI_CLI_TRUSTED_FOLDERS_PATH",
-            "GEMINI_CLI_IDE_SERVER_PORT",
-            "GEMINI_CLI_IDE_SERVER_STDIO_COMMAND",
-            "GEMINI_CLI_IDE_SERVER_STDIO_ARGS",
-            "GEMINI_CLI_IDE_WORKSPACE_PATH",
-            "GEMINI_CLI_IDE_AUTH_TOKEN",
-            "GEMINI_CLI_IDE_PID",
-        )
     }
 }

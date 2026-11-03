@@ -93,5 +93,43 @@ object LaunchVariables {
      * Every `OSTROM_` variable the CLI reads, its hooks and `ostrom mcp` included: an agent that loads a repository's
      * `.env` without replacing a variable already set (Gemini CLI) gets them all, empty when Ostrom has no value.
      */
-    val ALL: List<String> = emptyList()
+    val ALL: List<String> = listOf(
+        RELAY_URL,
+        RELAY_TOKEN,
+        RELAY_CLIENT,
+        RELAY_TOKEN_FILE,
+        INSTANCE_KEYS,
+        PACKAGE,
+        PACKAGE_SEAL,
+        PACKAGE_MANIFEST,
+        REPO,
+        DEV,
+        AGENT,
+        GIT,
+        GATES,
+        SESSION_FILE,
+        SESSION_SETTINGS,
+        HARNESS_VERSION,
+        LAUNCH_TOP,
+        LAUNCH_ID,
+        MODEL,
+        RUNNER_CHECKS,
+        HOOK_DIALECT,
+        HOOK_BUDGET_MS,
+        SERVER,
+        DEVICE_TOKEN,
+        // read by the CLI itself, its hooks or the agents' plugins
+        "OSTROM_HOME",
+        "OSTROM_HOOK_TIMING",
+        "OSTROM_TELEMETRY",
+        "OSTROM_ORG",
+        "OSTROM_CONSOLE_URL",
+        "OSTROM_GITHUB_WEB_URL",
+        "OSTROM_RELEASES_URL",
+        "OSTROM_PLUGIN_ROOT",
+        "OSTROM_BIN",
+        "OSTROM_KEEP_PLUGIN",
+        "OSTROM_INFERENCE",
+        "OSTROM_ALIVE_MS",
+    )
 }
