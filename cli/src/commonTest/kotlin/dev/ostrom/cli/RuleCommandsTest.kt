@@ -56,6 +56,10 @@ class RuleCommandsTest : SetupKit() {
             refusedFor("rules:read") to withServer + ("OSTROM_TOKEN" to "ost_console"),
             refusedFor("rules:read") to inSession,
             mapOf("GET /api/v1/rules" to (403 to """{"error":{"message":"not a member of acme"}}""")) to withServer,
+            // the server's sentence cut short: not the one it says for a lacked right
+            mapOf(
+                "GET /api/v1/rules" to (403 to """{"error":{"message":"This credential does not allow rules:read"}}"""),
+            ) to withServer,
         )
         for ((routes, environment) in alone) {
             console.err.clear()
