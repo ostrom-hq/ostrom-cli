@@ -232,7 +232,8 @@ class CloudSessionUseCase(
             null -> UNREACHABLE
             else -> FAILED
         }
-        say("ostrom: ${answer.message}")
+        val older = answer.status == FORBIDDEN && olderThanCloud(answer.message)
+        say("ostrom: ${if (older) OLDER_TOKEN else answer.message}")
         return code
     }
 
@@ -242,6 +243,16 @@ class CloudSessionUseCase(
         private fun passing(answer: ServerAnswer.Failed): Boolean {
             val status = answer.status
             return status == null || status == TOO_MANY || status >= SERVER_ERROR
+        }
+
+        /**
+         * True when [message] is the server's refusal of a cloud scope the token lacks, in either of its wordings
+         * (`MissingScopeException` of the runners module, `requireScope` of the kernel): a token of `ostrom login`
+         * issued before the server gave it cloud sessions (ostrom-server#240), which signing in again renews.
+         */
+        private fun olderThanCloud(message: String): Boolean {
+            val scope = MISSING_SCOPE.matchEntire(message)?.groupValues?.drop(1)?.firstOrNull { it.isNotEmpty() }
+            return scope in CLOUD_SCOPES
         }
 
         /** Agents with a cloud image (contract `CloudSession.agent`). */
@@ -304,5 +315,9 @@ class CloudSessionUseCase(
         private const val MISSING = 66
         private const val UNREACHABLE = 69
         private const val REFUSED = 77
+        private val MISSING_SCOPE = Regex("""This credential (?:lacks the (\S+) scope|does not allow (\S+))\.""")
+        private val CLOUD_SCOPES = setOf("cloud:read", "cloud:write")
+        private const val OLDER_TOKEN =
+            "this device's token is older than cloud sessions: run `ostrom login` again for a new one"
     }
 }
