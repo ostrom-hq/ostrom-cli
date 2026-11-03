@@ -13,15 +13,14 @@ import kotlinx.serialization.json.JsonObject
  */
 class InertKeys(private val inert: Set<String>) {
     /** The dotted path of the first key of [settings] that is not let through, or null when all are. */
-    fun firstOutside(settings: JsonObject, prefix: String = ""): String? {
-        for ((key, value) in settings) {
+    fun firstOutside(settings: JsonObject, prefix: String = ""): String? =
+        settings.entries.firstNotNullOfOrNull { (key, value) ->
             val path = if (prefix.isEmpty()) key else "$prefix.$key"
-            if (path in inert) continue
-            // a key some of whose children are let through is looked into
-            val partly = value is JsonObject && inert.any { it.startsWith("$path.") }
-            val outside = if (partly) firstOutside(value as JsonObject, path) else path
-            if (outside != null) return outside
+            when {
+                path in inert -> null
+                // a key some of whose children are let through is looked into
+                value is JsonObject && inert.any { it.startsWith("$path.") } -> firstOutside(value, path)
+                else -> path
+            }
         }
-        return null
-    }
 }

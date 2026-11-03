@@ -62,11 +62,11 @@ interface LaunchFiles {
 /**
  * [LaunchFiles] over okio.
  *
+ * @param resolve A path with its links followed, or null when it does not resolve: the system's own for its files.
  * @param restrict Sets the owner-only mode of a path (`executable`: 0700, else 0600); the platform's by default.
  */
 class LaunchFilesImpl(
     private val fileSystem: FileSystem = FileSystem.SYSTEM,
-    private val restrict: (String, Boolean) -> Unit = ::restrictToOwner,
     // the system's own realpath for its files: okio's canonicalize does not follow links on Windows
     private val resolve: (String) -> String? = if (fileSystem === FileSystem.SYSTEM) ::realPath else { path ->
         try {
@@ -75,6 +75,7 @@ class LaunchFilesImpl(
             null
         }
     },
+    private val restrict: (String, Boolean) -> Unit = ::restrictToOwner,
 ) : LaunchFiles {
     override fun read(path: String): String? = try {
         fileSystem.read(path.toPath()) { readUtf8() }

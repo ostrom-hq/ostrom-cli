@@ -20,6 +20,7 @@ internal object AgentPath {
             entry.isNotEmpty() && entry.toPath().isAbsolute &&
                 repository.none { Folders.within(files.canonical(entry), it, site.foldsCase) }
         }
-        return (listOfNotNull(folder?.toString()) + inherited).joinToString(site.pathSeparator.toString()).ifEmpty { null }
+        val entries = listOfNotNull(folder?.toString()) + inherited
+        return entries.joinToString(site.pathSeparator.toString()).ifEmpty { null }
     }
 }
