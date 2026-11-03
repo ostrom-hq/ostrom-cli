@@ -31,7 +31,10 @@ import kotlin.random.nextULong
 class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toString(HEX).padStart(NONCE, '0') }) :
     AgentAdapter {
     override val agent = Agent.GEMINI
-    override val minimum = MinimumVersion("", "")
+
+    // the version in which the system settings were seen to win over a workspace's `hooksConfig` (security audit
+    // n°2, H3): an older one is not trusted to keep the hooks on
+    override val minimum = MinimumVersion("0.66.0", "npm install -g @google/gemini-cli@latest")
 
     override fun prepare(layout: SessionLayout, files: LaunchFiles): AgentLaunch {
         val real = join(layout.variable("GEMINI_CLI_HOME") ?: layout.home, ".gemini")

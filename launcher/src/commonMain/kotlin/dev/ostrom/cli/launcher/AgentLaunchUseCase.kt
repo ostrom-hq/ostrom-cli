@@ -6,6 +6,7 @@ import dev.ostrom.cli.launcher.adapters.AgentAdapter
 import dev.ostrom.cli.launcher.adapters.AgentLaunch
 import dev.ostrom.cli.launcher.adapters.RelayView
 import dev.ostrom.cli.launcher.adapters.SessionLayout
+import dev.ostrom.cli.launcher.adapters.versionRefusal
 import dev.ostrom.cli.platform.CaptureResult
 import dev.ostrom.cli.platform.ExecutableFinder
 import dev.ostrom.cli.platform.ProcessCapture
@@ -116,6 +117,9 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         val agent = request.agent
         val adapter = adapters[agent] ?: stop(NO_ADAPTER, "${agent.displayName} has no adapter in this version.")
         val executable = dependencies.finder.find(agent.executable) ?: stop(AGENT_MISSING, missing(agent))
+        // an agent too old to keep Ostrom's hooks on is refused before any launch is asked of Ostrom
+        val tooOld = adapter.minimum?.let { versionRefusal(agent, executable, it, dependencies.capture) }
+        if (tooOld != null) stop(NO_ADAPTER, tooOld)
         val top = gitTop(site.cwd)
         val repo = request.repo ?: site.variable(LaunchVariables.REPO)?.takeIf { it.isNotEmpty() }
             ?: launchRepository(top, dependencies.capture, dependencies.say)
