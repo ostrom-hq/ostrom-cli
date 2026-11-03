@@ -35,14 +35,15 @@ class ClaudeAdapter : AgentAdapter {
             files.write(manifest, pretty(objectOf("name" to "ostrom", "description" to DESCRIPTION, "version" to "1")))
         }
         val (theirs, rest) = developersSettings(layout.arguments)
-        val (settings, notes) = settings(layout, files, theirs)
+        val own = inference(layout) + gateBudget(layout)
+        val (settings, notes) = settings(layout, files, theirs, own)
         // `--mcp-config` takes several values: after the developer's options and before a literal `--`, never first,
         // where it would swallow a prompt.
         val arguments = mutableListOf("--plugin-dir", layout.plugin)
         val mcp = mcpConfig(layout, files)
         val ours = listOf("--settings", settings) + if (mcp == null) emptyList() else listOf("--mcp-config", mcp)
         arguments += beforeSeparator(rest, ours)
-        return AgentLaunch(arguments, inference(layout) + gateBudget(layout), notes)
+        return AgentLaunch(arguments, own, notes)
     }
 
     /**
@@ -72,13 +73,18 @@ class ClaudeAdapter : AgentAdapter {
     }
 
     /**
-     * Writes the session's settings: the developer's ([theirs], inline JSON or a file), with hooks on. The path, and
-     * what to tell the developer.
+     * Writes the session's settings: the developer's ([theirs], inline JSON or a file), with hooks on and Ostrom's
+     * variables ([own] and the launcher's) in `env`. The path, and what to tell the developer.
      *
      * @throws AdapterException When [theirs] cannot be read: starting without them would drop their own rules
      * (`permissions.deny`, the sandbox), where Claude Code would refuse to start.
      */
-    private fun settings(layout: SessionLayout, files: LaunchFiles, theirs: String?): Pair<String, List<String>> {
+    private fun settings(
+        layout: SessionLayout,
+        files: LaunchFiles,
+        theirs: String?,
+        own: Map<String, String?>,
+    ): Pair<String, List<String>> {
         val inline = theirs != null && theirs.trimStart().startsWith("{")
         val read = theirs?.let { parseObject(if (inline) it else files.read(it)) }
         if (theirs != null && read == null) {
@@ -88,8 +94,12 @@ class ClaudeAdapter : AgentAdapter {
         val off = read?.get(DISABLE_ALL_HOOKS) == JsonPrimitive(true)
         // a repository's `enabledPlugins` can turn the plugin off too: this layer, before the project's, keeps it on
         val plugins = JsonObject(read?.child(ENABLED_PLUGINS).orEmpty() + (PLUGIN_ID to JsonPrimitive(true)))
+        // a repository's `env` rewrites the session's variables, the hooks' included (H4): Ostrom's and the
+        // provider's are written in this layer too, a variable Ostrom removes set empty
+        val pinned = (layout.environment + own).filterKeys { it.startsWith(OSTROM) || it in PROVIDER }
+        val env = read?.child(ENV).orEmpty() + pinned.mapValues { (_, value) -> JsonPrimitive(value.orEmpty()) }
         val merged = JsonObject(read.orEmpty() + (DISABLE_ALL_HOOKS to JsonPrimitive(false)) +
-            (ENABLED_PLUGINS to plugins))
+            (ENABLED_PLUGINS to plugins) + (ENV to JsonObject(env)))
         val path = join(layout.temporary, "claude-settings.json")
         files.write(path, merged.toString(), FileAccess.PRIVATE)
         return path to if (off) listOf(KEPT_ON) else emptyList()
@@ -152,6 +162,8 @@ class ClaudeAdapter : AgentAdapter {
         private const val SETTINGS = "--settings"
         private const val DISABLE_ALL_HOOKS = "disableAllHooks"
         private const val ENABLED_PLUGINS = "enabledPlugins"
+        private const val ENV = "env"
+        private const val OSTROM = "OSTROM_"
 
         // a plugin loaded by --plugin-dir is `<name>@inline` for Claude Code
         private const val PLUGIN_ID = "ostrom@inline"
@@ -169,5 +181,8 @@ class ClaudeAdapter : AgentAdapter {
             "CLAUDE_CODE_USE_VERTEX",
             "CLAUDE_CODE_USE_FOUNDRY",
         )
+
+        // the provider's variables, set or removed when the organization's inference goes through Ostrom
+        private val PROVIDER = PROVIDER_OVERRIDES.toSet() + setOf("ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN")
     }
 }

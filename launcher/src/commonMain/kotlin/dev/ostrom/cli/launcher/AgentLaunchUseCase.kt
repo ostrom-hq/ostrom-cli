@@ -190,9 +190,10 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         return dependencies.relays.start(settings).use { relay ->
             // S2-25: the hooks' capability goes to a private file, the agent's environment only gets its own
             files.write(run.relayTokenFile, relay.token, FileAccess.PRIVATE)
-            val prepared = prepare(run, RelayView(relay.url, relay.clientToken, mcp, inference))
+            val launcherEnvironment = environmentOf(run, relay, laid)
+            val prepared = prepare(run, RelayView(relay.url, relay.clientToken, mcp, inference), launcherEnvironment)
             prepared.notes.forEach { dependencies.say("ostrom: $it") }
-            val environment = environmentOf(run, relay, laid) + prepared.environment
+            val environment = launcherEnvironment + prepared.environment
             val settingsFile = join(run.temporary, SessionLayout.SESSION_SETTINGS)
             files.write(settingsFile, sessionSettings(environment).toString(), FileAccess.PRIVATE)
             val lifeline = SessionLifeline(
@@ -210,7 +211,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         }
     }
 
-    private fun prepare(run: Run, relay: RelayView): AgentLaunch {
+    private fun prepare(run: Run, relay: RelayView, environment: Map<String, String?>): AgentLaunch {
         val block = dependencies.files.read(join(run.plugin, "ostrom", "AGENTS-block.md")).orEmpty()
         val rules = if (run.pack == null) block else "$block\n${run.pack.context}\n"
         val model = run.request.model?.let { listOf("--model", it) }.orEmpty()
@@ -225,6 +226,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
             home = run.site.home,
             variable = run.site.variable,
             relay = relay,
+            environment = environment,
         )
         return try {
             run.adapter.prepare(layout, dependencies.files)
