@@ -139,9 +139,13 @@ private const val ASCII_END = 0x80
 /**
  * `OSTROM_HOOK_BUDGET_MS` for an agent that stops waiting for its gate hook at the timeout Ostrom gives it
  * ([SessionLayout.beforeToolSeconds]): Claude Code and Codex. The hook then refuses in time instead of being cut off,
- * which these agents read as "run the tool" (security audit of the CLI n°2, M1).
+ * which Claude Code reads as "run the tool" unless the hook says `onFailure: block`, and Codex was not measured
+ * (security audit of the CLI n°2, M1). The budget is a little under the timeout: the agent counts from the hook's
+ * spawn, the hook from after it has read its input. The variable reaches every hook of the session; the others have
+ * shorter limits or none that matters (`PostToolUse` runs after the tool, the launcher ends the session itself).
  */
 fun gateBudget(layout: SessionLayout): Map<String, String> =
-    mapOf(LaunchVariables.HOOK_BUDGET_MS to (layout.beforeToolSeconds * MILLIS_PER_SECOND).toString())
+    mapOf(LaunchVariables.HOOK_BUDGET_MS to ((layout.beforeToolSeconds - SPAWN_SECONDS) * MILLIS_PER_SECOND).toString())
 
 private const val MILLIS_PER_SECOND = 1_000L
+private const val SPAWN_SECONDS = 2L

@@ -3,8 +3,9 @@ package dev.ostrom.cli.hooks.runtime
 
 /**
  * What is left of the agent's limit on a hook (`OSTROM_HOOK_BUDGET_MS`) for the child processes of the hook: a check
- * script and the git commands around it. Every agent Ostrom launches lets an action through when its hook runs past
- * its timeout (Claude Code unless the hook says `onFailure: block`), so a check that outlived it would fail open;
+ * script and the git commands around it. Grok, Gemini, Hermes and Claude Code (unless the hook says `onFailure:
+ * block`) let an action through when its hook runs past its timeout, and Codex was not measured, so a check that
+ * outlived it could fail open;
  * each child is cut to what is left, and once nothing is left it is not started, which refuses the action in time
  * ([BudgetedCalls] does the same for the calls to Ostrom).
  *
