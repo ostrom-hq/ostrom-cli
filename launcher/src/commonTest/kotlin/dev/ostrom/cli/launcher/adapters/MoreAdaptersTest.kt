@@ -123,16 +123,16 @@ class MoreAdaptersTest {
         val launch = GeminiAdapter { "n1" }.prepare(layout(arguments = listOf("-p", "hi"), rules = "R"), files)
         val root = join("/tmp/run", "gemini-home")
         assertEquals(listOf("-p", "hi"), launch.arguments)
-        assertEquals(
-            mapOf(
-                "GEMINI_CLI_HOME" to root,
-                "OSTROM_HOOK_DIALECT" to "gemini",
-                "OSTROM_HOOK_BUDGET_MS" to "590000",
-                "GEMINI_CLI_SYSTEM_SETTINGS_PATH" to join("/etc", "gemini-cli", "settings.json"),
-                "GEMINI_CLI_SYSTEM_DEFAULTS_PATH" to join("/etc", "gemini-cli", "system-defaults.json"),
-            ) + TRUST.associateWith { "" },
-            launch.environment,
-        )
+        val expected = mapOf(
+            "GEMINI_CLI_HOME" to root,
+            "OSTROM_HOOK_DIALECT" to "gemini",
+            "OSTROM_HOOK_BUDGET_MS" to "590000",
+            "GEMINI_CLI_SYSTEM_SETTINGS_PATH" to join("/etc", "gemini-cli", "settings.json"),
+            "GEMINI_CLI_SYSTEM_DEFAULTS_PATH" to join("/etc", "gemini-cli", "system-defaults.json"),
+        ) + TRUST.associateWith { "" }
+        assertEquals(expected, launch.environment.filterKeys { it in expected })
+        // beside them, the variables a repository's .env cannot set (GeminiEnvironmentTest)
+        assertEquals("/usr/bin", launch.environment["PATH"])
         val directory = join(root, ".gemini")
         val settings = checkNotNull(parseObject(files.texts[join(directory, "settings.json")]))
         assertEquals(JsonPrimitive("dark"), settings["theme"])
@@ -453,7 +453,8 @@ class MoreAdaptersTest {
         arguments = arguments,
         pack = null,
         home = "/home/dev",
-        variable = { variables[it] },
+        // Gemini needs a PATH to look bash up in
+        variable = { (mapOf("PATH" to "/usr/bin") + variables)[it] },
         relay = RelayView("http://127.0.0.1:4100", "relay-token", mcp, false),
         workspace = workspace,
     )

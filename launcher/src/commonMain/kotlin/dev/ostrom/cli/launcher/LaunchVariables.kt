@@ -88,4 +88,10 @@ object LaunchVariables {
 
     /** Never passed on: the developer's own device token, when set in their shell. */
     const val DEVICE_TOKEN = "OSTROM_TOKEN"
+
+    /**
+     * Every `OSTROM_` variable the CLI reads, its hooks and `ostrom mcp` included: an agent that loads a repository's
+     * `.env` without replacing a variable already set (Gemini CLI) gets them all, empty when Ostrom has no value.
+     */
+    val ALL: List<String> = emptyList()
 }

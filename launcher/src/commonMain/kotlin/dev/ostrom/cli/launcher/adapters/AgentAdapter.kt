@@ -32,6 +32,8 @@ data class RelayView(val url: String, val token: String, val mcpServers: List<St
  * @property relay The local relay.
  * @property workspace The folders whose settings an agent reads as a workspace's: the working folder, then the
  * repository's top when it is another folder.
+ * @property environment The variables the launcher sets (a value) or removes (null) for the agent, the adapter's
+ * own aside.
  */
 data class SessionLayout(
     val temporary: String,
@@ -44,6 +46,7 @@ data class SessionLayout(
     val variable: (String) -> String?,
     val relay: RelayView,
     val workspace: List<String> = emptyList(),
+    val environment: Map<String, String?> = emptyMap(),
 ) {
     /** `"<ostrom>" hook gate|session`, the command an agent's hook runs. */
     fun hookCommand(kind: String): String = "${quoted(executable)} hook $kind"
