@@ -120,6 +120,26 @@ class AdaptersTest {
     }
 
     @Test
+    fun claudeBlocksTheToolWhenTheGateHookFailsOrRunsPastItsLimit() {
+        // a hook that times out or fails is a non-blocking error for Claude Code unless it says "onFailure": "block"
+        ClaudeAdapter().prepare(layout(), files)
+        val hooks = checkNotNull(parseObject(files.texts[join("/tmp/run", "plugin", "hooks", "hooks.json")]))
+        val pre = hooks.child("hooks")?.get("PreToolUse").toString()
+        assertTrue(""""onFailure":"block"""" in pre, pre)
+        val after = hooks.child("hooks")?.get("PostToolUse").toString()
+        assertFalse("onFailure" in after, "after the tool, a failure stops nothing")
+    }
+
+    @Test
+    fun claudeAndCodexGateHooksAnswerWithinTheLimitTheAgentGivesThem() {
+        // both agents stop waiting at the hook's timeout: the hook must refuse before, not be cut off
+        val claude = ClaudeAdapter().prepare(layout(), files)
+        assertEquals("20000", claude.environment["OSTROM_HOOK_BUDGET_MS"])
+        val codex = CodexAdapter().prepare(layout(), files)
+        assertEquals("20000", codex.environment["OSTROM_HOOK_BUDGET_MS"])
+    }
+
+    @Test
     fun claudesInferenceGoesThroughTheRelayAndNothingElse() {
         val launch = ClaudeAdapter().prepare(layout(inference = true), files)
         assertEquals("http://127.0.0.1:4100", launch.environment["ANTHROPIC_BASE_URL"])
