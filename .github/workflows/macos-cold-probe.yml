@@ -1,0 +1,39 @@
+# Probe, never merged: where the first start of `ostrom version` spends its time on a macOS runner. It takes the
+# macosArm64 release binary that CI built on main, so that nothing is compiled here.
+name: macOS cold probe
+
+on:
+  pull_request:
+    paths: [.github/workflows/macos-cold-probe.yml, e2e/macos_cold.py]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  probe:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: The macosArm64 binary of the last main run that built it
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          for run in $(gh api "repos/$REPO/actions/workflows/ci.yml/runs?branch=main&event=push&status=completed&per_page=10" -q '.workflow_runs[].id'); do
+            if gh run download "$run" -R "$REPO" -n ostrom-macosArm64 -D bin 2>/dev/null; then
+              echo "binary of run $run"; break
+            fi
+          done
+          chmod +x bin/ostrom.kexe
+          sw_vers; sysctl -n machdep.cpu.brand_string hw.memsize; df -h / | tail -1
+      - name: First start, broken down
+        run: python3 e2e/macos_cold.py --binary bin/ostrom.kexe --runs 10 --out cold.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-cold
+          path: cold.json
+          retention-days: 7
