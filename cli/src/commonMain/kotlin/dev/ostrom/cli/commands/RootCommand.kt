@@ -3,8 +3,10 @@ package dev.ostrom.cli.commands
 
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.Context
+import com.github.ajalt.clikt.core.ProgramResult
 import com.github.ajalt.clikt.core.context
 import com.github.ajalt.clikt.core.terminal
+import com.github.ajalt.clikt.parameters.options.eagerOption
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.mordant.rendering.AnsiLevel
@@ -54,6 +56,15 @@ class RootCommand(private val dependencies: CliDependencies) : CliktCommand(name
     var invoked: String? = null
         private set
 
+    init {
+        // `ostrom --version`, as any command-line tool: the line of `ostrom version`, measured as that command
+        eagerOption("--version", help = "Print the version of ostrom") {
+            invoked = VERSION_COMMAND
+            dependencies.console.out(versionLine(dependencies))
+            throw ProgramResult(0)
+        }
+    }
+
     override fun run() {
         invoked = currentContext.invokedSubcommand?.commandName
         if (invoked != null) return
@@ -74,3 +85,6 @@ class RootCommand(private val dependencies: CliDependencies) : CliktCommand(name
         )
     }
 }
+
+/** The name `ostrom --version` is measured under: the command it stands for. */
+private const val VERSION_COMMAND = "version"

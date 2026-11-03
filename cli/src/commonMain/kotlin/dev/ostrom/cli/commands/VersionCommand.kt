@@ -10,9 +10,12 @@ import dev.ostrom.cli.CliDependencies
 class VersionCommand(private val dependencies: CliDependencies) : CliktCommand(name = "version") {
     override fun help(context: Context) = "Print the version of ostrom"
 
-    override fun run() {
-        val environment = dependencies.environment
-        val platform = "${environment.operatingSystem.displayName} ${environment.architecture}"
-        dependencies.console.out("ostrom ${BuildInfo.VERSION} (kotlin-native, $platform)\n")
-    }
+    override fun run() = dependencies.console.out(versionLine(dependencies))
+}
+
+/** What `ostrom version` and `ostrom --version` print: the version, the engine and the platform of this binary. */
+internal fun versionLine(dependencies: CliDependencies): String {
+    val environment = dependencies.environment
+    val platform = "${environment.operatingSystem.displayName} ${environment.architecture}"
+    return "ostrom ${BuildInfo.VERSION} (kotlin-native, $platform)\n"
 }
