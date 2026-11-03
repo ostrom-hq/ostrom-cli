@@ -115,6 +115,8 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
     }
 
     private suspend fun start(request: LaunchRequest, site: LaunchSite): Int {
+        // what the CLI's own first call left (the organisation lookup): Kotlin/Native would not collect it by itself
+        dependencies.reclaim()
         val agent = request.agent
         val adapter = adapters[agent] ?: stop(NO_ADAPTER, "${agent.displayName} has no adapter in this version.")
         val executable = dependencies.finder.find(agent.executable) ?: stop(AGENT_MISSING, missing(agent))
@@ -179,6 +181,8 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         val files = dependencies.files
         files.createPrivateDirectory(run.plugin)
         val laid = run.pack?.let { PackageLayout(files).layDown(it, run.plugin, run.temporary) }
+        // the reads' answers and the package's decoded forms, before the relay and the agent live for the whole session
+        dependencies.reclaim()
         // `ostrom` (rules_for, request_approval, get_receipt) is built into every Ostrom server
         val mcp = (listOf(BUILT_IN_MCP) + run.mcpServers + run.pack?.mcpServers.orEmpty()).distinct()
         val inference = run.inference
