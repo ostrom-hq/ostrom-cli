@@ -60,6 +60,7 @@ class Journey:
         self.owner = None
         self.org_id = None
         self.admin_token = None
+        self.held_writes = None
         self.owner_session = None
         self.temporary = options.work is None
 
@@ -434,6 +435,10 @@ class Journey:
             if self.admin_signed_in(maya):
                 done = self.governed(maya, "policy", "set", "self-approval", "never")
                 self.check(done == 0, f"self-approval never, with the admin token ({done})")
+                if self.holds():
+                    # refused on the console: nothing is written, the CLI says so (77)
+                    done = self.governed(maya, "policy", "set", "self-approval", "sole-approver", answer="refuse")
+                    self.check(done == 77, f"a change refused on the console exits 77 ({done})")
                 # 5.6 relies on it
                 shown = self.ostrom(maya, "policy", "show", "--json", console=True)
                 gates = (read_json(shown.stdout) or {}).get("gates") or {}
@@ -583,7 +588,13 @@ class Journey:
             self.admin_token = self.login(maya, maya["email"], admin=True)
         return self.admin_token
 
-    def governed(self, maya, *arguments):
+    def holds(self):
+        """True when the server holds a token's governance write for a console confirmation (audit H1, server#146)."""
+        if self.held_writes is None:
+            self.held_writes = self.served("GET", "/api/v1/confirmations/journey")
+        return self.held_writes
+
+    def governed(self, maya, *arguments, answer="confirm"):
         """A governance write with the admin token: written at once, or held by the server until an owner confirms it
         on the console (202, audit H1), which the owner does here from a fresh browser session. Its exit code."""
         shown = "ostrom " + " ".join(shlex.quote(a) for a in arguments)
@@ -601,8 +612,9 @@ class Journey:
             session = self.sign_in(maya["email"])
             if session is not None:
                 status, body, _ = self.call("POST", f"/api/v1/confirmations/{urllib.parse.quote(confirmation)}/answer",
-                                            {"answer": "confirm"}, session=session, org=self.org_id)
-                self.check(status == 200, f"the owner confirms it on the console ({status}): {error_of(body)[:200]}")
+                                            {"answer": answer}, session=session, org=self.org_id)
+                self.check(status == 200, f"the owner answers {answer} on the console ({status}): "
+                                          f"{error_of(body)[:200]}")
         try:
             process.wait(timeout=120)
         except subprocess.TimeoutExpired:
@@ -611,6 +623,9 @@ class Journey:
         out = process.stdout.read()
         reader.join(5)
         self.record(maya, shown, process.returncode, out, "".join(said))
+        if self.holds():
+            # a server that holds the governance writes holds this one: the confirmation was played, not skipped
+            self.check(held.is_set(), f"{shown} is held until the console confirms it (H1)")
         return process.returncode
 
     def gated_session(self, maya, tom_email):
