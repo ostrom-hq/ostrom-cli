@@ -20,7 +20,10 @@ class McpBridgeTest {
     private val answers = ArrayDeque<Result<LoopbackResponse>>()
 
     private val console = object : Console {
-        override fun out(text: String) {
+        // L8: the MCP stream is for the agent, a program: written as it is, never through a person's channel
+        override fun out(text: String) = error("not a person's text")
+
+        override fun data(text: String) {
             written.append(text)
         }
 

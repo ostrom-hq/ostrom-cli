@@ -62,7 +62,7 @@ internal class InviteCommand(private val dependencies: CliDependencies) : CliktC
         val answer = access.write("POST", membersOf(access.org) + "/invites", body, access.org.missing())
         val invited = answer.list("invited").filterIsInstance<JsonPrimitive>().map { it.content }
         if (json) {
-            dependencies.console.out("$answer\n")
+            dependencies.console.data("$answer\n")
             return
         }
         if (invited.isNotEmpty()) {
@@ -99,7 +99,7 @@ private fun CliDependencies.listMembers(org: String?, server: String?, json: Boo
     val body = access.read(membersOf(access.org), access.org.missing())
     val members = body.list("items").filterIsInstance<JsonObject>()
     if (json) {
-        console.out("$body\n")
+        console.data("$body\n")
         return
     }
     console.out("${access.org.name} · ${if (members.size == 1) "1 member" else "${members.size} members"}\n")

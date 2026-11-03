@@ -12,6 +12,7 @@ import dev.ostrom.cli.platform.Environment
 import dev.ostrom.cli.platform.OperatingSystem
 import dev.ostrom.cli.platform.StandardInput
 import dev.ostrom.cli.platform.StandardInputFailure
+import dev.ostrom.cli.platform.terminalSafe
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -21,11 +22,14 @@ import kotlin.time.TimeSource
 class HookRunnerTest {
     private val passThrough = HookProcessorImpl(PassThroughGateHandler())
 
+    /** Cleans what is written for a person, as [dev.ostrom.cli.platform.ConsoleImpl] does, and keeps the rest. */
     private class FakeConsole(private val input: StandardInput) : Console {
         val out = StringBuilder()
         val err = StringBuilder()
-        override fun out(text: String) { out.append(text) }
-        override fun err(text: String) { err.append(text) }
+        override fun out(text: String) { out.append(terminalSafe(text)) }
+        override fun err(text: String) { err.append(terminalSafe(text)) }
+        override fun data(text: String) { out.append(text) }
+        override fun dataErr(text: String) { err.append(text) }
         override val isInteractive = false
         var asked: Pair<Int, Int>? = null
         override fun readStandardInput(maxBytes: Int, timeoutMillis: Int) =
@@ -145,8 +149,8 @@ class HookRunnerTest {
     fun aClosedStdoutKeepsTheReasonOnStderr() {
         val closed = object : Console by FakeConsole(StandardInput.Read("{}".encodeToByteArray())) {
             val said = StringBuilder()
-            override fun out(text: String) = error("stdout is closed")
-            override fun err(text: String) {
+            override fun data(text: String) = error("stdout is closed")
+            override fun dataErr(text: String) {
                 said.append(text)
             }
         }
@@ -158,9 +162,25 @@ class HookRunnerTest {
     private class ThrowingConsole(private val onRead: Boolean) : Console {
         override fun out(text: String) = error("stdout is closed")
         override fun err(text: String) = error("stderr is closed")
+        override fun data(text: String) = error("stdout is closed")
+        override fun dataErr(text: String) = error("stderr is closed")
         override val isInteractive = false
         override fun readStandardInput(maxBytes: Int, timeoutMillis: Int): StandardInput =
             if (onRead) error("stdin failed") else StandardInput.Read("{}".encodeToByteArray())
+    }
+
+    @Test
+    fun theHooksAnswerGoesToTheAgentAsItIs() {
+        // L8: the hook's streams are for the agent, a program; only what is said for a person is cleaned
+        val reason = "\u001B[2Kno \u202Ehere"
+        val refusing = HookProcessorImpl(object : GateHandler {
+            override fun decide(event: HookEvent) = GateDecision.Deny(reason)
+        })
+        val console = FakeConsole(StandardInput.Read("{}".encodeToByteArray()))
+        val environment = FakeEnvironment(mapOf("OSTROM_HOOK_DIALECT" to "hermes"))
+        assertEquals(2, HookRunnerImpl(console, environment, refusing).run(listOf("gate")))
+        assertTrue(console.out.contains("\\u001b[2Kno \u202Ehere"), console.out.toString())
+        assertTrue(console.err.startsWith("$reason\n"), console.err.toString())
     }
 
     @Test

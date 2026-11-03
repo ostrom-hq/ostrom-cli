@@ -52,9 +52,10 @@ class HookRunnerImpl(
             return USAGE
         }
         val reply = replyOf(kind)
-        // each stream on its own, stderr first: a closed stdout keeps the reason, and the exit code stays (2 refuses)
-        written { console.err(reply.stderr) }
-        written { console.out(reply.stdout) }
+        // for the agent, as they are; each stream on its own, stderr first: a closed stdout keeps the reason, and the
+        // exit code stays (2 refuses)
+        written { console.dataErr(reply.stderr) }
+        written { console.data(reply.stdout) }
         if (environment["OSTROM_HOOK_TIMING"] == "1") {
             val took = milliseconds(start.elapsedNow().inWholeMicroseconds)
             written { console.err("ostrom hook ${kind.command}: $took ms\n") }

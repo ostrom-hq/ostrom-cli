@@ -58,14 +58,15 @@ internal class StatusCommand(private val dependencies: CliDependencies) : CliktC
             }
         }
         val facts = Facts(login, org, device, repository, harness, waiting)
-        dependencies.console.out(if (json) facts.json() + "\n" else facts.text())
+        if (json) dependencies.console.data(facts.json() + "\n") else dependencies.console.out(facts.text())
         val failed = listOfNotNull(failing(orgs), harness.down, waiting.down).firstOrNull()
         failed?.let { said(it, "some lines are unknown") }
     }
 
     /** Ostrom did not answer: the device's line (or the JSON of what is known), what happened, and exit 69. */
     private fun down(failed: ServerAnswer.Failed, facts: Facts): Nothing {
-        dependencies.console.out(if (json) facts.json() + "\n" else "This device ${facts.device.line}\n")
+        val console = dependencies.console
+        if (json) console.data(facts.json() + "\n") else console.out("This device ${facts.device.line}\n")
         said(failed, "server lines not shown")
     }
 
