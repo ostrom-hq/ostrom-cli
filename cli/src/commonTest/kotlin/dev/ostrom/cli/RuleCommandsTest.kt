@@ -38,6 +38,37 @@ class RuleCommandsTest : SetupKit() {
     }
 
     @Test
+    fun aReadRightOfOstromLoginsTokenTheDeviceLacksSaysToSignInAgainNothingElseDoes() {
+        val refusedFor = { scope: String ->
+            mapOf("GET /api/v1/rules" to (403 to """{"error":{"message":"This credential does not allow $scope."}}"""))
+        }
+        // a device token made before the server gave ostrom login's token rules:read (server#160)
+        assertEquals(77, run(refusedFor("rules:read"), "policy", "rules", "list"))
+        assertEquals(
+            "This credential does not allow rules:read.\nThis device's token is older than this right: run " +
+                "`ostrom login` again for a new one.\n",
+            console.err.toString(),
+        )
+        // a right ostrom login never gives, a token set in OSTROM_TOKEN, another refusal: the server's words alone
+        val alone = listOf(
+            refusedFor("audit:read") to withServer,
+            refusedFor("rules:write") to withServer,
+            refusedFor("rules:read") to withServer + ("OSTROM_TOKEN" to "ost_console"),
+            refusedFor("rules:read") to inSession,
+            mapOf("GET /api/v1/rules" to (403 to """{"error":{"message":"not a member of acme"}}""")) to withServer,
+            // the server's sentence cut short: not the one it says for a lacked right
+            mapOf(
+                "GET /api/v1/rules" to (403 to """{"error":{"message":"This credential does not allow rules:read"}}"""),
+            ) to withServer,
+        )
+        for ((routes, environment) in alone) {
+            console.err.clear()
+            assertEquals(77, run(routes, "policy", "rules", "list", environment = environment))
+            assertTrue("ostrom login` again" !in console.err, console.err.toString())
+        }
+    }
+
+    @Test
     fun showSaysWhyWhereAndWhoDecided() {
         val full = """{"id":"r1","statement":"No push to main","status":"accepted","strength":"required",""" +
             """"why":"main deploys","scope":["acme/api"],"foundBy":"analysis",""" +

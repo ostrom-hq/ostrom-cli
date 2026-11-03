@@ -62,14 +62,14 @@ internal class OrgAccess(
 
     /** `GET` [path] in the organisation, or the spec's exit code; [notFound] is said on a 404. */
     fun read(path: String, notFound: String): JsonObject =
-        runBlocking { server.get(path, signed.token) }.orStop(signed.serverUrl, notFound)
+        runBlocking { server.get(path, signed.token) }.also(::lackedRight).orStop(signed.serverUrl, notFound)
 
     /**
      * `GET` [path], or null on a 404: a route another part of the product serves (rules, gate policy), shown when the
      * server has it and left out when it does not, rather than failing the whole command.
      */
     fun readIfServed(path: String): JsonObject? {
-        val answer = runBlocking { server.get(path, signed.token) }
+        val answer = runBlocking { server.get(path, signed.token) }.also(::lackedRight)
         val missing = answer is ServerAnswer.Failed && answer.status == NOT_FOUND
         return if (missing) null else answer.orStop(signed.serverUrl, "")
     }
@@ -104,6 +104,21 @@ internal class OrgAccess(
         return ConfirmationWait(this, token, elevated != null).await(done, confirmation)
     }
 
+    /**
+     * Stops on a read the device's token lacks a right for that `ostrom login` gives today: a token made before the
+     * server added it (`rules:read`, server#160) gets it by signing in again. A right `ostrom login` never gives, a
+     * token set in `OSTROM_TOKEN`, a command in an agent's session, any other refusal: left to the server's own words.
+     */
+    private fun lackedRight(answer: ServerAnswer) {
+        // only the device's own token, outside an agent's session (where ostrom login does not run), signs in again
+        val signsInAgain = !consoleToken && dependencies.environment[LaunchVariables.LAUNCH_ID].isNullOrEmpty()
+        if (answer !is ServerAnswer.Failed || answer.status != FORBIDDEN || !signsInAgain) return
+        val sentence = answer.message
+        val right = sentence.removePrefix(LACKS).removeSuffix(".")
+        if (!sentence.startsWith(LACKS) || !sentence.endsWith(".") || right !in LOGIN_READ_RIGHTS) return
+        throw stopWith(ExitCode.REFUSED, "${answer.message}\n$SIGN_IN_AGAIN")
+    }
+
     /** Stops on a refusal that has more to say than the server's message: which token the change takes, and where. */
     private fun refused(answer: ServerAnswer.Failed, governance: Boolean, elevated: String?) {
         val message = when {
@@ -126,10 +141,24 @@ internal class OrgAccess(
         const val ELEVATE =
             "Run ostrom login --admin: an owner or admin approves it in the browser, for 8 hours at most."
         const val FORBIDDEN = 403
+
+        /** The server's refusal of a right the token lacks (`requireScope`), before the right's name. */
+        const val LACKS = "This credential does not allow "
+
+        const val SIGN_IN_AGAIN =
+            "This device's token is older than this right: run `ostrom login` again for a new one."
         const val NOT_FOUND = 404
         const val WRITE_MILLIS = 15_000L
     }
 }
+
+/**
+ * The read rights the token of `ostrom login` holds: the `:read` entries of `CLI_SCOPES` in ostrom-server's
+ * `modules/identity` (`Policies.kt`), to follow when the server changes them.
+ */
+private val LOGIN_READ_RIGHTS = setOf(
+    "profile:read", "orgs:read", "workflows:read", "receipts:read", "gates:read", "mcp:read", "rules:read",
+)
 
 /**
  * The signed-in device and the organisation it acts in: [wanted] (`--org`), else `OSTROM_ORG`, else the one `ostrom
