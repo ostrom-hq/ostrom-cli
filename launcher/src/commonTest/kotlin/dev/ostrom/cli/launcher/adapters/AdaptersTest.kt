@@ -18,6 +18,9 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** What every adapter shares: the layout of a session, the overlay of a config home, skills, MCP names. */
+/** Ostrom's plugin kept on in the session's Claude settings. */
+private const val ON = """"enabledPlugins":{"ostrom@inline":true}"""
+
 class AdaptersTest {
     private val files = MemoryFiles()
 
@@ -168,9 +171,22 @@ class AdaptersTest {
             listOf("--plugin-dir", join("/tmp/run", "plugin"), "--resume", "x", "--settings", settings, "--", "prompt"),
             launch.arguments,
         )
-        assertEquals("""{"disableAllHooks":false}""", files.texts[settings])
+        assertEquals("""{"disableAllHooks":false,$ON}""", files.texts[settings])
         assertEquals(FileAccess.PRIVATE, files.access[settings])
         assertEquals(emptyList(), launch.notes)
+    }
+
+    @Test
+    fun claudeKeepsOstromsPluginOnWhateverTheRepositorySays() {
+        // a repository's "enabledPlugins": {"ostrom@inline": false} turns the plugin, and so its hooks, off; the
+        // session's settings come before the project's, so this one keeps it on, beside the developer's own choices
+        val settings = join("/tmp/run", "claude-settings.json")
+        val theirs = """{"enabledPlugins":{"ostrom@inline":false,"other@market":false}}"""
+        ClaudeAdapter().prepare(layout(arguments = listOf("--settings", theirs)), files)
+        assertEquals(
+            """{"enabledPlugins":{"ostrom@inline":true,"other@market":false},"disableAllHooks":false}""",
+            files.texts[settings],
+        )
     }
 
     @Test
@@ -185,7 +201,7 @@ class AdaptersTest {
             listOf("--plugin-dir", join("/tmp/run", "plugin"), "-p", "hi", "--settings", settings),
             inline.arguments,
         )
-        assertEquals("""{"model":"opus","disableAllHooks":false}""", files.texts[settings])
+        assertEquals("""{"model":"opus","disableAllHooks":false,$ON}""", files.texts[settings])
         assertEquals(
             listOf("claude: your --settings turns hooks off (disableAllHooks): Ostrom keeps them on for this session"),
             inline.notes,
@@ -193,7 +209,10 @@ class AdaptersTest {
         files.texts["/home/dev/mine.json"] = """{"permissions":{"allow":["Bash(ls)"]}}"""
         val file = ClaudeAdapter().prepare(layout(arguments = listOf("--settings=/home/dev/mine.json")), files)
         assertEquals(listOf("--plugin-dir", join("/tmp/run", "plugin"), "--settings", settings), file.arguments)
-        assertEquals("""{"permissions":{"allow":["Bash(ls)"]},"disableAllHooks":false}""", files.texts[settings])
+        assertEquals(
+            """{"permissions":{"allow":["Bash(ls)"]},"disableAllHooks":false,$ON}""",
+            files.texts[settings],
+        )
         assertEquals(emptyList(), file.notes)
     }
 
@@ -203,7 +222,7 @@ class AdaptersTest {
         files.texts["/home/dev/last.json"] = """{"model":"haiku"}"""
         val arguments = listOf("--settings", """{"model":"opus"}""", "--settings", "/home/dev/last.json")
         val last = ClaudeAdapter().prepare(layout(arguments = arguments + listOf("--", "--settings", "x")), files)
-        assertEquals("""{"model":"haiku","disableAllHooks":false}""", files.texts[settings], "the last one wins")
+        assertEquals("""{"model":"haiku","disableAllHooks":false,$ON}""", files.texts[settings], "the last one wins")
         assertEquals(
             listOf("--plugin-dir", join("/tmp/run", "plugin"), "--settings", settings, "--", "--settings", "x"),
             last.arguments,
