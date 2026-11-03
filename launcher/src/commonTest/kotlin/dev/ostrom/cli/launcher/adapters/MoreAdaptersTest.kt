@@ -273,6 +273,8 @@ class MoreAdaptersTest {
             refused(),
         )
         files.texts[kept] = """{"hooks":{"AfterTool":[{"hooks":[{"type":"command","command":"theirs"}]}]}}"""
+        // an extension without hooks adds none
+        files.texts[join(extensions, "bare", "gemini-extension.json")] = "{}"
         prepareAgain()
         val install = join(extensions, "linked", ".gemini-extension-install.json")
         files.texts[install] = """{"type":"link","source":"/src/x"}"""

@@ -215,8 +215,8 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
         const val NONCE = 16
 
         const val MACOS_ROOT = "/Library/Application Support"
-
-        // provisional, until the inventory of what Gemini CLI 0.66 reads in a workspace (AUDIT-SECU-CLI-H3-INVENTAIRE)
-        val WORKSPACE = InertKeys(setOf("\$schema", "ui"))
     }
 }
+
+// provisional, until the inventory of what Gemini CLI 0.66 reads in a workspace (AUDIT-SECU-CLI-H3-INVENTAIRE)
+private val WORKSPACE = InertKeys(setOf("\$schema", "ui"))
