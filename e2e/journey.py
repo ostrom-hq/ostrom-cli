@@ -16,8 +16,9 @@
         --seed "docker run --rm --network host --env-file server.env ghcr.io/ostrom-hq/ostrom-server:edge \\
                 seed-test-account"
 
-6.6 imports ostrom-helm's fake TeamCode team (compose/demo/teamcode, its MySQL at 127.0.0.1:3307) when given it; without,
-it is skipped, and ostrom-server's cli-journey.yml, which gives it, fails a run where 6.6 was not played and passed:
+6.6 imports ostrom-helm's fake TeamCode team (compose/demo/teamcode, its MySQL at 127.0.0.1:3307) when given it;
+without, it is skipped, and ostrom-server's cli-journey.yml, which gives it, fails a run where 6.6 was not played and
+passed:
 
     OSTROM_E2E_TEAMCODE_PASSWORD=demo-teamcode-ro python3 e2e/journey.py … \\
         --teamcode-db mysql://teamcode_ro@127.0.0.1:3307/teamcode --teamcode-key-file demo/teamcode/key.txt
