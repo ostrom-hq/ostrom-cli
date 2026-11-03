@@ -18,7 +18,7 @@ import kotlin.test.assertTrue
 class VerifyOrgTest : SetupKit() {
     private val home = "/home/maya/.config/ostrom"
     private val orgId = OrgReceiptVector.ORG_ID
-    private val acme = """{"id":"$orgId","slug":"acme","name":"Acme","role":"admin"}"""
+    private val acmeView = """{"id":"$orgId","slug":"acme","name":"Acme","role":"admin"}"""
     private val other = "0d9e8f7a-6b5c-4d3e-8f1a-2b3c4d5e6f70"
 
     private fun write(path: String, text: String) {
@@ -83,7 +83,7 @@ class VerifyOrgTest : SetupKit() {
         assertOut(org("?", unknown))
         // any command that looks the organisations up online keeps their ids
         val policy = "GET /api/v1/policy/models" to (200 to """{"allowed":[]}""")
-        assertEquals(0, run(mapOf(orgs(acme), policy), "policy", "show"))
+        assertEquals(0, run(mapOf(orgs(acmeView), policy), "policy", "show"))
         assertEquals(0, verify(OrgReceiptVector.ID))
         assertOut(org("✓", "signed for the organisation named here (acme)"))
         assertEquals(0, verify(OrgReceiptVector.ID, "--org", "acme"))
