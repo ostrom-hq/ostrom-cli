@@ -35,7 +35,10 @@ import kotlinx.coroutines.test.runTest
 import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
+import kotlin.test.assertNotSame
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class OstromCliTest : CliKit() {
@@ -317,6 +320,23 @@ class OstromCliTest : CliKit() {
         assertEquals(null, dependencies.credentials("/nowhere-ostrom").load("https://ostrom.example")?.login)
         assertEquals(64, dependencies.gateWait().await("not an id!", 1).exitCode, "never sent")
         pause(1)
+    }
+
+    @Test
+    fun theRealWiringKeepsOneClientPerServerForTheWholeCommand() {
+        // PERF-CLI: `ostrom claude` looked its organisation up with a client of its own, then launched with another:
+        // two connections, so two TLS handshakes with a real server, for one command
+        val dependencies = CliDependencies.create()
+        val server = dependencies.api("https://ostrom.example")
+        server.close()
+        assertSame(server, dependencies.api("https://ostrom.example"), "one client, closed by nobody but the process")
+        assertNotSame(server, dependencies.api("https://other.example"), "a client per server")
+        // nothing listens on the discard port of the loopback: the shared client still sends, and says so
+        val refused = dependencies.api("http://127.0.0.1:9")
+        assertFailsWith<ServerUnreachableException> { runBlocking { refused.get("/api/v1/health") } }
+        assertFailsWith<ServerUnreachableException> {
+            runBlocking { refused.send(ServerRequest("GET", "/api/v1/health")) }
+        }
     }
 
     @Test
