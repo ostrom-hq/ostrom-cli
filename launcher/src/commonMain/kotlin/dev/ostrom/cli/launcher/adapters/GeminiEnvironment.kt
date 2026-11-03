@@ -51,8 +51,8 @@ internal object GeminiEnvironment {
         val pinned = (TRUST + SHELL + LaunchVariables.ALL).associateWith { name ->
             if (name in layout.environment) layout.environment[name].orEmpty() else layout.variable(name).orEmpty()
         }
-        refuseWithoutBash(layout, files, pinned.getValue(PATH))
-        return pinned
+        GeminiShell.check(layout, files, pinned.getValue(PATH), pinned.getValue(COMSPEC))
+        return if (layout.pathSeparator == ';') pinned + GeminiShell.WINDOWS else pinned
     }
 
     /**
@@ -86,22 +86,6 @@ internal object GeminiEnvironment {
         }
     }
 
-    /**
-     * Stops the launch when the `PATH` Gemini gets holds no `bash`: Gemini spawns `bash -c` for each hook, and a spawn
-     * that fails leaves the tool ungated. Windows runs the hooks with PowerShell instead.
-     */
-    private fun refuseWithoutBash(layout: SessionLayout, files: LaunchFiles, path: String) {
-        if (layout.pathSeparator != ':') return
-        val folders = path.split(layout.pathSeparator).filter { it.isNotEmpty() }
-        if (folders.none { files.exists(join(it, "bash")) }) {
-            refuse(
-                "there is no bash on the PATH Ostrom gives it ($path), and Gemini runs Ostrom's hooks with it: " +
-                    "without one they fail open, so Gemini is not started. Install bash, or put its folder on your " +
-                    "PATH, to work with Ostrom",
-            )
-        }
-    }
-
     private fun parent(rule: String): String {
         val trimmed = rule.trimEnd('/', '\\')
         return trimmed.substring(0, maxOf(trimmed.lastIndexOfAny(charArrayOf('/', '\\')), 0))
@@ -110,6 +94,7 @@ internal object GeminiEnvironment {
     private fun refuse(reason: String): Nothing = throw AdapterException("gemini: $reason")
 
     private const val PATH = "PATH"
+    private const val COMSPEC = "ComSpec"
     private const val TRUSTED_FOLDERS = "GEMINI_CLI_TRUSTED_FOLDERS_PATH"
     private val PARENT = JsonPrimitive("TRUST_PARENT")
 
@@ -161,7 +146,7 @@ internal object GeminiEnvironment {
         "NODE_OPTIONS",
         "NODE_PATH",
         "GEMINI_SANDBOX",
-        "ComSpec",
+        COMSPEC,
         // the rest of Gemini CLI 0.66's own list of what changes a program run (BLOCKED_EXECUTION_ENVS)
         "NODE_CLI_FLAGS",
         "_FORCE_NODE_OPTIONS",
