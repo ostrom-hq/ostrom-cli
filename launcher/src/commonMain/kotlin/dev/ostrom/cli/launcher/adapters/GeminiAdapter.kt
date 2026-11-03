@@ -13,6 +13,7 @@ import dev.ostrom.cli.launcher.pretty
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlin.random.Random
 import kotlin.random.nextULong
 
@@ -48,6 +49,14 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
         val text = files.read(join(real, "settings.json"))
         val parsed = parseObject(text)
         val theirs = parsed ?: JsonObject(emptyMap())
+        // the gate is the organization's rule: the developer's own settings do not turn it off either. Their hooks
+        // run beside Ostrom's, and their `hooksConfig.disabled` cannot name Ostrom's, named anew in each session
+        if (theirs.child("hooksConfig")?.get("enabled") == JsonPrimitive(false)) {
+            throw AdapterException(
+                "gemini: ${join(real, "settings.json")} sets `hooksConfig.enabled: false`, which turns Ostrom's " +
+                    "hooks off: Gemini is not started. Remove it from that file to work with Ostrom",
+            )
+        }
         // comments, a trailing comma or a BOM: Gemini reads them, strict JSON does not, so the session goes without
         val notes = if (parsed == null && !text.isNullOrBlank()) listOf(UNREAD) else emptyList()
         val suffix = nonce()
