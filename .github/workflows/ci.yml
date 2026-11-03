@@ -414,14 +414,17 @@ jobs:
         env:
           OSTROM_NETWORK_TESTS: '1'
         run: ./gradlew macosArm64Test :cli:linkReleaseExecutableMacosArm64
-      # macOS (run 41541750442): hook p95 7.4 ms, version p95 9.4 ms (19.2 on a noisy runner), a start with the file
-      # cache emptied 432 ms at most (purge), the hook's peak memory 6.5 MB
+      # macOS runners differ from one machine to the next by about 3 times, with no change to the code: on 03/11, hook
+      # median 7 and p95 10.7 ms in the morning (run 41612349833), 13-15 and 21-25 ms from 10:00 (runs 41617836625,
+      # 41621434860), version p95 10 then 26-32 ms, a start with the file cache emptied up to 805 ms, while Linux and
+      # the hook's own time (0.45-0.75 ms) did not move. Budgets of about twice the slow runner: they catch a start-up
+      # several times slower; the precise budgets are held on Linux, whose runners are steady.
       - name: Start-up, first start, memory and size budgets
         run: >-
           python3 scripts/measure.py --label macosArm64
           --binary cli/build/bin/macosArm64/releaseExecutable/ostrom.kexe
           --sizes cli/build/bin/macosArm64/releaseExecutable/ostrom.kexe --max-size-mb 15
-          --max-hook-p95-ms 20 --max-version-p95-ms 30 --max-cold-ms 1000 --max-hook-memory-mb 25
+          --max-hook-ms 30 --max-hook-p95-ms 45 --max-version-p95-ms 60 --max-cold-ms 1500 --max-hook-memory-mb 25
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ostrom-macosArm64
