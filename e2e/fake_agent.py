@@ -220,9 +220,10 @@ def waits(arguments, path):
         json.dump({"asked": asked, "ids": ids}, handle)
     os.replace(path + ".tmp", path + ".asked")
     answered, deadline = None, time.monotonic() + 150
+    # a bridge that failed once (no wait read) is asked again: only a wait no longer open ends the reading
     while ids[0] and time.monotonic() < deadline:
         answered = read_wait(settings, ids[0])
-        if not isinstance(answered, dict) or answered.get("status") != "open":
+        if isinstance(answered, dict) and answered.get("status") != "open":
             break
         time.sleep(1)
     cancelled = bridge(settings, "ostrom", [HELLO, READY, tool_call(2, "cancel_wait", {"wait": ids[1]})]) \

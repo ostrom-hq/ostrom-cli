@@ -47,6 +47,10 @@ class McpWaits:
         agents = fake_claude(j)
         report = os.path.join(j.work, "claude-waits-report.json")
         asked = os.path.join(j.work, "claude-waits")
+        # a --work used before keeps the files of its run: this run's agent writes them anew
+        for stale in (report, asked + ".asked", asked + ".tmp"):
+            if os.path.exists(stale):
+                os.remove(stale)
         extra = {"PATH": agents + os.pathsep + os.environ["PATH"], "E2E_REPORT": report, "E2E_EXIT": "0",
                  "E2E_OSTROM": j.binary, "E2E_WAITS": asked}
         # files, not pipes: nobody reads them while the agent waits for the answer

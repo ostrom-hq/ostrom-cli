@@ -197,9 +197,11 @@ class Journey:
         last = self.recent.get(email)
         if last is not None and time.monotonic() - last[1] < RECENT_SIGN_IN_S:
             return last[0]
+        # its age counts from the request of the link, before the mail and the exchange
+        asked = time.monotonic()
         session = self.sign_in(email)
         if session is not None:
-            self.recent[email] = (session, time.monotonic())
+            self.recent[email] = (session, asked)
         return session
 
     def seed(self, email):
