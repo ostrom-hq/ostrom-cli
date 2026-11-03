@@ -114,7 +114,8 @@ class AdminLoginTest : SetupKit() {
         val routes = mapOf(models to (200 to policy), put to (200 to "{}"))
         assertEquals(0, run(routes, "policy", "set", "default-model", "opus"))
         assertEquals("ost_adm", requests.last { it.second.method == "PUT" }.second.token)
-        assertEquals("ost_1", requests.last { it.second.method == "GET" }.second.token, "reads go as the device")
+        // the policy it rewrites is read with the same token: the device's token cannot read it (inference:read)
+        assertEquals("ost_adm", requests.last { it.second.method == "GET" }.second.token, "read as the write goes")
         // the self-approval policy and the harness too
         val gates = mapOf("PUT /api/v1/gates/policy" to (200 to "{}"))
         assertEquals(0, run(gates, "policy", "set", "self-approval", "never"))
@@ -124,6 +125,7 @@ class AdminLoginTest : SetupKit() {
             mapOf("GET /api/v1/workflows/w1" to (200 to workflow), "PUT /api/v1/workflows/w1" to (200 to "{}"))
         assertEquals(0, run(enforce, "harness", "enforce", "w1"))
         assertEquals("ost_adm", requests.last().second.token)
+        assertEquals("ost_1", requests.last { it.second.method == "GET" }.second.token, "another read: the device")
         // another write is no governance: it goes as the device
         val invite = mapOf("POST /api/v1/orgs/o1/members/invites" to (200 to """{"invited":["lena@acme.dev"]}"""))
         run(invite, "invite", "lena@acme.dev")
@@ -157,6 +159,11 @@ class AdminLoginTest : SetupKit() {
             ("OSTROM_TOKEN" to "ost_console")))
         assertEquals("ost_console", requests.last().second.token)
         assertErr(elevate)
+        // nor for the read of the model policy before its write
+        val policy = mapOf("GET /api/v1/policy/models" to (200 to """{"allowed":["sonnet"],"default":"sonnet"}"""))
+        run(policy, "policy", "set", "models", "sonnet", environment = withServer + ("OSTROM_TOKEN" to "ost_console"))
+        val read = requests.first { it.second.method == "GET" && "models" in it.second.path }.second
+        assertEquals("ost_console", read.token)
     }
 
     @Test
@@ -175,6 +182,12 @@ class AdminLoginTest : SetupKit() {
         assertErr("Only an owner or admin.")
         assertFalse(console.err.contains("takes an admin token"), console.err.toString())
         assertEquals("ost_adm", secretsKept[adminSecret], "kept: it is the person who may not")
+        // refused at the read of the model policy, before its write: the same words
+        console.err.clear()
+        val gone = mapOf("GET /api/v1/policy/models" to (401 to """{"error":{"message":"revoked"}}"""))
+        assertEquals(65, run(gone, "policy", "set", "models", "sonnet"))
+        assertErr("Your admin token is no longer valid. Run ostrom login --admin")
+        assertEquals(null, secretsKept[adminSecret])
     }
 
     @Test
