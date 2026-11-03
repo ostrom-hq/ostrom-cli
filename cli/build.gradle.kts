@@ -3,6 +3,7 @@
 
 import org.jetbrains.kotlin.gradle.plugin.mpp.DisableCacheInKotlinVersion
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
+import org.jetbrains.kotlin.konan.target.Family
 
 plugins {
     id("ostrom.kmp")
@@ -86,12 +87,20 @@ kotlin {
             baseName = "ostrom"
         }
         binaries.configureEach {
-            if (konanTarget.family == org.jetbrains.kotlin.konan.target.Family.LINUX && buildType.name == "DEBUG") {
+            if (konanTarget.family == Family.LINUX && buildType.name == "DEBUG") {
                 // Clikt 5.1.0 caches export the same internal symbol twice on Linux (seen in TeamCode's CLI).
                 disableNativeCache(
                     version = DisableCacheInKotlinVersion.`2_4_21`,
                     reason = "Clikt 5.1.0 duplicate selfAndAncestors symbol in Linux static caches",
                 )
+            }
+            if (buildType.name == "RELEASE") {
+                // the binary a developer downloads: 15 MB at most, Windows 17 (ci.yml, scripts/measure.py).
+                // Kotlin/Native's size-first build, and no symbol table on Linux and Windows (-4.1 MB on linuxX64);
+                // macOS is under the budget without stripping. Measured on 02/11/2026: linuxX64 19.8 -> 14.3 MB,
+                // linuxArm64 18.1 -> 12.5, mingwX64 17.6 -> 16.3, macosArm64 14.3 -> 12.9; start-up no slower.
+                binaryOption("smallBinary", "true")
+                if (konanTarget.family == Family.LINUX || konanTarget.family == Family.MINGW) linkerOpts("-s")
             }
         }
     }
