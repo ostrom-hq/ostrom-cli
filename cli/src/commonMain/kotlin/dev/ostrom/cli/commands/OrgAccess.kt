@@ -194,6 +194,7 @@ internal fun CliDependencies.orgAccess(
     val signed = signedIn(serverOption)
     val kept = keptOrg(wanted)
     val orgs = memberOrgs(signed.server, signed.serverUrl, signed.token)
+    keepOrgs(signed.serverUrl, orgs)
     val console = consoleOf(this, signed.serverUrl)
     val org = if (kept == null) {
         onlyOrChosen(orgs, choose, "@${signed.login} is not a member of an organisation on ${signed.serverUrl} yet. " +

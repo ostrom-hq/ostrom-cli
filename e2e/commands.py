@@ -186,7 +186,8 @@ def lines(machine, other, nowhere):
         ("the receipts", ["receipts", "list"], 0, "No receipts yet.", None),
         ("a receipt that does not exist", ["receipts", "show", "R-none"], 66, "R-none", None),
         ("a receipt pulled", ["receipts", "pull", "W-e2e"], 0, "Saved W-e2e", None),
-        ("and verified offline", ["verify", "W-e2e"], 0, "VERIFIED offline", None),
+        # W-e2e was signed before receipts carried their organisation: it holds, but proves none (exit 2)
+        ("and checked offline", ["verify", "W-e2e"], 2, "not bound to an organisation", None),
         ("a setting", ["config", "set", "color", "never"], 0, "", None),
         ("read back", ["config", "get", "color"], 0, "never", None),
         ("a setting that cannot be", ["config", "set", "color", "purple"], 64, "auto, always or never", None),

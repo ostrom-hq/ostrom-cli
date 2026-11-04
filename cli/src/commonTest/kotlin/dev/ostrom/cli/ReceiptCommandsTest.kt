@@ -167,36 +167,49 @@ class ReceiptCommandsTest {
         return JsonObject(bundle + ("receipt" to edited)).toString()
     }
 
+    /**
+     * W-e2e was signed before receipts carried their organisation: everything else holds, and it is never verified
+     * for an organisation (exit 2, `VerifyOrgTest` for a bound receipt).
+     */
+    private fun assertHoldsButUnbound(out: String) {
+        assertTrue(out.contains("  ? org       not bound to an organisation (orgBound false)"), out)
+        assertFalse(out.contains("  ✗ "), out)
+        assertTrue(out.endsWith("INCOMPLETE: nothing is wrong, but the ? lines could not be checked offline.\n"), out)
+    }
+
     @Test
     fun aKeptReceiptVerifiesOfflineWithTheKeyPinnedForItsServer() {
         keep("W-e2e", ReceiptBundleVector.BUNDLE)
         pin()
-        assertEquals(0, cli(routes = null).run(arrayOf("verify", "W-e2e")))
+        assertEquals(2, cli(routes = null).run(arrayOf("verify", "W-e2e")))
         val out = console.out.toString()
         assertTrue(out.startsWith("Receipt W-e2e · workflow of @maya · acme-api · 2026-10-30T09:05:01.000Z\n"), out)
-        assertTrue(out.contains("(pinned for https://ostrom.example)"), out)
-        assertTrue(out.endsWith("VERIFIED offline: signature, package and chain hold. No network call was made.\n"))
+        assertTrue(out.contains("✓ signature this receipt: Ed25519 valid, key ${ReceiptBundleVector.KID} (pinned for " +
+            "https://ostrom.example)"), out)
+        assertHoldsButUnbound(out)
         assertEquals(emptyList(), requests, "no network call")
     }
 
     @Test
-    fun theJsonReportSaysVerified() {
+    fun theJsonReportSaysAnUnboundReceiptIsIncomplete() {
         keep("W-e2e", ReceiptBundleVector.BUNDLE)
         pin()
-        assertEquals(0, cli().run(arrayOf("verify", "W-e2e", "--json")))
+        assertEquals(2, cli().run(arrayOf("verify", "W-e2e", "--json")))
         val report = Json.parseToJsonElement(console.out.toString()) as JsonObject
-        assertEquals(JsonPrimitive("verified"), report["result"])
+        assertEquals(JsonPrimitive("incomplete"), report["result"])
+        assertEquals(JsonPrimitive(false), report["orgBound"])
     }
 
     @Test
-    fun aFileVerifiesWithTheKeysGivenAndIsIncompleteWithout() {
+    fun aFileVerifiesWithTheKeysGivenAndNotWithout() {
         write("/work/bundle.json", ReceiptBundleVector.BUNDLE)
         write("/work/key.pem", ReceiptBundleVector.PUBLIC_KEY_PEM)
-        assertEquals(0, cli().run(arrayOf("verify", "/work/bundle.json", "--key", "/work/key.pem")))
+        assertEquals(2, cli().run(arrayOf("verify", "/work/bundle.json", "--key", "/work/key.pem")))
         assertTrue(console.out.contains("(given by --key /work/key.pem)"), console.out.toString())
+        assertHoldsButUnbound(console.out.toString())
+        console.out.clear()
         assertEquals(2, cli().run(arrayOf("verify", "/work/bundle.json")))
-        val incomplete = "INCOMPLETE: nothing is wrong, but the ? lines could not be checked offline.\n"
-        assertTrue(console.out.endsWith(incomplete), console.out.toString())
+        assertTrue(console.out.contains("which this machine has not pinned"), console.out.toString())
     }
 
     @Test
@@ -371,7 +384,8 @@ class ReceiptCommandsTest {
         assertEquals(0, cli(routes).run(arrayOf("receipts", "pull", "W-e2e")))
         assertEquals("✓ Saved W-e2e with its package.\n", console.out.toString())
         assertEquals(bundle, Json.parseToJsonElement(read("$home/receipts/W-e2e.json")))
-        assertEquals(0, cli(routes = null).run(arrayOf("verify", "W-e2e")))
+        assertEquals(2, cli(routes = null).run(arrayOf("verify", "W-e2e")))
+        assertHoldsButUnbound(console.out.toString())
     }
 
     @Test
@@ -435,7 +449,9 @@ class ReceiptCommandsTest {
         assertEquals(ReceiptBundleVector.KID, (pin.getValue("kid") as JsonPrimitive).content)
         assertEquals(pem, pin["publicKeyPem"])
         assertTrue(pin.containsKey("pinnedAt"))
-        assertEquals(0, cli(routes = null).run(arrayOf("verify", "W-e2e")))
+        console.out.clear()
+        assertEquals(2, cli(routes = null).run(arrayOf("verify", "W-e2e")))
+        assertHoldsButUnbound(console.out.toString())
         fileSystem.delete("$home/server-keys.json".toPath())
         assertEquals(0, cli(mapOf(pulled, key)).run(arrayOf("receipts", "pull", "W-e2e")), "with no pins at all")
         val only = Json.parseToJsonElement(read("$home/server-keys.json")) as JsonObject

@@ -47,6 +47,9 @@ class Report(val title: String) {
     /** True once the hint to pin or give a key was said: it is said once per report. */
     internal var hinted = false
 
+    /** Whether the receipt carries the organisation it was signed for (`orgBound`); null until it was looked at. */
+    var orgBound: Boolean? = null
+
     /** Adds a check. */
     fun add(mark: Mark, what: String, text: String) {
         entries += ReportLine(mark, what, text)
@@ -73,7 +76,10 @@ class Report(val title: String) {
         )
     }
 
-    /** The JSON report (`--json`), shaped as the prototype's: `checks`, `result`, `title`, two-space indented. */
+    /**
+     * The JSON report (`--json`), shaped as the prototype's: `checks`, `result`, `title`, two-space indented; and
+     * `orgBound` once the receipt's organisation was looked at.
+     */
     fun toJson(): String {
         val checks = entries.map {
             JsonObject(
@@ -89,11 +95,12 @@ class Report(val title: String) {
             INVALID -> "invalid"
             else -> "incomplete"
         }
-        val report = mapOf(
+        val report = listOfNotNull(
             "checks" to JsonArray(checks),
+            orgBound?.let { "orgBound" to JsonPrimitive(it) },
             "result" to JsonPrimitive(result),
             "title" to JsonPrimitive(title),
-        )
+        ).toMap()
         return prettyJson.encodeToString(JsonObject.serializer(), JsonObject(report))
     }
 
