@@ -227,8 +227,9 @@ internal class ReceiptsPullCommand(private val dependencies: CliDependencies) : 
 }
 
 /**
- * `ostrom verify <file|id> [--key FILE]… [--json]`: offline, never a network call. Exit 0 verified, 1 not valid,
- * 2 incomplete (a link could not be checked offline), 64 a key file that gives no key, 66 nothing to verify.
+ * `ostrom verify <file|id> [--key FILE]… [--org ORG] [--json]`: offline, never a network call. Exit 0 verified, 1 not
+ * valid (another organisation's receipt included), 2 incomplete (a link, or the organisation, could not be checked
+ * offline), 64 a key file that gives no key, 66 nothing to verify.
  */
 internal class VerifyCommand(private val dependencies: CliDependencies) : CliktCommand(name = "verify") {
     override fun help(context: Context) = "Verify a receipt offline, with no network call"
@@ -236,6 +237,10 @@ internal class VerifyCommand(private val dependencies: CliDependencies) : CliktC
     val receipt by argument("receipt", help = "A receipt or bundle file, or the id of a receipt kept on this device")
     val keys by option("--key", help = "A public key to trust: PEM, or the answer of GET /api/v1/receipts/keys")
         .multiple()
+    val org by option(
+        "--org",
+        help = "The organisation it must be signed for, by its id or short name (else OSTROM_ORG, else ostrom init's)",
+    )
     val json by option("--json", help = "Machine-readable output").flag()
 
     override fun run() {
@@ -243,7 +248,8 @@ internal class VerifyCommand(private val dependencies: CliDependencies) : CliktC
         val read = dependencies.files::read
         val input = inputOf(directory, read)
         val trusted = TrustedKeys.pinned(read(ServerKeyPins.path(directory))) + keys.flatMap { given(it) }
-        val report = VerifyReceiptUseCaseImpl(KeptCopiesImpl(read, directory))(input, trusted)
+        val expected = dependencies.expectedOrg(org)
+        val report = VerifyReceiptUseCaseImpl(KeptCopiesImpl(read, directory))(input, trusted, expected)
         if (json) dependencies.console.data(report.toJson() + "\n") else dependencies.console.out(report.render())
         if (report.code != ExitCode.OK.code) throw ProgramResult(report.code)
     }

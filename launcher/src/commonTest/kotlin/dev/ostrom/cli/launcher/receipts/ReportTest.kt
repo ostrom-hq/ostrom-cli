@@ -56,6 +56,16 @@ class ReportTest {
     }
 
     @Test
+    fun theJsonSaysWhetherTheReceiptIsBoundToItsOrganisationOnceLookedAt() {
+        val report = Report("t")
+        report.orgBound = false
+        val json = "{\n  \"checks\": [],\n  \"orgBound\": false,\n  \"result\": \"verified\",\n  \"title\": \"t\"\n}"
+        assertEquals(json, report.toJson())
+        report.orgBound = true
+        assertEquals("\"orgBound\": true,", report.toJson().lines().first { "orgBound" in it }.trim())
+    }
+
+    @Test
     fun anIncompleteReportSaysSoInJson() {
         val report = Report("t")
         report.add(Mark.MISSING, "package", "p")

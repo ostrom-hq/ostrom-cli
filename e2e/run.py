@@ -233,12 +233,17 @@ def offline(binary, work, home):
         return subprocess.run([os.path.abspath(binary), *arguments], env=environment, capture_output=True, text=True,
                               timeout=30)
 
+    # W-e2e was signed before receipts carried their organisation: signature, package and chain hold, and it proves no
+    # organisation, so the report is incomplete (exit 2), never verified
     verified = ostrom("verify", "W-e2e")
-    check(verified.returncode == 0 and "VERIFIED offline" in verified.stdout,
-          f"ostrom verify W-e2e holds with the pinned key (exit {verified.returncode}: "
+    check(verified.returncode == 2 and "✓ signature" in verified.stdout and "✗" not in verified.stdout
+          and "not bound to an organisation" in verified.stdout,
+          f"ostrom verify W-e2e holds with the pinned key, unbound (exit {verified.returncode}: "
           f"{verified.stdout[-400:]}{verified.stderr[-200:]})")
     report = ostrom("verify", "W-e2e", "--json")
-    check(report.returncode == 0 and json.loads(report.stdout).get("result") == "verified", "--json says verified")
+    parsed = json.loads(report.stdout)
+    check(report.returncode == 2 and parsed.get("result") == "incomplete" and parsed.get("orgBound") is False,
+          "--json says incomplete, orgBound false")
     with open(os.path.join(home, "receipts", "W-e2e.json")) as handle:
         bundle = json.load(handle)
     bundle["receipt"]["nodes"][1]["outcome"] = "yes from mallory"

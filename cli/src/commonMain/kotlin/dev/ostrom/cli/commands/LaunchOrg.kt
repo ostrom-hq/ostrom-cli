@@ -19,5 +19,7 @@ internal fun CliDependencies.keptOrg(wanted: String?): String? = wanted?.takeIf 
  */
 internal fun CliDependencies.launchOrg(serverUrl: String, token: String, wanted: String?): String? {
     val kept = keptOrg(wanted) ?: return null
-    return named(memberOrgs(ServerJson(ApiServerTransport(api(serverUrl))), serverUrl, token), kept).id
+    val orgs = memberOrgs(ServerJson(ApiServerTransport(api(serverUrl))), serverUrl, token)
+    keepOrgs(serverUrl, orgs)
+    return named(orgs, kept).id
 }
