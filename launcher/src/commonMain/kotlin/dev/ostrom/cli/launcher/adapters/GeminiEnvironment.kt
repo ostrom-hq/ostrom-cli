@@ -15,7 +15,8 @@ import okio.Path.Companion.toPath
  * then runs each hook by `bash -c` (PowerShell on Windows) with that environment: a `.env` naming `BASH_ENV`, or
  * `SHELLOPTS` with `noexec`, stops Ostrom's gate before it runs, and an untrusted folder runs none of the settings'
  * hooks. So Ostrom sets each variable that decides the folder's trust or changes the shell, the loader under it or
- * Node, and every `OSTROM_` one: the launcher's value, else the developer's, else empty.
+ * Node, and every `OSTROM_` one: the launcher's value, else the developer's, else empty. The variables that choose
+ * Gemini's account are the developer's too ([GeminiAuth]).
  */
 internal object GeminiEnvironment {
     /**
@@ -52,7 +53,8 @@ internal object GeminiEnvironment {
             if (name in layout.environment) layout.environment[name].orEmpty() else layout.variable(name).orEmpty()
         }
         GeminiShell.check(layout, files, pinned.getValue(PATH), pinned.getValue(COMSPEC))
-        return if (layout.pathSeparator == ';') pinned + GeminiShell.WINDOWS else pinned
+        val all = pinned + GeminiAuth.of(layout, files)
+        return if (layout.pathSeparator == ';') all + GeminiShell.WINDOWS else all
     }
 
     /**
