@@ -21,6 +21,9 @@ import kotlin.test.assertTrue
 /** Ostrom's plugin kept on in the session's Claude settings. */
 private const val ON = """"enabledPlugins":{"ostrom@inline":true}"""
 
+/** Claude Code reads the developer's settings only (REVUES-CLI-4). */
+private val USER_ONLY = listOf("--setting-sources", "user")
+
 class AdaptersTest {
     private val files = MemoryFiles()
 
@@ -91,7 +94,8 @@ class AdaptersTest {
         assertEquals(
             listOf(
                 "--plugin-dir", join("/tmp/run", "plugin"), "--resume", "x",
-                "--settings", join("/tmp/run", "claude-settings.json"), "--mcp-config", mcp, "--", "prompt",
+                "--settings", join("/tmp/run", "claude-settings.json"), "--mcp-config", mcp, "--setting-sources",
+                "user", "--", "prompt",
             ),
             launch.arguments,
         )
@@ -124,7 +128,7 @@ class AdaptersTest {
         val launch = ClaudeAdapter().prepare(layout(arguments = listOf("-p", "hi")), files)
         val settings = join("/tmp/run", "claude-settings.json")
         assertEquals(
-            listOf("--plugin-dir", join("/tmp/run", "plugin"), "-p", "hi", "--settings", settings),
+            listOf("--plugin-dir", join("/tmp/run", "plugin"), "-p", "hi", "--settings", settings) + USER_ONLY,
             launch.arguments,
         )
         assertEquals("""{"name":"acme"}""", files.texts[manifest])
@@ -168,7 +172,8 @@ class AdaptersTest {
         val launch = ClaudeAdapter().prepare(layout(arguments = listOf("--resume", "x", "--", "prompt")), files)
         val settings = join("/tmp/run", "claude-settings.json")
         assertEquals(
-            listOf("--plugin-dir", join("/tmp/run", "plugin"), "--resume", "x", "--settings", settings, "--", "prompt"),
+            listOf("--plugin-dir", join("/tmp/run", "plugin"), "--resume", "x", "--settings", settings) + USER_ONLY +
+                listOf("--", "prompt"),
             launch.arguments,
         )
         assertEquals("""{"disableAllHooks":false,$ON}""", withoutEnv(files.texts[settings]))
@@ -198,7 +203,7 @@ class AdaptersTest {
             files,
         )
         assertEquals(
-            listOf("--plugin-dir", join("/tmp/run", "plugin"), "-p", "hi", "--settings", settings),
+            listOf("--plugin-dir", join("/tmp/run", "plugin"), "-p", "hi", "--settings", settings) + USER_ONLY,
             inline.arguments,
         )
         assertEquals("""{"model":"opus","disableAllHooks":false,$ON}""", withoutEnv(files.texts[settings]))
@@ -208,7 +213,10 @@ class AdaptersTest {
         )
         files.texts["/home/dev/mine.json"] = """{"permissions":{"allow":["Bash(ls)"]}}"""
         val file = ClaudeAdapter().prepare(layout(arguments = listOf("--settings=/home/dev/mine.json")), files)
-        assertEquals(listOf("--plugin-dir", join("/tmp/run", "plugin"), "--settings", settings), file.arguments)
+        assertEquals(
+            listOf("--plugin-dir", join("/tmp/run", "plugin"), "--settings", settings) + USER_ONLY,
+            file.arguments,
+        )
         assertEquals(
             """{"permissions":{"allow":["Bash(ls)"]},"disableAllHooks":false,$ON}""",
             withoutEnv(files.texts[settings]),
@@ -225,7 +233,8 @@ class AdaptersTest {
         val expected = """{"model":"haiku","disableAllHooks":false,$ON}"""
         assertEquals(expected, withoutEnv(files.texts[settings]), "the last one wins")
         assertEquals(
-            listOf("--plugin-dir", join("/tmp/run", "plugin"), "--settings", settings, "--", "--settings", "x"),
+            listOf("--plugin-dir", join("/tmp/run", "plugin"), "--settings", settings) + USER_ONLY +
+                listOf("--", "--settings", "x"),
             last.arguments,
             "after --, it is the prompt's text",
         )

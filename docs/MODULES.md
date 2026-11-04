@@ -194,6 +194,40 @@ temporary folder, which environment it gets, the hook dialect (`OSTROM_HOOK_DIAL
    `launcher` as `AgentAdapter` / one implementation per agent; it never writes into the repository or into
    `~/.claude` / `~/.codex`, and never passes a long-lived token in the agent's environment
    (`ostrom/mvp/COORD/VERIF-LANCEUR.md`).
+4. What a repository can configure in that agent decides whether Ostrom's gate holds in it. Every adapter pins the
+   variables of `ProgramVariables` (the shell of the hooks, the loader, git's configuration, the interpreters, the
+   proxies) with the launcher's value, else the developer's, else empty; the few that are not unset when empty
+   (`GIT_DIR`, `GIT_SSH_COMMAND`, `GIT_CONFIG_GLOBAL`, the editors, `HOME`, `SHELL`…) only to the developer's own
+   value, and the agent must close them another way.
+
+### What `ostrom claude` lets a repository configure
+
+Claude Code is started with `--setting-sources user` (review REVUES-CLI-4, 04/11/2026): the repository's
+`.claude/settings.json`, `.claude/settings.local.json` and `.mcp.json` are not read. They could otherwise run the
+repository's programs at start, outside the gate and with the session's environment (a `SessionStart` hook,
+`apiKeyHelper`, `statusLine`, the `.mcp.json` servers that `enableAllProjectMcpServers` approves), or wrap every hook
+in `CLAUDE_CODE_SHELL_PREFIX`. The working folder and the repository's top are given back by `--add-dir` with
+`CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`: the team's `CLAUDE.md`, `.claude/CLAUDE.md` and `.claude/rules` are
+read, as are the files they import from the repository. Probed on Claude Code 2.1.318, what the session reads:
+
+| From the repository | `ostrom claude` | `--trust-project-settings` |
+| --- | --- | --- |
+| `.claude/settings.json`, `.claude/settings.local.json` (`env`, `hooks`, `apiKeyHelper`, `statusLine`, permissions) | no | yes |
+| `.mcp.json` | no | yes, when the settings approve it |
+| `.claude/skills`, `.claude/commands`, `.claude/agents`, `.claude/output-styles` | no | yes |
+| `CLAUDE.md`, `.claude/CLAUDE.md`, `.claude/rules`, their imports from the repository | yes | yes |
+| `CLAUDE.local.md`, a `CLAUDE.md` of a folder above the repository or between it and the working folder | no | yes |
+| `.git/config` (a repository given as an archive) | yes, as git reads it | yes |
+
+Ostrom's `--settings` still pin their variables in both cases (`ClaudeEnvironment`: `LaunchVariables.ALL`,
+`ProgramVariables`, `CLAUDE_CODE_SHELL_PREFIX`, `CLAUDE_CODE_GIT_BASH_PATH`, `CLAUDE_CODE_SHELL`), and keep the hooks
+and the plugin on. A developer's own `--setting-sources` is not used, and said.
+
+`ostrom claude --trust-project-settings` is for a team that trusts its repository: Claude Code reads
+`user,project,local` (or the developer's own `--setting-sources`), and the launch says before the agent starts that
+the repository's settings can run its programs and turn the gate off. It lowers the guarantee: the pins hold, the
+programs the repository's settings start do not go through the gate. The choice is said on the developer's terminal
+only; Ostrom's server does not record it (no field in the launch's contract).
 
 ## Add a platform primitive
 

@@ -37,10 +37,15 @@ internal class AgentCommand(private val agent: Agent, private val dependencies: 
     val dryRun by option("--dry-run", help = "Check the launch and show the harness that would apply, then exit").flag()
     val server by option("--server", help = "Ostrom server URL (else OSTROM_URL, else the one of ostrom login)")
     val org by option("--org", help = "Organisation to act in (else OSTROM_ORG, else the one of ostrom init)")
+    val trustProjectSettings by option(
+        TRUST_PROJECT_SETTINGS,
+        help = "Claude Code: read this repository's settings, hooks and MCP servers too. They can run its programs " +
+            "and turn Ostrom's gate off: only for a repository your team trusts",
+    ).flag()
     val agentArguments by argument("agent-args", help = "Passed to the agent as they are").multiple()
 
     override fun run() {
-        if (cloud && dryRun) throw UsageError("--dry-run checks a launch on this machine: it does not go with --cloud")
+        refuseOptionsTogether()
         // a usage error before the server or the sign-in is looked at: 64, never 65 for a developer signed out
         if (cloud && agentArguments.isNotEmpty()) {
             throw stop(
@@ -75,11 +80,19 @@ internal class AgentCommand(private val agent: Agent, private val dependencies: 
             org = orgId,
             foldsCase = environment.operatingSystem.foldsCase,
         )
-        val request = LaunchRequest(agent, agentArguments, repo, model, dryRun)
+        val request = LaunchRequest(agent, agentArguments, repo, model, dryRun, trustProjectSettings)
         throw ProgramResult(runBlocking { dependencies.agents.run(request, site) })
     }
 
     private fun cwd() = dependencies.workingDirectory()
+
+    /** Options that do not go together, a usage error before anything is read. */
+    private fun refuseOptionsTogether() {
+        if (cloud && dryRun) throw UsageError("--dry-run checks a launch on this machine: it does not go with --cloud")
+        if (trustProjectSettings && (cloud || agent != Agent.CLAUDE)) {
+            throw UsageError("$TRUST_PROJECT_SETTINGS is for `ostrom claude` on this machine")
+        }
+    }
 
     /** `--cloud`: the session runs in Ostrom's cloud and this terminal is attached to it. */
     private suspend fun inTheCloud(site: CloudSite): Int =
@@ -89,6 +102,7 @@ internal class AgentCommand(private val agent: Agent, private val dependencies: 
 
     private companion object {
         const val NO_HOME = "no folder for ostrom's files: set OSTROM_HOME"
+        const val TRUST_PROJECT_SETTINGS = "--trust-project-settings"
         const val SIGN_IN = "no Ostrom server: run `ostrom login`, or set OSTROM_URL"
     }
 }

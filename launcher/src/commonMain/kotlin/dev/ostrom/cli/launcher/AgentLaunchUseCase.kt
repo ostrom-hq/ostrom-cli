@@ -28,6 +28,7 @@ import okio.IOException
  * @property model The `--model` given to ostrom (passed on to the agent), or null.
  * @property dryRun `--dry-run`: the checks of a launch and the harness that would apply, then exit 0 without starting
  *   the agent, creating a launch or writing any file.
+ * @property trustProjectSettings `--trust-project-settings` (Claude Code): the repository's own settings are read too.
  */
 data class LaunchRequest(
     val agent: Agent,
@@ -35,6 +36,7 @@ data class LaunchRequest(
     val repo: String?,
     val model: String?,
     val dryRun: Boolean = false,
+    val trustProjectSettings: Boolean = false,
 )
 
 /**
@@ -245,6 +247,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
             environment = environment,
             pathSeparator = run.site.pathSeparator,
             foldsCase = run.site.foldsCase,
+            trustProject = run.request.trustProjectSettings,
         )
         return try {
             run.adapter.prepare(layout, dependencies.files)

@@ -14,16 +14,17 @@ import okio.Path.Companion.toPath
  * CLI n°2, H3). Gemini loads the folder's `.env`, `.gemini/.env` included, without replacing a variable already set,
  * then runs each hook by `bash -c` (PowerShell on Windows) with that environment: a `.env` naming `BASH_ENV`, or
  * `SHELLOPTS` with `noexec`, stops Ostrom's gate before it runs, and an untrusted folder runs none of the settings'
- * hooks. So Ostrom sets each variable that decides the folder's trust or changes the shell, the loader under it or
- * Node, and every `OSTROM_` one: the launcher's value, else the developer's, else empty. The variables that choose
- * Gemini's account are the developer's too ([GeminiAuth]).
+ * hooks. So Ostrom sets each variable that decides the folder's trust, the ones that change a program the agent or
+ * its hooks start, shared with Claude Code ([ProgramVariables]), Gemini's own, and every `OSTROM_` one: the launcher's
+ * value, else the developer's, else empty. The variables that choose Gemini's account are the developer's too
+ * ([GeminiAuth]).
  */
 internal object GeminiEnvironment {
     /**
      * @param real The developer's `.gemini` folder, where Gemini finds their trusted folders.
      * @throws AdapterException When Ostrom cannot vouch for its gate: a variable of the developer's that takes the
-     * trust away or runs before the hooks, no `PATH`, this binary's path unknown, or a folder the developer does not
-     * trust.
+     * trust away or runs before the hooks, no `PATH`, this binary's path unknown, a folder the developer does not
+     * trust, or a repository's `.env` naming a variable Ostrom cannot set empty.
      */
     fun of(layout: SessionLayout, files: LaunchFiles, real: String): Map<String, String> {
         val untrusting = UNTRUSTING.firstOrNull { (name, value) -> layout.variable(name) == value }
@@ -49,9 +50,9 @@ internal object GeminiEnvironment {
             )
         }
         refuseDistrust(layout, files, real)
-        val pinned = (TRUST + SHELL + LaunchVariables.ALL).associateWith { name ->
-            if (name in layout.environment) layout.environment[name].orEmpty() else layout.variable(name).orEmpty()
-        }
+        val names = TRUST + ProgramVariables.PINNED + SHELL + LaunchVariables.ALL
+        val pinned = ProgramVariables.pinned(names, layout.environment, layout.variable)
+        refuseUnpinned(layout, files, pinned.keys)
         GeminiShell.check(layout, files, pinned.getValue(PATH), pinned.getValue(COMSPEC))
         val all = pinned + GeminiAuth.of(layout, files)
         return if (layout.pathSeparator == ';') all + GeminiShell.WINDOWS else all
@@ -86,6 +87,27 @@ internal object GeminiEnvironment {
                 )
             }
         }
+    }
+
+    /**
+     * Stops the launch where the `.env` Gemini loads from the repository (the first `.gemini/.env` or `.env` from the
+     * working folder up to the repository's top) names one of [ProgramVariables.KEPT] the developer does not set:
+     * Ostrom cannot pin it empty for them (an empty `GIT_DIR` stops git), and Gemini would take the repository's.
+     */
+    private fun refuseUnpinned(layout: SessionLayout, files: LaunchFiles, pinned: Set<String>) {
+        val top = layout.workspace.lastOrNull()
+        val folders = generateSequence(layout.workspace.firstOrNull()) { folder ->
+            parent(folder).takeIf { folder != top && it.isNotEmpty() }
+        }
+        val path = folders.flatMap { sequenceOf(join(it, ".gemini", ".env"), join(it, ".env")) }
+            .firstOrNull { files.read(it) != null } ?: return
+        val named = DotEnv.parse(files.read(path).orEmpty()).keys
+            .firstOrNull { it in ProgramVariables.KEPT && it !in pinned } ?: return
+        refuse(
+            "$path sets $named, which changes the programs Gemini and Ostrom's hooks start, and Ostrom cannot set it " +
+                "for this session without breaking them, so Gemini is not started. Remove it from that file, or set " +
+                "it in your environment, to work with Ostrom",
+        )
     }
 
     private fun parent(rule: String): String {
@@ -128,81 +150,12 @@ internal object GeminiEnvironment {
         "DYLD_INSERT_LIBRARIES",
     )
 
-    // what changes the shell that runs the hooks, where it is found, the loader under it, Node, or Gemini's sandbox
+    // Gemini's own (the shared ones are [ProgramVariables]): its sandbox, the shell of its hooks on Windows, and what a
+    // repository's .env could still set, from the inventory of Gemini CLI 0.66 (security audit of the CLI n°2, annex
+    // A § 4): endpoints, telemetry, system prompt, sandbox, IDE, its debug mode and npm's registry
     private val SHELL = listOf(
-        PATH,
-        "BASH_ENV",
-        "ENV",
-        "SHELLOPTS",
-        "BASHOPTS",
-        "CDPATH",
-        "GLOBIGNORE",
-        "IFS",
-        "PS4",
-        "LD_PRELOAD",
-        "LD_AUDIT",
-        "LD_LIBRARY_PATH",
-        "DYLD_INSERT_LIBRARIES",
-        "DYLD_LIBRARY_PATH",
-        "DYLD_FRAMEWORK_PATH",
-        "NODE_OPTIONS",
-        "NODE_PATH",
         "GEMINI_SANDBOX",
         COMSPEC,
-        // the rest of Gemini CLI 0.66's own list of what changes a program run (BLOCKED_EXECUTION_ENVS)
-        "NODE_CLI_FLAGS",
-        "_FORCE_NODE_OPTIONS",
-        "ELECTRON_RUN_AS_NODE",
-        "PYTHONPATH",
-        "PYTHONSTARTUP",
-        "RUBYOPT",
-        "RUBYLIB",
-        "PERL5OPT",
-        "PERL5LIB",
-        "PERL5DB",
-        "LD_DEBUG",
-        "LD_PROFILE",
-        "DYLD_FORCE_FLAT_NAMESPACE",
-        "DYLD_FALLBACK_LIBRARY_PATH",
-        "DYLD_FALLBACK_FRAMEWORK_PATH",
-        "JAVA_TOOL_OPTIONS",
-        "_JAVA_OPTIONS",
-        "CLASSPATH",
-        "DOTNET_STARTUP_HOOKS",
-        "CORECLR_PROFILER_PATH",
-        "CORECLR_ENABLE_PROFILING",
-        // and what that list lacks: Python's home, and the proxies the hooks' HTTP client would send the relay's
-        // token through
-        "PYTHONHOME",
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "ALL_PROXY",
-        "NO_PROXY",
-        "http_proxy",
-        "https_proxy",
-        "all_proxy",
-        "no_proxy",
-        // what a repository's .env could still set, from the inventory of Gemini CLI 0.66 (security audit of the
-        // CLI n°2, annex A § 4): git's configuration, pagers and editors, TLS, endpoints, telemetry, system prompt,
-        // sandbox, IDE
-        "GIT_CONFIG_COUNT",
-        "GIT_CONFIG_PARAMETERS",
-        "GIT_CONFIG_GLOBAL",
-        "GIT_CONFIG_SYSTEM",
-        "GIT_CONFIG_NOSYSTEM",
-        "GIT_SSH_COMMAND",
-        "GIT_SSH",
-        "GIT_EXTERNAL_DIFF",
-        "GIT_DIR",
-        "GIT_WORK_TREE",
-        "GIT_EXEC_PATH",
-        "PAGER",
-        "GIT_PAGER",
-        "EDITOR",
-        "VISUAL",
-        "BROWSER",
-        "NODE_TLS_REJECT_UNAUTHORIZED",
-        "NODE_EXTRA_CA_CERTS",
         "CODE_ASSIST_ENDPOINT",
         "CODE_ASSIST_API_VERSION",
         "GOOGLE_GEMINI_BASE_URL",

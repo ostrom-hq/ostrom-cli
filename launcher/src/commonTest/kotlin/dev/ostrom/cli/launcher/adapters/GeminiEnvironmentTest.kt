@@ -65,22 +65,19 @@ private val SHELL = listOf(
     "all_proxy",
     "no_proxy",
     // what a repository's .env could still set, from the inventory of Gemini CLI 0.66 (AUDIT-SECU-CLI-H3-INVENTAIRE,
-    // annex A § 4): git's configuration, pagers and editors, TLS, endpoints, telemetry, system prompt, sandbox, IDE
+    // annex A § 4): git's configuration, pagers, TLS, endpoints, telemetry, system prompt, sandbox, IDE
     "GIT_CONFIG_COUNT",
     "GIT_CONFIG_PARAMETERS",
-    "GIT_CONFIG_GLOBAL",
-    "GIT_CONFIG_SYSTEM",
     "GIT_CONFIG_NOSYSTEM",
-    "GIT_SSH_COMMAND",
-    "GIT_SSH",
     "GIT_EXTERNAL_DIFF",
-    "GIT_DIR",
-    "GIT_WORK_TREE",
     "GIT_EXEC_PATH",
+    "GIT_ASKPASS",
+    "SSH_ASKPASS",
+    "GIT_PROXY_COMMAND",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "XDG_CONFIG_HOME",
     "PAGER",
     "GIT_PAGER",
-    "EDITOR",
-    "VISUAL",
     "BROWSER",
     "NODE_TLS_REJECT_UNAUTHORIZED",
     "NODE_EXTRA_CA_CERTS",
@@ -171,6 +168,37 @@ class GeminiEnvironmentTest {
         assertEquals("", environment["SHELLOPTS"])
         val expected = SHELL.associateWith { if (it == "PATH") "/usr/bin" else "" }
         assertEquals(expected, environment.filterKeys { it in SHELL })
+    }
+
+    @Test
+    fun gitsPlacesTheEditorsAndTheShellAreTheDevelopersOrLeftAsTheyAre() {
+        // REVUES-CLI-4: an empty GIT_DIR stops git, an empty GIT_SSH_COMMAND runs nothing (git 2.47): these are never
+        // set empty, only to the developer's own value
+        val developers = mapOf("GIT_SSH_COMMAND" to "ssh -i /home/dev/.ssh/work", "SHELL" to "/bin/zsh")
+        val environment = prepare(layout(variables = developers, workspace = listOf("/work/repo"))).environment
+        assertEquals(developers, environment.filterKeys { it in ProgramVariables.KEPT })
+    }
+
+    @Test
+    fun geminiIsNotStartedWhereTheRepositorysEnvNamesAVariableOstromCannotSetEmpty() {
+        val workspace = listOf("/w/app/src", "/w/app")
+        files.texts[join("/w/app", ".env")] = "GIT_SSH_COMMAND=./steal.sh\n"
+        assertEquals(
+            "gemini: /w/app/.env sets GIT_SSH_COMMAND, which changes the programs Gemini and Ostrom's hooks start, " +
+                "and Ostrom cannot set it for this session without breaking them, so Gemini is not started. Remove " +
+                "it from that file, or set it in your environment, to work with Ostrom",
+            refusal(layout(workspace = workspace)),
+        )
+        // the developer's own value: Gemini does not replace it
+        prepare(layout(variables = mapOf("GIT_SSH_COMMAND" to "ssh"), workspace = workspace))
+        // Gemini loads only the first .env found from the working folder up
+        files.texts[join("/w/app/src", ".gemini", ".env")] = "DEBUG=1\n"
+        prepare(layout(workspace = workspace))
+        files.texts[join("/w/app/src", ".gemini", ".env")] = "export EDITOR=./ed\n"
+        assertTrue("/w/app/src/.gemini/.env sets EDITOR" in refusal(layout(workspace = workspace)))
+        // above the repository's top, the .env is the developer's
+        prepare(layout(workspace = listOf("/w/app/src/x", "/w/app/src/x")))
+        prepare(layout(workspace = listOf("/elsewhere", "/w/app/src")))
     }
 
     @Test

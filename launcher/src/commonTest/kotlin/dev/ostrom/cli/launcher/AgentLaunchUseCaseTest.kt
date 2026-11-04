@@ -16,6 +16,9 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
+/** Claude Code reads the developer's settings, and the memory of the working folder and the repository's top. */
+private val SOURCES = listOf("--setting-sources", "user", "--add-dir", "/work/acme-api/src", "/work/acme-api")
+
 /** `ostrom <agent>` end to end against fakes: what reaches the server, the agent and the developer. */
 @OptIn(ExperimentalCoroutinesApi::class)
 class AgentLaunchUseCaseTest : AgentLaunchKit() {
@@ -26,7 +29,7 @@ class AgentLaunchUseCaseTest : AgentLaunchKit() {
         assertEquals(3, start(), "the agent's exit code is the CLI's")
         val (mcp, settings, plugin) = listOf("mcp.json", "claude-settings.json", "plugin").map { join(temporary, it) }
         assertEquals(
-            listOf("/usr/bin/claude", "--plugin-dir", plugin, "--settings", settings, "--mcp-config", mcp),
+            listOf("/usr/bin/claude", "--plugin-dir", plugin, "--settings", settings, "--mcp-config", mcp) + SOURCES,
             commands.single(),
             "Ostrom's own MCP server is relayed to every session",
         )
