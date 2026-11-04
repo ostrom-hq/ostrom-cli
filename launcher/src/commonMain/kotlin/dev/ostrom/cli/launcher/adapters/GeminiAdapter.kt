@@ -29,12 +29,17 @@ import kotlin.random.nextULong
  * Ostrom's hooks get names no repository can know in advance, and the variables that decide the folder's trust or the
  * shell of the hooks are Ostrom's too ([GeminiEnvironment]).
  *
- * Nor does the session load a repository's `.env` (review REVUES-CLI-6, probed on Gemini CLI 0.66): its variables ran
- * the repository's programs outside the gate, a lower-case `google_application_credentials` naming an executable or a
- * `RIPGREP_CONFIG_PATH` with a `--pre` script, faster than a list of names can follow. The session's settings say
- * `advanced.ignoreLocalEnv`, and Gemini is not started where it would still load a repository's `.gemini/.env`. A team
- * that trusts its repository asks for its `.env` with `ostrom gemini --trust-project-settings`
- * ([SessionLayout.trustProject]), said before the agent starts: the guarantee is then the variables' pins only.
+ * By default the repository does not configure the agent, as for `ostrom claude` (reviews REVUES-CLI-6 and -7, probed
+ * on Gemini CLI 0.66), since what it configures ran its programs outside the gate, faster than a list of names can
+ * follow. The session's settings say `advanced.ignoreLocalEnv`: Gemini loads no `.env` of the repository's into its
+ * environment (a lower-case `google_application_credentials` naming an executable, a `RIPGREP_CONFIG_PATH` with a
+ * `--pre` script), and it is not started where it would still load a repository's `.gemini/.env`. They say
+ * `experimental.extensionConfig: false` too: Gemini otherwise reads the working folder's `.env` as the developer's
+ * extensions' settings, whose values replace `${extensionPath}` in those extensions' hooks; the developer's extensions
+ * then run without the settings they keep in Gemini (said at launch). And Gemini is not started where a command or an
+ * agent of the repository would run its programs ([GeminiProjectFiles]). A team that trusts its repository asks for
+ * all of it with `ostrom gemini --trust-project-settings` ([SessionLayout.trustProject]), said before the agent starts:
+ * the guarantee is then the variables' pins only.
  *
  * @param nonce A value of the session no repository can guess, for the names of Ostrom's hooks.
  */
@@ -50,6 +55,7 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
         val real = join(layout.variable("GEMINI_CLI_HOME") ?: layout.home, ".gemini")
         val pinned = GeminiEnvironment.of(layout, files, real)
         refuseWorkspaceHooks(layout, files, real)
+        if (!layout.trustProject) GeminiProjectFiles.refuse(layout, files, real)
         val root = join(layout.temporary, "gemini-home")
         files.createPrivateDirectory(root)
         val own = setOf("settings.json", "GEMINI.md", "skills")
@@ -59,10 +65,15 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
         val parsed = if (text.isNullOrBlank()) null else parseObject(text, comments = true)
         val theirs = parsed ?: JsonObject(emptyMap())
         developersRules(theirs, join(real, "settings.json"))
-        extensionsRules(files, real)
+        val configured = extensionsRules(files, real)
         // Gemini reads the session's settings, not these: settings Ostrom cannot read are left out, and said
         val unread = if (parsed == null && !text.isNullOrBlank()) listOf(UNREAD) else emptyList()
-        val notes = unread + if (layout.trustProject) listOf(TRUSTED) else emptyList()
+        val trust = when {
+            layout.trustProject -> listOf(TRUSTED)
+            configured.isEmpty() -> emptyList()
+            else -> listOf(unconfigured(configured))
+        }
+        val notes = unread + trust
         val suffix = nonce()
         files.write(join(directory, "settings.json"), pretty(settings(layout, theirs, suffix)), FileAccess.PRIVATE)
         val rules = files.read(join(real, "GEMINI.md")).orEmpty() + "\n" + layout.rules
@@ -124,20 +135,31 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
      * The developer's extensions follow their rules: Gemini registers an extension's hooks (`hooks/hooks.json`, in its
      * folder or, for a linked one, in its source) with the settings' ones. A file Gemini cannot read loads no hook.
      *
+     * @return The names of those that declare settings (`settings` in `gemini-extension.json`), which a session
+     * without `--trust-project-settings` does not give them.
      * @throws AdapterException When one adds a `BeforeTool` hook.
      */
-    private fun extensionsRules(files: LaunchFiles, real: String) {
+    private fun extensionsRules(files: LaunchFiles, real: String): List<String> {
         val extensions = join(real, "extensions")
+        val configured = mutableListOf<String>()
         for (name in files.list(extensions)) {
             val folder = join(extensions, name)
             val install = files.read(join(folder, ".gemini-extension-install.json"))?.let { parseObject(it) }
             val source = (install?.get("source") as? JsonPrimitive)?.content
             val effective = if (install?.get("type") == JsonPrimitive("link") && source != null) source else folder
+            val manifest = files.read(join(effective, "gemini-extension.json"))?.let { parseObject(it) }
+            if ((manifest?.get("settings") as? JsonArray).orEmpty().isNotEmpty()) configured += name
             val path = join(effective, "hooks", "hooks.json")
             val hooks = files.read(path)?.let { parseObject(it) } ?: continue
             developersRules(hooks, path)
         }
+        return configured
     }
+
+    private fun unconfigured(names: List<String>) = "gemini: your extensions ${names.joinToString(", ")} run " +
+        "without the settings you gave them in Gemini: Gemini would read them from this repository's .env too, " +
+        "where a repository can rewrite what those extensions' hooks run. Set them in your environment, or run " +
+        "`ostrom gemini --trust-project-settings` if your team trusts this repository"
 
     /**
      * The developer's own rules: the gate is the organization's, so their settings do not turn the hooks off
@@ -210,7 +232,13 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
         val added = mapOf("hooks" to JsonObject(merged), "mcpServers" to JsonObject(servers))
         // the folders' .env files are skipped, the developer's other advanced settings kept
         val advanced = theirs.child("advanced").orEmpty() + (IGNORE_LOCAL_ENV to JsonPrimitive(true))
-        val local = if (layout.trustProject) emptyMap() else mapOf("advanced" to JsonObject(advanced))
+        // nor does it read the working folder's .env as the extensions' settings (review REVUES-CLI-7)
+        val experimental = theirs.child("experimental").orEmpty() + (EXTENSION_CONFIG to JsonPrimitive(false))
+        val local = if (layout.trustProject) {
+            emptyMap()
+        } else {
+            mapOf("advanced" to JsonObject(advanced), "experimental" to JsonObject(experimental))
+        }
         return JsonObject(theirs + added + local)
     }
 
@@ -235,9 +263,11 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
             "settings"
         const val BOM = "\uFEFF"
         const val IGNORE_LOCAL_ENV = "ignoreLocalEnv"
+        const val EXTENSION_CONFIG = "extensionConfig"
         const val TRUSTED = "gemini: --trust-project-settings: Gemini loads this repository's .env and " +
-            ".gemini/.env, whose variables can run the repository's programs: Ostrom pins those it knows of, and " +
-            "does not vouch for its gate in this session"
+            ".gemini/.env, whose variables can run the repository's programs, reads its .env as your extensions' " +
+            "settings, and runs the shell commands of its commands and the MCP servers of its agents: Ostrom pins " +
+            "the variables it knows of, and does not vouch for its gate in this session"
         const val SYSTEM_SETTINGS = "GEMINI_CLI_SYSTEM_SETTINGS_PATH"
         const val SYSTEM_DEFAULTS = "GEMINI_CLI_SYSTEM_DEFAULTS_PATH"
         const val HEX = 16

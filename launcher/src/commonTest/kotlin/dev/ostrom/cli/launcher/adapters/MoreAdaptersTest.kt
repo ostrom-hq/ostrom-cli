@@ -435,8 +435,9 @@ class MoreAdaptersTest {
         assertTrue(note.startsWith("gemini: your settings.json cannot be read as JSON"), note)
         val directory = join("/tmp/run", "gemini-home", ".gemini")
         val settings = checkNotNull(parseObject(files.texts[join(directory, "settings.json")]))
-        // and the session's own: the folders' .env files skipped (GeminiRepositoryEnvTest)
-        assertEquals(setOf("hooks", "mcpServers", "advanced"), settings.keys)
+        // and the session's own: the folders' .env files skipped (GeminiRepositoryEnvTest), and the working folder's
+        // .env not read as the extensions' settings (GeminiProjectFilesTest)
+        assertEquals(setOf("hooks", "mcpServers", "advanced", "experimental"), settings.keys)
         assertEquals("\nR", files.texts[join(directory, "GEMINI.md")])
         files.texts[join("/g", ".gemini", "settings.json")] = "  "
         files.deleteRecursively(join("/tmp/run", "gemini-home"))
