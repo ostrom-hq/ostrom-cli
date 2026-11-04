@@ -13,6 +13,12 @@ object Routes {
     /** `POST`: ask the gate of an action (PreToolUse). */
     const val GATES = "/api/v1/gates"
 
+    /**
+     * `POST`: a gated action the hook refused on the workstation without asking (git redirected, a push it cannot
+     * read), told after the refusal, best effort (`reportLocalGateDenial`, audit A6).
+     */
+    const val LOCAL_DENIALS = "/api/v1/gates/local-denials"
+
     /** `POST`: the run of a check of the workflow package (`ReportCheckRequest`), best effort. */
     const val CHECKS = "/api/v1/checks"
 
