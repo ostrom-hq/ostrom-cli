@@ -16,7 +16,10 @@ import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.toKString
 import kotlinx.cinterop.usePinned
 import kotlinx.cinterop.value
+import platform.posix.free
 import platform.posix.getenv
+import platform.posix.realpath
+import platform.posix.symlink
 import platform.posix.getuid
 import platform.posix.setenv
 import platform.posix.unsetenv
@@ -134,3 +137,16 @@ internal actual fun terminalRead(buffer: ByteArray, timeoutMillis: Int): Int =
 /** Sets the crash handler of `posix.def` (`ostrom_exit_on_crash`). */
 actual fun exitOnCrash(code: Int, stdout: String, stderr: String): Boolean =
     ostrom_exit_on_crash(code, stdout, stderr) == 0
+
+/** [path] with its links followed, or null when it does not resolve. */
+actual fun realPath(path: String): String? {
+    val resolved = realpath(path, null) ?: return null
+    return try {
+        resolved.toKString()
+    } finally {
+        free(resolved)
+    }
+}
+
+/** Makes [link] a symbolic link to [target]; false when it cannot. */
+actual fun symbolicLink(target: String, link: String): Boolean = symlink(target, link) == 0

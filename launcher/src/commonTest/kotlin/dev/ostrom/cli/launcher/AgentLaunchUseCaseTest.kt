@@ -2,10 +2,11 @@
 package dev.ostrom.cli.launcher
 
 import dev.ostrom.cli.launcher.adapters.AdapterException
-import dev.ostrom.cli.launcher.adapters.AgentLaunch
 import dev.ostrom.cli.launcher.adapters.AgentAdapter
+import dev.ostrom.cli.launcher.adapters.AgentLaunch
 import dev.ostrom.cli.launcher.adapters.ClaudeAdapter
 import dev.ostrom.cli.launcher.adapters.CodexAdapter
+import dev.ostrom.cli.launcher.adapters.MinimumVersion
 import dev.ostrom.cli.platform.CaptureResult
 import dev.ostrom.cli.platform.ExecutableFinder
 import dev.ostrom.cli.platform.ProcessCapture
@@ -32,10 +33,12 @@ class AgentLaunchUseCaseTest {
     private val warned = mutableListOf<String>()
     private val variables = mutableMapOf("PATH" to "/usr/bin")
     private var gitAnswer: CaptureResult = CaptureResult.Exited(0, "/work/acme-api\n")
+    private var versionAnswer: CaptureResult = CaptureResult.Exited(0, "0.65.0\n")
     private var originAnswer: CaptureResult = CaptureResult.Exited(2, "error: No such remote 'origin'\n")
     private var installed = mutableMapOf("claude" to "/usr/bin/claude", "codex" to "/usr/bin/codex")
     private var agentResult: ProcessResult = ProcessResult.Exited(3)
     private val commands = mutableListOf<List<String>>()
+    private val versionAsked = mutableListOf<List<String>>()
     private val environments = mutableListOf<Map<String, String?>>()
     private val filesWhileRunning = mutableMapOf<String, String>()
     private val relaySettings = mutableListOf<RelaySettings>()
@@ -64,7 +67,11 @@ class AgentLaunchUseCaseTest {
 
     private val capture = object : ProcessCapture {
         override fun capture(command: List<String>, timeoutMillis: Int) =
-            if ("get-url" in command) originAnswer else gitAnswer
+            when {
+                "--version" in command -> versionAnswer.also { versionAsked += command }
+                "get-url" in command -> originAnswer
+                else -> gitAnswer
+            }
 
         override fun detach(command: List<String>) = false
     }
@@ -89,6 +96,23 @@ class AgentLaunchUseCaseTest {
     }
 
     private val temporary = join("/tmp", "ostrom-run-42")
+
+    @Test
+    fun aRepositoryCannotNameTheRunnerThatRunsTheChecks() = runTest {
+        // Gemini CLI loads a repository's .env without replacing a variable already set: the launcher always sets it,
+        // empty on a workstation, so a repository cannot point the checks at a socket of its own
+        serveALaunch()
+        start()
+        assertEquals("", environments.single()["OSTROM_RUNNER_CHECKS"])
+    }
+
+    @Test
+    fun theRunnerOfACloudSessionKeepsItsChecks() = runTest {
+        serveALaunch()
+        variables["OSTROM_RUNNER_CHECKS"] = "/run/ostrom/checks.sock"
+        start()
+        assertEquals("/run/ostrom/checks.sock", environments.single()["OSTROM_RUNNER_CHECKS"])
+    }
 
     @Test
     fun theAgentRunsWithTheRelayAndNeverWithTheDeviceToken() = runTest {
@@ -437,6 +461,51 @@ class AgentLaunchUseCaseTest {
     }
 
     @Test
+    fun anAgentOlderThanItsAdaptersMinimumIsNotStartedNorLaunched() = runTest {
+        serveALaunch()
+        installed["gemini"] = "/usr/bin/gemini"
+        val gemini = object : AgentAdapter {
+            override val agent = Agent.GEMINI
+            override val minimum = MinimumVersion("0.66.0", "npm install -g @google/gemini-cli@latest")
+
+            override fun prepare(layout: dev.ostrom.cli.launcher.adapters.SessionLayout, files: LaunchFiles) =
+                AgentLaunch(emptyList(), emptyMap())
+        }
+        adapters = listOf(gemini)
+        assertEquals(70, start(Agent.GEMINI))
+        assertEquals(
+            "ostrom: Gemini CLI 0.65.0 is older than 0.66.0: a repository could turn Ostrom's hooks off in it, so it " +
+                "is not started. Update it: npm install -g @google/gemini-cli@latest",
+            said.last(),
+        )
+        assertEquals(listOf(listOf("/usr/bin/gemini", "--version")), versionAsked)
+        assertTrue(commands.isEmpty(), "the agent never starts")
+        assertTrue(relaySettings.isEmpty(), "no launch is asked of Ostrom")
+        server["GET ${Routes.POLICY}?agent=gemini&dev=alice"] = 200 to """{"allowed":true}"""
+        versionAnswer = CaptureResult.Exited(0, "0.66.0\n")
+        assertEquals(3, start(Agent.GEMINI), "a recent enough agent starts")
+    }
+
+    @Test
+    fun anAdapterSeesTheWorkingFolderAndTheRepositorysTop() = runTest {
+        serveALaunch()
+        val seen = mutableListOf<List<String>>()
+        adapters = listOf(
+            object : AgentAdapter {
+                override val agent = Agent.CLAUDE
+
+                override fun prepare(layout: dev.ostrom.cli.launcher.adapters.SessionLayout, files: LaunchFiles) =
+                    AgentLaunch(emptyList(), emptyMap()).also { seen += layout.workspace }
+            },
+        )
+        start()
+        assertEquals(listOf(listOf("/work/acme-api/src", "/work/acme-api")), seen)
+        gitAnswer = CaptureResult.Exited(0, "/work/acme-api/src\n")
+        start()
+        assertEquals(listOf("/work/acme-api/src"), seen.last(), "once when the session starts at the top")
+    }
+
+    @Test
     fun anAdapterThatCannotPrepareStopsTheLaunch() = runTest {
         serveALaunch()
         val broken = object : AgentAdapter {
@@ -550,6 +619,30 @@ class AgentLaunchUseCaseTest {
         start()
         assertFalse(relaySettings.last().inference, "no gateway")
         assertEquals(2, server.sent("GET ${Routes.INFERENCE_MODELS}").size)
+    }
+
+    @Test
+    fun theAgentsPathHoldsOnlyAbsoluteFoldersOutsideTheRepository() = runTest {
+        // a relative entry, an empty one, or one inside the repository lets the repository supply the hooks' bash
+        serveALaunch()
+        files.texts[join("/work/acme-api/node_modules/.bin", "bash")] = ""
+        files.texts[join("/usr/bin", "bash")] = ""
+        files.links["/home/dev/acme"] = "/work/acme-api"
+        variables["PATH"] = "node_modules/.bin::.:/work/acme-api/node_modules/.bin:/home/dev/acme/bin:/usr/bin:" +
+            "/work/acme-api/src/tools:/opt/tools:bin"
+        start()
+        val path = checkNotNull(environments.last()["PATH"])
+        assertEquals("/opt/bin:/usr/bin:/opt/tools", path)
+        val bash = path.split(':').map { join(it, "bash") }.first { it in files.texts }
+        assertEquals(join("/usr/bin", "bash"), bash, "the bash found is outside the repository")
+    }
+
+    @Test
+    fun theHooksConfigFolderIsTheLaunchersOwn() = runTest {
+        // set, so that neither a repository's .env nor XDG_CONFIG_HOME can choose another
+        serveALaunch()
+        start()
+        assertEquals("/config", environments.last()["OSTROM_HOME"])
     }
 
     @Test

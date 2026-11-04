@@ -30,6 +30,12 @@ data class RelayView(val url: String, val token: String, val mcpServers: List<St
  * @property home The developer's home folder.
  * @property variable The developer's environment.
  * @property relay The local relay.
+ * @property workspace The folders whose settings an agent reads as a workspace's: the working folder, then the
+ * repository's top when it is another folder.
+ * @property environment The variables the launcher sets (a value) or removes (null) for the agent, the adapter's
+ * own aside.
+ * @property pathSeparator What separates the entries of `PATH` here (`;` on Windows).
+ * @property foldsCase Whether this machine's paths ignore case (macOS, Windows), as Gemini CLI compares them.
  */
 data class SessionLayout(
     val temporary: String,
@@ -41,6 +47,10 @@ data class SessionLayout(
     val home: String,
     val variable: (String) -> String?,
     val relay: RelayView,
+    val workspace: List<String> = emptyList(),
+    val environment: Map<String, String?> = emptyMap(),
+    val pathSeparator: Char = ':',
+    val foldsCase: Boolean = false,
 ) {
     /** `"<ostrom>" hook gate|session`, the command an agent's hook runs. */
     fun hookCommand(kind: String): String = "${quoted(executable)} hook $kind"
@@ -87,6 +97,10 @@ data class AgentLaunch(
 interface AgentAdapter {
     /** The agent this adapter is for. */
     val agent: Agent
+
+    /** The oldest version of the agent in which Ostrom's hooks stay on; null when every version is started. */
+    val minimum: MinimumVersion?
+        get() = null
 
     /**
      * Writes what the session needs under [SessionLayout.temporary] and says how to start the agent.

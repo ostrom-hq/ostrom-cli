@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.launcher
 
+import dev.ostrom.cli.platform.realPath
+import dev.ostrom.cli.platform.symbolicLink
 import okio.FileSystem
 import okio.ForwardingFileSystem
 import okio.IOException
@@ -78,5 +80,42 @@ class LaunchFilesTest {
         real.write((folder / "f").toString(), "x", FileAccess.PRIVATE)
         assertEquals("x", real.read((folder / "f").toString()))
         real.deleteRecursively(folder.toString())
+    }
+
+    @Test
+    fun aFolderIsReadWithItsLinksFollowedOrAsWrittenWhenItDoesNotResolve() {
+        fileSystem.createDirectories("/real/project".toPath())
+        fileSystem.createSymlink("/link".toPath(), "/real".toPath())
+        assertEquals("/real/project", files.canonical("/link/project"))
+        assertEquals("/real/project", files.canonical("/real/project"))
+        // as Node's realpathSync: `..` and `.` from the path as written, then the links
+        assertEquals("/real/project", files.canonical("/link/../link/project/."))
+        // as Gemini CLI: a path that does not resolve is kept, normalized
+        assertEquals("/nowhere/b", files.canonical("/nowhere/a/../b"))
+    }
+
+    @Test
+    fun theDefaultFilesTakeDotDotAsWrittenThenFollowLinks() {
+        // as Gemini CLI (Node's realpathSync, probed): `a/lien/..` is `a`, even where `a/lien` leads to `b/x`
+        val real = LaunchFilesImpl()
+        // the system's own name for the temporary folder (macOS: /private/var, Windows: the long names)
+        val temporary = checkNotNull(realPath(FileSystem.SYSTEM_TEMPORARY_DIRECTORY.toString())).toPath()
+        val base = temporary / "ostrom-canonical-${modes.hashCode()}"
+        FileSystem.SYSTEM.createDirectories(base / "real" / "project")
+        FileSystem.SYSTEM.createDirectories(base / "b" / "x")
+        FileSystem.SYSTEM.createDirectories(base / "b" / "projet")
+        FileSystem.SYSTEM.createDirectories(base / "a")
+        // no skip: a test that cannot make its links fails (GitHub's Windows runners make them as administrator); made
+        // by the system, as okio makes none on Windows
+        assertTrue(symbolicLink((base / "real").toString(), (base / "link").toString()), "links can be made here")
+        assertTrue(symbolicLink((base / "b" / "x").toString(), (base / "a" / "lien").toString()))
+        val dots = base / "link" / ".." / "link" / "project" / "."
+        assertEquals((base / "real" / "project").toString(), real.canonical(dots.toString()))
+        val through = (base / "a" / "lien" / ".." / "projet").toString()
+        // a/projet does not exist: kept as written, normalized, as Gemini keeps it
+        assertEquals((base / "a" / "projet").toString(), real.canonical(through))
+        FileSystem.SYSTEM.createDirectories(base / "a" / "projet")
+        assertEquals((base / "a" / "projet").toString(), real.canonical(through))
+        real.deleteRecursively(base.toString())
     }
 }
