@@ -25,7 +25,7 @@ interface VerifyReceiptUseCase {
      * @param expected The organisation it must have been signed for.
      * @return The report; its code is the exit code of `ostrom verify` (0, 1 or 2).
      */
-    operator fun invoke(input: ReceiptInput, keys: List<TrustedKey>, expected: ExpectedOrg = ExpectedOrg.None): Report
+    operator fun invoke(input: ReceiptInput, keys: List<TrustedKey>, expected: ExpectedOrg): Report
 }
 
 /**
