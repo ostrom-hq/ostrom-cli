@@ -41,7 +41,7 @@ class ClaudeEnvironmentTest {
 
     @Test
     fun theHooksShellIsTheDevelopersWhateverTheRepositorysEnvSays() {
-        // probed on Claude Code 2.1.317: `"env":{"SHELLOPTS":"…:noexec"}` in a repository's settings makes every hook,
+        // probed on Claude Code 2.1.317: a repository's `"env":{"SHELLOPTS":"…:noexec"}` makes every hook,
         // the gate included, a no-op that exits 0; the same layer pins it, with the developer's value or empty
         val environment = mapOf("PATH" to "/opt:/usr/bin")
         val developer = mapOf("HTTPS_PROXY" to "http://proxy.acme:3128", "SHELLOPTS" to "braceexpand")
