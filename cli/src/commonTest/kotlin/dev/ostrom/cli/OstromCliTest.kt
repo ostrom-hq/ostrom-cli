@@ -107,6 +107,23 @@ class OstromCliTest : CliKit() {
     }
 
     @Test
+    fun theVersionOptionIsTheVersionCommand() {
+        // `ostrom --version`, as any command-line tool: the line of `ostrom version`, code 0 (CONVENTIONS 16.3)
+        assertEquals(0, cli().run(arrayOf("--version")))
+        assertEquals("ostrom ${BuildInfo.VERSION} (kotlin-native, Linux x64)\n", console.out.toString())
+    }
+
+    @Test
+    fun theVersionOptionIsOstromsOnlyNeverACommandsNorAnAgents() {
+        assertEquals(0, cli().run(arrayOf("--debug", "--version")))
+        assertOut("ostrom ${BuildInfo.VERSION} (kotlin-native, Linux x64)\n")
+        assertEquals(64, cli().run(arrayOf("doctor", "--version")), "doctor has no --version of its own")
+        signIn("/home/maya/.config/ostrom")
+        assertEquals(7, cli(environment = withServer).run(arrayOf("codex", "--version")))
+        assertEquals(listOf("--version"), launches.single().first.arguments, "the agent's own --version, passed as is")
+    }
+
+    @Test
     fun noArgumentIsTheHomeScreenNeverTheRawHelp() {
         assertEquals(0, cli().run(emptyArray()))
         val home = console.out.toString()
@@ -395,6 +412,7 @@ class OstromCliTest : CliKit() {
             arrayOf<String>() to "home",
             arrayOf("--debug", "doctor", "--help") to "doctor",
             arrayOf("--help") to "help",
+            arrayOf("--version") to "version",
             arrayOf("https://secret.example") to "unknown",
             arrayOf("--bogus") to "unknown",
             arrayOf("config", "set", "colour", "x") to "config",
