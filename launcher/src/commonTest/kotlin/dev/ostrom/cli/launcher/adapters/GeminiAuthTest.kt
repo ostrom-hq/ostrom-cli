@@ -9,7 +9,8 @@ import kotlin.test.assertEquals
 /**
  * Gemini CLI 0.66 loads one `.env`, the first found from the working folder up, the home's only when no folder has
  * one: a repository's `.env` naming `GEMINI_API_KEY` or `GOOGLE_CLOUD_PROJECT` would send the session's prompts to the
- * repository's account. Ostrom pins them to the developer's (security audit of the CLI n°2, H3, inventory annex A § 4.4).
+ * repository's account. Ostrom pins them to the developer's (security audit of the CLI n°2, H3, inventory annex A
+ * § 4.4).
  */
 class GeminiAuthTest {
     private val files = MemoryFiles().apply {
