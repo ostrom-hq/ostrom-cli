@@ -89,7 +89,9 @@ internal class AgentCommand(private val agent: Agent, private val dependencies: 
     /** Options that do not go together, a usage error before anything is read. */
     private fun refuseOptionsTogether() {
         if (cloud && dryRun) throw UsageError("--dry-run checks a launch on this machine: it does not go with --cloud")
-        if (trustProjectSettings && (cloud || agent !in TRUSTING)) {
+        // the agents that read a repository's own configuration only when the developer asks
+        val trusting = agent == Agent.CLAUDE || agent == Agent.GEMINI
+        if (trustProjectSettings && (cloud || !trusting)) {
             throw UsageError("$TRUST_PROJECT_SETTINGS is for `ostrom claude` and `ostrom gemini` on this machine")
         }
     }
@@ -103,9 +105,6 @@ internal class AgentCommand(private val agent: Agent, private val dependencies: 
     private companion object {
         const val NO_HOME = "no folder for ostrom's files: set OSTROM_HOME"
         const val TRUST_PROJECT_SETTINGS = "--trust-project-settings"
-
-        // the agents that read a repository's own configuration only when the developer asks
-        val TRUSTING = setOf(Agent.CLAUDE, Agent.GEMINI)
         const val SIGN_IN = "no Ostrom server: run `ostrom login`, or set OSTROM_URL"
     }
 }
