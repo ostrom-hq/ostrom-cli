@@ -119,13 +119,19 @@ internal object ProgramVariables {
     )
 
     /**
-     * Each of [names] and each of [KEPT] the launcher sets or the developer has: the launcher's value (empty for one it
+     * Each of [names] and each of [kept] the launcher sets or the developer has: the launcher's value (empty for one it
      * removes), else the developer's, else empty.
      *
      * @param set The variables the launcher and the adapter set (a value) or remove (null).
+     * @param kept The names not unset when empty: [KEPT], and an agent's own.
      */
-    fun pinned(names: Collection<String>, set: Map<String, String?>, variable: (String) -> String?) =
-        (names + KEPT.filter { it in set || variable(it) != null }).associateWith { name ->
+    fun pinned(
+        names: Collection<String>,
+        set: Map<String, String?>,
+        kept: List<String> = KEPT,
+        variable: (String) -> String?,
+    ) =
+        (names + kept.filter { it in set || variable(it) != null }).associateWith { name ->
             if (name in set) set[name].orEmpty() else variable(name).orEmpty()
         }
 }

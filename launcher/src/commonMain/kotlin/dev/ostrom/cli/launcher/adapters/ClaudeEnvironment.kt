@@ -24,7 +24,7 @@ internal object ClaudeEnvironment {
     fun pinned(layout: SessionLayout, own: Map<String, String?>): Map<String, String> {
         val set = layout.environment + own
         val names = set.keys + LaunchVariables.ALL + ProgramVariables.PINNED + SHELL
-        return ProgramVariables.pinned(names, set, layout.variable)
+        return ProgramVariables.pinned(names, set, variable = layout.variable)
     }
 
     // Claude Code's own: the prefix of every command it runs, hooks included, and the shell it runs them with (Git

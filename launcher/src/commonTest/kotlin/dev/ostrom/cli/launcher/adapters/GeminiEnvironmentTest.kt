@@ -87,9 +87,7 @@ private val SHELL = listOf(
     "GOOGLE_VERTEX_BASE_URL",
     "GEMINI_CLI_CUSTOM_HEADERS",
     "GEMINI_TELEMETRY_ENABLED",
-    "GEMINI_TELEMETRY_TARGET",
     "GEMINI_TELEMETRY_OTLP_ENDPOINT",
-    "GEMINI_TELEMETRY_OTLP_PROTOCOL",
     "GEMINI_TELEMETRY_OTLP_HEADERS",
     "GEMINI_TELEMETRY_LOG_PROMPTS",
     "GEMINI_TELEMETRY_OUTFILE",
@@ -241,6 +239,21 @@ class GeminiEnvironmentTest {
         // a longer name is another variable
         files.texts[join("/w/app", ".env")] = "MY_GIT_SSH_COMMAND_X=1\nGIT_SSH_COMMANDS=2\n"
         prepare(layout(trusted = true, workspace = listOf("/w/app")))
+    }
+
+    @Test
+    fun geminisTelemetryTargetAndProtocolAreTheDevelopersOrLeftAsTheyAre() {
+        // REVUES-CLI-6's replay: Gemini CLI 0.66 stops on an empty telemetry target or OTLP protocol ("Invalid
+        // telemetry target: . Valid values are: local, gcp"), so pinned empty they kept every session from starting
+        val names = listOf("GEMINI_TELEMETRY_TARGET", "GEMINI_TELEMETRY_OTLP_PROTOCOL")
+        val environment = prepare(layout()).environment
+        assertEquals(emptyMap(), environment.filterKeys { it in names })
+        val theirs = mapOf("GEMINI_TELEMETRY_TARGET" to "local", "GEMINI_TELEMETRY_OTLP_PROTOCOL" to "http")
+        assertEquals(theirs, prepare(layout(variables = theirs)).environment.filterKeys { it in names })
+        // a trusted repository's .env naming one the developer does not set is refused, as git's places are
+        files.texts[join("/w/app", ".env")] = "GEMINI_TELEMETRY_TARGET=gcp\n"
+        val trusted = layout(trusted = true, workspace = listOf("/w/app"))
+        assertTrue("/w/app/.env names GEMINI_TELEMETRY_TARGET" in refusal(trusted))
     }
 
     @Test

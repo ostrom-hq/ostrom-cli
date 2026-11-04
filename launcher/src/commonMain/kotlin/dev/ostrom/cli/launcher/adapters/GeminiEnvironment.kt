@@ -54,7 +54,7 @@ internal object GeminiEnvironment {
         }
         refuseDistrust(layout, files, real)
         val names = TRUST + ProgramVariables.PINNED + SHELL + LaunchVariables.ALL
-        val pinned = ProgramVariables.pinned(names, layout.environment, layout.variable)
+        val pinned = ProgramVariables.pinned(names, layout.environment, KEPT, layout.variable)
         if (layout.trustProject) {
             refuseUnpinned(layout, files, pinned.keys)
         } else {
@@ -117,8 +117,8 @@ internal object GeminiEnvironment {
     }
 
     /**
-     * With `--trust-project-settings`, stops the launch where the `.env` Gemini loads names one of
-     * [ProgramVariables.KEPT] the developer does not set: Ostrom cannot pin it empty for them (an empty `GIT_DIR`
+     * With `--trust-project-settings`, stops the launch where the `.env` Gemini loads names one of [KEPT] the
+     * developer does not set: Ostrom cannot pin it empty for them (an empty `GIT_DIR`
      * stops git), and Gemini would take the file's.
      *
      * The file is found as Gemini 0.66's `findEnvFile` finds it (review REVUES-CLI-5): in each folder from the working
@@ -135,7 +135,7 @@ internal object GeminiEnvironment {
             .firstNotNullOfOrNull { path -> files.read(path)?.let { path to it } }
             ?.takeIf { (path, _) -> path !in own } ?: return
         val windows = layout.pathSeparator == ';'
-        val named = ProgramVariables.KEPT.firstOrNull { name ->
+        val named = KEPT.firstOrNull { name ->
             pinned.none { it.equals(name, ignoreCase = windows) } && word(name, windows).containsMatchIn(text)
         } ?: return
         refuse(
@@ -194,6 +194,10 @@ internal object GeminiEnvironment {
         "DYLD_INSERT_LIBRARIES",
     )
 
+    // not unset when empty: git's places and editors ([ProgramVariables.KEPT]), and Gemini's telemetry target and OTLP
+    // protocol, which Gemini CLI 0.66 refuses empty ("Invalid telemetry target: ."), so that no session started
+    private val KEPT = ProgramVariables.KEPT + listOf("GEMINI_TELEMETRY_TARGET", "GEMINI_TELEMETRY_OTLP_PROTOCOL")
+
     // Gemini's own (the shared ones are [ProgramVariables]): its sandbox, the shell of its hooks on Windows, and what a
     // repository's .env could still set, from the inventory of Gemini CLI 0.66 (security audit of the CLI n°2, annex
     // A § 4): endpoints, telemetry, system prompt, sandbox, IDE, its debug mode and npm's registry
@@ -206,9 +210,7 @@ internal object GeminiEnvironment {
         "GOOGLE_VERTEX_BASE_URL",
         "GEMINI_CLI_CUSTOM_HEADERS",
         "GEMINI_TELEMETRY_ENABLED",
-        "GEMINI_TELEMETRY_TARGET",
         "GEMINI_TELEMETRY_OTLP_ENDPOINT",
-        "GEMINI_TELEMETRY_OTLP_PROTOCOL",
         "GEMINI_TELEMETRY_OTLP_HEADERS",
         "GEMINI_TELEMETRY_LOG_PROMPTS",
         "GEMINI_TELEMETRY_OUTFILE",
