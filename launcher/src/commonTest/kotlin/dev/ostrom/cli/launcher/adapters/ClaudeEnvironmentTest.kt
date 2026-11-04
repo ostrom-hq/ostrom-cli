@@ -99,6 +99,25 @@ class ClaudeEnvironmentTest {
     }
 
     @Test
+    fun theDevelopersEnvironmentCannotTurnTheGateOff() {
+        // REVUES-CLI-5, probed on Claude Code 2.1.318: `CLAUDE_CODE_SIMPLE=1` (bare mode) or `CLAUDE_CODE_SAFE_MODE=1`
+        // inherited from the developer's shell skips every hook, the gate's included, and a refused command runs;
+        // written empty in `--settings`, the gate runs and refuses again. Ostrom is a governance tool: its gate is not
+        // turned off by an inherited variable, so these are removed and pinned empty, never the developer's value
+        val developer = mapOf("CLAUDE_CODE_SIMPLE" to "1", "CLAUDE_CODE_SAFE_MODE" to "1")
+        val theirs = """{"env":{"CLAUDE_CODE_SIMPLE":"1"}}"""
+        val launch = ClaudeAdapter().prepare(
+            layout(arguments = listOf("--settings", theirs), variables = developer),
+            files,
+        )
+        val env = env()
+        for (name in developer.keys) {
+            assertEquals(JsonPrimitive(""), env[name], name)
+            assertTrue(name in launch.environment && launch.environment[name] == null, "$name removed for the agent")
+        }
+    }
+
+    @Test
     fun everyOstromVariableIsPinnedEvenOneTheLauncherDoesNotSet() {
         // a repository could otherwise name its own console, telemetry or hook timing; the CLI reads empty as unset
         ClaudeAdapter().prepare(layout(variables = mapOf("OSTROM_TELEMETRY" to "0")), files)

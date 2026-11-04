@@ -184,7 +184,7 @@ class GeminiEnvironmentTest {
         val workspace = listOf("/w/app/src", "/w/app")
         files.texts[join("/w/app", ".env")] = "GIT_SSH_COMMAND=./steal.sh\n"
         assertEquals(
-            "gemini: /w/app/.env sets GIT_SSH_COMMAND, which changes the programs Gemini and Ostrom's hooks start, " +
+            "gemini: /w/app/.env names GIT_SSH_COMMAND, which changes the programs Gemini and Ostrom's hooks start, " +
                 "and Ostrom cannot set it for this session without breaking them, so Gemini is not started. Remove " +
                 "it from that file, or set it in your environment, to work with Ostrom",
             refusal(layout(workspace = workspace)),
@@ -195,10 +195,48 @@ class GeminiEnvironmentTest {
         files.texts[join("/w/app/src", ".gemini", ".env")] = "DEBUG=1\n"
         prepare(layout(workspace = workspace))
         files.texts[join("/w/app/src", ".gemini", ".env")] = "export EDITOR=./ed\n"
-        assertTrue("/w/app/src/.gemini/.env sets EDITOR" in refusal(layout(workspace = workspace)))
-        // above the repository's top, the .env is the developer's
-        prepare(layout(workspace = listOf("/w/app/src/x", "/w/app/src/x")))
+        assertTrue("/w/app/src/.gemini/.env names EDITOR" in refusal(layout(workspace = workspace)))
+        // Gemini looks up to `/`, past the repository's top (REVUES-CLI-5: a submodule, an archive without `.git`)
+        assertTrue("/w/app/src/.gemini/.env names EDITOR" in refusal(layout(workspace = listOf("/w/app/src/x"))))
+        assertTrue("/w/app/src/.gemini/.env names EDITOR" in refusal(layout(workspace = listOf("/w/app/src/x", "/w"))))
         prepare(layout(workspace = listOf("/elsewhere", "/w/app/src")))
+    }
+
+    @Test
+    fun geminiLooksForTheEnvUpToTheRootAsGeminiDoes() {
+        // REVUES-CLI-5, replayed on Gemini CLI 0.66's loader: in a submodule, or a folder git does not know, Gemini
+        // took GIT_SSH_COMMAND from a .env above the repository's top, where Ostrom had stopped looking
+        files.texts[join("/w/app", ".env")] = "GIT_SSH_COMMAND=./steal.sh\n"
+        assertTrue("/w/app/.env names GIT_SSH_COMMAND" in refusal(layout(workspace = listOf("/w/app/libs/sub"))))
+        files.texts.remove(join("/w/app", ".env"))
+        files.texts[join("/", ".env")] = "GIT_DIR=/tmp/x\n"
+        assertTrue("/.env names GIT_DIR" in refusal(layout(workspace = listOf("/w/app/libs/sub"))))
+        // the developer's own files in their home, where Gemini looks last, are theirs
+        files.texts.remove(join("/", ".env"))
+        files.texts[join("/home/dev", ".env")] = "GIT_SSH_COMMAND=./mine.sh\n"
+        files.texts[join("/home/dev", ".gemini", ".env")] = "EDITOR=./mine\n"
+        prepare(layout(workspace = listOf("/home/dev/work/app")))
+        prepare(layout(workspace = listOf("/w/app")))
+    }
+
+    @Test
+    fun aVariableOstromCannotSetEmptyIsRefusedWhereverTheEnvNamesIt() {
+        // REVUES-CLI-5: the parser cannot be the guard, a byte order mark or a no-break space made Ostrom's read
+        // nothing where Gemini's read GIT_SSH_COMMAND; the name as a word anywhere in the file is enough
+        val texts = listOf(
+            "\uFEFFGIT_SSH_COMMAND=./steal.sh\n",
+            "\u00A0GIT_SSH_COMMAND=./steal.sh\n",
+            "export\u00A0GIT_SSH_COMMAND=./steal.sh\n",
+            "GIT_SSH_COMMAND\u00A0=./steal.sh\n",
+            "# GIT_SSH_COMMAND, said in a comment\n",
+        )
+        for (text in texts) {
+            files.texts[join("/w/app", ".env")] = text
+            assertTrue("/w/app/.env names GIT_SSH_COMMAND" in refusal(layout(workspace = listOf("/w/app"))), text)
+        }
+        // a longer name is another variable
+        files.texts[join("/w/app", ".env")] = "MY_GIT_SSH_COMMAND_X=1\nGIT_SSH_COMMANDS=2\n"
+        prepare(layout(workspace = listOf("/w/app")))
     }
 
     @Test

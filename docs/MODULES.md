@@ -223,6 +223,13 @@ Ostrom's `--settings` still pin their variables in both cases (`ClaudeEnvironmen
 `ProgramVariables`, `CLAUDE_CODE_SHELL_PREFIX`, `CLAUDE_CODE_GIT_BASH_PATH`, `CLAUDE_CODE_SHELL`), and keep the hooks
 and the plugin on. A developer's own `--setting-sources` is not used, and said.
 
+What the developer's side cannot do either (review REVUES-CLI-5): Claude Code is not started with `--bare` or
+`--safe-mode`, which skip every hook and plugin (the launch stops, exit 70); `CLAUDE_CODE_SIMPLE` and
+`CLAUDE_CODE_SAFE_MODE`, the same modes by variable, are removed and written empty, never taken from the developer's
+shell. `ostrom` reads no argument file: `ostrom claude -p @TASK.md` passes `@TASK.md` to Claude Code as it is, so a
+file of the repository cannot carry `--trust-project-settings` or `--settings`. A developer's own `--settings` is
+merged as before: it is theirs, typed on their command line.
+
 `ostrom claude --trust-project-settings` is for a team that trusts its repository: Claude Code reads
 `user,project,local` (or the developer's own `--setting-sources`), and the launch says before the agent starts that
 the repository's settings can run its programs and turn the gate off. It lowers the guarantee: the pins hold, the

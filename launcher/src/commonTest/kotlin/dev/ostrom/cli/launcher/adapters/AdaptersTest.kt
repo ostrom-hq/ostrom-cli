@@ -99,7 +99,9 @@ class AdaptersTest {
             ),
             launch.arguments,
         )
-        assertEquals(mapOf("OSTROM_HOOK_BUDGET_MS" to "18000"), launch.environment)
+        // the modes without hooks are removed for the agent (REVUES-CLI-5)
+        val removed = mapOf("CLAUDE_CODE_SIMPLE" to null, "CLAUDE_CODE_SAFE_MODE" to null)
+        assertEquals(mapOf("OSTROM_HOOK_BUDGET_MS" to "18000") + removed, launch.environment)
         val hooks = checkNotNull(parseObject(files.texts[join("/tmp/run", "plugin", "hooks", "hooks.json")]))
         val pre = hooks.child("hooks")?.let { it["PreToolUse"].toString() }
         assertEquals(

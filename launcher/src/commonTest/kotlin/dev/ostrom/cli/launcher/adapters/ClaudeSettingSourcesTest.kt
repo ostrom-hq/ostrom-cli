@@ -86,6 +86,31 @@ class ClaudeSettingSourcesTest {
         assertFalse("user,project,local" in theirs.arguments)
     }
 
+    @Test
+    fun claudeIsNotStartedInAModeWithoutHooks() {
+        // REVUES-CLI-5, probed on Claude Code 2.1.318: `--bare` skips every hook and plugin, the gate's included, and a
+        // refused command runs; `--safe-mode` too. Claude Code reads both anywhere before a literal `--`, even as
+        // another option's value, so the launch stops there
+        val modes = listOf(
+            listOf("--bare", "-p", "hi") to "--bare",
+            listOf("-p", "--bare") to "--bare",
+            listOf("--bare=true") to "--bare",
+            listOf("--safe-mode") to "--safe-mode",
+        )
+        for ((arguments, option) in modes) {
+            val refused = assertFailsWith<AdapterException> { ClaudeAdapter().prepare(layout(arguments), files) }
+            assertEquals(
+                "claude: $option turns off Claude Code's hooks, Ostrom's gate included, so Claude Code is not " +
+                    "started with it. Run `ostrom claude` without $option to work with Ostrom",
+                refused.reason,
+                arguments.toString(),
+            )
+        }
+        // after `--`, it is the prompt's text
+        val prompt = ClaudeAdapter().prepare(layout(listOf("-p", "--", "--bare")), files)
+        assertEquals(listOf("--", "--bare"), prompt.arguments.takeLast(2))
+    }
+
     private fun env() = checkNotNull(checkNotNull(parseObject(files.texts[settings])).child("env"))
 
     private fun layout(arguments: List<String> = emptyList(), workspace: List<String> = emptyList()) = SessionLayout(

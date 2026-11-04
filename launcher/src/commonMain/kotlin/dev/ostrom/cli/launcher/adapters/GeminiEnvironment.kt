@@ -90,24 +90,32 @@ internal object GeminiEnvironment {
     }
 
     /**
-     * Stops the launch where the `.env` Gemini loads from the repository (the first `.gemini/.env` or `.env` from the
-     * working folder up to the repository's top) names one of [ProgramVariables.KEPT] the developer does not set:
-     * Ostrom cannot pin it empty for them (an empty `GIT_DIR` stops git), and Gemini would take the repository's.
+     * Stops the launch where the `.env` Gemini loads names one of [ProgramVariables.KEPT] the developer does not set:
+     * Ostrom cannot pin it empty for them (an empty `GIT_DIR` stops git), and Gemini would take the file's.
+     *
+     * The file is found as Gemini 0.66's `findEnvFile` finds it (review REVUES-CLI-5): in each folder from the working
+     * folder up to the root, `.gemini/.env` then `.env`, the first that exists, past the repository's top (a submodule,
+     * an archive without `.git`). The developer's own `<home>/.env` and `<home>/.gemini/.env` are theirs. A name counts
+     * wherever it stands in the file as a word, whatever a parser makes of the line: a byte order mark or a no-break
+     * space read as white space by Gemini's parser and not by another set a variable Ostrom had not seen.
      */
     private fun refuseUnpinned(layout: SessionLayout, files: LaunchFiles, pinned: Set<String>) {
-        val top = layout.workspace.lastOrNull()
-        val folders = generateSequence(layout.workspace.firstOrNull()) { folder ->
-            parent(folder).takeIf { folder != top && it.isNotEmpty() }
-        }
-        val (path, text) = folders.flatMap { sequenceOf(join(it, ".gemini", ".env"), join(it, ".env")) }
-            .firstNotNullOfOrNull { path -> files.read(path)?.let { path to it } } ?: return
-        val named = DotEnv.parse(text).keys.firstOrNull { it in ProgramVariables.KEPT && it !in pinned } ?: return
+        val own = setOf(join(layout.home, ".env"), join(layout.home, ".gemini", ".env"))
+        val (path, text) = generateSequence(layout.workspace.firstOrNull()) { folder -> up(folder) }
+            .flatMap { sequenceOf(join(it, ".gemini", ".env"), join(it, ".env")) }
+            .firstNotNullOfOrNull { path -> files.read(path)?.let { path to it } }
+            ?.takeIf { (path, _) -> path !in own } ?: return
+        val named = WORDS.entries.firstOrNull { (name, word) -> name !in pinned && word.containsMatchIn(text) }
+            ?: return
         refuse(
-            "$path sets $named, which changes the programs Gemini and Ostrom's hooks start, and Ostrom cannot set it " +
-                "for this session without breaking them, so Gemini is not started. Remove it from that file, or set " +
-                "it in your environment, to work with Ostrom",
+            "$path names ${named.key}, which changes the programs Gemini and Ostrom's hooks start, and Ostrom cannot " +
+                "set it for this session without breaking them, so Gemini is not started. Remove it from that file, " +
+                "or set it in your environment, to work with Ostrom",
         )
     }
+
+    /** The folder above [folder], the root's included (`/`, `C:\`), or null above the root. */
+    private fun up(folder: String): String? = folder.toPath().parent?.toString()
 
     private fun parent(rule: String): String {
         val trimmed = rule.trimEnd('/', '\\')
@@ -115,6 +123,9 @@ internal object GeminiEnvironment {
     }
 
     private fun refuse(reason: String): Nothing = throw AdapterException("gemini: $reason")
+
+    // each of [ProgramVariables.KEPT] as a word: not inside a longer name
+    private val WORDS = ProgramVariables.KEPT.associateWith { Regex("(?<![A-Za-z0-9_])$it(?![A-Za-z0-9_])") }
 
     private const val PATH = "PATH"
     private const val COMSPEC = "ComSpec"

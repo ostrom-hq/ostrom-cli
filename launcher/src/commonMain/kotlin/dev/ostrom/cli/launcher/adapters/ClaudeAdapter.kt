@@ -35,6 +35,9 @@ import kotlinx.serialization.json.JsonPrimitive
  * `.claude/rules` and nothing else of the repository (probed on Claude Code 2.1.318). A team that trusts its
  * repository asks for its settings with `ostrom claude --trust-project-settings`
  * ([SessionLayout.trustProject]), said before the agent starts: the guarantee is then the variables' pins only.
+ *
+ * Nor does the developer's side turn the gate off (review REVUES-CLI-5): Claude Code is not started with `--bare` or
+ * `--safe-mode`, and their variables (`CLAUDE_CODE_SIMPLE`, `CLAUDE_CODE_SAFE_MODE`) are removed and written empty.
  */
 class ClaudeAdapter : AgentAdapter {
     override val agent = Agent.CLAUDE
@@ -45,9 +48,11 @@ class ClaudeAdapter : AgentAdapter {
         if (!files.exists(manifest)) {
             files.write(manifest, pretty(objectOf("name" to "ostrom", "description" to DESCRIPTION, "version" to "1")))
         }
+        refuseModesWithoutHooks(layout.arguments)
         val (theirs, others) = developers(layout.arguments, SETTINGS)
         val (sources, rest) = developers(others, SETTING_SOURCES)
-        val own = inference(layout) + gateBudget(layout)
+        // a mode without hooks, inherited from the developer's shell, is removed and pinned empty, never kept
+        val own = inference(layout) + gateBudget(layout) + WITHOUT_HOOKS.associateWith { null }
         // the repository's memory, read from the folders given by --add-dir when its settings are not read
         val memory = if (layout.trustProject) emptyMap() else mapOf(ADDITIONAL_MEMORY to "1")
         val (settings, notes) = settings(layout, files, theirs, ClaudeEnvironment.pinned(layout, own) + memory)
@@ -59,6 +64,23 @@ class ClaudeAdapter : AgentAdapter {
         val ours = listOf(SETTINGS, settings) + (if (mcp == null) emptyList() else listOf("--mcp-config", mcp)) + read
         arguments += beforeSeparator(rest, ours)
         return AgentLaunch(arguments, own, notes + said)
+    }
+
+    /**
+     * Stops the launch where the developer's arguments turn Claude Code's hooks off (review REVUES-CLI-5, probed on
+     * Claude Code 2.1.318): `--bare` and `--safe-mode` skip every hook and plugin, Ostrom's gate included. Claude Code
+     * finds them anywhere before a literal `--`, even as another option's value (`-p --bare`), so any such word counts.
+     *
+     * @throws AdapterException On the first.
+     */
+    private fun refuseModesWithoutHooks(arguments: List<String>) {
+        val mode = arguments.take(separator(arguments)).firstNotNullOfOrNull { argument ->
+            MODES_WITHOUT_HOOKS.firstOrNull { argument == it || argument.startsWith("$it=") }
+        } ?: return
+        throw AdapterException(
+            "claude: $mode turns off Claude Code's hooks, Ostrom's gate included, so Claude Code is not started with " +
+                "it. Run `ostrom claude` without $mode to work with Ostrom",
+        )
     }
 
     /**
@@ -191,6 +213,14 @@ class ClaudeAdapter : AgentAdapter {
         private const val ALL_SOURCES = "user,project,local"
         private const val ADDITIONAL_MEMORY = "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"
         private const val DISABLE_ALL_HOOKS = "disableAllHooks"
+
+        // Claude Code's modes that skip every hook and plugin, by option and by variable (bare mode, safe mode): probed
+        // on 2.1.318, the developer's `CLAUDE_CODE_SIMPLE=1` or `CLAUDE_CODE_SAFE_MODE=1` let a refused command run,
+        // and the same variable written empty in `--settings` gave the gate back. No other `CLAUDE_CODE_*` variable of
+        // the binary turned the gate off (54 tried, hooks, plugins, policy, settings); `CLAUDE_CODE_RESTRICTED` takes
+        // the shell tool away instead
+        private val MODES_WITHOUT_HOOKS = listOf("--bare", "--safe-mode")
+        private val WITHOUT_HOOKS = listOf("CLAUDE_CODE_SIMPLE", "CLAUDE_CODE_SAFE_MODE")
         private const val ENABLED_PLUGINS = "enabledPlugins"
         private const val ENV = "env"
 
