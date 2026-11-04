@@ -155,6 +155,16 @@ brew install ostrom-hq/tap/ostrom                       # Homebrew
 scoop bucket add ostrom https://github.com/ostrom-hq/scoop-bucket; scoop install ostrom
 ```
 
+On macOS, `install.sh` downloads with `curl`, which sets no quarantine attribute: Gatekeeper checks nothing at the
+first start. An archive downloaded with a browser is quarantined, and Gatekeeper checks it at its first start: until
+the release is signed with a Developer ID and notarised (see "Signing the binaries themselves"), it warns. CI does not
+measure that check: the runner's shell starts even a quarantined copy that `spctl --assess` rejects without a hold
+(cli#111).
+The first start of a new binary costs its signature check, about 25 ms on a CI runner (39 ms, then 15 ms; budget of
+100 ms, `e2e/perf.py --max-installed-ms`). The ~550 ms that CI measures with the file cache emptied (`purge`) come
+from the system libraries every program loads (Foundation, Security), which a running Mac keeps in memory as long as
+they are in use; when a developer's Mac has dropped them, after a restart for instance, has not been measured.
+
 Installer variables: `OSTROM_VERSION` (default: the latest, through `latest.json`), `OSTROM_INSTALL_DIR` (default
 `~/.ostrom/bin`; never needs root), `OSTROM_DOWNLOAD_BASE` (default `https://github.com/ostrom-hq/ostrom-cli/releases`),
 `OSTROM_NO_MODIFY_PATH=1`, `OSTROM_SKIP_COSIGN=1`.

@@ -38,12 +38,15 @@ def check(condition, what):
         failures.append(what)
 
 
-def start_server(work, package):
+def start_server(work, package, actions=None):
+    """The contract server, its address and its request log; [actions] signs another policy (e2e/perf.py)."""
     log = os.path.join(work, "requests.jsonl")
     ready = os.path.join(work, "ready.txt")
     command = [sys.executable, os.path.join(HERE, "contract_server.py"), "--log", log, "--ready", ready]
     if package:
         command += ["--package", os.path.join(HERE, "vectors", "package.json")]
+    if actions is not None:
+        command += ["--actions", str(actions)]
     process = subprocess.Popen(command)
     for _ in range(100):
         if os.path.exists(ready) and open(ready).read():

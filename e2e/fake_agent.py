@@ -5,7 +5,9 @@ session fires: session start, a harmless tool, a gated deployment (and, when the
 command, the way a model obeys the refusal; $E2E_OSTROM names the binary), the after-tool hook, session end. With
 $E2E_HOLD, the session waits there for the yes: it writes what it fired to $E2E_HOLD.held, waits for $E2E_HOLD to
 appear, then runs `ostrom wait` again and the same command, as the model does once told it is approved. With
-$E2E_PERF (a number of calls), it then times the before-tool hook three ways ([perf]). What it
+$E2E_PERF (a number of calls), it then times the before-tool hook three ways ([perf]). With $E2E_WINDOWS
+(`<calls>:<seconds>`), it fires that many before-tool hooks on a harmless tool, that many seconds apart, and reports
+when each started and ended ([windows]): e2e/perf.py counts the server's requests made while one ran. What it
 saw and what each hook answered go to $E2E_REPORT. With a package, it then rewrites the package's hook view and fires
 one more tool, which the hooks must hold (S2-33); it exits with $E2E_EXIT (3 by default), which `ostrom` must hand
 back.
@@ -85,6 +87,25 @@ def sampled(command, case, runs, inside=True):
         inside = re.search(r"ostrom hook \S+: ([0-9.]+) ms", done.stderr)
         samples.append((wall, done.returncode, float(inside.group(1)) if inside else None))
     return samples
+
+
+def windows(command, base, spec):
+    """
+    [spec] (`<calls>:<seconds>`) harmless before-tool hooks, that many seconds apart, as the agent starts them: when
+    each started and ended (seconds since the epoch, the clock of the contract server's log), its wall time and exit
+    code.
+    """
+    calls, gap = spec.split(":")
+    event = {**base, "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "ls -la"}}
+    argv, fired = shlex.split(command), []
+    for i in range(int(calls)):
+        if i:
+            time.sleep(float(gap))
+        started, wall = time.time(), time.perf_counter()
+        done = subprocess.run(argv, input=json.dumps(event), capture_output=True, text=True, timeout=60)
+        fired.append({"start": started, "end": time.time(), "millis": round((time.perf_counter() - wall) * 1000, 1),
+                      "code": done.returncode})
+    return fired
 
 
 def percentiles(samples):
@@ -306,6 +327,7 @@ def main():
     timing = timed(hooks["PreToolUse"], harmless, runs) if runs else []
     perf_runs = int(os.environ.get("E2E_PERF") or 0)
     measured = perf(hooks["PreToolUse"], base, perf_runs) if perf_runs > 0 else None
+    spaced = windows(hooks["PreToolUse"], base, os.environ["E2E_WINDOWS"]) if os.environ.get("E2E_WINDOWS") else None
     tool = {"tool_name": "Bash", "tool_input": {"command": "ls -la"}, "tool_response": {"stdout": ""}}
     fired.append(fire(hooks["PostToolUse"], {**base, "hook_event_name": "PostToolUse", **tool}))
     package = os.environ.get("OSTROM_PACKAGE")
@@ -318,7 +340,7 @@ def main():
     fired.append(fire(hooks["SessionEnd"], {**base, "hook_event_name": "SessionEnd", "reason": "exit"}))
     environment = {key: value for key, value in os.environ.items() if key.startswith(("OSTROM_", "ANTHROPIC_"))}
     report = {"agent": name, "arguments": arguments, "environment": environment, "cwd": cwd, "hooks": fired,
-              "perf": measured,
+              "perf": measured, "windows": spaced,
               "path": os.environ.get("PATH", ""),
               "timing": {"median": statistics.median(timing), "p95": sorted(timing)[int(len(timing) * 0.95) - 1]}
               if timing else None}

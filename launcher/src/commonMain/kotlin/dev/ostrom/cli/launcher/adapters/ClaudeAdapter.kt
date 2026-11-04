@@ -6,14 +6,24 @@ import dev.ostrom.cli.launcher.FileAccess
 import dev.ostrom.cli.launcher.LaunchFiles
 import dev.ostrom.cli.launcher.LaunchVariables
 import dev.ostrom.cli.launcher.beforeSeparator
+import dev.ostrom.cli.launcher.child
 import dev.ostrom.cli.launcher.join
 import dev.ostrom.cli.launcher.objectOf
+import dev.ostrom.cli.launcher.parseObject
 import dev.ostrom.cli.launcher.pretty
+import dev.ostrom.cli.launcher.separator
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * Claude Code: the session's plugin by `--plugin-dir` (the package's skills, agents and rules, Ostrom's hooks in
  * `hooks/hooks.json`), the organisation's MCP servers through the local relay by `--mcp-config`, and, when the
  * organisation relays inference, `ANTHROPIC_BASE_URL` on the relay (as `teamcode run` does).
+ *
+ * The session's settings (`--settings`) say `"disableAllHooks": false`: a repository's `.claude/settings.json` that
+ * turns hooks off would otherwise switch Ostrom off with them, and command-line settings come before the project's
+ * (security audit of the CLI n°2, H1). Claude Code reads only the last `--settings`, so the developer's own is merged
+ * into them.
  */
 class ClaudeAdapter : AgentAdapter {
     override val agent = Agent.CLAUDE
@@ -24,12 +34,65 @@ class ClaudeAdapter : AgentAdapter {
         if (!files.exists(manifest)) {
             files.write(manifest, pretty(objectOf("name" to "ostrom", "description" to DESCRIPTION, "version" to "1")))
         }
+        val (theirs, rest) = developersSettings(layout.arguments)
+        val (settings, notes) = settings(layout, files, theirs)
         // `--mcp-config` takes several values: after the developer's options and before a literal `--`, never first,
         // where it would swallow a prompt.
         val arguments = mutableListOf("--plugin-dir", layout.plugin)
         val mcp = mcpConfig(layout, files)
-        arguments += beforeSeparator(layout.arguments, if (mcp == null) emptyList() else listOf("--mcp-config", mcp))
-        return AgentLaunch(arguments, inference(layout) + gateBudget(layout))
+        val ours = listOf("--settings", settings) + if (mcp == null) emptyList() else listOf("--mcp-config", mcp)
+        arguments += beforeSeparator(rest, ours)
+        return AgentLaunch(arguments, inference(layout) + gateBudget(layout), notes)
+    }
+
+    /**
+     * The value of the developer's last `--settings` (`--settings x` or `--settings=x`) before a literal `--`, or null,
+     * and their arguments without any `--settings`.
+     *
+     * @throws AdapterException When a `--settings` has no value, as Claude Code would refuse it.
+     */
+    private fun developersSettings(arguments: List<String>): Pair<String?, List<String>> {
+        val end = separator(arguments)
+        var value: String? = null
+        val rest = mutableListOf<String>()
+        var index = 0
+        while (index < end) {
+            val argument = arguments[index]
+            val given = when {
+                argument == SETTINGS -> arguments.getOrNull(++index)?.takeIf { index < end }.orEmpty()
+                argument.startsWith("$SETTINGS=") -> argument.removePrefix("$SETTINGS=")
+                else -> null
+            }
+            if (given == null) rest += argument
+            if (given?.isBlank() == true) throw AdapterException(NO_VALUE)
+            value = given ?: value
+            index++
+        }
+        return value to rest + arguments.drop(end)
+    }
+
+    /**
+     * Writes the session's settings: the developer's ([theirs], inline JSON or a file), with hooks on. The path, and
+     * what to tell the developer.
+     *
+     * @throws AdapterException When [theirs] cannot be read: starting without them would drop their own rules
+     * (`permissions.deny`, the sandbox), where Claude Code would refuse to start.
+     */
+    private fun settings(layout: SessionLayout, files: LaunchFiles, theirs: String?): Pair<String, List<String>> {
+        val inline = theirs != null && theirs.trimStart().startsWith("{")
+        val read = theirs?.let { parseObject(if (inline) it else files.read(it)) }
+        if (theirs != null && read == null) {
+            // only a file that exists is named: an inline value may hold secrets (`env`)
+            throw AdapterException(unread(if (!inline && files.exists(theirs)) " $theirs" else ""))
+        }
+        val off = read?.get(DISABLE_ALL_HOOKS) == JsonPrimitive(true)
+        // a repository's `enabledPlugins` can turn the plugin off too: this layer, before the project's, keeps it on
+        val plugins = JsonObject(read?.child(ENABLED_PLUGINS).orEmpty() + (PLUGIN_ID to JsonPrimitive(true)))
+        val merged = JsonObject(read.orEmpty() + (DISABLE_ALL_HOOKS to JsonPrimitive(false)) +
+            (ENABLED_PLUGINS to plugins))
+        val path = join(layout.temporary, "claude-settings.json")
+        files.write(path, merged.toString(), FileAccess.PRIVATE)
+        return path to if (off) listOf(KEPT_ON) else emptyList()
     }
 
     private fun writeHooks(layout: SessionLayout, files: LaunchFiles) {
@@ -86,6 +149,19 @@ class ClaudeAdapter : AgentAdapter {
         private const val AFTER_SECONDS = 10L
         private const val START_SECONDS = 20L
         private const val END_SECONDS = 30L
+        private const val SETTINGS = "--settings"
+        private const val DISABLE_ALL_HOOKS = "disableAllHooks"
+        private const val ENABLED_PLUGINS = "enabledPlugins"
+
+        // a plugin loaded by --plugin-dir is `<name>@inline` for Claude Code
+        private const val PLUGIN_ID = "ostrom@inline"
+
+        private const val NO_VALUE = "claude: --settings needs a value, a JSON object or a file"
+        private const val KEPT_ON =
+            "claude: your --settings turns hooks off (disableAllHooks): Ostrom keeps them on for this session"
+
+        private fun unread(file: String) =
+            "claude: your --settings$file is not a JSON object Ostrom can read: fix it, or start without it"
         private val PROVIDER_OVERRIDES = listOf(
             "ANTHROPIC_API_KEY",
             "CLAUDE_CODE_OAUTH_TOKEN",

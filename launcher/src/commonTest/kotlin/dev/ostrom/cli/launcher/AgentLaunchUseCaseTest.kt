@@ -43,12 +43,20 @@ class AgentLaunchUseCaseTest {
     private val filesWhileRunning = mutableMapOf<String, String>()
     private val relaySettings = mutableListOf<RelaySettings>()
     private var relayClosed = false
+
+    /** At each memory reclaim: the requests made so far, whether the relay had started, whether the agent had. */
+    private val reclaims = mutableListOf<Triple<List<String>, Boolean, Boolean>>()
     private var adapters: List<AgentAdapter> = listOf(ClaudeAdapter(), CodexAdapter())
+
+    /** The test's clock, and when the agent was started on it. */
+    private var now: () -> Long = { 0L }
+    private var agentStartedAt: Long? = null
 
     private val processes = object : ProcessLauncher {
         override fun run(command: List<String>, environment: Map<String, String?>): ProcessResult {
             commands += command
             environments += environment
+            agentStartedAt = agentStartedAt ?: now()
             // The agent's session hook records its session, as the real one does.
             environment[LaunchVariables.SESSION_FILE]?.let { files.texts[it] = "s1" }
             // the session's folder is removed once the agent ends: what it saw is kept here
@@ -111,9 +119,9 @@ class AgentLaunchUseCaseTest {
         serveALaunch()
         installed["git"] = "/usr/local/bin/git"
         assertEquals(3, start(), "the agent's exit code is the CLI's")
-        val mcp = join(temporary, "mcp.json")
+        val (mcp, settings, plugin) = listOf("mcp.json", "claude-settings.json", "plugin").map { join(temporary, it) }
         assertEquals(
-            listOf("/usr/bin/claude", "--plugin-dir", join(temporary, "plugin"), "--mcp-config", mcp),
+            listOf("/usr/bin/claude", "--plugin-dir", plugin, "--settings", settings, "--mcp-config", mcp),
             commands.single(),
             "Ostrom's own MCP server is relayed to every session",
         )
@@ -153,10 +161,10 @@ class AgentLaunchUseCaseTest {
         assertEquals("""{"repo":"acme-api","agent":"claude-code"}""", created.body)
         assertEquals("dev-token", created.token)
         assertEquals("agent-token", server.sent("POST /api/v1/sessions/s1/end").single().token)
-        val settings = checkNotNull(parseObject(filesWhileRunning[join(temporary, "session-env.json")]))
+        val sessionEnv = checkNotNull(parseObject(filesWhileRunning[join(temporary, "session-env.json")]))
         assertEquals(FileAccess.PRIVATE, files.access[join(temporary, "session-env.json")])
-        assertEquals("client-token", settings.text(LaunchVariables.RELAY_TOKEN))
-        assertFalse(settings.containsKey("PATH") || settings.containsKey(LaunchVariables.DEVICE_TOKEN))
+        assertEquals("client-token", sessionEnv.text(LaunchVariables.RELAY_TOKEN))
+        assertFalse(sessionEnv.containsKey("PATH") || sessionEnv.containsKey(LaunchVariables.DEVICE_TOKEN))
         // S2-20: no catalogue is written where the agent could empty it; without a package the relay asks Ostrom
         assertNull(filesWhileRunning[join(temporary, "plugin", "ostrom", "gates.json")])
         assertNull(relaySettings.single().gateCatalog)
@@ -186,7 +194,7 @@ class AgentLaunchUseCaseTest {
         variables["OSTROM_ALIVE_MS"] = "5000"
         assertEquals(3, start(arguments = listOf("-p", "hi"), model = "opus"))
         val command = commands.single()
-        assertEquals(listOf("-p", "hi", "--model", "opus", "--mcp-config"), command.drop(3).take(5))
+        assertEquals(listOf("-p", "hi", "--model", "opus", "--settings"), command.drop(3).take(5))
         val environment = environments.single()
         assertEquals("http://127.0.0.1:4100", environment["ANTHROPIC_BASE_URL"])
         assertEquals(join(temporary, "package.json"), environment[LaunchVariables.PACKAGE])
@@ -661,6 +669,28 @@ class AgentLaunchUseCaseTest {
     }
 
     @Test
+    fun theMcpServersNotListedAreSaidEvenWhenTheirAnswerComesLast() = runTest {
+        // the four reads are asked together: the list of MCP servers may fail after the package and keys are read
+        serveALaunch()
+        server.unreachable = setOf("GET ${Routes.MCP_MINE}")
+        server.slower = mapOf("GET ${Routes.MCP_MINE}" to ROUND_TRIP)
+        assertEquals(3, start(executable = "ostrom"))
+        assertTrue("ostrom: your organisation's MCP servers are not listed (connection refused)" in said, "$said")
+    }
+
+    @Test
+    fun aRefusedPackageStopsTheLaunchBeforeKeysThatCannotBeReadEvenWhenTheKeysAnswerFirst() = runTest {
+        serveALaunch()
+        server["GET ${Routes.PACKAGE}?repo=acme-api"] = 200 to """{"format":"x","payload":"e30="}"""
+        server.unreachable = setOf("GET ${Routes.INSTANCE_KEYS}")
+        server.slower = mapOf("GET ${Routes.PACKAGE}?repo=acme-api" to ROUND_TRIP)
+        assertEquals(78, start())
+        assertEquals(1, server.sent("GET ${Routes.INSTANCE_KEYS}").size, "the keys were asked, and failed first")
+        assertTrue(said.none { "instance's keys" in it }, "the package's refusal only: $said")
+        assertEquals(emptyList(), commands)
+    }
+
+    @Test
     fun aFileOfTheLaunchThatCannotBeWrittenIs73() = runTest {
         serveALaunch()
         files.failWrites = true
@@ -692,6 +722,58 @@ class AgentLaunchUseCaseTest {
         assertEquals("opencode", ostromName(Agent.OPENCODE))
     }
 
+    @Test
+    fun theReadsAfterTheLaunchIsCreatedAreAskedTogetherNotOneAfterTheOther() = runTest {
+        // PERF-CLI: every request is a round trip to Ostrom; far from the server, each one the agent waits on shows
+        serveALaunch()
+        server.roundTripMillis = ROUND_TRIP
+        now = { testScheduler.currentTime }
+        assertEquals(3, start())
+        assertEquals(
+            listOf("GET ${Routes.POLICY}?agent=claude-code&dev=alice", "POST ${Routes.LAUNCHES}"),
+            server.requests.take(2).map { "${it.method} ${it.path}" },
+            "the policy, then the launch, before anything else",
+        )
+        // the policy, the launch, then the package, the instance's keys, the MCP servers and the models together
+        val waited = checkNotNull(agentStartedAt)
+        assertTrue(waited <= 3 * ROUND_TRIP, "the agent starts after 3 round trips at most, not ${waited / ROUND_TRIP}")
+    }
+
+    @Test
+    fun theMemoryIsGivenBackBeforeTheLaunchIsCreatedAndOnceMoreBeforeTheRelayStarts() = runTest {
+        // PERF-CLI: Kotlin/Native's collector never ran during a launch; without these two, 50-51 MB at the agent
+        serveALaunch()
+        assertEquals(3, start())
+        assertEquals(2, reclaims.size, "$reclaims")
+        val (first, second) = reclaims
+        val policy = "${Routes.POLICY}?agent=claude-code&dev=alice"
+        assertEquals(Triple(listOf(policy), false, false), first, "after the policy, before the launch is created")
+        val read = listOf(Routes.PACKAGE, Routes.INSTANCE_KEYS, Routes.MCP_MINE, Routes.INFERENCE_MODELS)
+        assertTrue(read.all { route -> second.first.any { it.startsWith(route) } }, "after the reads: ${second.first}")
+        assertEquals(false to false, second.second to second.third, "before the relay and the agent start")
+    }
+
+    @Test
+    fun aLaunchThatStopsBeforeItIsCreatedCollectsNothing() = runTest {
+        serveALaunch()
+        server["GET ${Routes.POLICY}?agent=claude-code&dev=alice"] = 200 to """{"allowed":false,"reason":"x"}"""
+        assertEquals(77, start())
+        serveALaunch()
+        start(dryRun = true)
+        assertEquals(emptyList(), reclaims, "a refusal and a dry run end at once: nothing to give back")
+    }
+
+    @Test
+    fun theRealReclaimIsThePlatformsCollector() {
+        // the JVM's leaves its collector alone; Kotlin/Native's collects (measured in the CLI journey's bench)
+        val finder = object : ExecutableFinder {
+            override fun find(name: String): String? = null
+        }
+        val blocking = UnconfinedTestDispatcher()
+        LaunchDependencies(ServerJson(server), files, finder, processes, capture, relays, clock, {}, blocking, "t")
+            .reclaim()
+    }
+
     @Suppress("LongParameterList") // one default per fact of a launch a test changes
     private suspend fun TestScope.start(
         agent: Agent = Agent.CLAUDE,
@@ -714,6 +796,9 @@ class AgentLaunchUseCaseTest {
             say = { if (it.startsWith(NO_ORIGIN)) warned += it else said += it },
             blocking = UnconfinedTestDispatcher(testScheduler),
             userAgent = "ostrom/test",
+            reclaim = {
+                reclaims += Triple(server.requests.map { it.path }, relaySettings.isNotEmpty(), commands.isNotEmpty())
+            },
         )
         val site = LaunchSite(
             serverUrl = "https://ostrom.example",
@@ -742,6 +827,7 @@ class AgentLaunchUseCaseTest {
 
     private companion object {
         const val NO_ORIGIN = "ostrom: no origin with an owner/name here"
+        const val ROUND_TRIP = 100L
         const val KEYS = """{"keys":[{"keyId":"k1","algorithm":"ed25519","publicKeyPem":"pem"}]}"""
     }
 }
