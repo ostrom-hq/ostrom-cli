@@ -13,10 +13,22 @@ import kotlin.test.assertTrue
 
 /**
  * What a repository cannot change in `ostrom <agent>`: the runner of the checks, the agent's PATH, the hooks' config
- * folder, an agent older than its adapter's minimum (security audit of the CLI n°2, H3).
+ * folder, an agent older than its adapter's minimum (security audit of the CLI n°2, H3), Claude's session variables
+ * (H4).
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class AgentLaunchGuardsTest : AgentLaunchKit() {
+    @Test
+    fun claudesSessionSettingsCarryTheLaunchsOwnVariables() = runTest {
+        // a repository's `env` would otherwise rewrite them, the hooks' included (H4)
+        serveALaunch()
+        start()
+        val written = filesWhileRunning[join(temporary, "claude-settings.json")].orEmpty()
+        assertTrue(""""OSTROM_LAUNCH_ID":"L1"""" in written, written)
+        assertTrue(""""OSTROM_TOKEN":""""" in written, "the device token, removed, is pinned empty")
+        assertTrue(""""PATH":"/opt/bin:/usr/bin"""" in written, "the launcher's PATH, not a repository's")
+    }
+
     @Test
     fun aRepositoryCannotNameTheRunnerThatRunsTheChecks() = runTest {
         // Gemini CLI loads a repository's .env without replacing a variable already set: the launcher always sets it,
