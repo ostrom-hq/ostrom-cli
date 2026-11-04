@@ -1,10 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.launcher
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.JsonObject
 
 /** A launch created by Ostrom. */
 internal data class Launch(val launchId: String, val agentToken: String)
+
+/** What a launch read of Ostrom before its agent starts ([AgentLaunchUseCase]). */
+internal class LaunchReads(val pack: SessionPackage?, val keys: String, val mcp: List<String>, val inference: Boolean)
+
+/**
+ * [read]'s outcome, to be given later: its value, or the [LaunchStopped] it threw, thrown again when asked, so that a
+ * launch says its stops in its own order. Any other failure, a cancellation included, goes through at once.
+ */
+internal suspend fun <T> stopOf(read: suspend () -> T): () -> T {
+    val value = try {
+        read()
+    } catch (e: LaunchStopped) {
+        return { throw e }
+    }
+    return { value }
+}
 
 /** The calls of a launch to Ostrom before the agent runs, with the device token or the launch's agent token. */
 internal class LaunchCalls(private val dependencies: LaunchDependencies) {
@@ -118,17 +136,49 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
                 stop(UNREACHABLE, "the instance's keys could not be read (${answer.message}): the agent is not started")
         }
 
-    /** The organisation's MCP servers the relay serves to this agent (`?mine=true`), by name. */
-    suspend fun mcpServers(site: LaunchSite): List<String> =
+    /** The organisation's MCP servers the relay serves to this agent (`?mine=true`), by name; [say] tells a failure. */
+    suspend fun mcpServers(site: LaunchSite, say: (String) -> Unit = dependencies.say): List<String> =
         when (val answer = dependencies.server.get(Routes.MCP_MINE, site.credentials.token, MCP_MILLIS)) {
             is ServerAnswer.Ok -> answer.body.list("items").filterIsInstance<JsonObject>()
                 .filter { it.flag("enabled") != false }
                 .mapNotNull { it.text("name") }
                 .filter { MCP_NAME.matches(it) }
             is ServerAnswer.Failed -> emptyList<String>().also {
-                dependencies.say("ostrom: your organisation's MCP servers are not listed (${answer.message})")
+                say("ostrom: your organisation's MCP servers are not listed (${answer.message})")
             }
         }
+
+    /**
+     * What a launch reads of Ostrom once it has its agent token: the session package, the instance's keys, the MCP
+     * servers and whether the models are relayed. None depends on another, so they are asked together (PERF-CLI): the
+     * agent waits on one round trip for the four, not four. A refused package stops the launch first, then keys that
+     * cannot be read, as when they were asked one after the other; the notes are said in that order too.
+     */
+    suspend fun reads(request: LaunchRequest, site: LaunchSite, repo: String, launch: Launch): LaunchReads =
+        coroutineScope {
+            val keys = async { stopOf { instanceKeys() } }
+            // the notes come back with the list they are about: said once it has answered, whichever answer is last
+            val mcp = async { mutableListOf<String>().let { notes -> mcpServers(site) { notes += it } to notes } }
+            val inference = async { inferenceRelayed(request, site, launch) }
+            val pack = packageOf(repo, site, keep = true)
+            val read = keys.await()()
+            val (servers, notes) = mcp.await()
+            notes.forEach(dependencies.say)
+            LaunchReads(pack, read, servers, inference.await())
+        }
+
+    private suspend fun inferenceRelayed(request: LaunchRequest, site: LaunchSite, launch: Launch): Boolean {
+        val choice = site.variable(INFERENCE_VARIABLE)
+        return when {
+            request.agent != Agent.CLAUDE -> false
+            choice in OFF -> false
+            choice in ON -> true
+            else -> {
+                val answer = dependencies.server.get(Routes.INFERENCE_MODELS, launch.agentToken, INFERENCE_MILLIS)
+                answer is ServerAnswer.Ok && answer.body.list("data").isNotEmpty()
+            }
+        }
+    }
 
     /** The routes, limits and names of a launch. */
     companion object {
@@ -147,6 +197,10 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
         private const val MCP_MILLIS = 5_000L
         private const val KEYS_MILLIS = 5_000L
         private const val END_MILLIS = 5_000L
+        private const val INFERENCE_MILLIS = 3_000L
+        private const val INFERENCE_VARIABLE = "OSTROM_INFERENCE"
+        private val ON = setOf("on", "1", "true")
+        private val OFF = setOf("off", "0", "false")
         private val SILENT_END = setOf<Int?>(UNAUTHORIZED, NOT_FOUND, NOT_ALLOWED)
         private val MCP_NAME = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
     }

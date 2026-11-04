@@ -80,7 +80,17 @@ object GateTexts {
     fun letThrough(action: String, message: String): String =
         "Ostrom unreachable ($message): \"$action\" let through (the organisation's fail mode is open)."
 
-    /** Ostrom is unreachable and the organisation fails closed. */
+    /** Ostrom answered the request with a refusal (a 4xx), [message] its reason. */
+    fun refused(action: String, gate: Gate, message: String): String =
+        "Ostrom: denied. \"$action\" needs a yes from ${gate.approversPhrase} (${gate.name}), and Ostrom refused " +
+            "the request: ${sentence(message)} The action was not run. Do not work around this gate; tell the user."
+
+    /** [text] ended as a sentence. */
+    private fun sentence(text: String): String = text.trimEnd().let { if (ENDED.containsMatchIn(it)) it else "$it." }
+
+    private val ENDED = Regex("[.!?]$")
+
+    /** Ostrom is unreachable or failed (a 5xx) and the organisation fails closed. */
     fun unreachable(action: String, gate: Gate, message: String): String =
         "Ostrom: denied. \"$action\" needs a yes from ${gate.approversPhrase} (${gate.name}), and Ostrom is " +
             "unreachable ($message). The action was not run. Do not work around this gate; tell the user."

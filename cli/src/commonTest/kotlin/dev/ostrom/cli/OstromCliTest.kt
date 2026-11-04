@@ -36,6 +36,8 @@ import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNotSame
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class OstromCliTest : CliKit() {
@@ -102,6 +104,23 @@ class OstromCliTest : CliKit() {
     fun versionPrintsTheVersionAndThePlatform() {
         assertEquals(0, cli().run(arrayOf("version")))
         assertEquals("ostrom ${BuildInfo.VERSION} (kotlin-native, Linux x64)\n", console.out.toString())
+    }
+
+    @Test
+    fun theVersionOptionIsTheVersionCommand() {
+        // `ostrom --version`, as any command-line tool: the line of `ostrom version`, code 0 (CONVENTIONS 16.3)
+        assertEquals(0, cli().run(arrayOf("--version")))
+        assertEquals("ostrom ${BuildInfo.VERSION} (kotlin-native, Linux x64)\n", console.out.toString())
+    }
+
+    @Test
+    fun theVersionOptionIsOstromsOnlyNeverACommandsNorAnAgents() {
+        assertEquals(0, cli().run(arrayOf("--debug", "--version")))
+        assertOut("ostrom ${BuildInfo.VERSION} (kotlin-native, Linux x64)\n")
+        assertEquals(64, cli().run(arrayOf("doctor", "--version")), "doctor has no --version of its own")
+        signIn("/home/maya/.config/ostrom")
+        assertEquals(7, cli(environment = withServer).run(arrayOf("codex", "--version")))
+        assertEquals(listOf("--version"), launches.single().first.arguments, "the agent's own --version, passed as is")
     }
 
     @Test
@@ -320,6 +339,42 @@ class OstromCliTest : CliKit() {
     }
 
     @Test
+    fun theRealWiringKeepsOneClientPerServerForTheWholeCommand() {
+        // PERF-CLI: `ostrom claude` looked its organisation up with a client of its own, then launched with another:
+        // two connections, so two TLS handshakes with a real server, for one command
+        val dependencies = CliDependencies.create()
+        val server = dependencies.api("https://ostrom.example")
+        server.close()
+        assertSame(server, dependencies.api("https://ostrom.example"), "one client, closed by nobody but the process")
+        assertSame(server, dependencies.api("https://ostrom.example/"), "the same server, written with its slash")
+        assertNotSame(server, dependencies.api("https://other.example"), "a client per server")
+        assertIs<KeptOpen>(server, "a caller's close() leaves it open for the next")
+    }
+
+    @Test
+    fun aClientKeptOpenForTheCommandSendsThroughItsServerAndIsClosedByNoCaller() = runTest {
+        var closed = 0
+        val sent = mutableListOf<String>()
+        val kept = KeptOpen(
+            object : OstromApi {
+                override suspend fun get(path: String) = ServerResponse(200, "{}", 0).also { sent += "GET $path" }
+
+                override suspend fun send(request: ServerRequest) =
+                    ServerResponse(201, "{}", 0).also { sent += "${request.method} ${request.path}" }
+
+                override fun close() {
+                    closed++
+                }
+            },
+        )
+        kept.close()
+        assertEquals(200, kept.get("/api/v1/health").status)
+        assertEquals(201, kept.send(ServerRequest("POST", "/api/v1/launches")).status)
+        assertEquals(listOf("GET /api/v1/health", "POST /api/v1/launches"), sent)
+        assertEquals(0, closed, "the process closes it, with the command")
+    }
+
+    @Test
     fun theRealWaitOfLoginIsTheCoroutinesDelay() = runTest {
         // a delay: virtual time in a test, so this returns at once
         CliDependencies.create().sleep(1_000)
@@ -357,6 +412,7 @@ class OstromCliTest : CliKit() {
             arrayOf<String>() to "home",
             arrayOf("--debug", "doctor", "--help") to "doctor",
             arrayOf("--help") to "help",
+            arrayOf("--version") to "version",
             arrayOf("https://secret.example") to "unknown",
             arrayOf("--bogus") to "unknown",
             arrayOf("config", "set", "colour", "x") to "config",

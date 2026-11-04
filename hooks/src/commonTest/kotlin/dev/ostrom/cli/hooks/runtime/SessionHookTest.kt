@@ -3,6 +3,9 @@ package dev.ostrom.cli.hooks.runtime
 
 import dev.ostrom.cli.hooks.HookReply
 import dev.ostrom.cli.hooks.gate.ToolSubject
+import dev.ostrom.cli.platform.LoopbackHttp
+import dev.ostrom.cli.platform.LoopbackRequest
+import dev.ostrom.cli.platform.LoopbackResponse
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlin.test.Test
@@ -21,7 +24,7 @@ class SessionHookTest {
     }
 
     private fun hook(
-        calls: FakeCalls,
+        calls: OstromCalls,
         context: HookContext = contextOf(),
         checks: WorkflowChecks = NoWorkflowChecks,
     ) =
@@ -78,6 +81,49 @@ class SessionHookTest {
     fun anUnreachableStartIsSaidAndTheAgentGoesOn() {
         val reply = hook(FakeCalls()).handle(event("""{"hook_event_name":"SessionStart","session_id":"a1"}"""))
         assertEquals(HookReply(stderr = "Ostrom unreachable (HTTP 404): session not recorded.\n"), reply)
+    }
+
+    /** The local relay answering every call with [status] and [body], as it relays Ostrom's answer. */
+    private class Relay(private val status: Int, private val body: String) : LoopbackHttp {
+        override fun exchange(port: Int, request: LoopbackRequest, timeoutMillis: Int) =
+            Result.success(LoopbackResponse(status, body))
+    }
+
+    private fun relayed(status: Int, body: String) = RelayCalls("http://127.0.0.1:1", "t", Relay(status, body))
+
+    @Test
+    fun aStartOstromRefusesIsSaidAsARefusalAndHandsTheAgentNothing() {
+        val reason = "This repository is not one of the organisation's."
+        val refusing = relayed(403, """{"error":{"type":"repo_not_allowed","message":"$reason"}}""")
+        val start = event("""{"hook_event_name":"SessionStart","session_id":"a1"}""")
+        val reply = hook(refusing).handle(start)
+        assertEquals(HookReply(stderr = "Ostrom refused ($reason): session not recorded.\n"), reply)
+        assertEquals(0, reply.exitCode, "a refused start never stops the agent")
+        // the prototype's form of Ostrom's error is said the same
+        val legacy = relayed(404, """{"error":"No such organization."}""")
+        val said = hook(legacy).handle(start).stderr
+        assertEquals("Ostrom refused (No such organization.): session not recorded.\n", said)
+        // Hermes: no context, and no mark, so the next model call asks again
+        val hermes = hook(refusing, contextOf("OSTROM_HOOK_DIALECT" to "hermes"))
+        val call = event("""{"hook_event_name":"PreLLMCall","session_id":"h3"}""")
+        assertEquals(HookReply(stderr = "Ostrom refused ($reason): session not recorded.\n"), hermes.handle(call))
+        assertTrue("/s/session.context-h3" !in files.texts)
+    }
+
+    @Test
+    fun anOutageAnErrorOrTheRelaysOwnRefusalIsStillSaidUnreachable() {
+        val start = event("""{"hook_event_name":"SessionStart","session_id":"a1"}""")
+        val down = relayed(502, """{"error":{"type":"unreachable","message":"connection refused"}}""")
+        val outage = hook(down).handle(start).stderr
+        assertEquals("Ostrom unreachable (connection refused): session not recorded.\n", outage)
+        val error = relayed(500, """{"error":{"type":"internal","message":"Internal error."}}""")
+        assertEquals("Ostrom unreachable (Internal error.): session not recorded.\n", hook(error).handle(start).stderr)
+        // a 4xx without a reason is not said as Ostrom's refusal
+        val blank = relayed(422, """{"error":{"type":"invalid","message":" "}}""")
+        assertEquals("Ostrom unreachable (HTTP 422): session not recorded.\n", hook(blank).handle(start).stderr)
+        // the relay's own refusal is plain text: Ostrom never saw the request
+        val relay = relayed(401, "Unauthorized.")
+        assertEquals("Ostrom unreachable (HTTP 401): session not recorded.\n", hook(relay).handle(start).stderr)
     }
 
     @Test

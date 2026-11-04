@@ -10,10 +10,18 @@
     2.9 ostrom mcp: a server of the organisation, called through the session's relay
     4.3 ostrom mcp --server ostrom: the agent asks a person, the console answers, the agent reads the answer
     6.2 ostrom claude --cloud and ostrom attach: a session in Ostrom's cloud, detached and attached again
+    6.6 ostrom import teamcode: a TeamCode team into Ostrom, read back by its API
 
     python3 e2e/journey.py --binary ostrom --server http://127.0.0.1:4600 --mail-dir /tmp/mail \\
         --seed "docker run --rm --network host --env-file server.env ghcr.io/ostrom-hq/ostrom-server:edge \\
                 seed-test-account"
+
+6.6 imports ostrom-helm's fake TeamCode team (compose/demo/teamcode, its MySQL at 127.0.0.1:3307) when given it;
+without, it is skipped, and ostrom-server's cli-journey.yml, which gives it, fails a run where 6.6 was not played and
+passed:
+
+    OSTROM_E2E_TEAMCODE_PASSWORD=demo-teamcode-ro python3 e2e/journey.py … \\
+        --teamcode-db mysql://teamcode_ro@127.0.0.1:3307/teamcode --teamcode-key-file demo/teamcode/key.txt
 
 Nothing is faked on the server side: people sign in by their e-mailed link (read from the server's OSTROM_MAIL_DIR),
 the owner is made by `ostrom-server seed-test-account` (its personal token stands for a token made on the console,
@@ -46,6 +54,7 @@ from launch import LaunchLatency
 from mcp_relay import McpRelay
 from mcp_waits import McpWaits
 from rules import Rules
+from teamcode import TeamCode
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GENERIC_404 = "Not found."
@@ -71,6 +80,7 @@ class Journey:
         self.held_writes = None
         self.last_held = False
         self.last_said = ""
+        self.last_out = ""
         self.owner_session = None
         self.recent = {}
         self.temporary = options.work is None
@@ -428,7 +438,7 @@ class Journey:
                               f"the console makes a token that reads the rules ({status}): {error_of(made)[:200]}"):
                 return
             done = self.governed({**maya, "token": secret}, "init", "--yes", console=True)
-            out = self.step["commands"][-1]["stdout"]
+            out = self.last_out
             # init accepts every rule still proposed: the run's org is new, but its own rule is the one checked below
             self.check(done == 0 and re.search(r"✓ \d+ rules accepted", out) is not None,
                        f"init with it accepts the proposed rule once the owner confirms ({done}): "
@@ -454,9 +464,9 @@ class Journey:
             self.check(device.returncode == 77 and "console" in device.stderr,
                        f"the device's token cannot invite: the console can ({device.returncode})")
             since = time.time()
-            done = self.ostrom(maya, "invite", tom_email, "--role", "member", console=True)
-            self.check(done.returncode == 0, f"a console token invites {who(tom_email)} ({done.returncode}): "
-                                             f"{done.stderr.strip()[:300]}")
+            self.held_member_write(maya, f"a console token invites {who(tom_email)}",
+                                   f"Invited {tom_email} to {org.get('name')} as member",
+                                   "invite", tom_email, "--role", "member")
             self.begin("2.7", "the invitation, accepted by the person invited")
             if self.needs(("POST", "/api/v1/invitations/accept"), on_main=True):
                 token = self.mail_token(tom_email, "/invite", since)
@@ -480,10 +490,8 @@ class Journey:
                 device = self.ostrom(maya, "members", "role", tom_login, "admin")
                 self.check(device.returncode == 77 and "console" in device.stderr,
                            f"the device's token cannot change a role: the console can ({device.returncode})")
-                done = self.ostrom(maya, "members", "role", tom_login, "admin", console=True)
-                self.check(done.returncode == 0 and f"@{tom_login} is now admin" in done.stdout,
-                           f"a console token makes @{tom_login} admin ({done.returncode}): "
-                           f"{done.stderr.strip()[:300]}")
+                self.held_member_write(maya, f"a console token makes @{tom_login} admin",
+                                       f"@{tom_login} is now admin", "members", "role", tom_login, "admin")
                 # as the server says it, not as the CLI printed it
                 self.check(self.role_of(maya, org, tom_login) == "admin",
                            f"the server lists @{tom_login} as admin ({self.role_of(maya, org, tom_login)})")
@@ -560,19 +568,34 @@ class Journey:
         self.guarded(McpRelay(self, maya, SESSION_ROUTES).run)
         self.guarded(McpWaits(self, maya, SESSION_ROUTES).run)
         self.guarded(Cloud(self, maya).run)
+        self.guarded(TeamCode(self, maya).run)
 
         if self.invitee:
             self.begin("2.6", "ostrom members remove")
             device = self.ostrom(maya, "members", "remove", self.invitee, "--yes")
             self.check(device.returncode == 77 and "console" in device.stderr,
                        f"the device's token cannot remove a member: the console can ({device.returncode})")
-            done = self.ostrom(maya, "members", "remove", self.invitee, "--yes", console=True)
-            self.check(done.returncode == 0, f"a console token removes @{self.invitee} ({done.returncode}): "
-                                             f"{done.stderr.strip()[:300]}")
+            self.held_member_write(maya, f"a console token removes @{self.invitee}",
+                                   f"@{self.invitee} was removed", "members", "remove", self.invitee, "--yes")
             self.check(self.role_of(maya, org, self.invitee) is None,
                        f"the server no longer lists @{self.invitee}")
             listed = (read_json(self.ostrom(maya, "members", "list", "--json").stdout) or {}).get("items", [])
             self.check(len(listed) == 1, f"members list shows the owner alone ({len(listed)})")
+
+    def held_member_write(self, maya, what, said, *arguments):
+        """
+        A write on the members with the console's token (OSTROM_TOKEN): the server holds it until the owner confirms
+        it on the console (202, audit F1, decision (a) of 03/11/2026), then the CLI says [said] on stdout. On a server
+        that holds the governance writes (H1), a members' write written at once is the failure F1 closes, said once.
+        """
+        done = self.governed(maya, *arguments, console=True, must_hold=False)
+        if self.holds() and not self.last_held:
+            self.check(False, f"{what}: held until the owner confirms it on the console (F1), not written at once "
+                              f"({done}): {(self.last_out + self.last_said).strip()[-300:]}")
+            return
+        way = "once confirmed on the console" if self.last_held else "on a server that holds no governance write"
+        self.check(done == 0 and said in self.last_out,
+                   f"{what}, {way} ({done}): {(self.last_out + self.last_said).strip()[-300:]}")
 
     def role_of(self, maya, org, login):
         """[login]'s role in [org], as `GET /orgs/{org}/members` lists it to the console's token; None if not listed."""
@@ -718,6 +741,7 @@ class Journey:
         self.record(maya, shown, process.returncode, out, "".join(said))
         self.last_held = held.is_set()
         self.last_said = "".join(said).strip()
+        self.last_out = out
         if must_hold and self.holds():
             # a server that holds the governance writes holds this one: the confirmation was played, not skipped
             self.check(held.is_set(), f"{shown} is held until the console confirms it (H1)")
@@ -1068,6 +1092,10 @@ def main():
     # 6.2: the server runs cloud sessions (a runtime driver, as the Docker of the CI's machine); skipped without
     parser.add_argument("--cloud-sessions", action="store_true", help="6.2: the server runs cloud sessions")
     parser.add_argument("--cloud-machine-image", help="6.2 on a registered runner: the machine's ostrom-runner image")
+    # 6.6: a TeamCode team to import (ostrom-helm compose/demo/teamcode); skipped without, even with --strict
+    parser.add_argument("--teamcode-db", help="6.6: mysql://user@host[:port]/database of a TeamCode team (its "
+                                              "password in OSTROM_E2E_TEAMCODE_PASSWORD)")
+    parser.add_argument("--teamcode-key-file", help="6.6: the file of its credential key")
     # 5.9: what a launch costs, end to end; at most 60 launches an hour and a person (the server's LaunchLimit.DEFAULT)
     parser.add_argument("--launch-runs", type=int, default=20,
                         help="5.9: successive launches of `ostrom claude` timed to the first gated tool (0: none; max 60)")
