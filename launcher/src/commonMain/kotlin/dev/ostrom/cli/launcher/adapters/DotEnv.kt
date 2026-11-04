@@ -11,7 +11,7 @@ internal object DotEnv {
     fun parse(text: String): Map<String, String> =
         LINE.findAll(text.replace(NEWLINE, "\n")).associate { line ->
             val raw = line.groupValues[2].trim()
-            val unquoted = QUOTED.matchEntire(raw)?.let { it.groupValues[2] } ?: raw
+            val unquoted = QUOTED.replace(raw, "\$2")
             val value = if (raw.startsWith('"')) unquoted.replace("\\n", "\n").replace("\\r", "\r") else unquoted
             line.groupValues[1] to value
         }
