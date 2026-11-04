@@ -26,8 +26,10 @@ import dev.ostrom.cli.platform.interop.ostrom_is_terminal
 import dev.ostrom.cli.platform.interop.ostrom_raw_enter
 import dev.ostrom.cli.platform.interop.ostrom_raw_restore
 import dev.ostrom.cli.platform.interop.ostrom_read_stdin
+import dev.ostrom.cli.platform.interop.ostrom_real_path_w
 import dev.ostrom.cli.platform.interop.ostrom_spawn_detached_w
 import dev.ostrom.cli.platform.interop.ostrom_spawn_wait_w
+import dev.ostrom.cli.platform.interop.ostrom_symlink_w
 import dev.ostrom.cli.platform.interop.ostrom_tcp_exchange
 import dev.ostrom.cli.platform.interop.ostrom_terminal_read
 import dev.ostrom.cli.platform.interop.ostrom_terminal_size
@@ -153,3 +155,20 @@ internal actual fun terminalRead(buffer: ByteArray, timeoutMillis: Int): Int =
 
 /** Windows has no signal to catch here (a crash is a structured exception): nothing is set. */
 actual fun exitOnCrash(code: Int, stdout: String, stderr: String): Boolean = false
+
+/** [path] with its links followed, or null when it does not resolve. */
+actual fun realPath(path: String): String? = memScoped {
+    val buffer = allocArray<WCHARVar>(REAL_PATH_CAPACITY)
+    val length = ostrom_real_path_w(path.wcstr, buffer, REAL_PATH_CAPACITY)
+    if (length <= 0) return null
+    // the final path is written in the long form, `\\?\C:\…` or `\\?\UNC\server\share\…`
+    val final = buffer.toKStringFromUtf16()
+    if (final.startsWith(UNC)) "\\\\" + final.removePrefix(UNC) else final.removePrefix(LONG)
+}
+
+/** Makes [link] a symbolic link to [target]; false when it cannot. */
+actual fun symbolicLink(target: String, link: String): Boolean = ostrom_symlink_w(target.wcstr, link.wcstr) == 1
+
+private const val REAL_PATH_CAPACITY = 32_768
+private const val LONG = "\\\\?\\"
+private const val UNC = "\\\\?\\UNC\\"

@@ -2,17 +2,12 @@
 package dev.ostrom.cli.launcher
 
 import dev.ostrom.cli.launcher.adapters.AdapterException
-import dev.ostrom.cli.launcher.adapters.AgentLaunch
 import dev.ostrom.cli.launcher.adapters.AgentAdapter
-import dev.ostrom.cli.launcher.adapters.ClaudeAdapter
-import dev.ostrom.cli.launcher.adapters.CodexAdapter
+import dev.ostrom.cli.launcher.adapters.AgentLaunch
 import dev.ostrom.cli.platform.CaptureResult
 import dev.ostrom.cli.platform.ExecutableFinder
-import dev.ostrom.cli.platform.ProcessCapture
-import dev.ostrom.cli.platform.ProcessLauncher
 import dev.ostrom.cli.platform.ProcessResult
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -23,73 +18,7 @@ import kotlin.test.assertTrue
 
 /** `ostrom <agent>` end to end against fakes: what reaches the server, the agent and the developer. */
 @OptIn(ExperimentalCoroutinesApi::class)
-class AgentLaunchUseCaseTest {
-    private val server = FakeServer()
-    private val files = MemoryFiles()
-    private val said = mutableListOf<String>()
-
-    /** What is said about the repository's name, kept apart so the other tests read the rest as before. */
-    private val warned = mutableListOf<String>()
-    private val variables = mutableMapOf("PATH" to "/usr/bin")
-    private var gitAnswer: CaptureResult = CaptureResult.Exited(0, "/work/acme-api\n")
-    private var originAnswer: CaptureResult = CaptureResult.Exited(2, "error: No such remote 'origin'\n")
-    private var installed = mutableMapOf("claude" to "/usr/bin/claude", "codex" to "/usr/bin/codex")
-    private var agentResult: ProcessResult = ProcessResult.Exited(3)
-    private val commands = mutableListOf<List<String>>()
-    private val environments = mutableListOf<Map<String, String?>>()
-    private val filesWhileRunning = mutableMapOf<String, String>()
-    private val relaySettings = mutableListOf<RelaySettings>()
-    private var relayClosed = false
-
-    /** At each memory reclaim: the requests made so far, whether the relay had started, whether the agent had. */
-    private val reclaims = mutableListOf<Triple<List<String>, Boolean, Boolean>>()
-    private var adapters: List<AgentAdapter> = listOf(ClaudeAdapter(), CodexAdapter())
-
-    /** The test's clock, and when the agent was started on it. */
-    private var now: () -> Long = { 0L }
-    private var agentStartedAt: Long? = null
-
-    private val processes = object : ProcessLauncher {
-        override fun run(command: List<String>, environment: Map<String, String?>): ProcessResult {
-            commands += command
-            environments += environment
-            agentStartedAt = agentStartedAt ?: now()
-            // The agent's session hook records its session, as the real one does.
-            environment[LaunchVariables.SESSION_FILE]?.let { files.texts[it] = "s1" }
-            // the session's folder is removed once the agent ends: what it saw is kept here
-            filesWhileRunning += files.texts
-            return agentResult
-        }
-    }
-
-    private val capture = object : ProcessCapture {
-        override fun capture(command: List<String>, timeoutMillis: Int) =
-            if ("get-url" in command) originAnswer else gitAnswer
-
-        override fun detach(command: List<String>) = false
-    }
-
-    private val relays = SessionRelayStarter { settings ->
-        relaySettings += settings
-        object : SessionRelay {
-            override val url = "http://127.0.0.1:4100"
-            override val token = "relay-token"
-            override val clientToken = "client-token"
-
-            override fun close() {
-                relayClosed = true
-            }
-        }
-    }
-
-    private val clock = object : LaunchClock {
-        override fun now() = "2026-10-30T03:00:00Z"
-
-        override fun millis() = 42L
-    }
-
-    private val temporary = join("/tmp", "ostrom-run-42")
-
+class AgentLaunchUseCaseTest : AgentLaunchKit() {
     @Test
     fun theAgentRunsWithTheRelayAndNeverWithTheDeviceToken() = runTest {
         serveALaunch()
@@ -679,62 +608,5 @@ class AgentLaunchUseCaseTest {
         val blocking = UnconfinedTestDispatcher()
         LaunchDependencies(ServerJson(server), files, finder, processes, capture, relays, clock, {}, blocking, "t")
             .reclaim()
-    }
-
-    @Suppress("LongParameterList") // one default per fact of a launch a test changes
-    private suspend fun TestScope.start(
-        agent: Agent = Agent.CLAUDE,
-        arguments: List<String> = emptyList(),
-        repo: String? = null,
-        model: String? = null,
-        executable: String = join("/opt/bin", "ostrom"),
-        dryRun: Boolean = false,
-    ): Int {
-        val dependencies = LaunchDependencies(
-            server = ServerJson(server),
-            files = files,
-            finder = object : ExecutableFinder {
-                override fun find(name: String) = installed[name]
-            },
-            processes = processes,
-            capture = capture,
-            relays = relays,
-            clock = clock,
-            say = { if (it.startsWith(NO_ORIGIN)) warned += it else said += it },
-            blocking = UnconfinedTestDispatcher(testScheduler),
-            userAgent = "ostrom/test",
-            reclaim = {
-                reclaims += Triple(server.requests.map { it.path }, relaySettings.isNotEmpty(), commands.isNotEmpty())
-            },
-        )
-        val site = LaunchSite(
-            serverUrl = "https://ostrom.example",
-            credentials = Credentials("dev-token", "alice"),
-            cwd = "/work/acme-api/src",
-            executable = executable,
-            configDirectory = "/config",
-            temporaryDirectory = "/tmp",
-            home = "/home/dev",
-            pathSeparator = ':',
-            variable = { variables[it] },
-        )
-        val request = LaunchRequest(agent, arguments, repo, model, dryRun)
-        return AgentLaunchUseCase(dependencies, adapters).launch(request, site)
-    }
-
-    /** The routes of a launch that goes well, without a package. */
-    private fun serveALaunch() {
-        server["GET ${Routes.POLICY}?agent=claude-code&dev=alice"] = 200 to """{"allowed":true}"""
-        server["POST ${Routes.LAUNCHES}"] = 201 to """{"launchId":"L1","agentToken":"agent-token"}"""
-        server["GET ${Routes.MCP_MINE}"] = 200 to """{"items":[]}"""
-        server["GET ${Routes.INFERENCE_MODELS}"] = 200 to """{"data":[]}"""
-        server["POST /api/v1/sessions/s1/end"] = 200 to """{"session":{"receiptId":"R1"},"verification":{"ok":true}}"""
-        server["GET ${Routes.INSTANCE_KEYS}"] = 200 to KEYS
-    }
-
-    private companion object {
-        const val NO_ORIGIN = "ostrom: no origin with an owner/name here"
-        const val ROUND_TRIP = 100L
-        const val KEYS = """{"keys":[{"keyId":"k1","algorithm":"ed25519","publicKeyPem":"pem"}]}"""
     }
 }

@@ -47,6 +47,8 @@ class HookContextTest {
         assertNull(bare.model)
         assertNull(bare.relayTokenFile, "outside a session, no relay")
         assertNull(bare.runnerChecks, "on a workstation the hook runs the checks")
+        // the launcher sets it empty on a workstation
+        assertNull(HookContext.read { name -> mapOf("OSTROM_RUNNER_CHECKS" to "")[name] }.runnerChecks)
         val nobody = HookContext.read { name -> mapOf("OSTROM_LAUNCH_TOP" to "/w/app")[name] }
         assertEquals("app", nobody.repository)
         assertEquals("unknown", nobody.developer)

@@ -61,6 +61,13 @@ object LaunchVariables {
     /** The model asked at launch. */
     const val MODEL = "OSTROM_MODEL"
 
+    /**
+     * The Unix socket of a cloud session's runner, which runs the package checks. Always set by the launcher, empty on
+     * a workstation, so that a repository's `.env` (which Gemini CLI loads without replacing a variable already set)
+     * cannot point the hooks at a runner of its own.
+     */
+    const val RUNNER_CHECKS = "OSTROM_RUNNER_CHECKS"
+
     /** The hook protocol of the agent family (`claude`, `grok`, `gemini`, `hermes`). */
     const val HOOK_DIALECT = "OSTROM_HOOK_DIALECT"
 
@@ -79,6 +86,53 @@ object LaunchVariables {
     /** Never passed on: the server URL; the hooks reach Ostrom through the relay only. */
     const val SERVER = "OSTROM_URL"
 
+    /** The CLI's own folder, as the launcher resolved it, for the hooks to read the same. */
+    const val HOME = "OSTROM_HOME"
+
     /** Never passed on: the developer's own device token, when set in their shell. */
     const val DEVICE_TOKEN = "OSTROM_TOKEN"
+
+    /**
+     * Every `OSTROM_` variable the CLI reads, its hooks and `ostrom mcp` included: an agent that loads a repository's
+     * `.env` without replacing a variable already set (Gemini CLI) gets them all, empty when Ostrom has no value.
+     */
+    val ALL: List<String> = listOf(
+        RELAY_URL,
+        RELAY_TOKEN,
+        RELAY_CLIENT,
+        RELAY_TOKEN_FILE,
+        INSTANCE_KEYS,
+        PACKAGE,
+        PACKAGE_SEAL,
+        PACKAGE_MANIFEST,
+        REPO,
+        DEV,
+        AGENT,
+        GIT,
+        GATES,
+        SESSION_FILE,
+        SESSION_SETTINGS,
+        HARNESS_VERSION,
+        LAUNCH_TOP,
+        LAUNCH_ID,
+        MODEL,
+        RUNNER_CHECKS,
+        HOOK_DIALECT,
+        HOOK_BUDGET_MS,
+        SERVER,
+        DEVICE_TOKEN,
+        HOME,
+        // read by the CLI itself, its hooks or the agents' plugins
+        "OSTROM_HOOK_TIMING",
+        "OSTROM_TELEMETRY",
+        "OSTROM_ORG",
+        "OSTROM_CONSOLE_URL",
+        "OSTROM_GITHUB_WEB_URL",
+        "OSTROM_RELEASES_URL",
+        "OSTROM_PLUGIN_ROOT",
+        "OSTROM_BIN",
+        "OSTROM_KEEP_PLUGIN",
+        "OSTROM_INFERENCE",
+        "OSTROM_ALIVE_MS",
+    )
 }

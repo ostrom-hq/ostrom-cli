@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.ostrom.cli.launcher
 
+import dev.ostrom.cli.platform.realPath
 import dev.ostrom.cli.platform.restrictToOwner
 import okio.FileSystem
 import okio.IOException
@@ -49,15 +50,31 @@ interface LaunchFiles {
 
     /** Deletes [path] and everything under it. */
     fun deleteRecursively(path: String)
+
+    /**
+     * [path] as Gemini CLI reads a folder before matching it with the trusted folders (Node's `realpathSync`): its `.`
+     * and `..` taken from the path as written, then its links followed, or as written, normalized, when it does not
+     * resolve. So `a/lien/..` is `a`, even where `a/lien` leads elsewhere.
+     */
+    fun canonical(path: String): String
 }
 
 /**
  * [LaunchFiles] over okio.
  *
+ * @param resolve A path with its links followed, or null when it does not resolve: the system's own for its files.
  * @param restrict Sets the owner-only mode of a path (`executable`: 0700, else 0600); the platform's by default.
  */
 class LaunchFilesImpl(
     private val fileSystem: FileSystem = FileSystem.SYSTEM,
+    // the system's own realpath for its files: okio's canonicalize does not follow links on Windows
+    private val resolve: (String) -> String? = if (fileSystem === FileSystem.SYSTEM) ::realPath else { path ->
+        try {
+            fileSystem.canonicalize(path.toPath()).toString()
+        } catch (_: IOException) {
+            null
+        }
+    },
     private val restrict: (String, Boolean) -> Unit = ::restrictToOwner,
 ) : LaunchFiles {
     override fun read(path: String): String? = try {
@@ -108,4 +125,9 @@ class LaunchFilesImpl(
     }
 
     override fun deleteRecursively(path: String) = fileSystem.deleteRecursively(path.toPath(), mustExist = false)
+
+    override fun canonical(path: String): String {
+        val written = path.toPath(normalize = true).toString()
+        return resolve(written) ?: written
+    }
 }

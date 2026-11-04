@@ -72,7 +72,7 @@ data class HookContext(
                 packageSeal = variable("OSTROM_PACKAGE_SEAL"),
                 packageManifest = variable("OSTROM_PACKAGE_MANIFEST"),
                 relayTokenFile = variable("OSTROM_RELAY_TOKEN_FILE"),
-                runnerChecks = variable("OSTROM_RUNNER_CHECKS"),
+                runnerChecks = variable("OSTROM_RUNNER_CHECKS")?.ifEmpty { null },
             )
         }
     }

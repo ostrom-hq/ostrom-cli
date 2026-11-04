@@ -6,6 +6,7 @@ import dev.ostrom.cli.launcher.adapters.AgentAdapter
 import dev.ostrom.cli.launcher.adapters.AgentLaunch
 import dev.ostrom.cli.launcher.adapters.RelayView
 import dev.ostrom.cli.launcher.adapters.SessionLayout
+import dev.ostrom.cli.launcher.adapters.versionRefusal
 import dev.ostrom.cli.platform.CaptureResult
 import dev.ostrom.cli.platform.ExecutableFinder
 import dev.ostrom.cli.platform.ProcessCapture
@@ -20,7 +21,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import okio.IOException
-import okio.Path.Companion.toPath
 
 /**
  * What the developer asked: `ostrom <agent> [--repo R] [--model M] [agent arguments…]`.
@@ -47,6 +47,7 @@ data class LaunchRequest(
  * @property org The **id** of the organisation the launch acts in, sent as `Ostrom-Org` (never a short name: the CLI
  * looks up the one `--org`, `OSTROM_ORG` or `ostrom init` names), or null: the server then takes the person's only
  * organisation, and asks to choose (409 `org_required`) when there are several.
+ * @property foldsCase Whether this machine's paths ignore case (macOS, Windows).
  */
 data class LaunchSite(
     val serverUrl: String,
@@ -59,6 +60,7 @@ data class LaunchSite(
     val pathSeparator: Char,
     val variable: (String) -> String?,
     val org: String? = null,
+    val foldsCase: Boolean = false,
 )
 
 /** The clock of a launch. */
@@ -118,6 +120,9 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         val agent = request.agent
         val adapter = adapters[agent] ?: stop(NO_ADAPTER, "${agent.displayName} has no adapter in this version.")
         val executable = dependencies.finder.find(agent.executable) ?: stop(AGENT_MISSING, missing(agent))
+        // an agent too old to keep Ostrom's hooks on is refused before any launch is asked of Ostrom
+        val tooOld = adapter.minimum?.let { versionRefusal(agent, executable, it, dependencies.capture) }
+        if (tooOld != null) stop(NO_ADAPTER, tooOld)
         val top = gitTop(site.cwd)
         val repo = request.repo ?: site.variable(LaunchVariables.REPO)?.takeIf { it.isNotEmpty() }
             ?: launchRepository(top, dependencies.capture, dependencies.say)
@@ -200,9 +205,10 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         return dependencies.relays.start(settings).use { relay ->
             // S2-25: the hooks' capability goes to a private file, the agent's environment only gets its own
             files.write(run.relayTokenFile, relay.token, FileAccess.PRIVATE)
-            val prepared = prepare(run, RelayView(relay.url, relay.clientToken, mcp, inference))
+            val launcherEnvironment = environmentOf(run, relay, laid)
+            val prepared = prepare(run, RelayView(relay.url, relay.clientToken, mcp, inference), launcherEnvironment)
             prepared.notes.forEach { dependencies.say("ostrom: $it") }
-            val environment = environmentOf(run, relay, laid) + prepared.environment
+            val environment = launcherEnvironment + prepared.environment
             val settingsFile = join(run.temporary, SessionLayout.SESSION_SETTINGS)
             files.write(settingsFile, sessionSettings(environment).toString(), FileAccess.PRIVATE)
             val lifeline = SessionLifeline(
@@ -220,7 +226,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         }
     }
 
-    private fun prepare(run: Run, relay: RelayView): AgentLaunch {
+    private fun prepare(run: Run, relay: RelayView, environment: Map<String, String?>): AgentLaunch {
         val block = dependencies.files.read(join(run.plugin, "ostrom", "AGENTS-block.md")).orEmpty()
         val rules = if (run.pack == null) block else "$block\n${run.pack.context}\n"
         val model = run.request.model?.let { listOf("--model", it) }.orEmpty()
@@ -235,6 +241,10 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
             home = run.site.home,
             variable = run.site.variable,
             relay = relay,
+            workspace = listOf(run.site.cwd, run.top).distinct(),
+            environment = environment,
+            pathSeparator = run.site.pathSeparator,
+            foldsCase = run.site.foldsCase,
         )
         return try {
             run.adapter.prepare(layout, dependencies.files)
@@ -245,12 +255,6 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
 
     private fun environmentOf(run: Run, relay: SessionRelay, laid: LaidPackage?): Map<String, String?> {
         val site = run.site
-        // Only an absolute path names a folder: a bare name would put the working folder on the agent's PATH.
-        val binary = site.executable.toPath()
-        val folder = if (binary.isAbsolute) binary.parent else null
-        // an empty entry would put the working folder on the agent's PATH: none is added
-        val inherited = site.variable("PATH")?.takeIf { it.isNotEmpty() }
-        val path = listOfNotNull(folder?.toString(), inherited).joinToString(site.pathSeparator.toString())
         return mapOf(
             LaunchVariables.RELAY_URL to relay.url,
             LaunchVariables.RELAY_TOKEN to relay.clientToken,
@@ -273,8 +277,11 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
             LaunchVariables.PACKAGE_SEAL to laid?.seal,
             LaunchVariables.PACKAGE_MANIFEST to laid?.manifest,
             LaunchVariables.MODEL to run.model,
+            LaunchVariables.RUNNER_CHECKS to site.variable(LaunchVariables.RUNNER_CHECKS).orEmpty(),
             // `ostrom wait` must be callable by the agent's shell: this binary's folder goes first on its PATH.
-            "PATH" to path.ifEmpty { null },
+            "PATH" to AgentPath.of(site, run.top, dependencies.files),
+            // the hooks' own folder, as resolved here: neither a repository's .env nor XDG_CONFIG_HOME chooses it
+            LaunchVariables.HOME to site.configDirectory,
             // Never in the agent's environment: the device token, and the server the hooks must not call directly.
             LaunchVariables.DEVICE_TOKEN to null,
             LaunchVariables.SERVER to null,

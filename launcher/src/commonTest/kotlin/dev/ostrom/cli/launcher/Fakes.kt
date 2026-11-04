@@ -82,6 +82,41 @@ class MemoryFiles : LaunchFiles {
     }
 
     /**
+     * [path] as Node's realpathSync reads it: `.` and `..` from the path as written, then each name in turn, a link
+     * replaced by where it leads. Only POSIX paths are followed; others are kept.
+     */
+    override fun canonical(path: String): String {
+        if (!path.startsWith("/")) return path
+        val written = names(path).fold(listOf<String>()) { kept, name ->
+            when (name) {
+                "." -> kept
+                ".." -> kept.dropLast(1)
+                else -> kept + name
+            }
+        }
+        val pending = ArrayDeque(written)
+        var resolved = ""
+        var hops = 0
+        while (pending.isNotEmpty()) {
+            val name = pending.removeFirst()
+            val next = "$resolved/$name"
+            val target = links[next]
+            when {
+                name == "." -> Unit
+                name == ".." -> resolved = resolved.substringBeforeLast('/', "")
+                target != null && hops++ <= links.size -> {
+                    resolved = ""
+                    names(target).asReversed().forEach(pending::addFirst)
+                }
+                else -> resolved = next
+            }
+        }
+        return resolved.ifEmpty { "/" }
+    }
+
+    private fun names(path: String) = path.split('/').filter { it.isNotEmpty() }
+
+    /**
      * What follows [path] in [entry], or null when [entry] is not under it. Okio keeps the separator a path was written
      * with (on Windows, `"/tmp".toPath() / "a"` is `/tmp/a`), and Windows takes both: so does this double there. On
      * POSIX a `\` is part of a name, as for the real file system.

@@ -235,3 +235,18 @@ internal actual fun terminalRead(buffer: ByteArray, timeoutMillis: Int): Int = -
 // coverage: test-only JVM target; the shipped native actual is tested in posixTest.
 @ExcludeFromCoverage
 actual fun exitOnCrash(code: Int, stdout: String, stderr: String): Boolean = false
+
+/** [path] with its links followed, or null when it does not resolve. */
+actual fun realPath(path: String): String? = try {
+    Paths.get(path).toRealPath().toString()
+} catch (_: IOException) {
+    null
+}
+
+/** Makes [link] a symbolic link to [target]; false when it cannot. */
+actual fun symbolicLink(target: String, link: String): Boolean = try {
+    Files.createSymbolicLink(Paths.get(link), Paths.get(target))
+    true
+} catch (_: IOException) {
+    false
+}
