@@ -9,6 +9,8 @@ import kotlinx.serialization.json.JsonObject
  *
  * 1. signature: the SHA-256 of the canonical form matches the signed digest, and the Ed25519 signature is valid for a
  *    key this machine trusts (pinned at first use, or given by `--key`; never a key carried by the file);
+ *    organisation: the `orgId` it was signed for (server#327) is the one expected; a receipt without one is not bound
+ *    to an organisation and never valid for one;
  * 2. package (workflow receipt): the envelope it cites has that digest over its exact bytes, is signed by a trusted
  *    key, carries that version and every node the receipt reports on;
  * 3. subject (workflow receipt): `<session>@<version>`, its digest recomputed from the session, the package digest and
@@ -20,9 +22,10 @@ interface VerifyReceiptUseCase {
     /**
      * @param input The receipt and what its file carries.
      * @param keys The keys this machine trusts.
+     * @param expected The organisation it must have been signed for.
      * @return The report; its code is the exit code of `ostrom verify` (0, 1 or 2).
      */
-    operator fun invoke(input: ReceiptInput, keys: List<TrustedKey>): Report
+    operator fun invoke(input: ReceiptInput, keys: List<TrustedKey>, expected: ExpectedOrg = ExpectedOrg.None): Report
 }
 
 /**
@@ -30,9 +33,10 @@ interface VerifyReceiptUseCase {
  * receipts its nodes cite.
  */
 class VerifyReceiptUseCaseImpl(private val kept: KeptCopies) : VerifyReceiptUseCase {
-    override fun invoke(input: ReceiptInput, keys: List<TrustedKey>): Report {
+    override fun invoke(input: ReceiptInput, keys: List<TrustedKey>, expected: ExpectedOrg): Report {
         val verification = Verification(input, keys, kept, Report(titleOf(input)))
         verification.signatureLine("signature", "this receipt", input.receipt)
+        verification.checkOrg(expected)
         verification.checkPackage()
         verification.checkDecisions()
         verification.checkNodes()
@@ -88,6 +92,31 @@ internal class Verification(
         return check is SignatureCheck.Valid
     }
 
+    /**
+     * Writes the `org` line: the organisation the receipt was signed for against [expected], never naming it; a
+     * receipt without one proves no organisation, whatever is expected.
+     */
+    fun checkOrg(expected: ExpectedOrg) {
+        val signedFor = receipt.field("orgId").str()?.takeIf { it.isNotEmpty() }
+        report.orgBound = signedFor != null
+        val (mark, text) = when {
+            signedFor == null -> Mark.MISSING to UNBOUND
+            else -> when (expected) {
+                ExpectedOrg.None -> Mark.MISSING to NONE_NAMED
+                is ExpectedOrg.Unknown -> Mark.MISSING to unknownOrg(expected.named)
+                is ExpectedOrg.Known -> if (signedFor.equals(expected.id, ignoreCase = true)) {
+                    Mark.OK to "signed for the organisation named here (${expected.named})"
+                } else {
+                    Mark.BAD to "signed for another organisation than the one named here"
+                }
+            }
+        }
+        report.add(mark, "org", text)
+    }
+
+    private fun unknownOrg(named: String) = "bound to an organisation, but \"$named\" is not known on this device " +
+        "offline: run ostrom init, or pass --org <organisation id>"
+
     private fun unknownKey(label: String, kid: String): String {
         if (report.hinted) return "$label: signed by key $kid, not pinned here"
         report.hinted = true
@@ -98,5 +127,9 @@ internal class Verification(
     private companion object {
         const val CARRIED = " (the file carries it, but a key from the file being checked is not trusted)"
         const val PIN_HINT = "Pass --key FILE (GET /api/v1/receipts/keys of your Ostrom) or log in once to pin it"
+        const val UNBOUND = "not bound to an organisation (orgBound false): signed before receipts carried theirs, " +
+            "it does not prove which organisation it belongs to"
+        const val NONE_NAMED = "bound to an organisation, none named here to check it against: pass --org " +
+            "<organisation id>, or run ostrom init"
     }
 }

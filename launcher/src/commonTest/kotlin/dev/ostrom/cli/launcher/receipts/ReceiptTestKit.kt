@@ -10,6 +10,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /** The prototype's test key, trusted. */
@@ -72,15 +73,26 @@ internal class KeptInMemory(
     override fun envelope(digest: String) = envelopes[digest]
 }
 
-/** Verifies [document] with [keys] and [kept]. */
+/** Verifies [document] with [keys] and [kept], for the organisation [expected]. */
 internal fun verify(
     document: JsonElement,
     keys: List<TrustedKey> = listOf(testKey),
     kept: KeptCopies = NothingKept,
+    expected: ExpectedOrg = ExpectedOrg.None,
 ): Report {
     val reading = readReceiptInput(document)
     check(reading is InputReading.Read) { "not readable: $reading" }
-    return VerifyReceiptUseCaseImpl(kept)(reading.input, keys)
+    return VerifyReceiptUseCaseImpl(kept)(reading.input, keys, expected)
+}
+
+/**
+ * Asserts that everything holds in [report] but the organisation: its receipt was signed before receipts carried
+ * theirs (server#327), so it is never verified (2), whatever else holds.
+ */
+internal fun assertHoldsUnbound(report: Report) {
+    assertEquals(2, report.code, report.render())
+    assertTrue(report.lines.all { it.mark == Mark.OK || it.what == "org" }, report.render())
+    assertHas(report, Mark.MISSING, "org", "not bound to an organisation (orgBound false)")
 }
 
 /** Asserts that [report] has a [mark] line about [what] containing [needle], showing the report otherwise. */
