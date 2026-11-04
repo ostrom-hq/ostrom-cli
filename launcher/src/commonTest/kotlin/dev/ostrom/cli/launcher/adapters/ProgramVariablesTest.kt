@@ -38,4 +38,15 @@ class ProgramVariablesTest {
         }
         assertTrue(ProgramVariables.KEPT.filter { it != "GIT_DIR" }.none { it in gemini || it in claude })
     }
+
+    @Test
+    fun oneTheLauncherSetsIsTheLaunchersEvenWhenItIsNotUnsetWhenEmpty() {
+        val pinned = ProgramVariables.pinned(listOf("PAGER"), mapOf("SHELL" to "/bin/sh", "EDITOR" to null)) { "dev" }
+        assertEquals(mapOf("PAGER" to "dev", "SHELL" to "/bin/sh", "EDITOR" to "") + KEPT_BY_THE_DEVELOPER, pinned)
+    }
+
+    private companion object {
+        val KEPT_BY_THE_DEVELOPER =
+            ProgramVariables.KEPT.filter { it !in setOf("SHELL", "EDITOR") }.associateWith { "dev" }
+    }
 }

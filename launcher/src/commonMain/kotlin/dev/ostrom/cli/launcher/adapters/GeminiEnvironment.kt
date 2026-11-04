@@ -99,10 +99,9 @@ internal object GeminiEnvironment {
         val folders = generateSequence(layout.workspace.firstOrNull()) { folder ->
             parent(folder).takeIf { folder != top && it.isNotEmpty() }
         }
-        val path = folders.flatMap { sequenceOf(join(it, ".gemini", ".env"), join(it, ".env")) }
-            .firstOrNull { files.read(it) != null } ?: return
-        val named = DotEnv.parse(files.read(path).orEmpty()).keys
-            .firstOrNull { it in ProgramVariables.KEPT && it !in pinned } ?: return
+        val (path, text) = folders.flatMap { sequenceOf(join(it, ".gemini", ".env"), join(it, ".env")) }
+            .firstNotNullOfOrNull { path -> files.read(path)?.let { path to it } } ?: return
+        val named = DotEnv.parse(text).keys.firstOrNull { it in ProgramVariables.KEPT && it !in pinned } ?: return
         refuse(
             "$path sets $named, which changes the programs Gemini and Ostrom's hooks start, and Ostrom cannot set it " +
                 "for this session without breaking them, so Gemini is not started. Remove it from that file, or set " +
