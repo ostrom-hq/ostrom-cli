@@ -57,9 +57,12 @@ internal const val SIGNED_GATE_CATALOG = "/api/v1/gates/catalog/signed"
  * run the package's checks: like every route here, [opens] lets it through with the hooks' capability, never with the
  * agent's own. That keeps the agent's environment from reporting a run, not a determined agent: the hooks' capability
  * file is readable by the agent's own user (S2-20), so a report is the developer machine's word, never a proof.
- * Reading check runs (`GET /api/v1/checks`) is the console's, not a hook's: not on this list.
+ * Reading check runs (`GET /api/v1/checks`) is the console's, not a hook's: not on this list. A refusal the hook made
+ * on the workstation (`POST /api/v1/gates/local-denials`, `reportLocalGateDenial`, audit A6) is the hooks' too: it
+ * only writes a line in the organisation's audit log, never lets anything through.
  */
-private val HOOK_POST = Regex("/api/v1/(sessions|gates|notifications|checks)|/api/v1/sessions/$SESSION/(reopen|seen)")
+private val HOOK_POST =
+    Regex("/api/v1/(sessions|gates|gates/local-denials|notifications|checks)|/api/v1/sessions/$SESSION/(reopen|seen)")
 private val HOOK_GET = Regex("/api/v1/gates/$ID")
 
 /** An MCP server name, as the server accepts it. */

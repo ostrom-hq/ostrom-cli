@@ -35,6 +35,18 @@ class SessionWrites(private val calls: OstromCalls, private val ids: SessionIds,
     }
 
     /**
+     * Sends a report once and drops its answer: whatever Ostrom says, or not at all within [timeoutMillis], changes
+     * nothing for the hook. A closed session is not reopened for it.
+     *
+     * @param path The route.
+     * @param body Its body.
+     * @param timeoutMillis The call's limit.
+     */
+    fun report(path: String, body: JsonObject, timeoutMillis: Int) {
+        calls.call(path, body, timeoutMillis)
+    }
+
+    /**
      * Asks Ostrom for a new segment of the launch whose session [closed] was closed (idempotent).
      *
      * @return The new segment's id and the agent's session id, or null when Ostrom did not open one.

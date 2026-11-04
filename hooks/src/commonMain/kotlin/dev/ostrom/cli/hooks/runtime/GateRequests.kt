@@ -47,9 +47,12 @@ class GateRequests(
     private val pushes: PushReader,
     private val git: GitRunner,
 ) {
+    private val refusals = LocalRefusals(context, writes, ids, replies)
+
     /**
-     * Refuses a push Ostrom cannot read or that redirects git while the gate is enforced, else asks the gate. A gate
-     * only proposed (shadow) never stops the agent: it is asked, and what Ostrom logs is all it does.
+     * Refuses a push Ostrom cannot read or that redirects git while the gate is enforced, then tells Ostrom of the
+     * refusal for the organisation's audit log (audit A6); else asks the gate. A gate only proposed (shadow) never
+     * stops the agent: it is asked, and what Ostrom logs is all it does.
      */
     fun ask(ask: GateAsk): HookReply {
         val subject = ask.subject
@@ -63,12 +66,15 @@ class GateRequests(
         }
         return when {
             redirected != null && ask.gate.enforce ->
-                replies.deny(GateTexts.redirected(ask.action.name, ask.gate, redirected))
+                refused(ask, LocalRefusals.REDIRECTED, GateTexts.redirected(ask.action.name, ask.gate, redirected))
             read.problem != null && ask.gate.enforce ->
-                replies.deny(GateTexts.unreadable(ask.action.name, ask.gate, read.problem))
+                refused(ask, LocalRefusals.UNREADABLE, GateTexts.unreadable(ask.action.name, ask.gate, read.problem))
             else -> request(ask, directory, read.push)
         }
     }
+
+    private fun refused(ask: GateAsk, reason: String, text: String): HookReply =
+        refusals.deny(ask.event, ask.action.actionClass, reason, ask.subject.text, text)
 
     private fun request(ask: GateAsk, directory: String, push: Push?): HookReply {
         val subject = ask.subject

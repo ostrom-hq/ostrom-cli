@@ -43,6 +43,7 @@ class GateHook(
     private val pushes = PushReader(git, context.home)
     private val patterns = PatternCache()
     private val requests = GateRequests(context, writes, ids, replies, location, pushes, git)
+    private val refusals = LocalRefusals(context, writes, ids, replies)
 
     /** Answers one event (normalised to the Claude Code shape). */
     fun handle(event: JsonObject): HookReply {
@@ -65,7 +66,8 @@ class GateHook(
     private fun beforeTool(event: JsonObject, written: ToolSubject, cwd: String): HookReply =
         when (val read = catalogues.current()) {
             // no policy to trust: every action is held, not only a few classes of commands (S2-20, S2-38)
-            is CatalogueRead.Held -> replies.deny(GateTexts.held(read.reason))
+            is CatalogueRead.Held ->
+                refusals.deny(event, null, LocalRefusals.POLICY_HELD, written.text, GateTexts.held(read.reason))
             is CatalogueRead.Verified -> beforeTool(event, written, cwd, read.catalogue)
         }
 
@@ -80,43 +82,64 @@ class GateHook(
         } else {
             null
         }
-        val unread = if (raw.kind == ToolKind.BASH) unreadable(catalogue, raw.text) else null
+        val unread = if (raw.kind == ToolKind.BASH) unreadable(event, catalogue, raw.text) else null
         return when {
             unread != null -> unread
-            foreign != null ->
-                replies.deny(GateTexts.foreign(context, location.repositoryAt(context.launchTop), foreign))
+            foreign != null -> refusals.deny(
+                event,
+                action?.actionClass,
+                LocalRefusals.FOREIGN_REPOSITORY,
+                subject.text,
+                GateTexts.foreign(context, location.repositoryAt(context.launchTop), foreign),
+            )
             else -> checks.beforeTool(event, subject, cwd) ?: when {
                 action != null && gate != null ->
                     requests.ask(GateAsk(event, raw.text, subject, cwd, action, gate, catalogue.failMode))
-                landing != null -> landingReply(catalogue, subject, landing)
+                landing != null -> landingReply(event, catalogue, subject, landing)
                 else -> replies.allow()
             }
         }
     }
 
     /** A push whose landing Ostrom cannot read may land on main: refused while a gate on main is enforced (A9). */
-    private fun landingReply(catalogue: GateCatalogue, subject: ToolSubject, landing: String): HookReply {
+    private fun landingReply(
+        event: JsonObject,
+        catalogue: GateCatalogue,
+        subject: ToolSubject,
+        landing: String,
+    ): HookReply {
         val main = subject.copy(text = subject.text + GateRequests.targetsNote(listOf("main")))
         val guard = catalogue.enforcedFor(main, patterns)
         return if (guard == null) {
             replies.allow()
         } else {
-            replies.deny(GateTexts.unknownLanding(guard.first.name, guard.second, landing))
+            val text = GateTexts.unknownLanding(guard.first.name, guard.second, landing)
+            refusals.deny(event, guard.first.actionClass, LocalRefusals.UNKNOWN_LANDING, subject.text, text)
         }
     }
 
     /** A program named by a variable, or a change to where pushes go, while a gate holds them (S2-26, S2-27). */
-    private fun unreadable(catalogue: GateCatalogue, text: String): HookReply? {
+    private fun unreadable(event: JsonObject, catalogue: GateCatalogue, text: String): HookReply? {
         val program = CommandChecks.dynamicProgram(text)
         val guard = if (program == null) null else catalogue.enforcedOn(ToolKind.BASH.wire)
         val setting = CommandChecks.pushSetting(text)
         val push = ToolSubject(ToolKind.BASH, ToolKind.BASH.wire, "git push" + GateRequests.targetsNote(listOf("main")))
         val pushGuard = if (setting == null) null else catalogue.enforcedFor(push, patterns)
         return when {
-            program != null && guard != null ->
-                replies.deny(GateTexts.dynamicCommand(guard.first.name, guard.second, program))
-            setting != null && pushGuard != null ->
-                replies.deny(GateTexts.gitSetting(pushGuard.first.name, pushGuard.second, setting))
+            program != null && guard != null -> refusals.deny(
+                event,
+                guard.first.actionClass,
+                LocalRefusals.DYNAMIC_COMMAND,
+                text,
+                GateTexts.dynamicCommand(guard.first.name, guard.second, program),
+            )
+            setting != null && pushGuard != null -> refusals.deny(
+                event,
+                pushGuard.first.actionClass,
+                LocalRefusals.GIT_SETTING,
+                text,
+                GateTexts.gitSetting(pushGuard.first.name, pushGuard.second, setting),
+            )
             else -> null
         }
     }

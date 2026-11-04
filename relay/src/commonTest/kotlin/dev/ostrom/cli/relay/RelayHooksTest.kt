@@ -38,6 +38,7 @@ class RelayHooksTest {
             HttpMethod.Post to "/api/v1/sessions/s-1/reopen",
             HttpMethod.Post to "/api/v1/sessions/s-1/seen",
             HttpMethod.Post to "/api/v1/gates",
+            HttpMethod.Post to "/api/v1/gates/local-denials",
             HttpMethod.Get to "/api/v1/gates/catalog?repo=octo&ref=main",
             HttpMethod.Get to "/api/v1/gates/g-1?wait=30",
             HttpMethod.Get to "/api/v1/gates/g-1",
