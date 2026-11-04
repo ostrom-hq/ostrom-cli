@@ -20,7 +20,7 @@ class ChainChecksTest {
         val receipt = bundle.at("receipt")
         val crowded = bundle.with(listOf("chain"), JsonArray(listOf(receipt, session, selfGate, gate)))
         val report = verify(crowded)
-        assertEquals(0, report.code, report.render())
+        assertHoldsUnbound(report)
         assertHas(report, Mark.OK, "chain", "gate receipt rcpt_c0a50d60")
         val alone = verify(bundle.with(listOf("chain"), JsonArray(listOf(receipt, session))))
         assertHas(alone, Mark.MISSING, "chain", "is cited, but the receipt that signed it is not in the file")

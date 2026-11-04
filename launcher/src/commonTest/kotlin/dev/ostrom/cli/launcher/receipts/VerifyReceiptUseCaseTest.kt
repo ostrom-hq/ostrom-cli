@@ -34,10 +34,11 @@ class VerifyReceiptUseCaseTest {
     @Test
     fun aSignedWorkflowBundleVerifies() {
         val report = verify(bundle)
-        assertEquals(0, report.code, report.render())
+        assertHoldsUnbound(report)
         val expected = """
             |Receipt rcpt_032d1060-923d-45f0-9c9d-42a3de268f61 · workflow of @Lyesbcb · acme-core · 2026-10-27T23:21:01.745Z
             |  ✓ signature this receipt: Ed25519 valid, key f60d6b29d4cb7c46 (test), digest 1a4ebd439da5…
+            |  ? org       not bound to an organisation (orgBound false): signed before receipts carried theirs, it does not prove which organisation it belongs to
             |  ✓ subject   session sess-0f3c2a91 under package p202610280112-d2a4912a: digest recomputed from the session, the package digest and the 3 node(s)
             |  ✓ package   p202610280112-d2a4912a: envelope signed by key f60d6b29d4cb7c46, digest 1f0df7767d9f… over its exact bytes, compiled 2026-10-28T01:12:00.000Z from "Ship a change to acme-core"
             |  ✓ chain     gate receipt rcpt_c0a50d60-82b3-4986-8660-14e7e5ba0d5c: Ed25519 valid, key f60d6b29d4cb7c46 (test), digest 485da5b437dd…
@@ -47,10 +48,11 @@ class VerifyReceiptUseCaseTest {
             |  ✓ node      notify "Tell #release": sent to log:release
             |  ✓ session   session receipt rcpt_f2bb2d44-36ca-44fd-8418-ffe6266e65e9: Ed25519 valid, key f60d6b29d4cb7c46 (test), digest 91a0b5120f9f…
             |  ✓ session   agent claude-code, 1 yes in both receipts
-            |VERIFIED offline: signature, package and chain hold. No network call was made.
+            |INCOMPLETE: nothing is wrong, but the ? lines could not be checked offline.
             |
         """.trimMargin()
-        assertEquals(expected, report.render(), "the prototype's output, line for line, under CLI.md's title")
+        val said = "the prototype's output, line for line, under CLI.md's title, with the org line of server#327"
+        assertEquals(expected, report.render(), said)
     }
 
     @Test
@@ -65,7 +67,7 @@ class VerifyReceiptUseCaseTest {
     @Test
     fun serverNumbersAndUnicodeVerify() {
         val report = verify(json(ReceiptVectors.ODD_NUMBERS))
-        assertEquals(0, report.code, report.render())
+        assertHoldsUnbound(report)
         assertHas(report, Mark.OK, "decision", "by Lyesbcb at 2026-10-28T01:14:09.512Z (signed in this receipt)")
     }
 
@@ -148,11 +150,11 @@ class VerifyReceiptUseCaseTest {
     fun aSelfApprovedYesIsSaidOutLoud() {
         val vectors = json(ReceiptVectors.SELF_APPROVED)
         val gate = verify(vectors.at("gate"))
-        assertEquals(0, gate.code, gate.render())
+        assertHoldsUnbound(gate)
         assertHas(gate, Mark.OK, "decision", "SELF-APPROVED: dev-a asked for this action")
         // The session receipt cites the same yes with the same mark.
         val session = verify(vectors.at("session"))
-        assertEquals(0, session.code, session.render())
+        assertHoldsUnbound(session)
         assertHas(session, Mark.OK, "decision", "the same in both receipts · SELF-APPROVED")
         // A session receipt that hides the mark (signed: only a server could do it) disagrees with the gate's.
         val hiding = verify(vectors.at("sessionHidingIt"))
@@ -167,7 +169,7 @@ class VerifyReceiptUseCaseTest {
     fun aBareReceiptVerifiesItsSignature() {
         val gate = (bundle.at("chain") as JsonArray).first { it.at("subject", "kind") == JsonPrimitive("gate") }
         val report = verify(gate)
-        assertEquals(0, report.code, report.render())
+        assertHoldsUnbound(report)
         assertHas(report, Mark.OK, "decision", "signed in this receipt")
         assertEquals(
             "Receipt rcpt_c0a50d60-82b3-4986-8660-14e7e5ba0d5c · gate of @Lyesbcb · subject gate_51c0aa9e2f11 · " +
@@ -181,7 +183,7 @@ class VerifyReceiptUseCaseTest {
     fun theE2eBundleVerifiesWithTheCompatibilityKeyAndNotWithout() {
         val e2e = json(ReceiptVectors.E2E_BUNDLE)
         val report = verify(e2e, keys = listOf(compatKey))
-        assertEquals(0, report.code, report.render())
+        assertHoldsUnbound(report)
         assertHas(report, Mark.OK, "node", "gate \"Push to main\": yes from lena (gate receipt rcpt_e2e-gate, signed)")
         assertEquals(2, verify(e2e, keys = listOf(testKey)).code)
     }
