@@ -29,6 +29,13 @@ import kotlin.random.nextULong
  * Ostrom's hooks get names no repository can know in advance, and the variables that decide the folder's trust or the
  * shell of the hooks are Ostrom's too ([GeminiEnvironment]).
  *
+ * Nor does the session load a repository's `.env` (review REVUES-CLI-6, probed on Gemini CLI 0.66): its variables ran
+ * the repository's programs outside the gate, a lower-case `google_application_credentials` naming an executable or a
+ * `RIPGREP_CONFIG_PATH` with a `--pre` script, faster than a list of names can follow. The session's settings say
+ * `advanced.ignoreLocalEnv`, and Gemini is not started where it would still load a repository's `.gemini/.env`. A team
+ * that trusts its repository asks for its `.env` with `ostrom gemini --trust-project-settings`
+ * ([SessionLayout.trustProject]), said before the agent starts: the guarantee is then the variables' pins only.
+ *
  * @param nonce A value of the session no repository can guess, for the names of Ostrom's hooks.
  */
 class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toString(HEX).padStart(NONCE, '0') }) :
@@ -54,7 +61,8 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
         developersRules(theirs, join(real, "settings.json"))
         extensionsRules(files, real)
         // Gemini reads the session's settings, not these: settings Ostrom cannot read are left out, and said
-        val notes = if (parsed == null && !text.isNullOrBlank()) listOf(UNREAD) else emptyList()
+        val unread = if (parsed == null && !text.isNullOrBlank()) listOf(UNREAD) else emptyList()
+        val notes = unread + if (layout.trustProject) listOf(TRUSTED) else emptyList()
         val suffix = nonce()
         files.write(join(directory, "settings.json"), pretty(settings(layout, theirs, suffix)), FileAccess.PRIVATE)
         val rules = files.read(join(real, "GEMINI.md")).orEmpty() + "\n" + layout.rules
@@ -199,7 +207,11 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
         val servers = theirs.child("mcpServers").orEmpty() + layout.stdioServers.mapValues { (_, arguments) ->
             jsonOf(mapOf("command" to layout.executable, "args" to arguments))
         }
-        return JsonObject(theirs + mapOf("hooks" to JsonObject(merged), "mcpServers" to JsonObject(servers)))
+        val added = mapOf("hooks" to JsonObject(merged), "mcpServers" to JsonObject(servers))
+        // the folders' .env files are skipped, the developer's other advanced settings kept
+        val advanced = theirs.child("advanced").orEmpty() + (IGNORE_LOCAL_ENV to JsonPrimitive(true))
+        val local = if (layout.trustProject) emptyMap() else mapOf("advanced" to JsonObject(advanced))
+        return JsonObject(theirs + added + local)
     }
 
     private fun hook(layout: SessionLayout, name: String, kind: String, seconds: Long, matcher: String?): JsonElement {
@@ -222,6 +234,10 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
         const val UNREAD = "gemini: your settings.json cannot be read as JSON: this session starts without your " +
             "settings"
         const val BOM = "\uFEFF"
+        const val IGNORE_LOCAL_ENV = "ignoreLocalEnv"
+        const val TRUSTED = "gemini: --trust-project-settings: Gemini loads this repository's .env and " +
+            ".gemini/.env, whose variables can run the repository's programs: Ostrom pins those it knows of, and " +
+            "does not vouch for its gate in this session"
         const val SYSTEM_SETTINGS = "GEMINI_CLI_SYSTEM_SETTINGS_PATH"
         const val SYSTEM_DEFAULTS = "GEMINI_CLI_SYSTEM_DEFAULTS_PATH"
         const val HEX = 16

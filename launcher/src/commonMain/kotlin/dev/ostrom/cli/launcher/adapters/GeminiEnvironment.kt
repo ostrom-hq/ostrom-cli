@@ -14,17 +14,20 @@ import okio.Path.Companion.toPath
  * CLI n°2, H3). Gemini loads the folder's `.env`, `.gemini/.env` included, without replacing a variable already set,
  * then runs each hook by `bash -c` (PowerShell on Windows) with that environment: a `.env` naming `BASH_ENV`, or
  * `SHELLOPTS` with `noexec`, stops Ostrom's gate before it runs, and an untrusted folder runs none of the settings'
- * hooks. So Ostrom sets each variable that decides the folder's trust, the ones that change a program the agent or
- * its hooks start, shared with Claude Code ([ProgramVariables]), Gemini's own, and every `OSTROM_` one: the launcher's
- * value, else the developer's, else empty. The variables that choose Gemini's account are the developer's too
- * ([GeminiAuth]).
+ * hooks. By default the session loads no `.env` of the repository's (review REVUES-CLI-6): its settings skip the
+ * `.env` files ([GeminiAdapter]), and Gemini is not started where it would still load a `.gemini/.env` that is not the
+ * developer's. With `--trust-project-settings` it loads the repository's, as before. In both cases Ostrom sets each
+ * variable that decides the folder's trust, the ones that change a program the agent or its hooks start, shared with
+ * Claude Code ([ProgramVariables]), Gemini's own, and every `OSTROM_` one: the launcher's value, else the developer's,
+ * else empty. The variables that choose Gemini's account are the developer's too ([GeminiAuth]).
  */
 internal object GeminiEnvironment {
     /**
      * @param real The developer's `.gemini` folder, where Gemini finds their trusted folders.
      * @throws AdapterException When Ostrom cannot vouch for its gate: a variable of the developer's that takes the
      * trust away or runs before the hooks, no `PATH`, this binary's path unknown, a folder the developer does not
-     * trust, or a repository's `.env` naming a variable Ostrom cannot set empty.
+     * trust, a repository's `.gemini/.env` Gemini would load, or, when the developer trusts the repository, a `.env`
+     * of it naming a variable Ostrom cannot set empty.
      */
     fun of(layout: SessionLayout, files: LaunchFiles, real: String): Map<String, String> {
         val untrusting = UNTRUSTING.firstOrNull { (name, value) -> layout.variable(name) == value }
@@ -52,7 +55,11 @@ internal object GeminiEnvironment {
         refuseDistrust(layout, files, real)
         val names = TRUST + ProgramVariables.PINNED + SHELL + LaunchVariables.ALL
         val pinned = ProgramVariables.pinned(names, layout.environment, layout.variable)
-        refuseUnpinned(layout, files, pinned.keys)
+        if (layout.trustProject) {
+            refuseUnpinned(layout, files, pinned.keys)
+        } else {
+            refuseRepositoryEnv(layout, files, real)
+        }
         GeminiShell.check(layout, files, pinned.getValue(PATH), pinned.getValue(COMSPEC))
         val all = pinned + GeminiAuth.of(layout, files)
         return if (layout.pathSeparator == ';') all + GeminiShell.WINDOWS else all
@@ -90,14 +97,36 @@ internal object GeminiEnvironment {
     }
 
     /**
-     * Stops the launch where the `.env` Gemini loads names one of [ProgramVariables.KEPT] the developer does not set:
-     * Ostrom cannot pin it empty for them (an empty `GIT_DIR` stops git), and Gemini would take the file's.
+     * Stops the launch where Gemini would load a `.gemini/.env` that is not the developer's (review REVUES-CLI-6): the
+     * session's `advanced.ignoreLocalEnv` skips the `.env` files only, and in a trusted folder Gemini 0.66's
+     * `findEnvFile` still takes the first `.gemini/.env` from the working folder up to the root. Theirs are
+     * `<home>/.gemini/.env` and the one of their `GEMINI_CLI_HOME`, compared as this machine compares paths.
+     */
+    private fun refuseRepositoryEnv(layout: SessionLayout, files: LaunchFiles, real: String) {
+        val own = listOf(join(layout.home, ".gemini", ".env"), join(real, ".env"))
+        val path = generateSequence(layout.workspace.firstOrNull()) { folder -> up(folder) }
+            .map { join(it, ".gemini", ".env") }
+            .firstOrNull { files.exists(it) } ?: return
+        if (own.any { it.equals(path, ignoreCase = layout.foldsCase) }) return
+        refuse(
+            "$path is not yours: Gemini loads its variables into the session, and a repository's variables can run " +
+                "its programs (its Google credentials, ripgrep's configuration), so Gemini is not started. Remove " +
+                "it, or run `ostrom gemini --trust-project-settings` if your team trusts this repository, to work " +
+                "with Ostrom",
+        )
+    }
+
+    /**
+     * With `--trust-project-settings`, stops the launch where the `.env` Gemini loads names one of
+     * [ProgramVariables.KEPT] the developer does not set: Ostrom cannot pin it empty for them (an empty `GIT_DIR`
+     * stops git), and Gemini would take the file's.
      *
      * The file is found as Gemini 0.66's `findEnvFile` finds it (review REVUES-CLI-5): in each folder from the working
      * folder up to the root, `.gemini/.env` then `.env`, the first that exists, past the repository's top (a submodule,
      * an archive without `.git`). The developer's own `<home>/.env` and `<home>/.gemini/.env` are theirs. A name counts
      * wherever it stands in the file as a word, whatever a parser makes of the line: a byte order mark or a no-break
-     * space read as white space by Gemini's parser and not by another set a variable Ostrom had not seen.
+     * space read as white space by Gemini's parser and not by another set a variable Ostrom had not seen. On Windows,
+     * whose variables do not tell case apart, a name counts in any case.
      */
     private fun refuseUnpinned(layout: SessionLayout, files: LaunchFiles, pinned: Set<String>) {
         val own = setOf(join(layout.home, ".env"), join(layout.home, ".gemini", ".env"))
@@ -105,10 +134,12 @@ internal object GeminiEnvironment {
             .flatMap { sequenceOf(join(it, ".gemini", ".env"), join(it, ".env")) }
             .firstNotNullOfOrNull { path -> files.read(path)?.let { path to it } }
             ?.takeIf { (path, _) -> path !in own } ?: return
-        val named = WORDS.entries.firstOrNull { (name, word) -> name !in pinned && word.containsMatchIn(text) }
-            ?: return
+        val windows = layout.pathSeparator == ';'
+        val named = ProgramVariables.KEPT.firstOrNull { name ->
+            pinned.none { it.equals(name, ignoreCase = windows) } && word(name, windows).containsMatchIn(text)
+        } ?: return
         refuse(
-            "$path names ${named.key}, which changes the programs Gemini and Ostrom's hooks start, and Ostrom cannot " +
+            "$path names $named, which changes the programs Gemini and Ostrom's hooks start, and Ostrom cannot " +
                 "set it for this session without breaking them, so Gemini is not started. Remove it from that file, " +
                 "or set it in your environment, to work with Ostrom",
         )
@@ -124,8 +155,11 @@ internal object GeminiEnvironment {
 
     private fun refuse(reason: String): Nothing = throw AdapterException("gemini: $reason")
 
-    // each of [ProgramVariables.KEPT] as a word: not inside a longer name
-    private val WORDS = ProgramVariables.KEPT.associateWith { Regex("(?<![A-Za-z0-9_])$it(?![A-Za-z0-9_])") }
+    // a name as a word: not inside a longer name
+    private fun word(name: String, anyCase: Boolean) = Regex(
+        "(?<![A-Za-z0-9_])$name(?![A-Za-z0-9_])",
+        if (anyCase) setOf(RegexOption.IGNORE_CASE) else emptySet(),
+    )
 
     private const val PATH = "PATH"
     private const val COMSPEC = "ComSpec"

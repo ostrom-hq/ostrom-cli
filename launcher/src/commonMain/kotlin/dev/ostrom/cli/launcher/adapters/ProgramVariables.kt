@@ -83,6 +83,9 @@ internal object ProgramVariables {
         "PAGER",
         "GIT_PAGER",
         "BROWSER",
+        // the configuration of the programs the agents' own tools run: ripgrep's file can name a `--pre` program of the
+        // repository's, run behind a search the gate allows (Gemini CLI 0.66, review REVUES-CLI-6)
+        "RIPGREP_CONFIG_PATH",
     )
 
     /**
@@ -106,6 +109,8 @@ internal object ProgramVariables {
         "GIT_SSH",
         "GIT_SSH_COMMAND",
         "GIT_EDITOR",
+        // an empty one stops `git rebase -i` ("unable to start editor ''", git 2.47, review REVUES-CLI-6)
+        "GIT_SEQUENCE_EDITOR",
         "EDITOR",
         "VISUAL",
         "HOME",

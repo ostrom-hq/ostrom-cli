@@ -18,7 +18,9 @@ internal object GeminiAuth {
         val home = layout.variable(HOME) ?: layout.home
         val text = listOf(join(home, ".gemini", ".env"), join(home, ".env")).firstNotNullOfOrNull { files.read(it) }
         val theirs = DotEnv.parse(text.orEmpty())
-        return NAMES.associateWith { layout.variable(it) ?: theirs[it].orEmpty() }
+        // Windows' variables do not tell case apart: two names that differ by case only are one variable there
+        val names = if (layout.pathSeparator == ';') NAMES.distinctBy { it.uppercase() } else NAMES
+        return names.associateWith { layout.variable(it) ?: theirs[it].orEmpty() }
     }
 
     // Gemini's home, the developer's (Gemini reads its home's .env there)
@@ -35,6 +37,13 @@ internal object GeminiAuth {
         "GOOGLE_GENAI_USE_GCA",
         "GOOGLE_CLOUD_ACCESS_TOKEN",
         "GOOGLE_APPLICATION_CREDENTIALS",
+        // google-auth-library reads `UPPER || lower`: a lower-case file name and executables allowed run a program of
+        // the repository's at the first call to the model (review REVUES-CLI-6), and the metadata server is where
+        // the session's credentials come from on Google Cloud
+        "google_application_credentials",
+        "GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES",
+        "GCE_METADATA_HOST",
+        "GCE_METADATA_IP",
         "GEMINI_API_KEY_AUTH_MECHANISM",
         "GEMINI_CLI_USE_COMPUTE_ADC",
         "GEMINI_DEFAULT_AUTH_TYPE",

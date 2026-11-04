@@ -145,7 +145,8 @@ private val REFUSED = listOf(
 /**
  * Gemini CLI 0.66 loads the folder's `.env` (`.gemini/.env` included) without replacing a variable already set, then
  * runs each hook by `bash -c` with that environment: with `BASH_ENV` or `SHELLOPTS=noexec` from a `.env`, Ostrom's gate
- * never runs (security audit of the CLI n°2, H3).
+ * never runs (security audit of the CLI n°2, H3). The repository's `.env` is loaded only when the developer trusts it
+ * (`--trust-project-settings`, [GeminiRepositoryEnvTest]): the tests of what Ostrom still guards then say `trusted`.
  */
 class GeminiEnvironmentTest {
     private val files = MemoryFiles().apply { texts[join("/usr/bin", "bash")] = "" }
@@ -162,7 +163,7 @@ class GeminiEnvironmentTest {
     fun aRepositorysEnvCannotSetTheShellOfOstromsHooks() {
         files.texts[join("/work/repo", ".env")] = "BASH_ENV=./evil.sh\nSHELLOPTS=braceexpand:noexec\n"
         files.texts[join("/work/repo", ".gemini", ".env")] = "BASH_ENV=./evil.sh\n"
-        val environment = prepare(layout(workspace = listOf("/work/repo"))).environment
+        val environment = prepare(layout(trusted = true, workspace = listOf("/work/repo"))).environment
         // set, and empty: Gemini leaves them as they are, and bash reads no file and turns no option on
         assertEquals("", environment["BASH_ENV"])
         assertEquals("", environment["SHELLOPTS"])
@@ -187,19 +188,20 @@ class GeminiEnvironmentTest {
             "gemini: /w/app/.env names GIT_SSH_COMMAND, which changes the programs Gemini and Ostrom's hooks start, " +
                 "and Ostrom cannot set it for this session without breaking them, so Gemini is not started. Remove " +
                 "it from that file, or set it in your environment, to work with Ostrom",
-            refusal(layout(workspace = workspace)),
+            refusal(layout(trusted = true, workspace = workspace)),
         )
         // the developer's own value: Gemini does not replace it
-        prepare(layout(variables = mapOf("GIT_SSH_COMMAND" to "ssh"), workspace = workspace))
+        prepare(layout(trusted = true, variables = mapOf("GIT_SSH_COMMAND" to "ssh"), workspace = workspace))
         // Gemini loads only the first .env found from the working folder up
         files.texts[join("/w/app/src", ".gemini", ".env")] = "DEBUG=1\n"
-        prepare(layout(workspace = workspace))
+        prepare(layout(trusted = true, workspace = workspace))
         files.texts[join("/w/app/src", ".gemini", ".env")] = "export EDITOR=./ed\n"
-        assertTrue("/w/app/src/.gemini/.env names EDITOR" in refusal(layout(workspace = workspace)))
+        assertTrue("/w/app/src/.gemini/.env names EDITOR" in refusal(layout(trusted = true, workspace = workspace)))
         // Gemini looks up to `/`, past the repository's top (REVUES-CLI-5: a submodule, an archive without `.git`)
-        assertTrue("/w/app/src/.gemini/.env names EDITOR" in refusal(layout(workspace = listOf("/w/app/src/x"))))
-        assertTrue("/w/app/src/.gemini/.env names EDITOR" in refusal(layout(workspace = listOf("/w/app/src/x", "/w"))))
-        prepare(layout(workspace = listOf("/elsewhere", "/w/app/src")))
+        val editor = "/w/app/src/.gemini/.env names EDITOR"
+        assertTrue(editor in refusal(layout(trusted = true, workspace = listOf("/w/app/src/x"))))
+        assertTrue(editor in refusal(layout(trusted = true, workspace = listOf("/w/app/src/x", "/w"))))
+        prepare(layout(trusted = true, workspace = listOf("/elsewhere", "/w/app/src")))
     }
 
     @Test
@@ -207,16 +209,17 @@ class GeminiEnvironmentTest {
         // REVUES-CLI-5, replayed on Gemini CLI 0.66's loader: in a submodule, or a folder git does not know, Gemini
         // took GIT_SSH_COMMAND from a .env above the repository's top, where Ostrom had stopped looking
         files.texts[join("/w/app", ".env")] = "GIT_SSH_COMMAND=./steal.sh\n"
-        assertTrue("/w/app/.env names GIT_SSH_COMMAND" in refusal(layout(workspace = listOf("/w/app/libs/sub"))))
+        val sub = layout(trusted = true, workspace = listOf("/w/app/libs/sub"))
+        assertTrue("/w/app/.env names GIT_SSH_COMMAND" in refusal(sub))
         files.texts.remove(join("/w/app", ".env"))
         files.texts[join("/", ".env")] = "GIT_DIR=/tmp/x\n"
-        assertTrue("/.env names GIT_DIR" in refusal(layout(workspace = listOf("/w/app/libs/sub"))))
+        assertTrue("/.env names GIT_DIR" in refusal(layout(trusted = true, workspace = listOf("/w/app/libs/sub"))))
         // the developer's own files in their home, where Gemini looks last, are theirs
         files.texts.remove(join("/", ".env"))
         files.texts[join("/home/dev", ".env")] = "GIT_SSH_COMMAND=./mine.sh\n"
         files.texts[join("/home/dev", ".gemini", ".env")] = "EDITOR=./mine\n"
-        prepare(layout(workspace = listOf("/home/dev/work/app")))
-        prepare(layout(workspace = listOf("/w/app")))
+        prepare(layout(trusted = true, workspace = listOf("/home/dev/work/app")))
+        prepare(layout(trusted = true, workspace = listOf("/w/app")))
     }
 
     @Test
@@ -232,11 +235,12 @@ class GeminiEnvironmentTest {
         )
         for (text in texts) {
             files.texts[join("/w/app", ".env")] = text
-            assertTrue("/w/app/.env names GIT_SSH_COMMAND" in refusal(layout(workspace = listOf("/w/app"))), text)
+            val app = layout(trusted = true, workspace = listOf("/w/app"))
+            assertTrue("/w/app/.env names GIT_SSH_COMMAND" in refusal(app), text)
         }
         // a longer name is another variable
         files.texts[join("/w/app", ".env")] = "MY_GIT_SSH_COMMAND_X=1\nGIT_SSH_COMMANDS=2\n"
-        prepare(layout(workspace = listOf("/w/app")))
+        prepare(layout(trusted = true, workspace = listOf("/w/app")))
     }
 
     @Test
@@ -449,6 +453,7 @@ class GeminiEnvironmentTest {
         environment: Map<String, String?> = emptyMap(),
         workspace: List<String> = emptyList(),
         executable: String = "/opt/ostrom",
+        trusted: Boolean = false,
     ): SessionLayout {
         val all = mapOf("PATH" to "/usr/bin") + variables
         return SessionLayout(
@@ -463,6 +468,7 @@ class GeminiEnvironmentTest {
             relay = RelayView("http://127.0.0.1:4100", "relay-token", listOf("ostrom"), false),
             workspace = workspace,
             environment = environment,
+            trustProject = trusted,
         )
     }
 }

@@ -236,6 +236,34 @@ the repository's settings can run its programs and turn the gate off. It lowers 
 programs the repository's settings start do not go through the gate. The choice is said on the developer's terminal
 only; Ostrom's server does not record it (no field in the launch's contract).
 
+### What `ostrom gemini` lets a repository configure
+
+Gemini CLI loads a `.env` file into its own environment, which every tool, hook and program it starts inherits. A
+repository's `.env` ran its own programs outside the gate (review REVUES-CLI-6, probed on Gemini CLI 0.66): a
+lower-case `google_application_credentials` naming an external account with an executable, and
+`GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=1`, runs that executable at the first call to the model, with
+`OSTROM_RELAY_TOKEN` in its environment; `RIPGREP_CONFIG_PATH=.rgrc` with `--pre=./pre.sh` runs the script behind a
+`grep_search` the gate allows. A list of names cannot follow every program's variables, so by default, as for
+Claude Code, the repository does not configure the agent:
+
+| From the repository | `ostrom gemini` | `--trust-project-settings` |
+| --- | --- | --- |
+| `.env` of the working folder or a folder above it | no (`advanced.ignoreLocalEnv` in the session's settings) | yes, Ostrom's pins win |
+| `.gemini/.env` of the working folder or a folder above it | Gemini is not started (exit 70): Gemini loads it even with `ignoreLocalEnv` | yes, Ostrom's pins win |
+| `.gemini/settings.json` | only the keys that change how the terminal looks, else Gemini is not started | same |
+| `GEMINI.md` | yes | yes |
+
+The developer's own `<home>/.gemini/.env` (or the one of their `GEMINI_CLI_HOME`) is still loaded. **What it costs**:
+the application variables a repository keeps in its `.env` (`DATABASE_URL`, an API's address…) no longer reach the
+shell commands Gemini runs; a team sets them in its own shell, or passes `--trust-project-settings`.
+
+`ostrom gemini --trust-project-settings` is for a team that trusts its repository: Gemini loads its `.env` as it does
+outside Ostrom, and the launch says so before the agent starts. Ostrom still pins the variables it knows of (the shell,
+the loader, git, the interpreters, ripgrep's configuration, Gemini's account and credentials, `google_application_credentials`
+and `GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES` included), and still refuses a `.env` that names one it cannot set
+empty (`GIT_DIR`, `GIT_SSH_COMMAND`, the editors…, in any case on Windows). It lowers the guarantee: a variable no list
+knows of can still run the repository's programs. As for Claude, the choice is said on the developer's terminal only.
+
 ## Add a platform primitive
 
 Declare an interface and its `Impl` in `platform/src/commonMain`, the platform half as `internal expect fun`, and the

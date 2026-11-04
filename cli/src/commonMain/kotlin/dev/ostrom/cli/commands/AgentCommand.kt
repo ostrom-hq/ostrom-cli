@@ -39,8 +39,8 @@ internal class AgentCommand(private val agent: Agent, private val dependencies: 
     val org by option("--org", help = "Organisation to act in (else OSTROM_ORG, else the one of ostrom init)")
     val trustProjectSettings by option(
         TRUST_PROJECT_SETTINGS,
-        help = "Claude Code: read this repository's settings, hooks and MCP servers too. They can run its programs " +
-            "and turn Ostrom's gate off: only for a repository your team trusts",
+        help = "Claude Code: read this repository's settings, hooks and MCP servers too; Gemini CLI: load its .env " +
+            "files too. They can run its programs and turn Ostrom's gate off: only for a repository your team trusts",
     ).flag()
     val agentArguments by argument("agent-args", help = "Passed to the agent as they are").multiple()
 
@@ -89,8 +89,8 @@ internal class AgentCommand(private val agent: Agent, private val dependencies: 
     /** Options that do not go together, a usage error before anything is read. */
     private fun refuseOptionsTogether() {
         if (cloud && dryRun) throw UsageError("--dry-run checks a launch on this machine: it does not go with --cloud")
-        if (trustProjectSettings && (cloud || agent != Agent.CLAUDE)) {
-            throw UsageError("$TRUST_PROJECT_SETTINGS is for `ostrom claude` on this machine")
+        if (trustProjectSettings && (cloud || agent !in TRUSTING)) {
+            throw UsageError("$TRUST_PROJECT_SETTINGS is for `ostrom claude` and `ostrom gemini` on this machine")
         }
     }
 
@@ -103,6 +103,9 @@ internal class AgentCommand(private val agent: Agent, private val dependencies: 
     private companion object {
         const val NO_HOME = "no folder for ostrom's files: set OSTROM_HOME"
         const val TRUST_PROJECT_SETTINGS = "--trust-project-settings"
+
+        // the agents that read a repository's own configuration only when the developer asks
+        val TRUSTING = setOf(Agent.CLAUDE, Agent.GEMINI)
         const val SIGN_IN = "no Ostrom server: run `ostrom login`, or set OSTROM_URL"
     }
 }
