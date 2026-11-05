@@ -194,6 +194,96 @@ temporary folder, which environment it gets, the hook dialect (`OSTROM_HOOK_DIAL
    `launcher` as `AgentAdapter` / one implementation per agent; it never writes into the repository or into
    `~/.claude` / `~/.codex`, and never passes a long-lived token in the agent's environment
    (`ostrom/mvp/COORD/VERIF-LANCEUR.md`).
+4. What a repository can configure in that agent decides whether Ostrom's gate holds in it. Every adapter pins the
+   variables of `ProgramVariables` (the shell of the hooks, the loader, git's configuration, the interpreters, the
+   proxies) with the launcher's value, else the developer's, else empty; the few that are not unset when empty
+   (`GIT_DIR`, `GIT_SSH_COMMAND`, `GIT_CONFIG_GLOBAL`, the editors, `HOME`, `SHELL`…) only to the developer's own
+   value, and the agent must close them another way. Git gets one setting of Ostrom's by the environment
+   (`GIT_CONFIG_COUNT`, after the developer's own pairs): `safe.bareRepository=explicit` (review REVUES-CLI-9). A
+   repository could track a folder that is a repository of its own (`tools/x.git/`, with `core.worktree=..` and
+   `core.fsmonitor` or a `filter.<x>.clean`), whose program ran at the agent's `cd tools/x.git && git status` with the
+   session's environment. With it git uses such a folder only when told so (`--git-dir`, `GIT_DIR`), which the gate
+   sees in the command; a `safe.bareRepository` of the developer's `~/.gitconfig` does not undo it. **What it costs**:
+   in a session, a bare repository of the developer's is used with `git --git-dir=<it>`, not by `cd <it> && git …`;
+   the `.git` folders of a repository, a submodule and a worktree are not concerned (git 2.47).
+
+### What `ostrom claude` lets a repository configure
+
+Claude Code is started with `--setting-sources user` (review REVUES-CLI-4, 04/11/2026): the repository's
+`.claude/settings.json`, `.claude/settings.local.json` and `.mcp.json` are not read. They could otherwise run the
+repository's programs at start, outside the gate and with the session's environment (a `SessionStart` hook,
+`apiKeyHelper`, `statusLine`, the `.mcp.json` servers that `enableAllProjectMcpServers` approves), or wrap every hook
+in `CLAUDE_CODE_SHELL_PREFIX`. The working folder and the repository's top are given back by `--add-dir` with
+`CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`: the team's `CLAUDE.md`, `.claude/CLAUDE.md` and `.claude/rules` are
+read, as are the files they import from the repository. Probed on Claude Code 2.1.318, what the session reads:
+
+| From the repository | `ostrom claude` | `--trust-project-settings` |
+| --- | --- | --- |
+| `.claude/settings.json`, `.claude/settings.local.json` (`env`, `hooks`, `apiKeyHelper`, `statusLine`, permissions) | no | yes |
+| `.mcp.json` | no | yes, when the settings approve it |
+| `.claude/skills`, `.claude/commands`, `.claude/agents`, `.claude/output-styles` | no | yes |
+| `CLAUDE.md`, `.claude/CLAUDE.md`, `.claude/rules`, their imports from the repository | yes | yes |
+| `CLAUDE.local.md`, a `CLAUDE.md` of a folder above the repository or between it and the working folder | no | yes |
+| `.git/config` (a repository given as an archive) | yes, as git reads it | yes |
+
+Ostrom's `--settings` still pin their variables in both cases (`ClaudeEnvironment`: `LaunchVariables.ALL`,
+`ProgramVariables`, `CLAUDE_CODE_SHELL_PREFIX`, `CLAUDE_CODE_GIT_BASH_PATH`, `CLAUDE_CODE_SHELL`), and keep the hooks
+and the plugin on. A developer's own `--setting-sources` is not used, and said.
+
+What the developer's side cannot do either (review REVUES-CLI-5): Claude Code is not started with `--bare` or
+`--safe-mode`, which skip every hook and plugin (the launch stops, exit 70); `CLAUDE_CODE_SIMPLE` and
+`CLAUDE_CODE_SAFE_MODE`, the same modes by variable, are removed and written empty, never taken from the developer's
+shell. `ostrom` reads no argument file: `ostrom claude -p @TASK.md` passes `@TASK.md` to Claude Code as it is, so a
+file of the repository cannot carry `--trust-project-settings` or `--settings`. A developer's own `--settings` is
+merged as before: it is theirs, typed on their command line.
+
+`ostrom claude --trust-project-settings` is for a team that trusts its repository: Claude Code reads
+`user,project,local` (or the developer's own `--setting-sources`), and the launch says before the agent starts that
+the repository's settings can run its programs and turn the gate off. It lowers the guarantee: the pins hold, the
+programs the repository's settings start do not go through the gate. The choice is said on the developer's terminal
+only; Ostrom's server does not record it (no field in the launch's contract).
+
+### What `ostrom gemini` lets a repository configure
+
+Gemini CLI loads a `.env` file into its own environment, which every tool, hook and program it starts inherits. A
+repository's `.env` ran its own programs outside the gate (review REVUES-CLI-6, probed on Gemini CLI 0.66): a
+lower-case `google_application_credentials` naming an external account with an executable, and
+`GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=1`, runs that executable at the first call to the model, with
+`OSTROM_RELAY_TOKEN` in its environment; `RIPGREP_CONFIG_PATH=.rgrc` with `--pre=./pre.sh` runs the script behind a
+`grep_search` the gate allows. A list of names cannot follow every program's variables, so by default, as for
+Claude Code, the repository does not configure the agent:
+
+| From the repository | `ostrom gemini` | `--trust-project-settings` |
+| --- | --- | --- |
+| `.env` of the working folder or a folder above it | no (`advanced.ignoreLocalEnv` in the session's settings) | yes, Ostrom's pins win |
+| `.gemini/.env` of the working folder or a folder above it | Gemini is not started (exit 70): Gemini loads it even with `ignoreLocalEnv` | yes, Ostrom's pins win |
+| `.env` of the working folder, read as the developer's extensions' settings | no (`experimental.extensionConfig: false`) | yes |
+| `.gemini/commands`: a command whose prompt holds `!{…}`, or injects a file (`@{…}`) and takes arguments (`{{args}}`) | Gemini is not started (exit 70): Gemini runs that shell command outside the gate | yes |
+| `.gemini/agents`: any agent (a `.md` not starting with `_`, through links, in any case) | Gemini is not started (exit 70): an agent's `mcp_servers` start outside the gate, and a remote agent's `auth` runs a command or sends a variable when Gemini starts | yes |
+| `.gemini/settings.json` | only the keys that change how the terminal looks, else Gemini is not started | same |
+| `GEMINI.md` | yes | yes |
+
+The developer's own `<home>/.gemini/.env` (or the one of their `GEMINI_CLI_HOME`) is still loaded. **What it costs**:
+the application variables a repository keeps in its `.env` (`DATABASE_URL`, an API's address…) no longer reach the
+shell commands Gemini runs; a team sets them in its own shell, or passes `--trust-project-settings`. The developer's
+extensions run without the settings they keep in Gemini (`gemini extensions config`, an extension's `settings`):
+Gemini 0.66 reads those from the extension's folder and the keychain, but also from the working folder's `.env`, whose
+values replaced `${extensionPath}` in an extension's hooks and ran the repository's script (review REVUES-CLI-7), and
+one setting turns both off. The launch names those extensions; their hooks and servers still run, `${extensionPath}`
+pointing at the extension, and a setting is then read from the developer's own environment only. A repository's
+commands that run nothing are loaded as before; its agents are not (review REVUES-CLI-8): a front matter whose second
+line is `---` hid `mcp_servers` from a check of keys, and a remote agent's `auth` (`!…` run by `bash -c`, `$…` sent to
+the card's address) is resolved when Gemini starts, acknowledged by the card's address and not by the text. Gemini 0.66
+has no setting that skips the project's agents alone (`experimental.enableAgents: false` takes the developer's own and
+the built-in ones away too), so the launch stops there, as `ostrom claude` reads none of the repository's agents. The
+developer's own agents, in their home, are loaded as before.
+
+`ostrom gemini --trust-project-settings` is for a team that trusts its repository: Gemini loads its `.env`, its commands
+and its agents as it does outside Ostrom, and the launch says so before the agent starts. Ostrom still pins the variables it knows of (the shell,
+the loader, git, the interpreters, ripgrep's configuration, Gemini's account and credentials, `google_application_credentials`
+and `GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES` included), and still refuses a `.env` that names one it cannot set
+empty (`GIT_DIR`, `GIT_SSH_COMMAND`, the editors…, in any case on Windows). It lowers the guarantee: a variable no list
+knows of can still run the repository's programs. As for Claude, the choice is said on the developer's terminal only.
 
 ## Add a platform primitive
 

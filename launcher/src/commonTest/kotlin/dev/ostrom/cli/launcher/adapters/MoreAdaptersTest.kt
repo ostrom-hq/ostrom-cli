@@ -297,6 +297,29 @@ class MoreAdaptersTest {
     }
 
     @Test
+    fun aGeminiFolderWrittenInAnotherCaseIsStillCheckedForALink() {
+        // macOS and Windows ignore case: Gemini reads `.GEMINI/settings.json` as `.gemini/settings.json`, through the
+        // link, so Ostrom names the folder as these machines do
+        files.texts[join("/elsewhere", "settings.json")] = """{"hooksConfig":{"enabled":false}}"""
+        files.links[join("/w/app", ".GEMINI")] = "/elsewhere"
+        val started = { foldsCase: Boolean ->
+            files.deleteRecursively(join("/tmp/run", "gemini-home"))
+            GeminiAdapter().prepare(layout(workspace = listOf("/w/app"), foldsCase = foldsCase), files)
+        }
+        assertEquals(
+            "gemini: ${join("/w/app", ".GEMINI")} is a link (to /elsewhere), so what Gemini reads there may not be " +
+                "what Ostrom checked: Gemini is not started. Make it a folder to work with Ostrom",
+            assertFailsWith<AdapterException> { started(true) }.reason,
+        )
+        // where case is told apart, `.GEMINI` is not Gemini's folder
+        started(false)
+        // a folder of that name, not a link, is checked as `.gemini`
+        files.links.clear()
+        files.directories += join("/w/app", ".GEMINI")
+        started(true)
+    }
+
+    @Test
     fun geminiIsNotStartedBesideABeforeToolHookOfTheDevelopersExtensions() {
         // Gemini registers an extension's hooks with the settings' ones: the same rule holds, for an extension in
         // the developer's folder and for one linked from elsewhere (`gemini extensions link`)
@@ -435,7 +458,9 @@ class MoreAdaptersTest {
         assertTrue(note.startsWith("gemini: your settings.json cannot be read as JSON"), note)
         val directory = join("/tmp/run", "gemini-home", ".gemini")
         val settings = checkNotNull(parseObject(files.texts[join(directory, "settings.json")]))
-        assertEquals(setOf("hooks", "mcpServers"), settings.keys)
+        // and the session's own: the folders' .env files skipped (GeminiRepositoryEnvTest), and the working folder's
+        // .env not read as the extensions' settings (GeminiProjectFilesTest)
+        assertEquals(setOf("hooks", "mcpServers", "advanced", "experimental"), settings.keys)
         assertEquals("\nR", files.texts[join(directory, "GEMINI.md")])
         files.texts[join("/g", ".gemini", "settings.json")] = "  "
         files.deleteRecursively(join("/tmp/run", "gemini-home"))
@@ -529,6 +554,7 @@ class MoreAdaptersTest {
         rules: String = "",
         variables: Map<String, String> = emptyMap(),
         workspace: List<String> = emptyList(),
+        foldsCase: Boolean = false,
     ) = SessionLayout(
         temporary = "/tmp/run",
         plugin = join("/tmp/run", "plugin"),
@@ -541,5 +567,6 @@ class MoreAdaptersTest {
         variable = { (mapOf("PATH" to "/usr/bin") + variables)[it] },
         relay = RelayView("http://127.0.0.1:4100", "relay-token", mcp, false),
         workspace = workspace,
+        foldsCase = foldsCase,
     )
 }

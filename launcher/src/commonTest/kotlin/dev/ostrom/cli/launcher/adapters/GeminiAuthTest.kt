@@ -33,6 +33,8 @@ class GeminiAuthTest {
             variable = { all[it]?.ifEmpty { null } },
             relay = RelayView("http://127.0.0.1:4100", "relay-token", listOf("ostrom"), false),
             workspace = listOf("/work/repo"),
+            // the repository's .env is loaded only when the developer trusts it (GeminiRepositoryEnvTest)
+            trustProject = true,
         )
         return GeminiAdapter().prepare(layout, files).environment.filterKeys { it in GeminiAuth.NAMES }
     }

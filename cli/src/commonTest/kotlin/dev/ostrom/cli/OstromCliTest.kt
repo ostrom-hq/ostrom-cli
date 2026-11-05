@@ -40,6 +40,8 @@ import kotlin.test.assertNotSame
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
+private const val TRUST = "--trust-project-settings"
+
 class OstromCliTest : CliKit() {
     private val noSessions = AgentSessions { null }
 
@@ -70,6 +72,41 @@ class OstromCliTest : CliKit() {
         assertEquals(64, cli(environment = withServer).run(arrayOf("claude", "--cloud", "--dry-run")))
         assertTrue(console.err.contains("it does not go with --cloud"), console.err.toString())
         assertEquals(1, launches.size, "nothing launched")
+    }
+
+    @Test
+    fun trustingTheRepositorysClaudeSettingsIsAskedForByName() {
+        // REVUES-CLI-4: Claude Code is started without the repository's settings unless the developer asks for them
+        signIn("/home/maya/.config/ostrom")
+        assertEquals(7, cli(environment = withServer).run(arrayOf("claude", TRUST, "-p", "hi")))
+        assertEquals(
+            LaunchRequest(Agent.CLAUDE, listOf("-p", "hi"), null, null, trustProjectSettings = true),
+            launches.single().first,
+        )
+        assertEquals(7, cli(environment = withServer).run(arrayOf("claude", "-p", "hi")))
+        assertEquals(false, launches.last().first.trustProjectSettings)
+        val elsewhere = listOf(arrayOf("codex", TRUST), arrayOf("claude", "--cloud", TRUST))
+        for (arguments in elsewhere) {
+            assertEquals(64, cli(environment = withServer).run(arguments))
+            assertTrue(
+                console.err.contains("$TRUST is for `ostrom claude` and `ostrom gemini` on this machine"),
+                console.err.toString(),
+            )
+        }
+        assertEquals(2, launches.size, "nothing else launched")
+    }
+
+    @Test
+    fun trustingTheRepositorysGeminiEnvIsAskedForByName() {
+        // REVUES-CLI-6: Gemini CLI is started without the repository's .env unless the developer asks for it
+        signIn("/home/maya/.config/ostrom")
+        assertEquals(7, cli(environment = withServer).run(arrayOf("gemini", TRUST, "-p", "hi")))
+        assertEquals(
+            LaunchRequest(Agent.GEMINI, listOf("-p", "hi"), null, null, trustProjectSettings = true),
+            launches.single().first,
+        )
+        assertEquals(64, cli(environment = withServer).run(arrayOf("gemini", "--cloud", TRUST)))
+        assertEquals(1, launches.size, "nothing else launched")
     }
 
     @Test

@@ -21,6 +21,9 @@ import kotlin.test.assertTrue
 /** Ostrom's plugin kept on in the session's Claude settings. */
 private const val ON = """"enabledPlugins":{"ostrom@inline":true}"""
 
+/** Claude Code reads the developer's settings only (REVUES-CLI-4). */
+private val USER_ONLY = listOf("--setting-sources", "user")
+
 class AdaptersTest {
     private val files = MemoryFiles()
 
@@ -91,11 +94,14 @@ class AdaptersTest {
         assertEquals(
             listOf(
                 "--plugin-dir", join("/tmp/run", "plugin"), "--resume", "x",
-                "--settings", join("/tmp/run", "claude-settings.json"), "--mcp-config", mcp, "--", "prompt",
+                "--settings", join("/tmp/run", "claude-settings.json"), "--mcp-config", mcp, "--setting-sources",
+                "user", "--", "prompt",
             ),
             launch.arguments,
         )
-        assertEquals(mapOf("OSTROM_HOOK_BUDGET_MS" to "18000"), launch.environment)
+        // the modes without hooks are removed for the agent (REVUES-CLI-5)
+        val removed = mapOf("CLAUDE_CODE_SIMPLE" to null, "CLAUDE_CODE_SAFE_MODE" to null)
+        assertEquals(mapOf("OSTROM_HOOK_BUDGET_MS" to "18000") + removed, launch.environment)
         val hooks = checkNotNull(parseObject(files.texts[join("/tmp/run", "plugin", "hooks", "hooks.json")]))
         val pre = hooks.child("hooks")?.let { it["PreToolUse"].toString() }
         assertEquals(
@@ -124,7 +130,7 @@ class AdaptersTest {
         val launch = ClaudeAdapter().prepare(layout(arguments = listOf("-p", "hi")), files)
         val settings = join("/tmp/run", "claude-settings.json")
         assertEquals(
-            listOf("--plugin-dir", join("/tmp/run", "plugin"), "-p", "hi", "--settings", settings),
+            listOf("--plugin-dir", join("/tmp/run", "plugin"), "-p", "hi", "--settings", settings) + USER_ONLY,
             launch.arguments,
         )
         assertEquals("""{"name":"acme"}""", files.texts[manifest])
@@ -168,10 +174,11 @@ class AdaptersTest {
         val launch = ClaudeAdapter().prepare(layout(arguments = listOf("--resume", "x", "--", "prompt")), files)
         val settings = join("/tmp/run", "claude-settings.json")
         assertEquals(
-            listOf("--plugin-dir", join("/tmp/run", "plugin"), "--resume", "x", "--settings", settings, "--", "prompt"),
+            listOf("--plugin-dir", join("/tmp/run", "plugin"), "--resume", "x", "--settings", settings) + USER_ONLY +
+                listOf("--", "prompt"),
             launch.arguments,
         )
-        assertEquals("""{"disableAllHooks":false,$ON}""", files.texts[settings])
+        assertEquals("""{"disableAllHooks":false,$ON}""", withoutEnv(files.texts[settings]))
         assertEquals(FileAccess.PRIVATE, files.access[settings])
         assertEquals(emptyList(), launch.notes)
     }
@@ -185,7 +192,7 @@ class AdaptersTest {
         ClaudeAdapter().prepare(layout(arguments = listOf("--settings", theirs)), files)
         assertEquals(
             """{"enabledPlugins":{"ostrom@inline":true,"other@market":false},"disableAllHooks":false}""",
-            files.texts[settings],
+            withoutEnv(files.texts[settings]),
         )
     }
 
@@ -198,20 +205,23 @@ class AdaptersTest {
             files,
         )
         assertEquals(
-            listOf("--plugin-dir", join("/tmp/run", "plugin"), "-p", "hi", "--settings", settings),
+            listOf("--plugin-dir", join("/tmp/run", "plugin"), "-p", "hi", "--settings", settings) + USER_ONLY,
             inline.arguments,
         )
-        assertEquals("""{"model":"opus","disableAllHooks":false,$ON}""", files.texts[settings])
+        assertEquals("""{"model":"opus","disableAllHooks":false,$ON}""", withoutEnv(files.texts[settings]))
         assertEquals(
             listOf("claude: your --settings turns hooks off (disableAllHooks): Ostrom keeps them on for this session"),
             inline.notes,
         )
         files.texts["/home/dev/mine.json"] = """{"permissions":{"allow":["Bash(ls)"]}}"""
         val file = ClaudeAdapter().prepare(layout(arguments = listOf("--settings=/home/dev/mine.json")), files)
-        assertEquals(listOf("--plugin-dir", join("/tmp/run", "plugin"), "--settings", settings), file.arguments)
+        assertEquals(
+            listOf("--plugin-dir", join("/tmp/run", "plugin"), "--settings", settings) + USER_ONLY,
+            file.arguments,
+        )
         assertEquals(
             """{"permissions":{"allow":["Bash(ls)"]},"disableAllHooks":false,$ON}""",
-            files.texts[settings],
+            withoutEnv(files.texts[settings]),
         )
         assertEquals(emptyList(), file.notes)
     }
@@ -222,9 +232,11 @@ class AdaptersTest {
         files.texts["/home/dev/last.json"] = """{"model":"haiku"}"""
         val arguments = listOf("--settings", """{"model":"opus"}""", "--settings", "/home/dev/last.json")
         val last = ClaudeAdapter().prepare(layout(arguments = arguments + listOf("--", "--settings", "x")), files)
-        assertEquals("""{"model":"haiku","disableAllHooks":false,$ON}""", files.texts[settings], "the last one wins")
+        val expected = """{"model":"haiku","disableAllHooks":false,$ON}"""
+        assertEquals(expected, withoutEnv(files.texts[settings]), "the last one wins")
         assertEquals(
-            listOf("--plugin-dir", join("/tmp/run", "plugin"), "--settings", settings, "--", "--settings", "x"),
+            listOf("--plugin-dir", join("/tmp/run", "plugin"), "--settings", settings) + USER_ONLY +
+                listOf("--", "--settings", "x"),
             last.arguments,
             "after --, it is the prompt's text",
         )
@@ -354,6 +366,9 @@ class AdaptersTest {
         assertEquals(skill, files.links[join(home, "skills", "ostrom-wf-x")])
         assertTrue(files.links.keys.none { it.startsWith(real) }, "nothing written in the developer's own CODEX_HOME")
     }
+
+    // the session's settings without their `env`, which ClaudeEnvironmentTest checks
+    private fun withoutEnv(text: String?) = JsonObject(checkNotNull(parseObject(text)) - "env").toString()
 
     @Suppress("LongParameterList") // A test builder: every field has a default.
     private fun layout(

@@ -65,22 +65,19 @@ private val SHELL = listOf(
     "all_proxy",
     "no_proxy",
     // what a repository's .env could still set, from the inventory of Gemini CLI 0.66 (AUDIT-SECU-CLI-H3-INVENTAIRE,
-    // annex A § 4): git's configuration, pagers and editors, TLS, endpoints, telemetry, system prompt, sandbox, IDE
+    // annex A § 4): git's configuration, pagers, TLS, endpoints, telemetry, system prompt, sandbox, IDE
     "GIT_CONFIG_COUNT",
     "GIT_CONFIG_PARAMETERS",
-    "GIT_CONFIG_GLOBAL",
-    "GIT_CONFIG_SYSTEM",
     "GIT_CONFIG_NOSYSTEM",
-    "GIT_SSH_COMMAND",
-    "GIT_SSH",
     "GIT_EXTERNAL_DIFF",
-    "GIT_DIR",
-    "GIT_WORK_TREE",
     "GIT_EXEC_PATH",
+    "GIT_ASKPASS",
+    "SSH_ASKPASS",
+    "GIT_PROXY_COMMAND",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "XDG_CONFIG_HOME",
     "PAGER",
     "GIT_PAGER",
-    "EDITOR",
-    "VISUAL",
     "BROWSER",
     "NODE_TLS_REJECT_UNAUTHORIZED",
     "NODE_EXTRA_CA_CERTS",
@@ -90,9 +87,7 @@ private val SHELL = listOf(
     "GOOGLE_VERTEX_BASE_URL",
     "GEMINI_CLI_CUSTOM_HEADERS",
     "GEMINI_TELEMETRY_ENABLED",
-    "GEMINI_TELEMETRY_TARGET",
     "GEMINI_TELEMETRY_OTLP_ENDPOINT",
-    "GEMINI_TELEMETRY_OTLP_PROTOCOL",
     "GEMINI_TELEMETRY_OTLP_HEADERS",
     "GEMINI_TELEMETRY_LOG_PROMPTS",
     "GEMINI_TELEMETRY_OUTFILE",
@@ -148,7 +143,8 @@ private val REFUSED = listOf(
 /**
  * Gemini CLI 0.66 loads the folder's `.env` (`.gemini/.env` included) without replacing a variable already set, then
  * runs each hook by `bash -c` with that environment: with `BASH_ENV` or `SHELLOPTS=noexec` from a `.env`, Ostrom's gate
- * never runs (security audit of the CLI n°2, H3).
+ * never runs (security audit of the CLI n°2, H3). The repository's `.env` is loaded only when the developer trusts it
+ * (`--trust-project-settings`, [GeminiRepositoryEnvTest]): the tests of what Ostrom still guards then say `trusted`.
  */
 class GeminiEnvironmentTest {
     private val files = MemoryFiles().apply { texts[join("/usr/bin", "bash")] = "" }
@@ -164,13 +160,104 @@ class GeminiEnvironmentTest {
     @Test
     fun aRepositorysEnvCannotSetTheShellOfOstromsHooks() {
         files.texts[join("/work/repo", ".env")] = "BASH_ENV=./evil.sh\nSHELLOPTS=braceexpand:noexec\n"
-        files.texts[join("/work/repo", ".gemini", ".env")] = "BASH_ENV=./evil.sh\n"
-        val environment = prepare(layout(workspace = listOf("/work/repo"))).environment
+        files.texts[join("/work/repo", ".gemini", ".env")] =
+            "BASH_ENV=./evil.sh\nGIT_CONFIG_KEY_0=core.fsmonitor\nGIT_CONFIG_VALUE_0=./fsm.sh\n"
+        val environment = prepare(layout(trusted = true, workspace = listOf("/work/repo"))).environment
         // set, and empty: Gemini leaves them as they are, and bash reads no file and turns no option on
         assertEquals("", environment["BASH_ENV"])
         assertEquals("", environment["SHELLOPTS"])
-        val expected = SHELL.associateWith { if (it == "PATH") "/usr/bin" else "" }
+        // git's count is Ostrom's: one pair, `safe.bareRepository=explicit` (REVUES-CLI-9)
+        val expected = SHELL.associateWith { if (it == "PATH") "/usr/bin" else "" } + ("GIT_CONFIG_COUNT" to "1")
         assertEquals(expected, environment.filterKeys { it in SHELL })
+        assertEquals("safe.bareRepository", environment["GIT_CONFIG_KEY_0"])
+        assertEquals("explicit", environment["GIT_CONFIG_VALUE_0"])
+    }
+
+    @Test
+    fun gitsPlacesTheEditorsAndTheShellAreTheDevelopersOrLeftAsTheyAre() {
+        // REVUES-CLI-4: an empty GIT_DIR stops git, an empty GIT_SSH_COMMAND runs nothing (git 2.47): these are never
+        // set empty, only to the developer's own value
+        val developers = mapOf("GIT_SSH_COMMAND" to "ssh -i /home/dev/.ssh/work", "SHELL" to "/bin/zsh")
+        val environment = prepare(layout(variables = developers, workspace = listOf("/work/repo"))).environment
+        assertEquals(developers, environment.filterKeys { it in ProgramVariables.KEPT })
+    }
+
+    @Test
+    fun geminiIsNotStartedWhereTheRepositorysEnvNamesAVariableOstromCannotSetEmpty() {
+        val workspace = listOf("/w/app/src", "/w/app")
+        files.texts[join("/w/app", ".env")] = "GIT_SSH_COMMAND=./steal.sh\n"
+        assertEquals(
+            "gemini: /w/app/.env names GIT_SSH_COMMAND, which changes the programs Gemini and Ostrom's hooks start, " +
+                "and Ostrom cannot set it for this session without breaking them, so Gemini is not started. Remove " +
+                "it from that file, or set it in your environment, to work with Ostrom",
+            refusal(layout(trusted = true, workspace = workspace)),
+        )
+        // the developer's own value: Gemini does not replace it
+        prepare(layout(trusted = true, variables = mapOf("GIT_SSH_COMMAND" to "ssh"), workspace = workspace))
+        // Gemini loads only the first .env found from the working folder up
+        files.texts[join("/w/app/src", ".gemini", ".env")] = "DEBUG=1\n"
+        prepare(layout(trusted = true, workspace = workspace))
+        files.texts[join("/w/app/src", ".gemini", ".env")] = "export EDITOR=./ed\n"
+        assertTrue("/w/app/src/.gemini/.env names EDITOR" in refusal(layout(trusted = true, workspace = workspace)))
+        // Gemini looks up to `/`, past the repository's top (REVUES-CLI-5: a submodule, an archive without `.git`)
+        val editor = "/w/app/src/.gemini/.env names EDITOR"
+        assertTrue(editor in refusal(layout(trusted = true, workspace = listOf("/w/app/src/x"))))
+        assertTrue(editor in refusal(layout(trusted = true, workspace = listOf("/w/app/src/x", "/w"))))
+        prepare(layout(trusted = true, workspace = listOf("/elsewhere", "/w/app/src")))
+    }
+
+    @Test
+    fun geminiLooksForTheEnvUpToTheRootAsGeminiDoes() {
+        // REVUES-CLI-5, replayed on Gemini CLI 0.66's loader: in a submodule, or a folder git does not know, Gemini
+        // took GIT_SSH_COMMAND from a .env above the repository's top, where Ostrom had stopped looking
+        files.texts[join("/w/app", ".env")] = "GIT_SSH_COMMAND=./steal.sh\n"
+        val sub = layout(trusted = true, workspace = listOf("/w/app/libs/sub"))
+        assertTrue("/w/app/.env names GIT_SSH_COMMAND" in refusal(sub))
+        files.texts.remove(join("/w/app", ".env"))
+        files.texts[join("/", ".env")] = "GIT_DIR=/tmp/x\n"
+        assertTrue("/.env names GIT_DIR" in refusal(layout(trusted = true, workspace = listOf("/w/app/libs/sub"))))
+        // the developer's own files in their home, where Gemini looks last, are theirs
+        files.texts.remove(join("/", ".env"))
+        files.texts[join("/home/dev", ".env")] = "GIT_SSH_COMMAND=./mine.sh\n"
+        files.texts[join("/home/dev", ".gemini", ".env")] = "EDITOR=./mine\n"
+        prepare(layout(trusted = true, workspace = listOf("/home/dev/work/app")))
+        prepare(layout(trusted = true, workspace = listOf("/w/app")))
+    }
+
+    @Test
+    fun aVariableOstromCannotSetEmptyIsRefusedWhereverTheEnvNamesIt() {
+        // REVUES-CLI-5: the parser cannot be the guard, a byte order mark or a no-break space made Ostrom's read
+        // nothing where Gemini's read GIT_SSH_COMMAND; the name as a word anywhere in the file is enough
+        val texts = listOf(
+            "\uFEFFGIT_SSH_COMMAND=./steal.sh\n",
+            "\u00A0GIT_SSH_COMMAND=./steal.sh\n",
+            "export\u00A0GIT_SSH_COMMAND=./steal.sh\n",
+            "GIT_SSH_COMMAND\u00A0=./steal.sh\n",
+            "# GIT_SSH_COMMAND, said in a comment\n",
+        )
+        for (text in texts) {
+            files.texts[join("/w/app", ".env")] = text
+            val app = layout(trusted = true, workspace = listOf("/w/app"))
+            assertTrue("/w/app/.env names GIT_SSH_COMMAND" in refusal(app), text)
+        }
+        // a longer name is another variable
+        files.texts[join("/w/app", ".env")] = "MY_GIT_SSH_COMMAND_X=1\nGIT_SSH_COMMANDS=2\n"
+        prepare(layout(trusted = true, workspace = listOf("/w/app")))
+    }
+
+    @Test
+    fun geminisTelemetryTargetAndProtocolAreTheDevelopersOrLeftAsTheyAre() {
+        // REVUES-CLI-6's replay: Gemini CLI 0.66 stops on an empty telemetry target or OTLP protocol ("Invalid
+        // telemetry target: . Valid values are: local, gcp"), so pinned empty they kept every session from starting
+        val names = listOf("GEMINI_TELEMETRY_TARGET", "GEMINI_TELEMETRY_OTLP_PROTOCOL")
+        val environment = prepare(layout()).environment
+        assertEquals(emptyMap(), environment.filterKeys { it in names })
+        val theirs = mapOf("GEMINI_TELEMETRY_TARGET" to "local", "GEMINI_TELEMETRY_OTLP_PROTOCOL" to "http")
+        assertEquals(theirs, prepare(layout(variables = theirs)).environment.filterKeys { it in names })
+        // a trusted repository's .env naming one the developer does not set is refused, as git's places are
+        files.texts[join("/w/app", ".env")] = "GEMINI_TELEMETRY_TARGET=gcp\n"
+        val trusted = layout(trusted = true, workspace = listOf("/w/app"))
+        assertTrue("/w/app/.env names GEMINI_TELEMETRY_TARGET" in refusal(trusted))
     }
 
     @Test
@@ -383,6 +470,7 @@ class GeminiEnvironmentTest {
         environment: Map<String, String?> = emptyMap(),
         workspace: List<String> = emptyList(),
         executable: String = "/opt/ostrom",
+        trusted: Boolean = false,
     ): SessionLayout {
         val all = mapOf("PATH" to "/usr/bin") + variables
         return SessionLayout(
@@ -397,6 +485,7 @@ class GeminiEnvironmentTest {
             relay = RelayView("http://127.0.0.1:4100", "relay-token", listOf("ostrom"), false),
             workspace = workspace,
             environment = environment,
+            trustProject = trusted,
         )
     }
 }

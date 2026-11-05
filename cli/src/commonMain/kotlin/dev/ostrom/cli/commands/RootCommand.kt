@@ -31,6 +31,11 @@ class RootCommand(private val dependencies: CliDependencies) : CliktCommand(name
     init {
         context {
             helpFormatter = { OstromHelpFormatter(it) }
+            // A word starting with `@` is an argument, never a file of more options (review REVUES-CLI-5): with
+            // `alias claude='ostrom claude'`, `claude -p @TASK.md` read Ostrom's own options from a file of the
+            // repository (`--trust-project-settings`). Clikt 5 expands them unless this is null; its
+            // `expandArgumentFiles` no longer has any effect.
+            readArgumentFile = null
             // No colour means no hyperlink either; otherwise the terminal says.
             val level = colours()
             terminal = Terminal(ansiLevel = level, hyperlinks = if (level == AnsiLevel.NONE) false else null)

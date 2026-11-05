@@ -23,7 +23,21 @@ import kotlinx.serialization.json.JsonPrimitive
  * The session's settings (`--settings`) say `"disableAllHooks": false`: a repository's `.claude/settings.json` that
  * turns hooks off would otherwise switch Ostrom off with them, and command-line settings come before the project's
  * (security audit of the CLI n°2, H1). Claude Code reads only the last `--settings`, so the developer's own is merged
- * into them.
+ * into them. Their `env` holds Ostrom's variables and the shell's ([ClaudeEnvironment], H4), which a repository's
+ * `env` would otherwise rewrite.
+ *
+ * Claude Code is started with `--setting-sources user` (review REVUES-CLI-4): a repository's `.claude/settings.json`,
+ * `.claude/settings.local.json` and `.mcp.json` would otherwise run its own programs at start (a `SessionStart` hook,
+ * `apiKeyHelper`, its MCP servers), outside the gate and with the session's environment, or wrap every hook in its
+ * `CLAUDE_CODE_SHELL_PREFIX`. That option also stops the repository's `CLAUDE.md`, which is the team's memory, not a
+ * setting: the working folder and the repository's top are given back by `--add-dir` with
+ * `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD`, which reads their `CLAUDE.md`, `.claude/CLAUDE.md` and
+ * `.claude/rules` and nothing else of the repository (probed on Claude Code 2.1.318). A team that trusts its
+ * repository asks for its settings with `ostrom claude --trust-project-settings`
+ * ([SessionLayout.trustProject]), said before the agent starts: the guarantee is then the variables' pins only.
+ *
+ * Nor does the developer's side turn the gate off (review REVUES-CLI-5): Claude Code is not started with `--bare` or
+ * `--safe-mode`, and their variables (`CLAUDE_CODE_SIMPLE`, `CLAUDE_CODE_SAFE_MODE`) are removed and written empty.
  */
 class ClaudeAdapter : AgentAdapter {
     override val agent = Agent.CLAUDE
@@ -34,24 +48,60 @@ class ClaudeAdapter : AgentAdapter {
         if (!files.exists(manifest)) {
             files.write(manifest, pretty(objectOf("name" to "ostrom", "description" to DESCRIPTION, "version" to "1")))
         }
-        val (theirs, rest) = developersSettings(layout.arguments)
-        val (settings, notes) = settings(layout, files, theirs)
+        refuseModesWithoutHooks(layout.arguments)
+        val (theirs, others) = developers(layout.arguments, SETTINGS)
+        val (sources, rest) = developers(others, SETTING_SOURCES)
+        // a mode without hooks, inherited from the developer's shell, is removed and pinned empty, never kept
+        val own = inference(layout) + gateBudget(layout) + WITHOUT_HOOKS.associateWith { null }
+        // the repository's memory, read from the folders given by --add-dir when its settings are not read
+        val memory = if (layout.trustProject) emptyMap() else mapOf(ADDITIONAL_MEMORY to "1")
+        val (settings, notes) = settings(layout, files, theirs, ClaudeEnvironment.pinned(layout, own) + memory)
+        val (read, said) = sources(layout, sources)
         // `--mcp-config` takes several values: after the developer's options and before a literal `--`, never first,
         // where it would swallow a prompt.
         val arguments = mutableListOf("--plugin-dir", layout.plugin)
         val mcp = mcpConfig(layout, files)
-        val ours = listOf("--settings", settings) + if (mcp == null) emptyList() else listOf("--mcp-config", mcp)
+        val ours = listOf(SETTINGS, settings) + (if (mcp == null) emptyList() else listOf("--mcp-config", mcp)) + read
         arguments += beforeSeparator(rest, ours)
-        return AgentLaunch(arguments, inference(layout) + gateBudget(layout), notes)
+        return AgentLaunch(arguments, own, notes + said)
     }
 
     /**
-     * The value of the developer's last `--settings` (`--settings x` or `--settings=x`) before a literal `--`, or null,
-     * and their arguments without any `--settings`.
+     * Stops the launch where the developer's arguments turn Claude Code's hooks off (review REVUES-CLI-5, probed on
+     * Claude Code 2.1.318): `--bare` and `--safe-mode` skip every hook and plugin, Ostrom's gate included. Claude Code
+     * finds them anywhere before a literal `--`, even as another option's value (`-p --bare`), so any such word counts.
      *
-     * @throws AdapterException When a `--settings` has no value, as Claude Code would refuse it.
+     * @throws AdapterException On the first.
      */
-    private fun developersSettings(arguments: List<String>): Pair<String?, List<String>> {
+    private fun refuseModesWithoutHooks(arguments: List<String>) {
+        val mode = arguments.take(separator(arguments)).firstNotNullOfOrNull { argument ->
+            MODES_WITHOUT_HOOKS.firstOrNull { argument == it || argument.startsWith("$it=") }
+        } ?: return
+        throw AdapterException(
+            "claude: $mode turns off Claude Code's hooks, Ostrom's gate included, so Claude Code is not started with " +
+                "it. Run `ostrom claude` without $mode to work with Ostrom",
+        )
+    }
+
+    /**
+     * The sources of settings Claude Code reads, and what to tell the developer: their user settings only, and the
+     * repository's memory from [SessionLayout.workspace]; or, trusted, the repository's settings too ([theirs] when
+     * they named the sources).
+     */
+    private fun sources(layout: SessionLayout, theirs: String?): Pair<List<String>, List<String>> {
+        if (layout.trustProject) return listOf(SETTING_SOURCES, theirs ?: ALL_SOURCES) to listOf(TRUSTED)
+        val memory = if (layout.workspace.isEmpty()) emptyList() else listOf(ADD_DIR) + layout.workspace
+        val said = if (theirs == null || theirs == USER) emptyList() else listOf(untrusted(theirs))
+        return listOf(SETTING_SOURCES, USER) + memory to said
+    }
+
+    /**
+     * The value of the developer's last [option] (`--settings x` or `--settings=x`) before a literal `--`, or null, and
+     * their arguments without any [option].
+     *
+     * @throws AdapterException When one has no value, as Claude Code would refuse it.
+     */
+    private fun developers(arguments: List<String>, option: String): Pair<String?, List<String>> {
         val end = separator(arguments)
         var value: String? = null
         val rest = mutableListOf<String>()
@@ -59,12 +109,12 @@ class ClaudeAdapter : AgentAdapter {
         while (index < end) {
             val argument = arguments[index]
             val given = when {
-                argument == SETTINGS -> arguments.getOrNull(++index)?.takeIf { index < end }.orEmpty()
-                argument.startsWith("$SETTINGS=") -> argument.removePrefix("$SETTINGS=")
+                argument == option -> arguments.getOrNull(++index)?.takeIf { index < end }.orEmpty()
+                argument.startsWith("$option=") -> argument.removePrefix("$option=")
                 else -> null
             }
             if (given == null) rest += argument
-            if (given?.isBlank() == true) throw AdapterException(NO_VALUE)
+            if (given?.isBlank() == true) throw AdapterException(noValue(option))
             value = given ?: value
             index++
         }
@@ -72,13 +122,18 @@ class ClaudeAdapter : AgentAdapter {
     }
 
     /**
-     * Writes the session's settings: the developer's ([theirs], inline JSON or a file), with hooks on. The path, and
-     * what to tell the developer.
+     * Writes the session's settings: the developer's ([theirs], inline JSON or a file), with hooks on and Ostrom's
+     * [pinned] variables in `env`, beside the developer's own. The path, and what to tell the developer.
      *
      * @throws AdapterException When [theirs] cannot be read: starting without them would drop their own rules
      * (`permissions.deny`, the sandbox), where Claude Code would refuse to start.
      */
-    private fun settings(layout: SessionLayout, files: LaunchFiles, theirs: String?): Pair<String, List<String>> {
+    private fun settings(
+        layout: SessionLayout,
+        files: LaunchFiles,
+        theirs: String?,
+        pinned: Map<String, String>,
+    ): Pair<String, List<String>> {
         val inline = theirs != null && theirs.trimStart().startsWith("{")
         val read = theirs?.let { parseObject(if (inline) it else files.read(it)) }
         if (theirs != null && read == null) {
@@ -88,8 +143,10 @@ class ClaudeAdapter : AgentAdapter {
         val off = read?.get(DISABLE_ALL_HOOKS) == JsonPrimitive(true)
         // a repository's `enabledPlugins` can turn the plugin off too: this layer, before the project's, keeps it on
         val plugins = JsonObject(read?.child(ENABLED_PLUGINS).orEmpty() + (PLUGIN_ID to JsonPrimitive(true)))
+        // a repository's `env` rewrites the session's variables, the hooks' shell included (H4): this layer wins
+        val env = JsonObject(read?.child(ENV).orEmpty() + pinned.mapValues { (_, value) -> JsonPrimitive(value) })
         val merged = JsonObject(read.orEmpty() + (DISABLE_ALL_HOOKS to JsonPrimitive(false)) +
-            (ENABLED_PLUGINS to plugins))
+            (ENABLED_PLUGINS to plugins) + (ENV to env))
         val path = join(layout.temporary, "claude-settings.json")
         files.write(path, merged.toString(), FileAccess.PRIVATE)
         return path to if (off) listOf(KEPT_ON) else emptyList()
@@ -150,13 +207,39 @@ class ClaudeAdapter : AgentAdapter {
         private const val START_SECONDS = 20L
         private const val END_SECONDS = 30L
         private const val SETTINGS = "--settings"
+        private const val SETTING_SOURCES = "--setting-sources"
+        private const val ADD_DIR = "--add-dir"
+        private const val USER = "user"
+        private const val ALL_SOURCES = "user,project,local"
+        private const val ADDITIONAL_MEMORY = "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"
         private const val DISABLE_ALL_HOOKS = "disableAllHooks"
+
+        // Claude Code's modes that skip every hook and plugin, by option and by variable (bare mode, safe mode): probed
+        // on 2.1.318, the developer's `CLAUDE_CODE_SIMPLE=1` or `CLAUDE_CODE_SAFE_MODE=1` let a refused command run,
+        // and the same variable written empty in `--settings` gave the gate back. No other `CLAUDE_CODE_*` variable of
+        // the binary turned the gate off (54 tried, hooks, plugins, policy, settings); `CLAUDE_CODE_RESTRICTED` takes
+        // the shell tool away instead
+        private val MODES_WITHOUT_HOOKS = listOf("--bare", "--safe-mode")
+        private val WITHOUT_HOOKS = listOf("CLAUDE_CODE_SIMPLE", "CLAUDE_CODE_SAFE_MODE")
         private const val ENABLED_PLUGINS = "enabledPlugins"
+        private const val ENV = "env"
 
         // a plugin loaded by --plugin-dir is `<name>@inline` for Claude Code
         private const val PLUGIN_ID = "ostrom@inline"
 
-        private const val NO_VALUE = "claude: --settings needs a value, a JSON object or a file"
+        private const val TRUSTED =
+            "claude: --trust-project-settings: Claude Code reads this repository's settings too " +
+                "(.claude/settings.json, .claude/settings.local.json, .mcp.json), its hooks, MCP servers, skills and " +
+                "agents, which can run the repository's programs and turn Ostrom's gate off: Ostrom does not vouch " +
+                "for its gate in this session"
+
+        private fun noValue(option: String) =
+            "claude: $option needs a value" + if (option == SETTINGS) ", a JSON object or a file" else ""
+
+        private fun untrusted(theirs: String) =
+            "claude: your --setting-sources $theirs is not used: Ostrom reads your user settings only, so that a " +
+                "repository's cannot turn its gate off (its CLAUDE.md is read). Run `ostrom claude " +
+                "--trust-project-settings` to read the repository's settings too"
         private const val KEPT_ON =
             "claude: your --settings turns hooks off (disableAllHooks): Ostrom keeps them on for this session"
 
