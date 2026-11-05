@@ -252,7 +252,7 @@ Claude Code, the repository does not configure the agent:
 | `.gemini/.env` of the working folder or a folder above it | Gemini is not started (exit 70): Gemini loads it even with `ignoreLocalEnv` | yes, Ostrom's pins win |
 | `.env` of the working folder, read as the developer's extensions' settings | no (`experimental.extensionConfig: false`) | yes |
 | `.gemini/commands`: a command whose prompt holds `!{…}`, or injects a file (`@{…}`) and takes arguments (`{{args}}`) | Gemini is not started (exit 70): Gemini runs that shell command outside the gate | yes |
-| `.gemini/agents`: an agent declaring `mcp_servers` | Gemini is not started (exit 70): Gemini starts those programs outside the gate | yes |
+| `.gemini/agents`: any agent (a `.md` not starting with `_`, through links, in any case) | Gemini is not started (exit 70): an agent's `mcp_servers` start outside the gate, and a remote agent's `auth` runs a command or sends a variable when Gemini starts | yes |
 | `.gemini/settings.json` | only the keys that change how the terminal looks, else Gemini is not started | same |
 | `GEMINI.md` | yes | yes |
 
@@ -264,7 +264,12 @@ Gemini 0.66 reads those from the extension's folder and the keychain, but also f
 values replaced `${extensionPath}` in an extension's hooks and ran the repository's script (review REVUES-CLI-7), and
 one setting turns both off. The launch names those extensions; their hooks and servers still run, `${extensionPath}`
 pointing at the extension, and a setting is then read from the developer's own environment only. A repository's
-commands and agents that run nothing are loaded as before.
+commands that run nothing are loaded as before; its agents are not (review REVUES-CLI-8): a front matter whose second
+line is `---` hid `mcp_servers` from a check of keys, and a remote agent's `auth` (`!…` run by `bash -c`, `$…` sent to
+the card's address) is resolved when Gemini starts, acknowledged by the card's address and not by the text. Gemini 0.66
+has no setting that skips the project's agents alone (`experimental.enableAgents: false` takes the developer's own and
+the built-in ones away too), so the launch stops there, as `ostrom claude` reads none of the repository's agents. The
+developer's own agents, in their home, are loaded as before.
 
 `ostrom gemini --trust-project-settings` is for a team that trusts its repository: Gemini loads its `.env`, its commands
 and its agents as it does outside Ostrom, and the launch says so before the agent starts. Ostrom still pins the variables it knows of (the shell,

@@ -88,9 +88,10 @@ class GeminiRepositoryEnvTest {
         assertEquals(
             listOf(
                 "gemini: --trust-project-settings: Gemini loads this repository's .env and .gemini/.env, whose " +
-                    "variables can run the repository's programs, reads its .env as your extensions' settings, and " +
-                    "runs the shell commands of its commands and the MCP servers of its agents: Ostrom pins the " +
-                    "variables it knows of, and does not vouch for its gate in this session",
+                    "variables can run the repository's programs, reads its .env as your extensions' settings, runs " +
+                    "the shell commands of its commands, and loads its agents, with their MCP servers and their " +
+                    "remote agents' `auth`: Ostrom pins the variables it knows of, and does not vouch for its gate " +
+                    "in this session",
             ),
             launch.notes,
         )

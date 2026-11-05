@@ -14,9 +14,15 @@ import dev.ostrom.cli.launcher.join
  *   shell command when the command is called, through no tool and no `BeforeTool` hook (`ShellProcessor`), without
  *   asking in `--yolo` or where the developer's policy allows it. A prompt that takes arguments (`{{args}}`) runs the
  *   `!{…}` of a file it injects with `@{…}` too: the shell step reads the prompt after the files are put in.
- * - An agent, a `.md` file of `.gemini/agents` (not one starting with `_`), whose front matter declares
- *   `mcp_servers`: Gemini starts those programs when the agent is called, outside the gate, after an acknowledgement
- *   that does not show them, and they read Ostrom's relay token from their parent's environment.
+ * - An agent, a `.md` file of `.gemini/agents` (not one starting with `_`): any of them (review REVUES-CLI-8), as
+ *   `ostrom claude` loads none of the repository's agents. Its front matter's `mcp_servers` are programs Gemini starts
+ *   when the agent is called, outside the gate, after an acknowledgement that does not show them, and they read
+ *   Ostrom's relay token from their parent's environment; a remote agent's `auth` (`agent_card_url`,
+ *   `agent_card_json`) runs a command (`!…`) by `bash -c` or sends a variable (`$…`, the relay token) to the card's
+ *   address when Gemini starts, acknowledged by that address and not by the text. Gemini 0.66 has no setting that
+ *   skips the project's agents alone: `experimental.enableAgents: false` takes the developer's own and the built-in
+ *   ones away too, and an untrusted folder runs none of the hooks. Those keys are still named in a refusal, read in
+ *   the front matter as Gemini reads it.
  *
  * Gemini reads both in its working folder only; Ostrom reads every folder of [SessionLayout.workspace], whose
  * repository's top is where `gemini --worktree` works. The developer's own `.gemini`, in their home, is theirs.
@@ -29,7 +35,7 @@ internal object GeminiProjectFiles {
             val directory = join(folder, GEMINI)
             if (own.any { it.equals(directory, ignoreCase = layout.foldsCase) }) continue
             commands(files, join(directory, "commands"), mutableSetOf())
-            agents(files, join(directory, "agents"))
+            agents(files, directory)
         }
     }
 
@@ -72,33 +78,64 @@ internal object GeminiProjectFiles {
         if (code <= Char.MAX_VALUE.code) code.toInt().toChar().toString() else match.value
     }
 
-    /** The `.md` files of [folder] Gemini reads as agents, not those starting with `_`; not below it. */
-    private fun agents(files: LaunchFiles, folder: String) {
-        for (name in files.list(folder).filter { !it.startsWith("_") && it.endsWith(".md") }) {
-            val path = join(folder, name)
-            val head = frontMatter(files.read(path) ?: continue)
-            if (SERVERS in head) {
-                refuse(
-                    "$path declares `$SERVERS`: Gemini starts those programs when the agent is called, outside " +
-                        "Ostrom's gate",
-                )
+    /**
+     * The `.md` files of the `agents` folder of [directory] Gemini reads as agents, not those starting with `_`, not
+     * below it: the folder in any case, since a volume may fold it whatever this machine's other paths do, and the
+     * extension in any case, through links (Gemini 0.66 follows the folder's, not yet a file's). A file naming
+     * `mcp_servers` or a remote agent is refused as such, any other as an agent of the repository.
+     */
+    private fun agents(files: LaunchFiles, directory: String) {
+        var first: String? = null
+        for (named in files.list(directory).filter { it.equals(AGENTS, ignoreCase = true) }) {
+            val folder = join(directory, named)
+            val listed = files.canonical(folder)
+            for (name in files.list(listed).filter { !it.startsWith("_") && it.endsWith(".md", ignoreCase = true) }) {
+                val path = join(folder, name)
+                val text = files.read(files.canonical(join(listed, name))) ?: continue
+                agent(path, frontMatter(text))
+                if (first == null) first = path
             }
-            if ('\\' in head) {
-                refuse(
-                    "$path has a `\\` in its front matter, through which YAML can write `$SERVERS` without its " +
-                        "letters (`\\x5f`…), so Ostrom cannot tell whether Gemini starts programs of this repository",
-                )
-            }
+        }
+        if (first != null) {
+            refuse(
+                "$first is an agent of this repository, which Gemini loads: an agent can start programs " +
+                    "(`$SERVERS`) or reach a remote agent whose `auth` runs a command or sends a variable when " +
+                    "Gemini starts, outside Ostrom's gate",
+            )
+        }
+    }
+
+    /** Refuses the agent at [path] by what its front matter [head] declares, when it names it. */
+    private fun agent(path: String, head: String) {
+        if (SERVERS in head) {
+            refuse(
+                "$path declares `$SERVERS`: Gemini starts those programs when the agent is called, outside " +
+                    "Ostrom's gate",
+            )
+        }
+        if (REMOTE in head) {
+            refuse(
+                "$path declares a remote agent (`$REMOTE…`): Gemini resolves its `auth` when it starts, running " +
+                    "a command (`!…`) or sending a variable (`$…`) to the card's address, outside Ostrom's gate",
+            )
+        }
+        if ('\\' in head) {
+            refuse(
+                "$path has a `\\` in its front matter, through which YAML can write `$SERVERS` without its " +
+                    "letters (`\\x5f`…), so Ostrom cannot tell whether Gemini starts programs of this repository",
+            )
         }
     }
 
     /**
-     * The front matter as Gemini reads it: up to the first line that is `---` (white space after it allowed) past the
-     * first line; the whole text when there is none, so that nothing Gemini could read as front matter is left out.
+     * The front matter as Gemini reads it (`FRONTMATTER_REGEX`): up to the first line that is `---` (white space after
+     * it allowed) from the third line on, its second line always read as front matter, even when it is `---` itself
+     * (review REVUES-CLI-8); the whole text when there is none, so that nothing Gemini could read as front matter is
+     * left out.
      */
     private fun frontMatter(text: String): String {
         val lines = text.split('\n')
-        val close = (1 until lines.size).firstOrNull { CLOSING.matches(lines[it]) } ?: return text
+        val close = (FIRST_CLOSING until lines.size).firstOrNull { CLOSING.matches(lines[it]) } ?: return text
         return lines.subList(0, close).joinToString("\n")
     }
 
@@ -111,7 +148,10 @@ internal object GeminiProjectFiles {
     private const val SHELL = "!{"
     private const val FILE = "@{"
     private const val ARGUMENTS = "{{args}}"
+    private const val AGENTS = "agents"
     private const val SERVERS = "mcp_servers"
+    private const val REMOTE = "agent_card"
+    private const val FIRST_CLOSING = 2
     private const val HEX = 16
     private val ESCAPE = Regex("""\\(?:u([0-9A-Fa-f]{4})|U([0-9A-Fa-f]{8})|x([0-9A-Fa-f]{2}))""")
     private val CONTINUATION = Regex("""\\[ \t]*\r?\n[ \t\r\n]*""")

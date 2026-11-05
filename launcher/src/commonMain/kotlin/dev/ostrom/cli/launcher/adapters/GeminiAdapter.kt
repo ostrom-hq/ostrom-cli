@@ -36,10 +36,10 @@ import kotlin.random.nextULong
  * `--pre` script), and it is not started where it would still load a repository's `.gemini/.env`. They say
  * `experimental.extensionConfig: false` too: Gemini otherwise reads the working folder's `.env` as the developer's
  * extensions' settings, whose values replace `${extensionPath}` in those extensions' hooks; the developer's extensions
- * then run without the settings they keep in Gemini (said at launch). And Gemini is not started where a command or an
- * agent of the repository would run its programs ([GeminiProjectFiles]). A team that trusts its repository asks for
- * all of it with `ostrom gemini --trust-project-settings` ([SessionLayout.trustProject]), said before the agent starts:
- * the guarantee is then the variables' pins only.
+ * then run without the settings they keep in Gemini (said at launch). And Gemini is not started where a command of the
+ * repository would run its programs, nor where the repository has an agent ([GeminiProjectFiles]). A team that trusts
+ * its repository asks for all of it with `ostrom gemini --trust-project-settings` ([SessionLayout.trustProject]), said
+ * before the agent starts: the guarantee is then the variables' pins only.
  *
  * @param nonce A value of the session no repository can guess, for the names of Ostrom's hooks.
  */
@@ -266,8 +266,9 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
         const val EXTENSION_CONFIG = "extensionConfig"
         const val TRUSTED = "gemini: --trust-project-settings: Gemini loads this repository's .env and " +
             ".gemini/.env, whose variables can run the repository's programs, reads its .env as your extensions' " +
-            "settings, and runs the shell commands of its commands and the MCP servers of its agents: Ostrom pins " +
-            "the variables it knows of, and does not vouch for its gate in this session"
+            "settings, runs the shell commands of its commands, and loads its agents, with their MCP servers and " +
+            "their remote agents' `auth`: Ostrom pins the variables it knows of, and does not vouch for its gate in " +
+            "this session"
         const val SYSTEM_SETTINGS = "GEMINI_CLI_SYSTEM_SETTINGS_PATH"
         const val SYSTEM_DEFAULTS = "GEMINI_CLI_SYSTEM_DEFAULTS_PATH"
         const val HEX = 16
