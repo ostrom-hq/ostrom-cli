@@ -198,7 +198,14 @@ temporary folder, which environment it gets, the hook dialect (`OSTROM_HOOK_DIAL
    variables of `ProgramVariables` (the shell of the hooks, the loader, git's configuration, the interpreters, the
    proxies) with the launcher's value, else the developer's, else empty; the few that are not unset when empty
    (`GIT_DIR`, `GIT_SSH_COMMAND`, `GIT_CONFIG_GLOBAL`, the editors, `HOME`, `SHELL`…) only to the developer's own
-   value, and the agent must close them another way.
+   value, and the agent must close them another way. Git gets one setting of Ostrom's by the environment
+   (`GIT_CONFIG_COUNT`, after the developer's own pairs): `safe.bareRepository=explicit` (review REVUES-CLI-9). A
+   repository could track a folder that is a repository of its own (`tools/x.git/`, with `core.worktree=..` and
+   `core.fsmonitor` or a `filter.<x>.clean`), whose program ran at the agent's `cd tools/x.git && git status` with the
+   session's environment. With it git uses such a folder only when told so (`--git-dir`, `GIT_DIR`), which the gate
+   sees in the command; a `safe.bareRepository` of the developer's `~/.gitconfig` does not undo it. **What it costs**:
+   in a session, a bare repository of the developer's is used with `git --git-dir=<it>`, not by `cd <it> && git …`;
+   the `.git` folders of a repository, a submodule and a worktree are not concerned (git 2.47).
 
 ### What `ostrom claude` lets a repository configure
 

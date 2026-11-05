@@ -85,11 +85,15 @@ class ClaudeEnvironmentTest {
         ClaudeAdapter().prepare(layout(arguments = listOf("--settings", theirs), variables = developer), files)
         val env = env()
         val emptied = listOf(
-            "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS", "GIT_EXTERNAL_DIFF", "GIT_ASKPASS", "PAGER", "GIT_PAGER",
+            "GIT_CONFIG_PARAMETERS", "GIT_EXTERNAL_DIFF", "GIT_ASKPASS", "PAGER", "GIT_PAGER",
             "XDG_CONFIG_HOME", "PYTHONPATH", "PYTHONSTARTUP", "RUBYOPT", "PERL5OPT", "JAVA_TOOL_OPTIONS",
             "DOTNET_STARTUP_HOOKS", "NODE_EXTRA_CA_CERTS", "NODE_TLS_REJECT_UNAUTHORIZED",
         )
         emptied.forEach { assertEquals(JsonPrimitive(""), env[it], it) }
+        // git reads one pair, Ostrom's, in place of the repository's core.fsmonitor (REVUES-CLI-9)
+        assertEquals(JsonPrimitive("1"), env["GIT_CONFIG_COUNT"])
+        assertEquals(JsonPrimitive("safe.bareRepository"), env["GIT_CONFIG_KEY_0"])
+        assertEquals(JsonPrimitive("explicit"), env["GIT_CONFIG_VALUE_0"])
         assertEquals(JsonPrimitive("ssh -i /home/dev/.ssh/work"), env["GIT_SSH_COMMAND"], "the developer's own")
         assertEquals(JsonPrimitive("vim"), env["EDITOR"])
         // an empty GIT_DIR stops git, an empty GIT_SSH_COMMAND runs nothing: one the developer does not set is never

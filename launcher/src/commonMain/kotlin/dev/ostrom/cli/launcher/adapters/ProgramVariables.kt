@@ -10,6 +10,16 @@ package dev.ostrom.cli.launcher.adapters
  *
  * Each agent adds its own: Gemini's trust, endpoints and sandbox ([GeminiEnvironment]), Claude Code's shell
  * ([ClaudeEnvironment]).
+ *
+ * Git also gets one setting of Ostrom's ([GIT]): `safe.bareRepository=explicit` (review REVUES-CLI-9). A repository
+ * can track a folder git takes for a repository of its own (`tools/x.git/` with `HEAD`, `config`, `objects`), whose
+ * `config` names its worktree (`core.worktree=..`) and a program (`core.fsmonitor`, or a `filter.<x>.clean` of the
+ * `.gitattributes` beside it): the agent's `cd tools/x.git && git status`, which the gate lets through, ran that
+ * program with the session's environment, the relay's token included (probed on Claude Code 2.1.318 and Gemini CLI
+ * 0.66). With that setting git uses no such folder it finds by itself, only one named by `--git-dir` or `GIT_DIR`; the
+ * `.git` folder of a repository, of a submodule (`.git/modules`) and of a worktree (`.git/worktrees`) are not
+ * concerned, and a repository cannot track a `.git` of its own. Git reads the setting in the environment's
+ * configuration, after the system's and the developer's, so a `safe.bareRepository` of theirs does not undo it.
  */
 internal object ProgramVariables {
     /**
@@ -69,7 +79,8 @@ internal object ProgramVariables {
         "no_proxy",
         "NODE_TLS_REJECT_UNAUTHORIZED",
         "NODE_EXTRA_CA_CERTS",
-        // git's configuration and the programs it runs (an empty one is checked to change nothing, git 2.47)
+        // git's configuration and the programs it runs (an empty one is checked to change nothing, git 2.47); the count
+        // is then written with Ostrom's own setting ([GIT])
         "GIT_CONFIG_COUNT",
         "GIT_CONFIG_PARAMETERS",
         "GIT_CONFIG_NOSYSTEM",
@@ -120,7 +131,7 @@ internal object ProgramVariables {
 
     /**
      * Each of [names] and each of [kept] the launcher sets or the developer has: the launcher's value (empty for one it
-     * removes), else the developer's, else empty.
+     * removes), else the developer's, else empty; then git's configuration, which ends with [GIT].
      *
      * @param set The variables the launcher and the adapter set (a value) or remove (null).
      * @param kept The names not unset when empty: [KEPT], and an agent's own.
@@ -130,8 +141,34 @@ internal object ProgramVariables {
         set: Map<String, String?>,
         kept: List<String> = KEPT,
         variable: (String) -> String?,
-    ) =
-        (names + kept.filter { it in set || variable(it) != null }).associateWith { name ->
-            if (name in set) set[name].orEmpty() else variable(name).orEmpty()
-        }
+    ): Map<String, String> {
+        val value = { name: String -> if (name in set) set[name].orEmpty() else variable(name).orEmpty() }
+        return (names + kept.filter { it in set || variable(it) != null }).associateWith(value) + git(value)
+    }
+
+    /**
+     * Git's configuration from the environment (`GIT_CONFIG_COUNT`, then `GIT_CONFIG_KEY_<i>` and
+     * `GIT_CONFIG_VALUE_<i>` from 0, the last value of a key winning): the developer's pairs as they are, then [GIT].
+     * A pair they count but do not set is pinned empty, not left to a repository's settings. A count git cannot read
+     * (not a decimal number, or more than [MOST] pairs, which no one sets by hand) is read as none: git would stop on
+     * it, so the configuration is written anew with [GIT] alone. Gemini CLI 0.66 adds its own pairs after these.
+     */
+    private fun git(read: (String) -> String): Map<String, String> {
+        val count = read(COUNT).takeIf { it.isNotEmpty() && it.all { digit -> digit in '0'..'9' } }?.toIntOrNull()
+            ?.takeIf { it <= MOST } ?: 0
+        val developers = (0 until count).flatMap { listOf(keyOf(it), valueOf(it)) }.associateWith(read)
+        return developers + mapOf(COUNT to "${count + 1}", keyOf(count) to GIT.first, valueOf(count) to GIT.second)
+    }
+
+    private fun keyOf(index: Int) = "GIT_CONFIG_KEY_$index"
+
+    private fun valueOf(index: Int) = "GIT_CONFIG_VALUE_$index"
+
+    /** Git uses no repository it finds by itself in a folder that is one (a bare repository): see the type's KDoc. */
+    val GIT = "safe.bareRepository" to "explicit"
+
+    private const val COUNT = "GIT_CONFIG_COUNT"
+
+    // the most configuration pairs of the developer's that are kept
+    private const val MOST = 1000
 }

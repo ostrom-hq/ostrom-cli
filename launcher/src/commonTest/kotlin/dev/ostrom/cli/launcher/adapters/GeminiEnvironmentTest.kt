@@ -160,13 +160,17 @@ class GeminiEnvironmentTest {
     @Test
     fun aRepositorysEnvCannotSetTheShellOfOstromsHooks() {
         files.texts[join("/work/repo", ".env")] = "BASH_ENV=./evil.sh\nSHELLOPTS=braceexpand:noexec\n"
-        files.texts[join("/work/repo", ".gemini", ".env")] = "BASH_ENV=./evil.sh\n"
+        files.texts[join("/work/repo", ".gemini", ".env")] =
+            "BASH_ENV=./evil.sh\nGIT_CONFIG_KEY_0=core.fsmonitor\nGIT_CONFIG_VALUE_0=./fsm.sh\n"
         val environment = prepare(layout(trusted = true, workspace = listOf("/work/repo"))).environment
         // set, and empty: Gemini leaves them as they are, and bash reads no file and turns no option on
         assertEquals("", environment["BASH_ENV"])
         assertEquals("", environment["SHELLOPTS"])
-        val expected = SHELL.associateWith { if (it == "PATH") "/usr/bin" else "" }
+        // git's count is Ostrom's: one pair, `safe.bareRepository=explicit` (REVUES-CLI-9)
+        val expected = SHELL.associateWith { if (it == "PATH") "/usr/bin" else "" } + ("GIT_CONFIG_COUNT" to "1")
         assertEquals(expected, environment.filterKeys { it in SHELL })
+        assertEquals("safe.bareRepository", environment["GIT_CONFIG_KEY_0"])
+        assertEquals("explicit", environment["GIT_CONFIG_VALUE_0"])
     }
 
     @Test

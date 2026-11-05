@@ -99,7 +99,7 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
             val directory = join(folder, ".gemini")
             // in their home, Gemini reads the developer's own settings as the workspace's (its home is the session's)
             val own = directory == real
-            if (!own) refuseLink(files, folder, directory)
+            if (!own) refuseLink(files, folder, layout.foldsCase)
             val path = join(directory, "settings.json")
             val text = files.read(path)?.removePrefix(BOM)
             if (text.isNullOrBlank()) continue
@@ -119,11 +119,15 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
         }
     }
 
-    /** A repository's `.gemini` must be a folder: through a link, what Gemini reads may not be what Ostrom read. */
-    private fun refuseLink(files: LaunchFiles, folder: String, directory: String) {
-        if (".gemini" !in files.list(folder)) return
+    /**
+     * A repository's `.gemini` must be a folder: through a link, what Gemini reads may not be what Ostrom read. Its
+     * name is matched as this machine matches paths: `.GEMINI` is Gemini's folder on macOS and Windows.
+     */
+    private fun refuseLink(files: LaunchFiles, folder: String, foldsCase: Boolean) {
+        val name = files.list(folder).firstOrNull { it.equals(".gemini", ignoreCase = foldsCase) } ?: return
+        val directory = join(folder, name)
         val target = files.canonical(directory)
-        if (target != join(files.canonical(folder), ".gemini")) {
+        if (!target.equals(join(files.canonical(folder), name), ignoreCase = foldsCase)) {
             throw AdapterException(
                 "gemini: $directory is a link (to $target), so what Gemini reads there may not be what Ostrom " +
                     "checked: Gemini is not started. Make it a folder to work with Ostrom",

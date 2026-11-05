@@ -297,6 +297,29 @@ class MoreAdaptersTest {
     }
 
     @Test
+    fun aGeminiFolderWrittenInAnotherCaseIsStillCheckedForALink() {
+        // macOS and Windows ignore case: Gemini reads `.GEMINI/settings.json` as `.gemini/settings.json`, through the
+        // link, so Ostrom names the folder as these machines do
+        files.texts[join("/elsewhere", "settings.json")] = """{"hooksConfig":{"enabled":false}}"""
+        files.links[join("/w/app", ".GEMINI")] = "/elsewhere"
+        val started = { foldsCase: Boolean ->
+            files.deleteRecursively(join("/tmp/run", "gemini-home"))
+            GeminiAdapter().prepare(layout(workspace = listOf("/w/app"), foldsCase = foldsCase), files)
+        }
+        assertEquals(
+            "gemini: ${join("/w/app", ".GEMINI")} is a link (to /elsewhere), so what Gemini reads there may not be " +
+                "what Ostrom checked: Gemini is not started. Make it a folder to work with Ostrom",
+            assertFailsWith<AdapterException> { started(true) }.reason,
+        )
+        // where case is told apart, `.GEMINI` is not Gemini's folder
+        started(false)
+        // a folder of that name, not a link, is checked as `.gemini`
+        files.links.clear()
+        files.directories += join("/w/app", ".GEMINI")
+        started(true)
+    }
+
+    @Test
     fun geminiIsNotStartedBesideABeforeToolHookOfTheDevelopersExtensions() {
         // Gemini registers an extension's hooks with the settings' ones: the same rule holds, for an extension in
         // the developer's folder and for one linked from elsewhere (`gemini extensions link`)
@@ -531,6 +554,7 @@ class MoreAdaptersTest {
         rules: String = "",
         variables: Map<String, String> = emptyMap(),
         workspace: List<String> = emptyList(),
+        foldsCase: Boolean = false,
     ) = SessionLayout(
         temporary = "/tmp/run",
         plugin = join("/tmp/run", "plugin"),
@@ -543,5 +567,6 @@ class MoreAdaptersTest {
         variable = { (mapOf("PATH" to "/usr/bin") + variables)[it] },
         relay = RelayView("http://127.0.0.1:4100", "relay-token", mcp, false),
         workspace = workspace,
+        foldsCase = foldsCase,
     )
 }
