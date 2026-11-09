@@ -45,9 +45,10 @@ class AgentOrgTest : SetupKit() {
 
     @Test
     fun aCloudSessionActsInTheOrganisationNamedToo() {
-        assertEquals(5, run(both, "claude", "--cloud", "--org", "beta"))
+        val cloud = both + capabilities("runners.cloud.v1")
+        assertEquals(5, run(cloud, "claude", "--cloud", "--org", "beta"))
         assertEquals(CloudSite("https://ostrom.example", "ost_1", "/work/acme", "o2"), clouds.single().second)
-        assertEquals(6, run(both, "attach", "cs1", environment = withServer + ("OSTROM_ORG" to "acme")))
+        assertEquals(6, run(cloud, "attach", "cs1", environment = withServer + ("OSTROM_ORG" to "acme")))
         assertEquals(CloudSite("https://ostrom.example", "ost_1", "/work/acme", "o1"), attached.single().second)
     }
 }
