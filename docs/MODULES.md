@@ -106,7 +106,7 @@ started.
 | 64 | `USAGE` | Bad usage: an unknown command, option or agent, an option not in this version, a question with no terminal. |
 | 65 | `SIGN_IN_REQUIRED` | Sign-in required: run ostrom login. |
 | 66 | `NOT_FOUND` | Not found: a receipt, a gate, a harness, or not a git repository. |
-| 69 | `UNREACHABLE` | The server is unreachable, or the secret store did not answer. |
+| 69 | `UNREACHABLE` | The server is unreachable, does not serve this or speaks another API, or the secret store did not answer. |
 | 70 | `NOT_IMPLEMENTED` | The command is not implemented in this version yet. |
 | 73 | `CANNOT_WRITE` | A local file could not be written. |
 | 75 | `STILL_WAITING` | Still waiting: wait reached its deadline, or nobody confirmed a governance change in time. |

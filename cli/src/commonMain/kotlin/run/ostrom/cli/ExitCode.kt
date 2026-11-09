@@ -30,8 +30,11 @@ enum class ExitCode(val code: Int, val meaning: String) {
     /** Not found: receipt, gate, harness, not a git repository. */
     NOT_FOUND(66, "Not found: a receipt, a gate, a harness, or not a git repository."),
 
-    /** The server is unreachable. */
-    UNREACHABLE(69, "The server is unreachable, or the secret store did not answer."),
+    /** The server is unreachable, does not serve what was asked, or speaks an API this ostrom does not. */
+    UNREACHABLE(
+        69,
+        "The server is unreachable, does not serve this or speaks another API, or the secret store did not answer.",
+    ),
 
     /** The command is not implemented yet in this version (EX_SOFTWARE); disappears as commands land. */
     NOT_IMPLEMENTED(70, "The command is not implemented in this version yet."),

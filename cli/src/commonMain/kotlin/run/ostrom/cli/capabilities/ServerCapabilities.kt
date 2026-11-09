@@ -19,7 +19,7 @@ sealed interface CapabilitiesRead {
 
     /**
      * The server answered 404: an Ostrom server from before the capabilities route (only development builds of
-     * November 2026 are), which cannot say what it speaks.
+     * November 2026 are), too old for this ostrom ([tooOld]).
      */
     data object Unknown : CapabilitiesRead
 
@@ -116,6 +116,17 @@ internal fun incompatibility(serverUrl: String, capabilities: Capabilities, vers
     return "$serverUrl speaks the Ostrom API v${capabilities.apiVersion} ($server), and ostrom $version speaks " +
         "$spoken: $advice"
 }
+
+/**
+ * What this ostrom says of a server from before the capabilities route (404), which it refuses as the app and the
+ * console do.
+ *
+ * @param serverUrl The server, as the developer named it.
+ * @param version This ostrom's version.
+ */
+internal fun tooOld(serverUrl: String, version: String): String =
+    "$serverUrl is too old for ostrom $version (it does not say which Ostrom API it speaks): " +
+        "ask your admin to update the server."
 
 /** A server's version as it may be printed: never an escape sequence nor a line of its own. */
 internal fun shown(version: String): String = if (PRINTABLE.matches(version)) version else "?"
