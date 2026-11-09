@@ -1,4 +1,4 @@
-package = dev.ostrom.cli.platform.vault
+package = run.ostrom.cli.platform.vault
 linkerOpts = -framework Security -framework CoreFoundation
 ---
 #include <CoreFoundation/CoreFoundation.h>

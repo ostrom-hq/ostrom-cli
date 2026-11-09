@@ -1,4 +1,4 @@
-package = dev.ostrom.cli.api.interop.tlsexit
+package = run.ostrom.cli.api.interop.tlsexit
 ---
 #include <stddef.h>
 #include <stdint.h>

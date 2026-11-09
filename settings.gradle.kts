@@ -21,7 +21,7 @@ dependencyResolutionManagement {
                 username = providers.gradleProperty("gpr.user").orElse(providers.environmentVariable("GITHUB_ACTOR")).orNull
                 password = providers.gradleProperty("gpr.key").orElse(providers.environmentVariable("GITHUB_TOKEN")).orNull
             }
-            content { includeGroup("dev.ostrom") }
+            content { includeGroup("run.ostrom") }
         }
     }
 }
@@ -34,7 +34,7 @@ if (providers.gradleProperty("ostrom.core.local").orNull == "true") {
     includeBuild("../ostrom-core") {
         dependencySubstitution {
             for (module in listOf("api", "receipts", "telemetry")) {
-                substitute(module("dev.ostrom:ostrom-$module")).using(project(":$module"))
+                substitute(module("run.ostrom:ostrom-$module")).using(project(":$module"))
             }
         }
     }

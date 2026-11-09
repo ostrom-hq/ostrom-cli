@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-package = dev.ostrom.cli.relay.interop.tlsexit
+package = run.ostrom.cli.relay.interop.tlsexit
 ---
 #include <stddef.h>
 #include <stdint.h>

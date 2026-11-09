@@ -9,13 +9,13 @@ all Ostrom repositories are in `ostrom-core/docs/CONVENTIONS.md`; this page only
 
 | Module | Package | Holds | Depends on |
 | --- | --- | --- | --- |
-| `platform` | `dev.ostrom.cli.platform` | everything that touches the OS: processes sharing the terminal, stdin with a deadline, unbuffered stdout/stderr, environment, files, `config.toml`, PATH lookup | okio |
-| `hooks` | `dev.ostrom.cli.hooks` | `ostrom hook gate\|session`: event parsing (all agents' dialects), the gate, the reply; `ostrom wait` (`GateWait`) | `platform` |
-| `api-client` | `dev.ostrom.cli.api` | the server over HTTPS (Ktor, platform engine) | ostrom-core `api` |
-| `launcher` | `dev.ostrom.cli.launcher` | the agents (`Agent`) and starting one in this terminal | `platform` |
-| `mcp` | `dev.ostrom.cli.mcp` | the local MCP server on stdio (`ostrom mcp`) | `platform` |
-| `relay` | `dev.ostrom.cli.relay` | the launch's local relay on `127.0.0.1` (Ktor CIO): hooks, MCP and inference reach Ostrom through it | `platform` |
-| `cli` | `dev.ostrom.cli` | the command tree (Clikt), `main`, the wiring (`CliDependencies`), the executable | all of the above |
+| `platform` | `run.ostrom.cli.platform` | everything that touches the OS: processes sharing the terminal, stdin with a deadline, unbuffered stdout/stderr, environment, files, `config.toml`, PATH lookup | okio |
+| `hooks` | `run.ostrom.cli.hooks` | `ostrom hook gate\|session`: event parsing (all agents' dialects), the gate, the reply; `ostrom wait` (`GateWait`) | `platform` |
+| `api-client` | `run.ostrom.cli.api` | the server over HTTPS (Ktor, platform engine) | ostrom-core `api` |
+| `launcher` | `run.ostrom.cli.launcher` | the agents (`Agent`) and starting one in this terminal | `platform` |
+| `mcp` | `run.ostrom.cli.mcp` | the local MCP server on stdio (`ostrom mcp`) | `platform` |
+| `relay` | `run.ostrom.cli.relay` | the launch's local relay on `127.0.0.1` (Ktor CIO): hooks, MCP and inference reach Ostrom through it | `platform` |
+| `cli` | `run.ostrom.cli` | the command tree (Clikt), `main`, the wiring (`CliDependencies`), the executable | all of the above |
 
 Rules that keep the binary fast and the modules apart:
 
@@ -333,7 +333,7 @@ to the hooks, the binary reads `OSTROM_URL` (server), `OSTROM_HOME` (the CLI fol
 
 ## Import from TeamCode
 
-`ostrom import teamcode` (package `dev.ostrom.cli.imports` of `cli`) reads one TeamCode team with the `mysql` client
+`ostrom import teamcode` (package `run.ostrom.cli.imports` of `cli`) reads one TeamCode team with the `mysql` client
 (`ProcessCapture`, one `START TRANSACTION READ ONLY`, the password in `MYSQL_PWD`, never on the command line), opens
 TeamCode's credential envelopes with its key file (`aesGcmOpen` of `launcher`: AES-256-GCM, `v1:` then base64url of
 nonce, ciphertext and tag, bound to `variant:<team>:<id>[:<member>]` or `<team>:<account>`), maps the members to
@@ -375,7 +375,7 @@ nothing anywhere else.
 
 ## ostrom-core
 
-`api-client` depends on `dev.ostrom:ostrom-api` (the API models of ostrom-core, `OstromJson`, `ApiError`). The version
+`api-client` depends on `run.ostrom:ostrom-api` (the API models of ostrom-core, `OstromJson`, `ApiError`). The version
 is `ostromCoreVersion` in `gradle.properties`, and `gradle/ostrom-core.ref` is the ostrom-core commit that published it:
 change both together.
 

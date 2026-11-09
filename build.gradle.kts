@@ -10,6 +10,6 @@ require(Regex("""\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?""").matches(ostromVersion)) {
 }
 
 allprojects {
-    group = "dev.ostrom"
+    group = "run.ostrom"
     version = ostromVersion
 }
