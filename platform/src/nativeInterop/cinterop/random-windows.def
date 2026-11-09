@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-package = dev.ostrom.cli.platform.interop.random
+package = run.ostrom.cli.platform.interop.random
 linkerOpts = -lbcrypt
 ---
 #include <windows.h>

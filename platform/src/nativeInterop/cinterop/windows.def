@@ -1,4 +1,4 @@
-package = dev.ostrom.cli.platform.interop
+package = run.ostrom.cli.platform.interop
 linkerOpts = -lkernel32 -ladvapi32 -lws2_32
 ---
 #ifndef _WIN32_WINNT
