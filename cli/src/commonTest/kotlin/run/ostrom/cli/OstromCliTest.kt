@@ -726,7 +726,14 @@ class OstromCliTest : CliKit() {
 
                 override suspend fun attach(id: String, site: CloudSite) = 0
             },
-            selfUpdate = SelfUpdate({ _, _ -> Download.Missing(404) }, fileSystem, { _, _ -> false }, {}, noSessions),
+            selfUpdate = SelfUpdate(
+                { _, _ -> Download.Missing(404) },
+                fileSystem,
+                { _, _ -> false },
+                {},
+                noSessions,
+                { _, _, _ -> false },
+            ),
             stderrIsTerminal = { false },
             postHogKey = "",
             sendStatistics = { _, _ -> },
