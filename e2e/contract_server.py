@@ -155,6 +155,12 @@ def make_handler(state):
             if (method, path) == ("GET", "/api/v1/inference/v1/models"):
                 return self._error(404, "not_found", "no gateway")
             # the routes the developer's own commands call (e2e/commands.py): doctor, inbox, receipts, logout
+            # what the server speaks and serves, with any credential (`ostrom doctor`, login, update)
+            if (method, path) == ("GET", "/api/v1/capabilities"):
+                if not (device or agent):
+                    return self._error(401, "unauthorized", "sign in first")
+                return self._answer(200, {"apiVersion": 1, "serverVersion": SERVER_VERSION,
+                                          "features": ["receipts.v1", "sessions.v1", "packages.v1", "gates.v1"]})
             if (method, path) == ("GET", "/api/v1/health"):
                 return self._answer(200, {"status": "ok", "version": SERVER_VERSION, "checks": {"database": "ok"}})
             if (method, path) in (("GET", "/api/v1/approvals"), ("GET", "/api/v1/receipts")) and device:

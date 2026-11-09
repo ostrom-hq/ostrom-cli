@@ -12,6 +12,7 @@ import run.ostrom.cli.CliDependencies
 import run.ostrom.cli.ExitCode
 import run.ostrom.cli.platform.Environment
 import run.ostrom.cli.platform.OperatingSystem
+import run.ostrom.cli.update.ServerApiVersion
 import run.ostrom.cli.update.UpdateRequest
 import kotlinx.coroutines.runBlocking
 
@@ -49,8 +50,21 @@ internal class UpdateCommand(private val dependencies: CliDependencies) : CliktC
             notice.record(runBlocking { updates.latest(request) })
             throw ProgramResult(ExitCode.OK.code)
         }
-        val code = runBlocking { if (rollback) updates.rollback(request) else updates.update(request) }
+        val code = runBlocking {
+            if (rollback) updates.rollback(request, ::serverApiVersion) else updates.update(request, ::serverApiVersion)
+        }
         throw ProgramResult(code)
+    }
+
+    /** The API version of the server this device is signed in to, which the binary to put in place must speak. */
+    private suspend fun serverApiVersion(): Int {
+        val signedIn = dependencies.environment.configDirectory?.let { directory ->
+            val serverUrl = dependencies.serverOf(null, directory)
+            // the device's token never travels in clear, not even for this read
+            serverUrl to dependencies.credentials(directory).load(serverUrl)?.token?.takeUnless { inClear(serverUrl) }
+        }
+        val read = ServerApiVersion(dependencies.capabilities) { dependencies.console.out("$it\n") }
+        return read(signedIn?.first, signedIn?.second)
     }
 }
 

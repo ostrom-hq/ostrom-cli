@@ -128,7 +128,10 @@ floor, cannot lower it. A signed expiry date of the manifest, to refuse a replay
 2. verify the signature with the public key below, and refuse to go on if it fails;
 3. compare `version` with its own (never move to an older or equal version unless asked, and never below the latest
    release's `floor`);
-4. download `assets[<its target>].url`, check `size` and `sha256`, unpack, replace the binary atomically.
+4. download `assets[<its target>].url`, check `size` and `sha256`, unpack;
+5. run the unpacked binary with `--ostrom-installation-probe <version> <apiVersion>` (the API version of the server
+   the device is signed in to, else its own) and refuse it unless it exits 0 ([COMPATIBILITY.md](COMPATIBILITY.md));
+6. replace the binary atomically.
 
 **Ed25519 public key to embed in the CLI** (SPKI DER, base64; the private half is the organisation secret
 `RELEASE_SIGNING_KEY`, PEM PKCS#8):

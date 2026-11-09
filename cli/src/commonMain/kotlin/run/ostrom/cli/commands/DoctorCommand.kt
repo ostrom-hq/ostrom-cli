@@ -34,6 +34,12 @@ class DoctorCommand(private val dependencies: CliDependencies) : CliktCommand(na
             api = dependencies.api,
             contractVersion = BuildInfo.CONTRACT_VERSION,
             secrets = dependencies.secrets,
+            // the device's token never travels in clear, not even for the doctor's read of the server's API
+            credentials = { url ->
+                dependencies.environment.configDirectory?.takeUnless { inClear(url) }
+                    ?.let { dependencies.credentials(it).load(url) }
+            },
+            capabilities = dependencies.capabilities,
         )
         val checks = runBlocking { doctor() }
         val problems = checks.count { it.status == CheckStatus.PROBLEM }

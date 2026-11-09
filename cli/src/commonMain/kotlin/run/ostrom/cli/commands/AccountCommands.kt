@@ -7,8 +7,11 @@ import com.github.ajalt.clikt.core.PrintMessage
 import com.github.ajalt.clikt.core.ProgramResult
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
+import run.ostrom.cli.BuildInfo
 import run.ostrom.cli.CliDependencies
 import run.ostrom.cli.ExitCode
+import run.ostrom.cli.capabilities.CapabilitiesRead
+import run.ostrom.cli.capabilities.incompatibility
 import run.ostrom.cli.launch.ApiServerTransport
 import run.ostrom.cli.launcher.CredentialStore
 import run.ostrom.cli.launcher.LaunchVariables
@@ -108,8 +111,33 @@ internal class LoginCommand(private val dependencies: CliDependencies) : CliktCo
         }
         when (val outcome = runBlocking { login.signIn(serverUrl, scopes) }) {
             is LoginOutcome.Stopped -> throw PrintMessage(outcome.message, outcome.exitCode, printError = true)
-            is LoginOutcome.SignedIn ->
+            is LoginOutcome.SignedIn -> {
+                runBlocking { checkServer(serverUrl, outcome.credentials.token) }
                 if (admin) keepAdmin(directory, serverUrl, outcome) else keepDevice(directory, serverUrl, outcome)
+            }
+        }
+    }
+
+    /**
+     * Reads what [serverUrl] speaks with the new [token] before anything is kept (as TeamCode's login): a server whose
+     * API this ostrom does not speak, or whose capabilities cannot be read, gets the token revoked and nothing is
+     * kept. A server from before the capabilities route (404, development builds of November 2026 only) is signed in
+     * to with a warning: refusing it would sign nobody in to the servers built before ostrom-server served it.
+     */
+    private suspend fun checkServer(serverUrl: String, token: String) {
+        val refusal = when (val read = dependencies.capabilities.read(serverUrl, token)) {
+            is CapabilitiesRead.Read -> incompatibility(serverUrl, read.capabilities, BuildInfo.VERSION)
+            is CapabilitiesRead.Failed ->
+                "$serverUrl did not say which Ostrom API it speaks (${read.reason}). Run ostrom login again."
+            CapabilitiesRead.Unknown -> null.also {
+                dependencies.console.err("! $serverUrl does not say which Ostrom API it speaks: it is older than " +
+                    "this ostrom. Ask your admin to update it.\n")
+            }
+        }
+        if (refusal != null) {
+            // the token is of no use here: the server is told, so that it does not stay open on it
+            signedOut(serverUrl, token)
+            throw PrintMessage("ostrom: $refusal Nothing was kept.", ExitCode.UNREACHABLE.code, printError = true)
         }
     }
 

@@ -3,7 +3,12 @@ package run.ostrom.cli.doctor
 
 import run.ostrom.cli.api.OstromApi
 import run.ostrom.cli.api.ServerUnreachableException
+import run.ostrom.cli.capabilities.CapabilitiesRead
+import run.ostrom.cli.capabilities.ServerCapabilities
+import run.ostrom.cli.capabilities.incompatibility
+import run.ostrom.cli.capabilities.shown
 import run.ostrom.cli.launcher.Agent
+import run.ostrom.cli.launcher.Credentials
 import run.ostrom.cli.platform.ConfigKey
 import run.ostrom.cli.platform.ConfigStore
 import run.ostrom.cli.platform.Environment
@@ -40,6 +45,8 @@ interface RunDoctorUseCase {
  * @param api Builds the client of a server URL.
  * @param contractVersion `info.version` of the API contract this build speaks, blank when unknown.
  * @param secrets Opens the secret store, where the device token is kept.
+ * @param credentials The credentials this device holds for a server URL (no trailing slash), or null.
+ * @param capabilities What a server speaks, read with those credentials once the server is reachable.
  */
 @Suppress("LongParameterList") // Each check reads one dependency; grouping them would only hide which.
 class RunDoctorUseCaseImpl(
@@ -52,19 +59,73 @@ class RunDoctorUseCaseImpl(
     private val api: (String) -> OstromApi,
     private val contractVersion: String,
     private val secrets: () -> SecretStore,
+    private val credentials: (String) -> Credentials?,
+    private val capabilities: ServerCapabilities,
 ) : RunDoctorUseCase {
-    override suspend fun invoke(): List<DoctorCheck> = listOf(
-        DoctorCheck(
-            CheckStatus.OK,
-            "ostrom $version · ${environment.operatingSystem.displayName} ${environment.architecture}",
-        ),
-        configFolder(),
-        secretStore(),
-        DoctorCheck(CheckStatus.WARNING, "Not signed in. Run ostrom login."),
-        server(),
-        git(),
-        agents(),
-    )
+    override suspend fun invoke(): List<DoctorCheck> {
+        val url = environment["OSTROM_URL"] ?: config?.get(ConfigKey.SERVER)
+        val signedIn = url?.let { signedIn(it.trimEnd('/')) }
+        val server = server(url)
+        // the API the server speaks, once it answers as an Ostrom server and this device can sign the read
+        val spoken = if (url != null && signedIn != null && server.status != CheckStatus.PROBLEM) {
+            apiCheck(url, signedIn.token)
+        } else {
+            null
+        }
+        return listOfNotNull(
+            DoctorCheck(
+                CheckStatus.OK,
+                "ostrom $version · ${environment.operatingSystem.displayName} ${environment.architecture}",
+            ),
+            configFolder(),
+            secretStore(),
+            signedIn?.let { DoctorCheck(CheckStatus.OK, "Signed in as @${it.login}") }
+                ?: DoctorCheck(CheckStatus.WARNING, "Not signed in. Run ostrom login."),
+            server,
+            spoken,
+            git(),
+            agents(),
+        )
+    }
+
+    /** The credentials of [url]; a secret store that does not answer is said by its own line. */
+    private fun signedIn(url: String): Credentials? = try {
+        credentials(url)
+    } catch (_: SecretStoreException) {
+        null
+    }
+
+    /** Whether this ostrom speaks the server's API: a server it does not speak is a problem, not a warning. */
+    private suspend fun apiCheck(url: String, token: String): DoctorCheck {
+        val host = hostOf(url)
+        return when (val read = capabilities.read(url.trimEnd('/'), token)) {
+            is CapabilitiesRead.Read -> {
+                val spoken = read.capabilities
+                incompatibility(host, spoken, version)?.let { DoctorCheck(CheckStatus.PROBLEM, it) }
+                    ?: DoctorCheck(
+                        CheckStatus.OK,
+                        "$host speaks the Ostrom API v${spoken.apiVersion}, as this ostrom does " +
+                            "(Ostrom ${shown(spoken.serverVersion)})",
+                    )
+            }
+            CapabilitiesRead.Unknown -> DoctorCheck(
+                CheckStatus.WARNING,
+                "$host does not say which Ostrom API it speaks: it is older than this ostrom. " +
+                    "Ask your admin to update it.",
+            )
+            is CapabilitiesRead.Failed -> {
+                val why = read.status?.let { "HTTP $it" } ?: "unreachable"
+                DoctorCheck(
+                    CheckStatus.WARNING,
+                    if (read.status == UNAUTHORIZED) {
+                        "$host refused this device's token: run ostrom login."
+                    } else {
+                        "$host did not say which Ostrom API it speaks ($why)."
+                    },
+                )
+            }
+        }
+    }
 
     private fun configFolder(): DoctorCheck {
         val directory = configDirectory ?: return DoctorCheck(CheckStatus.PROBLEM, NO_HOME)
@@ -90,10 +151,9 @@ class RunDoctorUseCaseImpl(
         DoctorCheck(CheckStatus.PROBLEM, e.message)
     }
 
-    private suspend fun server(): DoctorCheck {
-        val url = environment["OSTROM_URL"] ?: config?.get(ConfigKey.SERVER)
-            ?: return DoctorCheck(CheckStatus.WARNING, "No server yet: ostrom login sets it.")
-        val host = url.substringAfter("://").substringBefore('/')
+    private suspend fun server(url: String?): DoctorCheck {
+        if (url == null) return DoctorCheck(CheckStatus.WARNING, "No server yet: ostrom login sets it.")
+        val host = hostOf(url)
         return try {
             healthCheck(host, url, api(url).use { it.get(HEALTH_ROUTE) }, contractVersion)
         } catch (_: ServerUnreachableException) {
@@ -119,6 +179,11 @@ class RunDoctorUseCaseImpl(
         return DoctorCheck(CheckStatus.OK, "Agents found: ${found.joinToString(", ") { it.command }}")
     }
 }
+
+/** The host of a server URL, as the doctor names it. */
+private fun hostOf(url: String) = url.substringAfter("://").substringBefore('/')
+
+private const val UNAUTHORIZED = 401
 
 /** The liveness route of the API contract (ostrom-core `api/openapi.yaml`), which the doctor probes. */
 internal const val HEALTH_ROUTE = "/api/v1/health"

@@ -7,13 +7,18 @@ import run.ostrom.cli.hooks.runtime.HookReplies
 import run.ostrom.cli.platform.ConsoleImpl
 import run.ostrom.cli.platform.EnvironmentImpl
 import run.ostrom.cli.platform.exitOnCrash
+import run.ostrom.cli.update.installationProbeExit
+import run.ostrom.core.api.models.ServerFeatures
 import kotlin.system.exitProcess
 
 /**
- * Entry point of `ostrom`. `ostrom hook …` is answered before anything else is built: agents call it before every
- * tool, so its start-up time is the CLI's most visible cost. Its help, asked by a person, goes through the tree.
+ * Entry point of `ostrom`. The installation probe of `ostrom update` is answered first, then `ostrom hook …`, before
+ * anything else is built: agents call it before every tool, so its start-up time is the CLI's most visible cost. Its
+ * help, asked by a person, goes through the tree.
  */
 fun main(args: Array<String>) {
+    // `ostrom update` asks a new binary, before putting it in place, whether it runs here as that version and API
+    installationProbeExit(args.asList(), BuildInfo.VERSION, ServerFeatures.SUPPORTED_API_VERSIONS)?.let(::exitProcess)
     if (args.firstOrNull() == "hook" && args.getOrNull(1) !in HELP) {
         val environment = EnvironmentImpl()
         if (args.getOrNull(1) == HookKind.GATE.command) {
