@@ -1,7 +1,7 @@
 # Server compatibility
 
-An Ostrom server says what it speaks and serves in its capabilities (operation `capabilities` of ostrom-core's
-contract, read with any credential): `apiVersion`, the version of the `/api/v1` contract it speaks, which changes only
+An Ostrom server says what it speaks and serves in its capabilities (`GET /api/v1/capabilities`, operation
+`capabilities` of ostrom-core's contract, read with any signed-in credential): `apiVersion`, the version of the `/api/v1` contract it speaks, which changes only
 on a breaking change; `serverVersion`, its release; and `features`, the keys of the optional features it serves and
 has configured (`runners.cloud.v1`, `import.teamcode.v1`, `billing.v1`…, `ServerFeatures` in ostrom-core). This
 ostrom speaks the API versions of the ostrom-core it is built on (`ServerFeatures.SUPPORTED_API_VERSIONS`: v1 today).
@@ -19,19 +19,18 @@ reads the capabilities with that token:
 | --- | --- |
 | speaks an API this ostrom speaks | keeps the token and the server, as before |
 | speaks another API | keeps nothing, revokes the new token, exits 69 naming both API versions and the side to update (`ostrom update` when the server is newer, the server when it is older) |
+| has no capabilities (404) | keeps nothing, revokes the new token, exits 69: the server is too old for this ostrom, ask your admin to update it |
 | fails to answer them (5xx, unreachable) | keeps nothing, revokes the new token, exits 69: run `ostrom login` again |
-| has no capabilities (404) | signs in, with a warning: the server is older than this ostrom, ask your admin to update it |
 
-A server without capabilities is a development build of ostrom-server from before it served them (November 2026); no
-release lacks them. Refusing it would sign nobody in to those servers, the end-to-end journey's server included, so
-it is a warning until they are gone.
+A server without capabilities is a development build of ostrom-server from before it served them (ostrom-server#364,
+November 2026); no release lacks them. The app and the web console refuse it the same way.
 
 ## `ostrom doctor`
 
 Signed in to a server that answers its health route, the doctor reads its capabilities with the device's token and
-says which API it speaks: ✓ when this ostrom speaks it, ✗ (an error, exit 1) when it does not, with the side to
-update; ! for a server without capabilities, one that refused the token (run `ostrom login`), or one that failed to
-answer. The doctor's sign-in line now says who is signed in. The token is never sent to a server in clear (`http://`
+says which API it speaks: ✓ when this ostrom speaks it; ✗ (an error, exit 1) when it does not, with the side to
+update, or when it has no capabilities (too old); ! for one that refused the token (run `ostrom login`), or one that
+failed to answer. The doctor's sign-in line now says who is signed in. The token is never sent to a server in clear (`http://`
 other than this machine).
 
 ## `ostrom update`
@@ -59,8 +58,9 @@ another API:
 | `ostrom claude --cloud` (any agent), `ostrom attach` | `runners.cloud.v1` | This Ostrom server runs no cloud session: start the agent here, without --cloud. |
 | `ostrom import teamcode` | `import.teamcode.v1` | This Ostrom server does not import TeamCode teams: ask your admin to update it. |
 
-A server without capabilities, or one that fails to answer them, lets the command go on: the feature's own route
-answers, in the command's words. A server that cannot be reached stops it at once (exit 69).
+A server without capabilities is too old and stops the command too. One that fails to answer them (401, 5xx) lets the
+command go on: the feature's own route answers, in the command's words. A server that cannot be reached stops it at
+once (exit 69).
 
 The CLI has no command for the other optional features yet (billing, Slack, GitHub, push notifications); each gets the
 same check when it comes.

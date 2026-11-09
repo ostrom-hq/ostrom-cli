@@ -7,6 +7,7 @@ import run.ostrom.cli.CliDependencies
 import run.ostrom.cli.ExitCode
 import run.ostrom.cli.capabilities.CapabilitiesRead
 import run.ostrom.cli.capabilities.incompatibility
+import run.ostrom.cli.capabilities.tooOld
 import kotlinx.coroutines.runBlocking
 
 /**
@@ -15,9 +16,9 @@ import kotlinx.coroutines.runBlocking
  * not serve `ostrom login --admin`). Only the commands of an optional feature call it: one more request, on the
  * connection the command opens anyway.
  *
- * A server from before the capabilities route (404) says nothing: the command goes on and the feature's own route
- * answers. So does a server that fails to answer (401, 5xx): the command's own call says what is wrong, in its words.
- * Only a server that cannot be reached stops here, rather than once more for the command's own call.
+ * A server from before the capabilities route (404) is too old: it stops, as at login. A server that fails to answer
+ * (401, 5xx) lets the command go on: the command's own call says what is wrong, in its words. A server that cannot be
+ * reached stops here, rather than once more for the command's own call.
  *
  * @param token Any credential of the server.
  * @param missing What to say when the feature is not served, such as `This Ostrom server runs no cloud session.`
@@ -31,7 +32,7 @@ internal fun CliDependencies.requireFeature(serverUrl: String, token: String, fe
         } else {
             null
         }
-        CapabilitiesRead.Unknown -> null
+        CapabilitiesRead.Unknown -> tooOld(serverUrl, BuildInfo.VERSION)
     }
     if (stop != null) throw PrintMessage("ostrom: $stop", ExitCode.UNREACHABLE.code, printError = true)
 }

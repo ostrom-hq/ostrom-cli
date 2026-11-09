@@ -7,6 +7,7 @@ import run.ostrom.cli.capabilities.CapabilitiesRead
 import run.ostrom.cli.capabilities.ServerCapabilities
 import run.ostrom.cli.capabilities.incompatibility
 import run.ostrom.cli.capabilities.shown
+import run.ostrom.cli.capabilities.tooOld
 import run.ostrom.cli.launcher.Agent
 import run.ostrom.cli.launcher.Credentials
 import run.ostrom.cli.platform.ConfigKey
@@ -95,7 +96,10 @@ class RunDoctorUseCaseImpl(
         null
     }
 
-    /** Whether this ostrom speaks the server's API: a server it does not speak is a problem, not a warning. */
+    /**
+     * Whether this ostrom speaks the server's API: a server it does not speak, or one too old to say, is a problem, not
+     * a warning.
+     */
     private suspend fun apiCheck(url: String, token: String): DoctorCheck {
         val host = hostOf(url)
         return when (val read = capabilities.read(url.trimEnd('/'), token)) {
@@ -108,11 +112,7 @@ class RunDoctorUseCaseImpl(
                             "(Ostrom ${shown(spoken.serverVersion)})",
                     )
             }
-            CapabilitiesRead.Unknown -> DoctorCheck(
-                CheckStatus.WARNING,
-                "$host does not say which Ostrom API it speaks: it is older than this ostrom. " +
-                    "Ask your admin to update it.",
-            )
+            CapabilitiesRead.Unknown -> DoctorCheck(CheckStatus.PROBLEM, tooOld(host, version))
             is CapabilitiesRead.Failed -> {
                 val why = if (read.status == null) "unreachable" else "HTTP ${read.status}"
                 DoctorCheck(

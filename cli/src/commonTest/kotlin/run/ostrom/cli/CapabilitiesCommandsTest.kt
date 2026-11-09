@@ -82,13 +82,16 @@ class CapabilitiesCommandsTest : CliKit() {
     }
 
     @Test
-    fun loginToAServerFromBeforeTheCapabilitiesSaysSoAndSignsIn() {
-        // ostrom-server builds of November 2026 before it served the route: refusing would sign nobody in to them
+    fun loginToAServerFromBeforeTheCapabilitiesKeepsNothing() {
+        // ostrom-server builds of November 2026 before it served the route: too old, as the app and the console say
         val older = deviceFlow - capabilitiesRoute
-        assertEquals(0, cli(environment = withServer, api = serverOf(older)).run(arrayOf("login")))
-        assertTrue(err().contains("! https://ostrom.example does not say which Ostrom API it speaks: it is older " +
-            "than this ostrom. Ask your admin to update it.\n"), err())
-        assertEquals("ost_new", secretsKept["https://ostrom.example"])
+        assertEquals(69, cli(environment = withServer, api = serverOf(older)).run(arrayOf("login")))
+        val said = "ostrom: https://ostrom.example is too old for ostrom ${BuildInfo.VERSION} (it does not say " +
+            "which Ostrom API it speaks): ask your admin to update the server. Nothing was kept.\n"
+        assertTrue(err().endsWith(said), err())
+        assertTrue(secretsKept.isEmpty(), "no token kept")
+        val revoked = requests.filter { it.second.path == "/api/v1/auth/logout" }.map { it.second.token }
+        assertEquals(listOf("ost_new"), revoked)
     }
 
     private fun doctor(api: (String) -> OstromApi, environment: Map<String, String> = withServer) =
@@ -112,11 +115,11 @@ class CapabilitiesCommandsTest : CliKit() {
     }
 
     @Test
-    fun aServerThatDoesNotSayWhatItSpeaksIsAWarningForTheDoctor() {
+    fun aServerTooOldIsAProblemAndOneThatDoesNotAnswerAWarningForTheDoctor() {
         signIn(home)
-        assertEquals(0, doctor(serverOf(mapOf(health))))
-        assertOut("  ! ostrom.example does not say which Ostrom API it speaks: it is older than this ostrom. " +
-            "Ask your admin to update it.\n")
+        assertEquals(1, doctor(serverOf(mapOf(health))), "a server too old is a problem")
+        assertOut("  ✗ ostrom.example is too old for ostrom ${BuildInfo.VERSION} (it does not say which Ostrom " +
+            "API it speaks): ask your admin to update the server.\n")
         val refused = capabilitiesRoute to (401 to """{"error":{"type":"unauthorized","message":"no"}}""")
         assertEquals(0, doctor(serverOf(mapOf(health, refused))))
         assertOut("  ! ostrom.example refused this device's token: run ostrom login.\n")
@@ -213,12 +216,14 @@ class CapabilitiesCommandsTest : CliKit() {
         assertEquals(69, cli(environment = withServer, api = unreachable(emptyMap())).run(arguments))
         assertTrue(err().endsWith("ostrom: Ostrom is unreachable at https://ostrom.example. Check your network, or " +
             "the --server URL.\n"), err())
-        // a server that fails to answer, or from before the route: its own route answers
+        // a server from before the route is too old; one that fails to answer lets the feature's own route answer
+        assertEquals(69, cli(environment = withServer, api = serverOf(emptyMap())).run(arrayOf("attach", "c")))
+        assertTrue(err().endsWith("is too old for ostrom ${BuildInfo.VERSION} (it does not say which Ostrom API it " +
+            "speaks): ask your admin to update the server.\n"), err())
         val failing = serverOf(mapOf(capabilitiesRoute to (500 to "")))
         assertEquals(5, cli(environment = withServer, api = failing).run(arguments))
-        assertEquals(6, cli(environment = withServer, api = serverOf(emptyMap())).run(arrayOf("attach", "c")))
         assertEquals(1, clouds.size)
-        assertEquals(1, attached.size)
+        assertTrue(attached.isEmpty())
     }
 
     @Test

@@ -12,6 +12,9 @@ import kotlin.test.assertTrue
 
 /** `ostrom import teamcode` through the command line: the plan, the console token, never inside a session. */
 class ImportTeamCodeCommandTest : CliKit() {
+    /** A server that imports TeamCode teams. */
+    private val importing = capabilities("import.teamcode.v1")
+
     @Test
     fun importTeamCodeShowsOstromsPlanWithAConsoleTokenNeverTheDevices() {
         val arguments = arrayOf("import", "teamcode", "--db", "mysql://ro@db/teamcode", "--key-file", "/keys/tc.key")
@@ -24,7 +27,7 @@ class ImportTeamCodeCommandTest : CliKit() {
         assertTrue(refusal in console.err.toString(), console.err.toString())
         val admin = withServer + ("OSTROM_TOKEN" to "ost_console")
         val mysql = FakeMysql(FULL_SCHEMA, TEAM_TABLES)
-        val noKey = cli(environment = admin, api = serverOf(emptyMap()), capture = mysql)
+        val noKey = cli(environment = admin, api = serverOf(mapOf(importing)), capture = mysql)
         assertEquals(64, noKey.run(arguments))
         assertTrue("--key-file holds no TeamCode key" in console.err.toString(), "a failure goes to stderr")
         // S2-32: an agent would send every secret of the team, opened, to the server it names
@@ -34,6 +37,7 @@ class ImportTeamCodeCommandTest : CliKit() {
         fileSystem.createDirectories("/keys".toPath())
         fileSystem.write("/keys/tc.key".toPath()) { writeUtf8(Sealed.KEY + "\n") }
         val routes = mapOf(
+            importing,
             "GET /api/v1/members" to (200 to """{"items":[]}"""),
             "POST /api/v1/import/teamcode?dryRun=true" to (200 to """{"items":[],"created":3}"""),
         )
@@ -54,6 +58,7 @@ class ImportTeamCodeCommandTest : CliKit() {
         fileSystem.write("/keys/tc.key".toPath()) { writeUtf8(Sealed.KEY + "\n") }
         val plan = "POST /api/v1/import/teamcode?dryRun=true&cutover=true"
         val routes = mapOf(
+            importing,
             "GET /api/v1/members" to (200 to """{"items":[]}"""),
             plan to (200 to """{"items":[{"kind":"account","name":"Team Max","action":"planned"}]}"""),
             "POST /api/v1/import/teamcode?cutover=true" to (200 to """{"items":[],"updated":1}"""),

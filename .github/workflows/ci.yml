@@ -188,7 +188,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       # Until the image can be pulled (Actions access of the package for ostrom-cli, a gesture of Lyes) and contains the
-      # oldest server the journey needs (MIN_SERVER: server#62, the device poll of the contract), the journey is
+      # oldest server the journey needs (MIN_SERVER: server#364, the capabilities ostrom login requires), the journey is
       # skipped with a warning and a line in the summary; with the repository variable OSTROM_CLI_REQUIRE_REAL_SERVER
       # set to `true`, a skip fails the job.
       - name: Real server image (edge of ostrom-server main)
@@ -196,7 +196,7 @@ jobs:
         env:
           IMAGE: ghcr.io/ostrom-hq/ostrom-server:edge
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          MIN_SERVER: b7f954a
+          MIN_SERVER: fca8f9e
           REQUIRED: ${{ vars.OSTROM_CLI_REQUIRE_REAL_SERVER == 'true' }}
         run: |
           skip() {
@@ -223,7 +223,7 @@ jobs:
           git -C .ostrom/server cat-file -e "${revision}^{commit}" 2>/dev/null \
             || skip "edge is ostrom-server@${revision:0:7}, a commit that is not in the history of main."
           git -C .ostrom/server merge-base --is-ancestor "$MIN_SERVER" "$revision" \
-            || skip "edge is ostrom-server@${revision:0:7}, older than $MIN_SERVER (server#62)."
+            || skip "edge is ostrom-server@${revision:0:7}, older than $MIN_SERVER (server#364)."
           # The database roles of the image's own commit, not of a main that may have moved past it.
           git -C .ostrom/server show "${revision}:ci/database-roles.sql" > "$RUNNER_TEMP/database-roles.sql"
           echo "ready=true" >> "$GITHUB_OUTPUT"
@@ -298,7 +298,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ostrom-hq/ostrom-core
-          ref: 57ec021511e772a54f7ee7f8b869baff410670ff # docs-truth and served-routes.txt; move it forward by pull request
+          ref: f1629b2b7230b8dca4cc167ca59e1a75c88a1b1d # docs-truth and served-routes.txt; move it forward by pull request
           ssh-key: ${{ secrets.DEPLOY_KEY_CORE }}
           path: docs-truth-core
           persist-credentials: false
