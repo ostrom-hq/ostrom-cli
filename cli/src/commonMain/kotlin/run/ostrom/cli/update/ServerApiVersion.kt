@@ -27,7 +27,7 @@ class ServerApiVersion(private val capabilities: ServerCapabilities, private val
         val why = when (read) {
             null, is CapabilitiesRead.Read -> null
             CapabilitiesRead.Unknown -> "it is older than this ostrom"
-            is CapabilitiesRead.Failed -> read.status?.let { "HTTP $it" } ?: "unreachable"
+            is CapabilitiesRead.Failed -> if (read.status == null) "unreachable" else "HTTP ${read.status}"
         }
         if (why != null) {
             say(
@@ -35,6 +35,6 @@ class ServerApiVersion(private val capabilities: ServerCapabilities, private val
                     "API v${ServerFeatures.API_VERSION} this ostrom speaks.",
             )
         }
-        return (read as? CapabilitiesRead.Read)?.capabilities?.apiVersion ?: ServerFeatures.API_VERSION
+        return if (read is CapabilitiesRead.Read) read.capabilities.apiVersion else ServerFeatures.API_VERSION
     }
 }

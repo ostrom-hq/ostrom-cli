@@ -3,6 +3,7 @@ package run.ostrom.cli.update
 
 import run.ostrom.cli.platform.CaptureResult
 import run.ostrom.cli.platform.ProcessCapture
+import okio.Path
 
 /**
  * The hidden first argument that asks a binary whether it is a version and speaks an API:
@@ -21,6 +22,15 @@ fun interface InstallationProbe {
      */
     fun probe(binary: String, version: String, apiVersion: Int): Boolean
 }
+
+/** Why `ostrom update` refuses [binary], or null when it answers the probe as [version] speaking [apiVersion]. */
+internal fun InstallationProbe.refusal(binary: Path, version: String, apiVersion: Int): String? =
+    if (probe(binary.toString(), version, apiVersion)) {
+        null
+    } else {
+        "✗ ostrom $version does not start here, or does not speak the API v$apiVersion of your Ostrom server. " +
+            "Nothing was changed."
+    }
 
 /**
  * [InstallationProbe] by running the binary: a binary that does not start here (another architecture, a missing

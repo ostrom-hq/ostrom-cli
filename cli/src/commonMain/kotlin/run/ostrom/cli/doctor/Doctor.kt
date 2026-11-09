@@ -114,7 +114,7 @@ class RunDoctorUseCaseImpl(
                     "Ask your admin to update it.",
             )
             is CapabilitiesRead.Failed -> {
-                val why = read.status?.let { "HTTP $it" } ?: "unreachable"
+                val why = if (read.status == null) "unreachable" else "HTTP ${read.status}"
                 DoctorCheck(
                     CheckStatus.WARNING,
                     if (read.status == UNAUTHORIZED) {

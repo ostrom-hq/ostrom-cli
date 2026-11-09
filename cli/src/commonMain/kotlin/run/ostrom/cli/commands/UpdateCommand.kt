@@ -61,7 +61,7 @@ internal class UpdateCommand(private val dependencies: CliDependencies) : CliktC
         val signedIn = dependencies.environment.configDirectory?.let { directory ->
             val serverUrl = dependencies.serverOf(null, directory)
             // the device's token never travels in clear, not even for this read
-            serverUrl to dependencies.credentials(directory).load(serverUrl)?.token?.takeUnless { inClear(serverUrl) }
+            serverUrl to if (inClear(serverUrl)) null else dependencies.credentials(directory).load(serverUrl)?.token
         }
         val read = ServerApiVersion(dependencies.capabilities) { dependencies.console.out("$it\n") }
         return read(signedIn?.first, signedIn?.second)

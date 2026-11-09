@@ -173,7 +173,7 @@ class SelfUpdate(
             ?: stop(ExitCode.REFUSED, "✗ The version of the ostrom kept is not recorded. $UNCHANGED $REINSTALL")
         floorRefusal(recorded.trim(), request.current, manifest(request.copy(version = null)).floor, trust.floor)
             ?.let { stop(ExitCode.REFUSED, it) }
-        probe.require(previousOf(binary), recorded.trim(), apiVersion())
+        probe.refusal(previousOf(binary), recorded.trim(), apiVersion())?.let { stop(ExitCode.REFUSED, it) }
         swapBack(binary, request.current)
     } catch (stopped: Stop) {
         say(stopped.text)
@@ -268,7 +268,7 @@ class SelfUpdate(
             if (!unpack.unpack(file.toString(), work.toString()) || !fileSystem.exists(fresh)) {
                 stop(ExitCode.FAILED, "✗ The archive does not hold ${binary.name}. Nothing was changed.")
             }
-            probe.require(fresh, asset.version, api)
+            probe.refusal(fresh, asset.version, api)?.let { stop(ExitCode.REFUSED, it) }
             swap(binary, fresh)
         } catch (failure: IOException) {
             stop(ExitCode.CANNOT_WRITE, "ostrom could not write next to $binary: ${failure.message}")
@@ -329,17 +329,6 @@ class SelfUpdate(
         const val NOT_FOUND = 404
         const val CHECK_NETWORK = "Check your network."
         const val REINSTALL = "Install the version you want with ostrom update --version."
-    }
-}
-
-/** Stops [SelfUpdate] unless [binary] answers the probe as [version] speaking the API [apiVersion]. */
-private fun InstallationProbe.require(binary: Path, version: String, apiVersion: Int) {
-    if (!probe(binary.toString(), version, apiVersion)) {
-        stop(
-            ExitCode.REFUSED,
-            "✗ ostrom $version does not start here, or does not speak the API v$apiVersion of your Ostrom server. " +
-                UNCHANGED,
-        )
     }
 }
 

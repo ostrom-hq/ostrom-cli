@@ -71,10 +71,14 @@ class ServerCapabilitiesImpl(private val api: (String) -> OstromApi) : ServerCap
             return CapabilitiesRead.Failed(null, e.reason)
         }
         return when (response.status) {
-            in SUCCESS -> decoded(response.body)?.let { CapabilitiesRead.Read(it) }
+            in OK..LAST_SUCCESS -> decoded(response.body)?.let { CapabilitiesRead.Read(it) }
                 ?: CapabilitiesRead.Failed(response.status, "its capabilities cannot be read")
             NOT_FOUND -> CapabilitiesRead.Unknown
-            else -> CapabilitiesRead.Failed(response.status, response.apiError()?.message ?: "HTTP ${response.status}")
+            else -> {
+                val error = response.apiError()
+                val reason = if (error == null) "HTTP ${response.status}" else error.message
+                CapabilitiesRead.Failed(response.status, reason)
+            }
         }
     }
 
@@ -86,7 +90,8 @@ class ServerCapabilitiesImpl(private val api: (String) -> OstromApi) : ServerCap
     }
 
     private companion object {
-        val SUCCESS = 200..299
+        const val OK = 200
+        const val LAST_SUCCESS = 299
         const val NOT_FOUND = 404
     }
 }
