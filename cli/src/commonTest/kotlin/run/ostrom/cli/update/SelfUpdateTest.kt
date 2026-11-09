@@ -23,6 +23,8 @@ class SelfUpdateTest {
     private val said = mutableListOf<String>()
     private val fetched = mutableListOf<String>()
     private var session: String? = null
+    private var probeAnswer = true
+    private val probed = mutableListOf<String>()
     private val routes = mutableMapOf<String, () -> Download>()
     private var unpacked: (String) -> Boolean = { into ->
         fake.write("$into/ostrom".toPath()) { writeUtf8("new") }
@@ -54,6 +56,7 @@ class SelfUpdateTest {
         unpack = { _, into -> unpacked(into) },
         say = { said += it },
         sessions = { session },
+        probe = { binary, version, api -> probeAnswer.also { probed += "$binary $version $api" } },
         trust = ReleaseTrust(ReleaseVectors.KEY_PEM),
     )
 
@@ -88,6 +91,54 @@ class SelfUpdateTest {
             said,
         )
         assertEquals(listOf(latest, "$latest.sig", archive), fetched)
+    }
+
+    @Test
+    fun theNewBinaryMustAnswerAsTheVersionSignedSpeakingTheServersApi() = runTest {
+        assertEquals(0, updater().update(request()) { 2 })
+        assertEquals(listOf("/opt/ostrom/ostrom.update/ostrom 9.9.9 2"), probed, "run before it is put in place")
+        // a binary that does not start here, or does not speak the server's API, is never put in place
+        fake.write(binary.toPath()) { writeUtf8("old") }
+        fake.delete("$binary.previous".toPath())
+        fake.delete("$binary.previous.version".toPath())
+        probeAnswer = false
+        assertEquals(77, updater().update(request()))
+        assertEquals(
+            "✗ ostrom 9.9.9 does not start here, or does not speak the API v1 of your Ostrom server. " +
+                "Nothing was changed.",
+            said.last(),
+        )
+        assertEquals("old", text(binary))
+        assertFalse(fake.exists("$binary.previous".toPath()), "nothing kept: nothing was swapped")
+        assertFalse(fake.exists("$binary.update".toPath()), "the work folder is removed")
+    }
+
+    @Test
+    fun theServersApiIsAskedOnlyWhenABinaryIsToBeInstalled() = runTest {
+        val never: suspend () -> Int = { error("the server is not asked") }
+        assertEquals(0, updater().update(request(current = "9.9.9"), never), "up to date")
+        assertEquals(0, updater().update(request(checkOnly = true), never), "only a check")
+        assertEquals(66, updater().rollback(request(), never), "nothing kept")
+        assertTrue(probed.isEmpty())
+    }
+
+    @Test
+    fun aRollbackProbesTheKeptBinaryWithTheServersApi() = runTest {
+        serve(latest, "LATEST_FLOOR")
+        updater().update(request())
+        probed.clear()
+        probeAnswer = false
+        assertEquals(77, updater().rollback(request(current = "9.9.9")) { 3 })
+        assertEquals(listOf("/opt/ostrom/ostrom.previous 1.0.0 3"), probed)
+        assertEquals(
+            "✗ ostrom 1.0.0 does not start here, or does not speak the API v3 of your Ostrom server. " +
+                "Nothing was changed.",
+            said.last(),
+        )
+        assertEquals("new", text(binary), "nothing was swapped")
+        probeAnswer = true
+        assertEquals(0, updater().rollback(request(current = "9.9.9")) { 3 })
+        assertEquals("old", text(binary))
     }
 
     @Test
@@ -238,6 +289,7 @@ class SelfUpdateTest {
             unpack = { _, into -> unpacked(into) },
             say = { said += it },
             sessions = { null },
+            probe = { _, _, _ -> true },
             trust = ReleaseTrust(ReleaseVectors.KEY_PEM, floor = "9.0.0"),
         )
         assertEquals(77, guarded.rollback(request(current = "9.9.9")))
@@ -256,7 +308,8 @@ class SelfUpdateTest {
         assertEquals("✗ The release signature does not match. Nothing was changed.", said.last())
         routes["$latest.sig"] = { Download.Bytes("not base64 %%%".encodeToByteArray()) }
         assertEquals(78, updater().update(request()))
-        val other = SelfUpdate({ _, _ -> routes.getValue(latest)() }, fake, { _, _ -> true }, { said += it }, { null })
+        val fetch = Downloads { _, _ -> routes.getValue(latest)() }
+        val other = SelfUpdate(fetch, fake, { _, _ -> true }, { said += it }, { null }, { _, _, _ -> true })
         assertEquals(78, other.update(request()), "the embedded key did not sign the test vectors")
         assertEquals("old", text(binary))
     }

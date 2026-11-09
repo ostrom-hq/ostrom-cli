@@ -7,6 +7,8 @@ import run.ostrom.cli.api.OstromApiImpl
 import run.ostrom.cli.api.StatisticsSender
 import run.ostrom.cli.api.TerminalChannels
 import run.ostrom.cli.api.TraceContext
+import run.ostrom.cli.capabilities.ServerCapabilities
+import run.ostrom.cli.capabilities.ServerCapabilitiesImpl
 import run.ostrom.cli.cloud.CloudRunner
 import run.ostrom.cli.cloud.CloudRunnerImpl
 import run.ostrom.cli.hooks.HookProcessor
@@ -50,6 +52,7 @@ import run.ostrom.cli.relay.LocalRelayStarterImpl
 import run.ostrom.cli.telemetry.UsageStatistics
 import run.ostrom.cli.update.AgentSessions
 import run.ostrom.cli.update.AgentSessionsImpl
+import run.ostrom.cli.update.InstallationProbeImpl
 import run.ostrom.cli.update.ReleaseTrust
 import run.ostrom.cli.update.SelfUpdate
 import run.ostrom.cli.update.TarUnpacker
@@ -127,6 +130,12 @@ class CliDependencies(
     val usage: UsageStatistics by lazy {
         UsageStatistics(environment, config, postHogKey, BuildInfo.VERSION, sendStatistics)
     }
+
+    /**
+     * What the servers of this command speak and serve, read once per server for the process, only by the commands
+     * that need it ([run.ostrom.cli.commands.requireFeature], login, doctor, update).
+     */
+    val capabilities: ServerCapabilities by lazy { ServerCapabilitiesImpl(api) }
 
     /** The device configuration, or null when no home folder is known. */
     val config: ConfigStore? by lazy {
@@ -222,6 +231,7 @@ class CliDependencies(
             TarUnpacker(ProcessLauncherImpl(), environment["SystemRoot"]),
             { console.out("$it\n") },
             sessions,
+            InstallationProbeImpl(ProcessCaptureImpl()),
             ReleaseTrust(floor = BuildInfo.FLOOR),
         )
 

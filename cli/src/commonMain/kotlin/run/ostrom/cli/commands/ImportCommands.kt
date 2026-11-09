@@ -16,6 +16,7 @@ import run.ostrom.cli.imports.ImportTeamCodeUseCase
 import run.ostrom.cli.imports.TeamCodeDatabase
 import run.ostrom.cli.launch.ApiServerTransport
 import run.ostrom.cli.launcher.ServerJson
+import run.ostrom.core.api.models.ServerFeatures
 import kotlinx.coroutines.runBlocking
 
 /** `ostrom import`: brings a team from another tool into Ostrom (admin). */
@@ -63,6 +64,12 @@ internal class ImportTeamCodeCommand(private val dependencies: CliDependencies) 
                 "the device token of ostrom login cannot import",
             ExitCode.SIGN_IN_REQUIRED.code,
             printError = true,
+        )
+        dependencies.requireFeature(
+            serverUrl,
+            token,
+            ServerFeatures.IMPORT_TEAMCODE,
+            "This Ostrom server does not import TeamCode teams: ask your admin to update it.",
         )
         val typed = { (confirm ?: dependencies.ask("Type $CUTOVER to run it: ", "--confirm $CUTOVER")) == CUTOVER }
         val import = ImportTeamCodeUseCase(

@@ -81,6 +81,8 @@ Ostrom is before its first public release.
 ## Development
 
 - Modules, and how to add a command or an agent adapter: [docs/MODULES.md](docs/MODULES.md).
+- How `ostrom login`, `ostrom doctor` and `ostrom update` check the server's API and features:
+  [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
 - CI builds and tests every target (`.github/workflows/ci.yml`). Locally: `./gradlew jvmTest koverVerify` for the
   common tests and their coverage, `./gradlew linuxX64Test` or `./gradlew macosArm64Test` natively.
 

@@ -161,6 +161,7 @@ def coming(machine):
 
 # Each line: what it shows, the command line, the exit code, a text its stdout or stderr holds, and the setting.
 def lines(machine, other, nowhere):
+    version = machine.run("--version").stdout.split()[1]
     return [
         ("the home screen", [], 0, "Start an agent   ostrom claude", None),
         ("the version", ["version"], 0, "ostrom ", None),
@@ -174,9 +175,14 @@ def lines(machine, other, nowhere):
     ] + [
         (f"a command not built yet, {name}", [name], 70, "not implemented yet", None) for name in coming(machine)
     ] + [
+        # what ostrom update asks a new binary before putting it in place: that very version, speaking that API
+        ("the installation probe", ["--ostrom-installation-probe", version, "1"], 0, "", None),
+        ("which another version refuses", ["--ostrom-installation-probe", "0.0.1", "1"], 1, "", None),
+        ("as an API it does not speak", ["--ostrom-installation-probe", version, "999"], 1, "", None),
         ("wait without a request", ["wait"], 64, "Run 'ostrom wait --help' for usage.", None),
         ("the doctor, with an Ostrom server", ["doctor"], 0, "reachable", None),
         ("which says the server's version", ["doctor"], 0, "· Ostrom 0.1.0-e2e", None),
+        ("and the API it speaks", ["doctor"], 0, "speaks the Ostrom API v1, as this ostrom does", None),
         ("the doctor, for a script", ["doctor", "--json"], 0, '"problems":0', None),
         ("the doctor, with no Ostrom at the URL", ["doctor"], 1, "but not as an Ostrom server", other),
         ("the doctor, with nothing at the URL", ["doctor"], 1, "unreachable", nowhere),

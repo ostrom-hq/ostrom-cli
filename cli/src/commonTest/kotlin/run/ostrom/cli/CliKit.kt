@@ -32,8 +32,12 @@ import run.ostrom.cli.platform.SecretStore
 import run.ostrom.cli.platform.StandardInput
 import run.ostrom.cli.platform.terminalSafe
 import run.ostrom.cli.update.AgentSessionsImpl
+import run.ostrom.cli.update.ReleaseTrust
+import run.ostrom.cli.update.ReleaseVectors
 import run.ostrom.cli.update.SelfUpdate
 import run.ostrom.cli.update.UpdateNotice
+import run.ostrom.core.api.OstromJson
+import run.ostrom.core.api.models.Capabilities
 import okio.Path.Companion.toPath
 import okio.fakefilesystem.FakeFileSystem
 import kotlin.test.assertTrue
@@ -91,6 +95,9 @@ open class CliKit {
     protected val bridged = mutableListOf<BridgeTarget>()
     protected var browser = true
     protected val releaseUrls = mutableListOf<String>()
+
+    /** The releases `ostrom update` is served, by URL, signed by the test key of [ReleaseVectors]; else 404. */
+    protected val releases = mutableMapOf<String, Download>()
     protected var now = 10 * UpdateNotice.DAY_MILLIS
     protected var refreshes = 0
 
@@ -120,10 +127,20 @@ open class CliKit {
         }
     }
 
+    /** A server of this ostrom's API, serving the features [features]. */
+    protected fun capabilities(vararg features: String, apiVersion: Int = 1) =
+        "GET /api/v1/capabilities" to (200 to Capabilities(apiVersion, "1.4.0", features.toList()).let {
+            OstromJson.encodeToString(Capabilities.serializer(), it)
+        })
+
     protected val deviceFlow = mapOf(
         "POST /api/v1/auth/device" to (200 to """{"deviceCode":"dc","userCode":"4F2C-9B1D","interval":1}"""),
         "POST /api/v1/auth/device/token" to (200 to """{"token":"ost_new","login":"maya-k"}"""),
+        capabilities(),
     )
+
+    /** What `ostrom update` asked the new binaries: the binary, the version and the API version. */
+    protected val probes = mutableListOf<Triple<String, String, Int>>()
 
     /** A server that answers every request with [status] after [millis]. */
     protected fun serverAnswering(status: Int, millis: Long): (String) -> OstromApi = {
@@ -174,11 +191,13 @@ open class CliKit {
             openUrl = { url -> browser.also { opened += url } },
             gateWait = gateWait,
             selfUpdate = SelfUpdate(
-                downloads = { url, _ -> Download.Missing(404).also { releaseUrls += url } },
+                downloads = { url, _ -> (releases[url] ?: Download.Missing(404)).also { releaseUrls += url } },
                 fileSystem = fileSystem,
-                unpack = { _, _ -> false },
+                unpack = { _, into -> true.also { fileSystem.write("$into/ostrom".toPath()) { writeUtf8("new") } } },
                 say = { console.out("$it\n") },
                 sessions = AgentSessionsImpl(FakeEnvironment(environment), fileSystem, "/tmp", noRelay),
+                probe = { binary, version, api -> true.also { probes += Triple(binary, version, api) } },
+                trust = ReleaseTrust(ReleaseVectors.KEY_PEM),
             ),
             updateNotice = UpdateNotice(FileStoreImpl(fileSystem), NOTICE, "1.0.0", { now }, { noticeAdvice() }) {
                 true.also { refreshes++ }

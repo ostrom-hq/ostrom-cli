@@ -8,6 +8,7 @@ import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.options.option
 import run.ostrom.cli.CliDependencies
 import run.ostrom.cli.cloud.CloudSite
+import run.ostrom.core.api.models.ServerFeatures
 import kotlinx.coroutines.runBlocking
 
 /** `ostrom attach <session>`: this terminal to a session running in Ostrom's cloud; Ctrl-] detaches. */
@@ -20,6 +21,7 @@ internal class AttachCommand(private val dependencies: CliDependencies) : CliktC
 
     override fun run() {
         val signedIn = dependencies.signedIn(server)
+        dependencies.requireFeature(signedIn.serverUrl, signedIn.token, ServerFeatures.RUNNERS_CLOUD, NO_CLOUD)
         val orgId = dependencies.launchOrg(signedIn.serverUrl, signedIn.token, org)
         val site = CloudSite(signedIn.serverUrl, signedIn.token, dependencies.workingDirectory(), orgId)
         throw ProgramResult(runBlocking { dependencies.cloud.attach(session, site) })

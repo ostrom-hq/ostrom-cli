@@ -40,7 +40,8 @@ class ImportTeamCodeCommandTest : CliKit() {
         val ready = cli(environment = admin, api = serverOf(routes), capture = FakeMysql(FULL_SCHEMA, TEAM_TABLES))
         assertEquals(0, ready.run(arguments))
         assertOut("3 created, 0 updated, 0 unchanged, 0 skipped.\nRun the same command with --yes to import.\n")
-        assertEquals(listOf("ost_console", "ost_console"), requests.map { it.second.token })
+        assertEquals(List(4) { "ost_console" }, requests.map { it.second.token })
+        assertEquals("/api/v1/capabilities", requests.first().second.path, "the server imports TeamCode teams")
         assertEquals(0, cli().run(arrayOf("import")), "the group shows its help")
         assertOut("teamcode")
     }
@@ -71,7 +72,7 @@ class ImportTeamCodeCommandTest : CliKit() {
         assertTrue(requests.isEmpty(), "nothing asked of Ostrom")
         assertEquals(2, run("--cutover", "--confirm", "yes"), "another word is never the cutover")
         val paths = { requests.map { it.second.path } }
-        assertEquals(listOf("/api/v1/members", plan.removePrefix("POST ")), paths())
+        assertEquals(listOf("/api/v1/capabilities", "/api/v1/members", plan.removePrefix("POST ")), paths())
         assertEquals(0, run("--cutover", "--confirm", "cutover"))
         assertEquals("/api/v1/import/teamcode?cutover=true", paths().last())
         // at a terminal, the word is typed

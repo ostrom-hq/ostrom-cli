@@ -10,6 +10,7 @@ import run.ostrom.cli.launcher.ed25519Verify
 import run.ostrom.cli.launcher.parseObject
 import run.ostrom.cli.launcher.sha256Hex
 import run.ostrom.cli.launcher.text
+import run.ostrom.core.api.models.ServerFeatures
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.longOrNull
@@ -88,23 +89,38 @@ private class Asset(val version: String, val url: String, val sha256: String, va
  * `ostrom` whose gate it knows how to get around. The floor this binary was built with (`release-floor.txt`) holds too:
  * an old manifest served again, still signed but with its own lower floor, never lowers it.
  *
+ * Neither puts in place a binary that does not run here or does not speak the server's API: the new binary, once
+ * verified and unpacked, and the kept one before a rollback, are run with [INSTALLATION_PROBE] and must answer that
+ * they are that very version and speak that API ([probe]); otherwise nothing is changed (as TeamCode's update).
+ *
  * @param downloads Fetches the manifest and the archive.
  * @param fileSystem Where the binary is.
  * @param unpack Unpacks an archive into a folder; false when it could not.
  * @param say Writes a line for the developer (stdout).
  * @param sessions Says whether this runs inside an agent's session.
+ * @param probe Runs a binary with [INSTALLATION_PROBE].
  * @param trust The release key and the floor this binary was built with.
  */
+@Suppress("LongParameterList") // One parameter per collaborator, each replaced in tests.
 class SelfUpdate(
     private val downloads: Downloads,
     private val fileSystem: FileSystem,
     private val unpack: Unpacker,
     private val say: (String) -> Unit,
     private val sessions: AgentSessions,
+    private val probe: InstallationProbe,
     private val trust: ReleaseTrust = ReleaseTrust(),
 ) {
-    /** Runs [request]; the exit code. */
-    suspend fun update(request: UpdateRequest): Int = try {
+    /**
+     * Runs [request]; the exit code.
+     *
+     * @param apiVersion The API version of the server this device works with, asked only once a binary is to be
+     * installed: the new binary must speak it.
+     */
+    suspend fun update(
+        request: UpdateRequest,
+        apiVersion: suspend () -> Int = { ServerFeatures.API_VERSION },
+    ): Int = try {
         // the version goes into the release's address: only a version, never a path or a query
         if (request.version != null && SemVer.of(request.version) == null) {
             stop(ExitCode.USAGE, "ostrom update: ${request.version} is not a version (1.2.3 or v1.2.3).")
@@ -120,7 +136,7 @@ class SelfUpdate(
                 val run = if (request.version == null) "ostrom update" else "ostrom update --version ${asset.version}"
                 say("! ostrom ${asset.version} is available. Run $run.")
             }
-            else -> install(request, asset)
+            else -> install(request, asset, apiVersion)
         }
     } catch (stopped: Stop) {
         say(stopped.text)
@@ -139,9 +155,15 @@ class SelfUpdate(
 
     /**
      * `ostrom update --rollback`: back to the version kept by the last update, which is kept in turn. The version kept
-     * is checked against the latest release's signed floor first, so the release must be reachable.
+     * is checked against the latest release's signed floor first, so the release must be reachable, then run with
+     * [INSTALLATION_PROBE]: it must speak the server's API too.
+     *
+     * @param apiVersion The API version of the server this device works with.
      */
-    suspend fun rollback(request: UpdateRequest): Int = try {
+    suspend fun rollback(
+        request: UpdateRequest,
+        apiVersion: suspend () -> Int = { ServerFeatures.API_VERSION },
+    ): Int = try {
         refuseIn(sessions)
         val binary = request.executable?.toPath()
         if (binary == null || !fileSystem.exists(previousOf(binary))) {
@@ -151,6 +173,7 @@ class SelfUpdate(
             ?: stop(ExitCode.REFUSED, "✗ The version of the ostrom kept is not recorded. $UNCHANGED $REINSTALL")
         floorRefusal(recorded.trim(), request.current, manifest(request.copy(version = null)).floor, trust.floor)
             ?.let { stop(ExitCode.REFUSED, it) }
+        probe.refusal(previousOf(binary), recorded.trim(), apiVersion())?.let { stop(ExitCode.REFUSED, it) }
         swapBack(binary, request.current)
     } catch (stopped: Stop) {
         say(stopped.text)
@@ -222,14 +245,15 @@ class SelfUpdate(
         return Asset(version, url, sha256, size, floor)
     }
 
-    /** Installs [asset] when the latest release's floor allows it (S2-39). */
-    private suspend fun install(request: UpdateRequest, asset: Asset): Int {
+    /** Installs [asset] when the latest release's floor allows it (S2-39), and the binary speaks the server's API. */
+    private suspend fun install(request: UpdateRequest, asset: Asset, apiVersion: suspend () -> Int): Int {
         val floor = if (request.version == null) asset.floor else manifest(request.copy(version = null)).floor
         floorRefusal(asset.version, request.current, floor, trust.floor)?.let { stop(ExitCode.REFUSED, it) }
         val executable = request.executable
             ?: stop(ExitCode.CANNOT_WRITE, "ostrom cannot find its own binary. Reinstall it with the installer.")
         val binary = executable.toPath()
         managerOf(binary)?.let { stop(ExitCode.USAGE, "This ostrom is managed by $it.") }
+        val api = apiVersion()
         val archive = fetch(asset.url, MAX_BINARY_BYTES, request)
         if (archive.size.toLong() != asset.size || sha256Hex(archive) != asset.sha256) {
             stop(ExitCode.SIGNATURE_REFUSED, "✗ The download does not match its signed checksum. $UNCHANGED")
@@ -244,6 +268,7 @@ class SelfUpdate(
             if (!unpack.unpack(file.toString(), work.toString()) || !fileSystem.exists(fresh)) {
                 stop(ExitCode.FAILED, "✗ The archive does not hold ${binary.name}. Nothing was changed.")
             }
+            probe.refusal(fresh, asset.version, api)?.let { stop(ExitCode.REFUSED, it) }
             swap(binary, fresh)
         } catch (failure: IOException) {
             stop(ExitCode.CANNOT_WRITE, "ostrom could not write next to $binary: ${failure.message}")

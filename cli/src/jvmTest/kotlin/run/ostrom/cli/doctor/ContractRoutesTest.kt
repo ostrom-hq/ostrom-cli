@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli.doctor
 
+import run.ostrom.cli.capabilities.CAPABILITIES_ROUTE
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertTrue
@@ -13,6 +14,11 @@ class ContractRoutesTest {
     @Test
     fun theDoctorProbesAGetRouteOfTheContract() {
         assertTrue(HEALTH_ROUTE in getRoutes(), "$HEALTH_ROUTE is not a GET route of $contract")
+    }
+
+    @Test
+    fun theCapabilitiesAreAGetRouteOfTheContract() {
+        assertTrue(CAPABILITIES_ROUTE in getRoutes(), "$CAPABILITIES_ROUTE is not a GET route of $contract")
     }
 
     private val contract = File(

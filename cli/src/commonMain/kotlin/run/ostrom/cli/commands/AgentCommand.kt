@@ -19,6 +19,7 @@ import run.ostrom.cli.launcher.LaunchSite
 import run.ostrom.cli.launcher.cloud.CloudStart
 import run.ostrom.cli.platform.ConfigKey
 import run.ostrom.cli.platform.ConfigStoreImpl
+import run.ostrom.core.api.models.ServerFeatures
 import kotlinx.coroutines.runBlocking
 
 /**
@@ -63,6 +64,7 @@ internal class AgentCommand(private val agent: Agent, private val dependencies: 
         refuseInClear(serverUrl, "the device's token")
         val credentials = dependencies.credentials(directory).load(serverUrl)
             ?: throw stop(ExitCode.SIGN_IN_REQUIRED, "not signed in to $serverUrl: run `ostrom login`")
+        if (cloud) dependencies.requireFeature(serverUrl, credentials.token, ServerFeatures.RUNNERS_CLOUD, NO_CLOUD)
         val orgId = dependencies.launchOrg(serverUrl, credentials.token, org)
         if (cloud) {
             throw ProgramResult(runBlocking { inTheCloud(CloudSite(serverUrl, credentials.token, cwd(), orgId)) })
