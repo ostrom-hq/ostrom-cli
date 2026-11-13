@@ -18,6 +18,7 @@ fun pendingCommands(implemented: List<CliktCommand>): List<CliktCommand> {
         named("waits"),
         named("hooks"),
         named("workflows"),
+        named("automations"),
         named("receipts"),
         named("verify"),
         named("sessions"),

@@ -242,6 +242,61 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
         "ostrom workflows run-show 3f9c" to "a run: its step, what it waits for, its visits",
     ),
     "workflows cancel" to guide("workflows", "ostrom workflows cancel 3f9c" to "cancel a run"),
+    "automations" to guide(
+        "automations",
+        "ostrom automations list" to "the organisation's automations",
+        "ostrom automations run nightly --dry-run" to "check what an automation would do, starting nothing",
+        "ostrom automations enable nightly" to "arm it once the test looks right",
+    ),
+    "automations list" to guide(
+        "automations",
+        "ostrom automations list" to "id, name, trigger, armed or paused, what it starts, version and age",
+        "ostrom automations list --json" to "for a script",
+    ),
+    "automations show" to guide(
+        "automations",
+        "ostrom automations show nightly" to "an automation, and how to call its webhook",
+        "ostrom automations show nightly --url-version current" to "the address pinned to this version",
+    ),
+    "automations create" to guide(
+        "automations",
+        "ostrom automations create --name nightly --cron \"0 21 * * *\" --timezone Europe/Paris --prompt \"Triage\"" to
+            "a cron that starts an agent session",
+        "ostrom automations create --name hook --webhook --var 'ticket=\$.ticket.id' --prompt \"Fix {{ticket}}\"" to
+            "a webhook with a payload variable",
+        "ostrom automations create --name ship --webhook --workflow deploy --input env=staging" to
+            "a webhook that starts a workflow run",
+    ),
+    "automations edit" to guide(
+        "automations",
+        "ostrom automations edit nightly --prompt \"Triage the new tickets\"" to "change only the prompt",
+        "ostrom automations edit nightly --clear-model" to "go back to the agent's own model",
+    ),
+    "automations enable" to guide("automations", "ostrom automations enable nightly" to "arm an automation"),
+    "automations disable" to guide("automations", "ostrom automations disable nightly" to "pause an automation"),
+    "automations delete" to guide(
+        "automations",
+        "ostrom automations delete nightly --yes" to "delete it and its history",
+    ),
+    "automations rotate-secret" to guide(
+        "automations",
+        "ostrom automations rotate-secret hook" to "a new webhook secret, printed once",
+    ),
+    "automations runs" to guide(
+        "automations",
+        "ostrom automations runs nightly" to "the latest runs, newest first",
+        "ostrom automations runs nightly --status failed --source cron" to "the failed cron runs",
+    ),
+    "automations cancel-run" to guide(
+        "automations",
+        "ostrom automations cancel-run nightly run_9f3a" to
+            "stop a run: a queued one ends at once, a started one is paused",
+    ),
+    "automations run" to guide(
+        "automations",
+        "ostrom automations run hook --payload body.json --dry-run" to "check a payload and see the rendered prompt",
+        "ostrom automations run nightly --idempotency-key try-1" to "a real test run, safe to retry",
+    ),
     "members" to guide("organizations", "ostrom members list" to "the members of your organisation"),
     "members list" to guide("organizations", "ostrom members list" to "the members of your organisation"),
     "members role" to guide("organizations", "ostrom members role lena admin" to "change someone's role"),

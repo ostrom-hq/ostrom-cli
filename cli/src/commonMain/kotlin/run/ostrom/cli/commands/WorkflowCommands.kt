@@ -93,7 +93,8 @@ private fun CliDependencies.definition(file: String): JsonObject = usage {
     parseDefinition(if (file == "-") standardInput() else fileText(file))
 }
 
-private fun CliDependencies.fileText(file: String): String {
+/** The text of [file], relative to the working folder; exit 66 when there is none. */
+internal fun CliDependencies.fileText(file: String): String {
     val path = (workingDirectory().toPath() / file).toString()
     return files.read(path) ?: throw stopWith(ExitCode.NOT_FOUND, "No file $path.")
 }
