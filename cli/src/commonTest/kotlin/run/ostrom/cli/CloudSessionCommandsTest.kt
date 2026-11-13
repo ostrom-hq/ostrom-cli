@@ -27,6 +27,8 @@ class CloudSessionCommandsTest : SetupKit() {
         val filtered = "GET /api/v1/cloud/sessions?status=paused&before=cs0"
         val options = arrayOf("--status", "paused", "--before", "cs0")
         assertEquals(0, run(routes(filtered to (200 to """{"items":[]}""")), "cloud", "list", *options))
+        assertErr("None match.\n")
+        assertEquals(0, run(routes(list to (200 to """{"items":[]}""")), "cloud", "list"))
         assertErr("No cloud sessions. Start one: ostrom run claude --cloud\n")
         assertEquals(0, run(routes(list to (200 to """{"items":[$session]}""")), "cloud", "list", "--json"))
         assertEquals("[$session]\n", console.out.toString())

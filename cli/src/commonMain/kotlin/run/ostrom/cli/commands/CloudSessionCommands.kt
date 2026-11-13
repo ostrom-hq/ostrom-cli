@@ -65,7 +65,8 @@ internal class CloudListCommand(private val dependencies: CliDependencies) : Cli
             console.data(JsonArray(items).toString() + "\n")
         } else {
             items.forEach { console.out(it.cloudLine(dependencies.clock()) + "\n") }
-            if (items.isEmpty()) console.err("No cloud sessions. Start one: ostrom run claude --cloud\n")
+            val none = if (query.isEmpty()) "No cloud sessions. Start one: ostrom run claude --cloud" else "None match."
+            if (items.isEmpty()) console.err("$none\n")
         }
         page.text("next")?.let { console.err("More exist: ostrom cloud list --before $it\n") }
     }
