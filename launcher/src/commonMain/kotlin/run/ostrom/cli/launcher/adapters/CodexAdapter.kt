@@ -7,6 +7,7 @@ import run.ostrom.cli.launcher.LaunchVariables
 import run.ostrom.cli.launcher.join
 import run.ostrom.cli.launcher.quoted
 import run.ostrom.cli.launcher.sha256Hex
+import run.ostrom.cli.launcher.team.TeamHook
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -34,7 +35,14 @@ class CodexAdapter : AgentAdapter {
             // The launcher ends the session, never the hook (security audit S2-25): this one only reads the event.
             OstromHook("SessionEnd", "session_end", "session", END_SECONDS),
         ) + if (layout.todo) listOf(OstromHook("Stop", "stop", "todo-stop", TODO_STOP_SECONDS)) else emptyList()
-        val overrides = hooks.map { "hooks.${it.event}=[${group(handler(layout, it))}]" }.toMutableList()
+        val ours = hooks.groupBy({ it.event }, { group(handler(layout, it)) })
+        // the team hooks the member approved: later groups of the same events, not trusted by Ostrom (Codex asks the
+        // member to review them in /hooks, as any hook it has not seen)
+        val team = layout.teamHooks.flatMap { hook -> hook.events.map { it to teamGroup(hook) } }
+            .groupBy({ it.first }, { it.second })
+        val overrides = (ours.keys + team.keys).map { event ->
+            "hooks.$event=[" + (ours[event].orEmpty() + team[event].orEmpty()).joinToString(",") + "]"
+        }.toMutableList()
         overrides += "hooks.state=${trust(layout, hooks)}"
         overrides += "developer_instructions=${quoted(layout.rules)}"
         layout.relay.mcpServers.forEach { name ->
@@ -56,7 +64,14 @@ class CodexAdapter : AgentAdapter {
             emptyList<String>() to layout.arguments
         }
         val arguments = subcommand + overrides.flatMap { listOf("-c", it) } + rest
-        return AgentLaunch(arguments, environment)
+        val notes = if (team.isEmpty()) emptyList() else listOf(REVIEW_TEAM_HOOKS)
+        return AgentLaunch(arguments, environment, notes)
+    }
+
+    /** A team hook's group: its matcher, then its command, the quoted absolute path of its installed executable. */
+    private fun teamGroup(hook: TeamHook): String {
+        val handler = "{type=\"command\",command=${quoted(quoted(hook.command))},timeout=${hook.seconds}}"
+        return "{" + hook.matcher?.let { "matcher=${quoted(it)}," }.orEmpty() + "hooks=[$handler]}"
     }
 
     /**
@@ -111,6 +126,9 @@ class CodexAdapter : AgentAdapter {
     private class OstromHook(val event: String, val label: String, val kind: String, val seconds: Long)
 
     private companion object {
+        const val REVIEW_TEAM_HOOKS = "Codex runs your team hooks once you trust them in /hooks: Ostrom does not " +
+            "trust them for you"
+
         // the path Codex gives the `-c` layer in hook keys, on POSIX then on Windows
         const val POSIX_FLAGS = "/<session-flags>/config.toml"
         const val WINDOWS_FLAGS = "C:\\<session-flags>\\config.toml"

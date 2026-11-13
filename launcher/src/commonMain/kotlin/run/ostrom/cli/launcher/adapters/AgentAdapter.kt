@@ -7,6 +7,7 @@ import run.ostrom.cli.launcher.LaunchVariables
 import run.ostrom.cli.launcher.SessionPackage
 import run.ostrom.cli.launcher.join
 import run.ostrom.cli.launcher.quoted
+import run.ostrom.cli.launcher.team.TeamHook
 
 /**
  * The local relay of a launch, as an adapter points the agent at it.
@@ -42,6 +43,7 @@ data class RelayView(val url: String, val token: String, val mcpServers: List<St
  * installs `ostrom hook wake`. No other agent holds its stop, so none installs it.
  * @property todo The server serves the session todo (`todos.v1`): the agent gets the `ostrom-todo` MCP server, and the
  * todo's Stop and SessionStart hooks where it has them (docs/TODOS.md).
+ * @property teamHooks The team hooks the member approved, installed: run next to Ostrom's own, on their events.
  */
 data class SessionLayout(
     val temporary: String,
@@ -60,6 +62,7 @@ data class SessionLayout(
     val trustProject: Boolean = false,
     val waitsWake: Boolean = false,
     val todo: Boolean = false,
+    val teamHooks: List<TeamHook> = emptyList(),
 ) {
     /** `"<ostrom>" hook gate|session|wake`, the command an agent's hook runs. */
     fun hookCommand(kind: String): String = "${quoted(executable)} hook $kind"

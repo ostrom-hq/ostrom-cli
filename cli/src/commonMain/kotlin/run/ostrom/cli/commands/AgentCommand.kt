@@ -53,6 +53,10 @@ internal class AgentCommand(
         help = "Claude Code: read this repository's settings, hooks and MCP servers too; Gemini CLI: load its .env " +
             "files too. They can run its programs and turn Ostrom's gate off: only for a repository your team trusts",
     ).flag()
+    val noTeamHooks by option(
+        "--no-team-hooks",
+        help = "Run none of the team hooks you approved in this session (ostrom hooks list)",
+    ).flag()
     val agentArguments by argument("agent-args", help = "After --: passed to the agent as they are").multiple()
 
     override fun run() {
@@ -95,7 +99,7 @@ internal class AgentCommand(
             org = orgId,
             foldsCase = environment.operatingSystem.foldsCase,
         )
-        val request = LaunchRequest(agent, agentArguments, repo, model, dryRun, trustProjectSettings)
+        val request = LaunchRequest(agent, agentArguments, repo, model, dryRun, trustProjectSettings, !noTeamHooks)
         throw ProgramResult(runBlocking { dependencies.agents.run(request, site) })
     }
 
