@@ -15,7 +15,7 @@ all Ostrom repositories are in `ostrom-core/docs/CONVENTIONS.md`; this page only
 | `launcher` | `run.ostrom.cli.launcher` | the agents (`Agent`) and starting one in this terminal | `platform` |
 | `mcp` | `run.ostrom.cli.mcp` | the local MCP server on stdio (`ostrom mcp`) | `platform` |
 | `relay` | `run.ostrom.cli.relay` | the launch's local relay on `127.0.0.1` (Ktor CIO): hooks, MCP and inference reach Ostrom through it | `platform` |
-| `todo` | `run.ostrom.cli.todo` | the session todo's `ostrom-todo` MCP server (`ostrom mcp --server ostrom-todo`, served in-process) and its checks run on this machine (`gh`, a shell command): [TODOS.md](TODOS.md) | `platform`, `mcp`, ostrom-core `api` |
+| `todo` | `run.ostrom.cli.todo` | the session todo's `ostrom-todo` MCP server (`ostrom mcp --server ostrom-todo`, served in-process), its checks run on this machine (`gh`, a shell command), and its hooks (`ostrom hook todo-stop\|todo-context`): [TODOS.md](TODOS.md) | `platform`, `mcp`, ostrom-core `api` |
 | `cli` | `run.ostrom.cli` | the command tree (Clikt), `main`, the wiring (`CliDependencies`), the executable | all of the above |
 
 Rules that keep the binary fast and the modules apart:

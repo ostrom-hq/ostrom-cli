@@ -34,6 +34,7 @@ import run.ostrom.cli.todo.GitHub
 import run.ostrom.cli.todo.RelayTodoApi
 import run.ostrom.cli.todo.TODO_SERVER
 import run.ostrom.cli.todo.TodoChecks
+import run.ostrom.cli.todo.TodoHookRunner
 import run.ostrom.cli.todo.TodoTools
 import run.ostrom.cli.platform.ConfigStore
 import run.ostrom.cli.platform.ConfigStoreImpl
@@ -292,7 +293,20 @@ class CliDependencies(
                     clock,
                 )
             },
-        ): HookRunner = HookRunnerImpl(console, environment, LazyHookProcessor(session))
+        ): HookRunner {
+            val gate = HookRunnerImpl(console, environment, LazyHookProcessor(session))
+            val io = Dispatchers.IO
+            return object : HookRunner {
+                // the todo's hooks (`todo-stop`, `todo-context`) have their own runner: they fail open, never refuse
+                override fun run(arguments: List<String>): Int {
+                    val todo = arguments.singleOrNull()?.takeIf { it in TodoHookRunner.KINDS }
+                        ?: return gate.run(arguments)
+                    val http = LoopbackHttpImpl()
+                    val runner = TodoHookRunner(console, environment, FileSystem.SYSTEM, http, ProcessCaptureImpl(), io)
+                    return runner.run(todo)
+                }
+            }
+        }
     }
 }
 

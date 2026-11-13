@@ -43,8 +43,42 @@ passing state such as an open PR; an item that delivers a PR ends on `pr_merged`
 A check that cannot be read (`gh` missing or failing, a timeout, a value not linked yet, a check this version does not
 know) is unknown, and an unknown result never counts as done.
 
-## Gating and tests
+## The Stop hook (`ostrom hook todo-stop`)
 
-Ostrom announces `todos.v1` only when it serves the routes; without it nothing of the todo is offered to the agent. The
-module is tested with fakes of the relay and of `gh`; end-to-end journeys against the real server (ostrom-e2e) come
-once ostrom-server serves the routes.
+The agent cannot end its turn while items remain, unless a wait is open or a background task runs (TeamCode's
+`TodoStop`). Ostrom decides; the hook runs what only this machine can:
+
+1. `begin`: Ostrom answers `allow` (no list, the hook off for this member, a wait open, a background task or a
+   scheduled wake-up in the event's `background_tasks` or `session_crons`, the list finished) or asks for a phase.
+2. `verify`: the checks of the item in progress and of the waiting items whose checks are all cheap (`pr_merged`,
+   `release_contains`, `artifact_published`, `wait_answered`), each item in parallel, a PR found by its marker linked
+   to its item; with them the pull requests the session opened that no item names (the addresses a successful
+   `gh pr create` printed in the Claude Code transcript, at most 5) and the end of the last message (600 characters).
+3. `settle`: every check of the done items. Ostrom never reopens an item because of an `attested` check.
+
+`block` gives the agent Ostrom's reason (`{"decision":"block","reason":…}`). The hook never relaxes on
+`stop_hook_active`: the bound is Ostrom's count of stops without progress, after which it asks the session's owner.
+It fails open: the whole decision has 140 s (the hook's timeout is 150 s), one call to Ostrom 20 s; past them, or
+when Ostrom is unreachable or refuses, the agent stops and the failure is recorded on the list (`hook-error`). The
+hooks reach Ostrom through the launch's relay with the hooks' capability (`OSTROM_RELAY_TOKEN_FILE`), which alone
+opens the `stop`, `hook-error` and `context` routes.
+
+`ostrom hook todo-context` is the SessionStart hook for `compact` and `resume`: it gives the agent the reference, the
+list and the next item again (`additionalContext`), nothing at any other start or on any failure.
+
+## What a launch installs
+
+A launch reads the server's capabilities; only when it announces `todos.v1` does the session get the todo:
+
+| Agent | MCP server `ostrom-todo` | Stop hook | SessionStart (compact, resume) |
+| --- | --- | --- | --- |
+| Claude Code | stdio entry in the session's `--mcp-config` | `Stop`, 150 s | second `SessionStart` group, `compact\|resume`, 25 s |
+| Codex | `-c mcp_servers.ostrom-todo={command,args}` | `-c hooks.Stop`, 150 s, trusted by its hash | no: its transcript is not read either |
+| Gemini CLI, Grok, Hermes, OpenCode, Pi | through `ostrom mcp --session … --server ostrom-todo` | no | no |
+
+Without `todos.v1` (an older server, or one that cannot say) nothing of the todo is offered and no hook is installed.
+
+## Tests
+
+The module is tested with fakes of the relay, of `gh` and of the transcript; end-to-end journeys against the real
+server (ostrom-e2e) come once ostrom-server serves the routes.

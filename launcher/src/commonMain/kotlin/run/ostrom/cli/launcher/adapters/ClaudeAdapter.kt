@@ -162,28 +162,36 @@ class ClaudeAdapter : AgentAdapter {
                 ),
             ).toMap(),
         )
+        // the todo's: the Stop hook, and its reminder after a compaction or on resume (the session's hook stays first)
+        val todo = layout.todo
+        val start = entry("session", START_SECONDS, null) +
+            if (todo) entry(TODO_CONTEXT, TODO_CONTEXT_SECONDS, CONTEXT_SOURCES) else emptyList()
         val events = mapOf(
             // a gate hook that fails or runs past its timeout blocks the tool: Claude Code runs it otherwise
             "PreToolUse" to entry("gate", layout.beforeToolSeconds, MATCHER, blocking = true),
             "PostToolUse" to entry("gate", AFTER_SECONDS, "$MATCHER|Skill|Task|Agent"),
-            "SessionStart" to entry("session", START_SECONDS, null),
+            "SessionStart" to start,
             "SessionEnd" to entry("session", END_SECONDS, null),
         )
-        // the one hook that holds: the stop waits for the answer of a wait of the session, up to a day (TC-WAI-11)
-        val stop = if (layout.waitsWake) mapOf("Stop" to entry("wake", WAKE_SECONDS, null)) else emptyMap()
-        val hooks = objectOf("hooks" to events + stop)
+        // the one hook that holds: the stop waits for the answer of a wait of the session, up to a day (TC-WAI-11);
+        // the todo's runs beside it, and the server lets the stop pass while a wait is open
+        val stop = (if (layout.waitsWake) entry("wake", WAKE_SECONDS, null) else emptyList()) +
+            if (todo) entry(TODO_STOP, TODO_STOP_SECONDS, null) else emptyList()
+        val hooks = objectOf("hooks" to if (stop.isEmpty()) events else events + ("Stop" to stop))
         files.write(join(layout.plugin, "hooks", "hooks.json"), pretty(hooks))
     }
 
     /** The relayed MCP servers, or null when there is none. */
     private fun mcpConfig(layout: SessionLayout, files: LaunchFiles): String? {
-        if (layout.relay.mcpServers.isEmpty()) return null
+        if (layout.relay.mcpServers.isEmpty() && !layout.todo) return null
         val servers = layout.relay.mcpServers.associate { name ->
             mcpLabel(name) to mapOf(
                 "type" to "http",
                 "url" to "${layout.relay.url}/mcp/$name",
                 "headers" to mapOf("Authorization" to "Bearer \${${LaunchVariables.RELAY_TOKEN}}"),
             )
+        } + layout.todoServer.mapValues { (_, arguments) ->
+            mapOf("type" to "stdio", "command" to layout.executable, "args" to arguments)
         }
         val path = join(layout.temporary, "mcp.json")
         files.write(path, pretty(objectOf("mcpServers" to servers)), FileAccess.PRIVATE)
@@ -210,6 +218,14 @@ class ClaudeAdapter : AgentAdapter {
 
         /** The Stop hook's timeout: it holds the agent for a wait's answer, a day at most. */
         private const val WAKE_SECONDS = 86_400L
+
+        private const val TODO_STOP = "todo-stop"
+        private const val TODO_CONTEXT = "todo-context"
+        private const val CONTEXT_SOURCES = "compact|resume"
+        private const val TODO_CONTEXT_SECONDS = 25L
+
+        /** TeamCode's: the decision's own budget is 140 s (the CLI's `TodoStop`). */
+        private const val TODO_STOP_SECONDS = 150L
         private const val SETTINGS = "--settings"
         private const val SETTING_SOURCES = "--setting-sources"
         private const val ADD_DIR = "--add-dir"
