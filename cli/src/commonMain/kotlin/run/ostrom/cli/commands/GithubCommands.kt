@@ -204,7 +204,7 @@ internal class GithubLinkCommand(private val dependencies: CliDependencies) : Cl
     /** A poll that did not reach GitHub or the server: the next one may. */
     private fun transient(answer: ServerAnswer.Failed) = answer.status == null || answer.status == UNAVAILABLE
 
-    XX
+    private fun JsonObject.link(): JsonObject = child("link") ?: JsonObject(emptyMap())
 
     private companion object {
         const val GITHUB_PAGES = "https://github.com/"
