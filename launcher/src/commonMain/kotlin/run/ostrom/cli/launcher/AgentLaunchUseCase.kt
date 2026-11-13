@@ -178,6 +178,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         val mcpServers = reads.mcp
         val inference = reads.inference
         val waitsWake = reads.waitsWake
+        val todos = reads.todos
         val plugin = join(temporary, "plugin")
         val relayTokenFile = join(temporary, "relay-token")
         val sessionFile = join(temporary, "session-id")
@@ -250,6 +251,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
             foldsCase = run.site.foldsCase,
             trustProject = run.request.trustProjectSettings,
             waitsWake = run.waitsWake,
+            todo = run.todos,
         )
         return try {
             run.adapter.prepare(layout, dependencies.files)

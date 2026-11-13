@@ -512,7 +512,7 @@ class AgentLaunchUseCaseTest : AgentLaunchKit() {
         server[capabilities] = 200 to """{"apiVersion":1,"features":["$WAITS_WAKE"]}"""
         start(Agent.CODEX)
         assertEquals(listOf(true, false, false, false, false, false), wakes)
-        assertEquals(5, server.sent(capabilities).size, "Codex is never asked: it cannot be held")
+        assertEquals(6, server.sent(capabilities).size, "asked once a launch, Codex too: the todo is for every agent")
     }
 
     @Test

@@ -58,4 +58,13 @@ class HookWiringTest {
         assertEquals(2, runner.run(listOf("gate")))
         assertEquals("${GateTexts.GATE_FAILED} (IllegalStateException)\n", console.err.toString())
     }
+
+    @Test
+    fun theTodosHooksHaveTheirOwnRunnerWhichFailsOpen() {
+        // no relay in this environment: nothing is asked, nothing is said, and the agent goes on
+        val console = EventConsole("""{"source":"compact"}""")
+        assertEquals(0, CliDependencies.hookRunner(console, NoEnvironment()).run(listOf("todo-context")))
+        assertEquals("", console.err.toString())
+        assertEquals(64, CliDependencies.hookRunner(console, NoEnvironment()).run(emptyList()), "usage")
+    }
 }

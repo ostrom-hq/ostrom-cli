@@ -40,6 +40,8 @@ data class RelayView(val url: String, val token: String, val mcpServers: List<St
  * (`--trust-project-settings`), which can run the repository's programs and turn Ostrom's gate off.
  * @property waitsWake The server holds the Stop hook's call for a wait's answer (`waits.wake.v1`): Claude Code then
  * installs `ostrom hook wake`. No other agent holds its stop, so none installs it.
+ * @property todo The server serves the session todo (`todos.v1`): the agent gets the `ostrom-todo` MCP server, and the
+ * todo's Stop and SessionStart hooks where it has them (docs/TODOS.md).
  */
 data class SessionLayout(
     val temporary: String,
@@ -57,6 +59,7 @@ data class SessionLayout(
     val foldsCase: Boolean = false,
     val trustProject: Boolean = false,
     val waitsWake: Boolean = false,
+    val todo: Boolean = false,
 ) {
     /** `"<ostrom>" hook gate|session|wake`, the command an agent's hook runs. */
     fun hookCommand(kind: String): String = "${quoted(executable)} hook $kind"
@@ -69,7 +72,14 @@ data class SessionLayout(
      * that serve it (`ostrom mcp --session <file> --server <name>`, a stdio bridge to the local relay).
      */
     val stdioServers: Map<String, List<String>>
-        get() = relay.mcpServers.associate { mcpLabel(it) to mcpArguments + listOf("--server", it) }
+        get() = relay.mcpServers.associate { mcpLabel(it) to mcpArguments + listOf("--server", it) } + todoServer
+
+    /**
+     * The session todo's MCP server, served by this binary itself (`ostrom mcp --session <file> --server ostrom-todo`),
+     * when the server serves the todo; nothing otherwise.
+     */
+    val todoServer: Map<String, List<String>>
+        get() = if (todo) mapOf(TODO_SERVER to mcpArguments + listOf("--server", TODO_SERVER)) else emptyMap()
 
     /** The PreToolUse limit: every enforced check runs in the one hook, plus a margin, and never under 10 s. */
     val beforeToolSeconds: Long get() = maxOf((pack?.enforcedCheckSeconds ?: 0L) + CHECK_MARGIN_SECONDS, MIN_SECONDS)
@@ -81,6 +91,9 @@ data class SessionLayout(
     companion object {
         /** File name of the session's settings under [temporary]. */
         const val SESSION_SETTINGS = "session-env.json"
+
+        /** The session todo's MCP server (the CLI's `todo` module serves it). */
+        const val TODO_SERVER = "ostrom-todo"
         private const val CHECK_MARGIN_SECONDS = 20L
         private const val MIN_SECONDS = 10L
     }

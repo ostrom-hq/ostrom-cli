@@ -33,7 +33,7 @@ class CodexAdapter : AgentAdapter {
             OstromHook("SessionStart", "session_start", "session", START_SECONDS),
             // The launcher ends the session, never the hook (security audit S2-25): this one only reads the event.
             OstromHook("SessionEnd", "session_end", "session", END_SECONDS),
-        )
+        ) + if (layout.todo) listOf(OstromHook("Stop", "stop", "todo-stop", TODO_STOP_SECONDS)) else emptyList()
         val overrides = hooks.map { "hooks.${it.event}=[${group(handler(layout, it))}]" }.toMutableList()
         overrides += "hooks.state=${trust(layout, hooks)}"
         overrides += "developer_instructions=${quoted(layout.rules)}"
@@ -41,6 +41,11 @@ class CodexAdapter : AgentAdapter {
             val url = quoted("${layout.relay.url}/mcp/$name")
             overrides += "mcp_servers.${mcpLabel(name)}={url=$url," +
                 "bearer_token_env_var=\"${LaunchVariables.RELAY_TOKEN}\"}"
+        }
+        // the session todo's server, served by this binary (a JSON string or list is a TOML one too)
+        layout.todoServer.forEach { (label, arguments) ->
+            val args = JsonArray(arguments.map(::JsonPrimitive))
+            overrides += "mcp_servers.$label={command=${quoted(layout.executable)},args=$args}"
         }
         val home = if (layout.pack == null) emptyMap() else mapOf("CODEX_HOME" to codexHome(layout, files))
         val environment = gateBudget(layout) + home
@@ -112,5 +117,8 @@ class CodexAdapter : AgentAdapter {
         const val AFTER_SECONDS = 10L
         const val START_SECONDS = 20L
         const val END_SECONDS = 3L
+
+        /** The todo's Stop hook, as Claude Code's: its decision's own budget is 140 s. */
+        const val TODO_STOP_SECONDS = 150L
     }
 }

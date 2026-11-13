@@ -15,13 +15,25 @@ internal data class Launch(val launchId: String, val agentToken: String)
  */
 const val WAITS_WAKE = "waits.wake.v1"
 
-/** What a launch read of Ostrom before its agent starts ([AgentLaunchUseCase]). */
+/**
+ * The feature key of the session todo (`ServerFeatures.TODOS` of ostrom-core): the launcher depends on no other
+ * module, so the CLI's tests check that the two are the same.
+ */
+const val TODOS = "todos.v1"
+
+/**
+ * What a launch read of Ostrom before its agent starts ([AgentLaunchUseCase]).
+ *
+ * @property waitsWake The server holds the Stop hook for a wait's answer ([WAITS_WAKE]), for Claude Code only.
+ * @property todos The server serves the session todo ([TODOS]): its MCP server and hooks are installed.
+ */
 internal class LaunchReads(
     val pack: SessionPackage?,
     val keys: String,
     val mcp: List<String>,
     val inference: Boolean,
     val waitsWake: Boolean,
+    val todos: Boolean,
 )
 
 /**
@@ -173,24 +185,25 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
             // the notes come back with the list they are about: said once it has answered, whichever answer is last
             val mcp = async { mutableListOf<String>().let { notes -> mcpServers(site) { notes += it } to notes } }
             val inference = async { inferenceRelayed(request, site, launch) }
-            val wake = async { wakeServed(request, site) }
+            val features = async { features(site) }
             val pack = packageOf(repo, site, keep = true)
             val read = keys.await()()
             val (servers, notes) = mcp.await()
             notes.forEach(dependencies.say)
-            LaunchReads(pack, read, servers, inference.await(), wake.await())
+            val served = features.await()
+            // the Stop hook that holds the agent for a wait's answer: Claude Code only
+            val wake = request.agent == Agent.CLAUDE && WAITS_WAKE in served
+            LaunchReads(pack, read, servers, inference.await(), wake, TODOS in served)
         }
 
     /**
-     * Whether the Stop hook that holds the agent for a wait's answer is worth installing: Claude Code only, and the
-     * server advertises [WAITS_WAKE]. A server that cannot say (a failure, an older one) gets no hook: the answer then
-     * stays on the wait, as for an agent that cannot be held.
+     * The features the server announces (`GET /api/v1/capabilities`). A server that cannot say (a failure, an older
+     * one) announces none: what depends on a feature is then left out of the session.
      */
-    private suspend fun wakeServed(request: LaunchRequest, site: LaunchSite): Boolean {
-        if (request.agent != Agent.CLAUDE) return false
+    private suspend fun features(site: LaunchSite): Set<String> {
         val answer = dependencies.server.get(Routes.CAPABILITIES, site.credentials.token, CAPABILITIES_MILLIS)
-        return answer is ServerAnswer.Ok &&
-            answer.body.list("features").any { (it as? JsonPrimitive)?.content == WAITS_WAKE }
+        if (answer !is ServerAnswer.Ok) return emptySet()
+        return answer.body.list("features").mapNotNull { (it as? JsonPrimitive)?.content }.toSet()
     }
 
     private suspend fun inferenceRelayed(request: LaunchRequest, site: LaunchSite, launch: Launch): Boolean {
