@@ -377,7 +377,7 @@ class WorkflowsCommandsTest : SetupKit() {
         val polls = arrayOf(
             200 to runJson(visits = visit(1, "running", ""","sessionId":"s1"""")),
             200 to runJson(status = "waiting", visits = visit(1, "done", ""","outcome":"delivered"""") + "," + waiting),
-            200 to run(
+            200 to runJson(
                 status = "succeeded", extra = ""","output":"shipped"""",
                 visits = visit(1, "done", ""","outcome":"delivered"""") + "," +
                     visit(2, "done", ""","outcome":"go","waitId":"w9"""", "ask", "wait") + "," +
@@ -531,7 +531,7 @@ class WorkflowsCommandsTest : SetupKit() {
     fun aRunIsShownWithItsStepWhatItWaitsForItsFailureAndItsVisits() {
         val visits = visit(1, "done", ""","outcome":"delivered","sessionId":"s1","output":"built  it\nwell"""") + "," +
             visit(2, "waiting", ""","waitId":"w9","nodeTitle":"Ship it?"""", "ask", "wait")
-        val body = run(
+        val body = runJson(
             status = "waiting", extra = ""","currentNodeId":"ask","sessionId":"s1","parentRunId":"r0",""" +
                 """"inputs":{"env":"prod"}""",
             visits = visits,
@@ -569,7 +569,7 @@ class WorkflowsCommandsTest : SetupKit() {
 
     @Test
     fun aFinishedRunShowsItsFailureAndOutputInsteadOfAStep() {
-        val failed = run(
+        val failed = runJson(
             status = "failed",
             extra = ""","failureCode":"no_transition","endedAt":"1970-01-10T22:00:00Z","output":"half"""",
             visits = visit(1, "failed"),

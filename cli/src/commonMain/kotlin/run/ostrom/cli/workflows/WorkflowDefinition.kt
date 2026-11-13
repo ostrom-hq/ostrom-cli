@@ -49,36 +49,22 @@ internal fun parseDefinition(text: String): JsonObject {
     return clean
 }
 
+/** `nodes.ID.output`: the three parts of a template that reads a node. */
+private const val NODE_REFERENCE = 3
+
 private val TEMPLATE = Regex("""\{\{\s*([^}]*?)\s*}}""")
 
 /** What can be checked without the server, each problem naming its node (the adaptation of TeamCode's checks). */
 internal fun problemsOf(workflow: Workflow): List<String> {
     val byId = workflow.nodes.associateBy { it.id }
     val inputs = workflow.inputs.map { it.id }.toSet()
+    val start = workflow.start ?: workflow.nodes.firstOrNull { it.kind == WorkflowNodeKind.TRIGGER }?.id
     return buildList {
         workflow.nodes.groupBy { it.id }.filterValues { it.size > 1 }.keys
             .forEach { add("The node id \"$it\" is used by more than one node.") }
-        val start = workflow.start ?: workflow.nodes.firstOrNull { it.kind == WorkflowNodeKind.TRIGGER }?.id
-        when {
-            start == null -> add("No start: set \"start\" to a node id, or add a trigger node.")
-            start !in byId -> add("The start node \"$start\" does not exist.")
-        }
-        workflow.edges.forEach { edge ->
-            val on = edge.on ?: "next"
-            val to = edge.to
-            if (edge.from !in byId) add("An edge leaves \"${edge.from}\", which does not exist.")
-            if (to != null && to !in byId) {
-                add("Node \"${edge.from}\" goes on \"$on\" to \"$to\", which does not exist.")
-            }
-        }
-        workflow.nodes.forEach { node ->
-            if (node.kind == WorkflowNodeKind.AGENT && node.run?.instructions.isNullOrBlank()) {
-                add("Agent node \"${node.id}\" has no instructions (run.instructions).")
-            }
-            templatesOf(node).forEach { reference ->
-                templateProblem(node, reference, byId.keys, inputs)?.let { add(it) }
-            }
-        }
+        startProblem(start, byId.keys)?.let { add(it) }
+        addAll(edgeProblems(workflow, byId.keys))
+        workflow.nodes.forEach { addAll(nodeProblems(it, byId.keys, inputs)) }
         if (start != null && start in byId) {
             val reached = reachable(workflow, start)
             workflow.nodes.filter { it.id !in reached }
@@ -86,6 +72,29 @@ internal fun problemsOf(workflow: Workflow): List<String> {
         }
         if (workflow.edges.none { it.to == null }) add("No edge ends the workflow: give one edge \"to\": null.")
     }
+}
+
+private fun startProblem(start: String?, nodes: Set<String>): String? = when {
+    start == null -> "No start: set \"start\" to a node id, or add a trigger node."
+    start !in nodes -> "The start node \"$start\" does not exist."
+    else -> null
+}
+
+private fun edgeProblems(workflow: Workflow, nodes: Set<String>): List<String> = buildList {
+    workflow.edges.forEach { edge ->
+        val to = edge.to
+        if (edge.from !in nodes) add("An edge leaves \"${edge.from}\", which does not exist.")
+        if (to != null && to !in nodes) {
+            add("Node \"${edge.from}\" goes on \"${edge.on ?: "next"}\" to \"$to\", which does not exist.")
+        }
+    }
+}
+
+private fun nodeProblems(node: WorkflowNode, nodes: Set<String>, inputs: Set<String>): List<String> = buildList {
+    if (node.kind == WorkflowNodeKind.AGENT && node.run?.instructions.isNullOrBlank()) {
+        add("Agent node \"${node.id}\" has no instructions (run.instructions).")
+    }
+    templatesOf(node).forEach { reference -> templateProblem(node, reference, nodes, inputs)?.let { add(it) } }
 }
 
 /** The texts of a node a template is read in, `{{...}}` taken out. */
@@ -103,7 +112,7 @@ private fun templateProblem(node: WorkflowNode, reference: String, nodes: Set<St
     return when {
         parts.size == 2 && parts[0] == "inputs" && parts[1] !in inputs ->
             "$at, but the workflow declares no input \"${parts[1]}\"."
-        parts.size == 3 && parts[0] == "nodes" && parts[2] == "output" -> when {
+        parts.size == NODE_REFERENCE && parts[0] == "nodes" && parts[2] == "output" -> when {
             parts[1] == node.id -> "Node \"${node.id}\" reads its own output ({{$reference}})."
             parts[1] !in nodes -> "$at, but there is no node \"${parts[1]}\"."
             else -> null
