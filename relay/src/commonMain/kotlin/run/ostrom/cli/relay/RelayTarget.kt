@@ -31,6 +31,13 @@ internal sealed interface RelayTarget {
      */
     data object Memory : RelayTarget
 
+    /**
+     * `GET /api/v1/workflows/session/pending`: the workflow step's Stop hook asking whether its agent still has to
+     * deliver (`pendingWorkflowSession`), forwarded with the session the relay knows in place of any the caller names,
+     * for the hooks' capability only. The agent delivers through its MCP server and reads nothing of a run.
+     */
+    data object WorkflowPending : RelayTarget
+
     /** `GET /api/v1/gates/catalog`, answered with the package's verified [catalog] without leaving the machine. */
     data class Catalog(val catalog: String) : RelayTarget
 
@@ -93,6 +100,7 @@ private const val TODO_ROOT = "/api/v1/todos/session"
 private val TODO_AGENT_POST = Regex("$TODO_ROOT(/items(/$ID/(start|notes|proof|link|drop))?)?")
 private val TODO_HOOK_POST = Regex("$TODO_ROOT/(stop|hook-error)")
 private const val TODO_CONTEXT = "$TODO_ROOT/context"
+internal const val WORKFLOW_PENDING = "/api/v1/workflows/session/pending"
 
 /**
  * The memory routes the agent's `ostrom-memory` server calls, and nothing else of `/api/v1/memory`: the proposals, the
@@ -127,10 +135,15 @@ private fun hookTarget(method: HttpMethod, path: String, catalog: String?): Rela
     method == HttpMethod.Post && HOOK_POST.matches(path) -> RelayTarget.Hook(longPoll = false)
     method == HttpMethod.Post && path == WAITS_WAKE -> RelayTarget.Wake
     path.startsWith(TODO_ROOT) -> todoTarget(method, path)
-    method == HttpMethod.Get && path == SIGNED_GATE_CATALOG -> RelayTarget.SignedCatalog
-    method == HttpMethod.Get && path == GATE_CATALOG ->
-        if (catalog == null) RelayTarget.Hook(longPoll = false) else RelayTarget.Catalog(catalog)
-    method == HttpMethod.Get && HOOK_GET.matches(path) -> RelayTarget.Hook(longPoll = true)
+    method == HttpMethod.Get -> hookReadTarget(path, catalog)
+    else -> RelayTarget.NotFound
+}
+
+private fun hookReadTarget(path: String, catalog: String?): RelayTarget = when {
+    path == WORKFLOW_PENDING -> RelayTarget.WorkflowPending
+    path == SIGNED_GATE_CATALOG -> RelayTarget.SignedCatalog
+    path == GATE_CATALOG -> if (catalog == null) RelayTarget.Hook(longPoll = false) else RelayTarget.Catalog(catalog)
+    HOOK_GET.matches(path) -> RelayTarget.Hook(longPoll = true)
     else -> RelayTarget.NotFound
 }
 
@@ -171,13 +184,13 @@ private fun inferenceTarget(method: HttpMethod, path: String): RelayTarget {
  * take the agent's (security audit S2-25). The agent's opens one hook route, reading where a gate stands
  * (`GET /api/v1/gates/{id}`, which `ostrom wait` calls from the agent's shell): it neither asks, consumes nor closes
  * anything. The agent's opens the todo routes its `ostrom-todo` server calls, never the Stop hook's (a stop, a hook
- * error) nor the reminder block. The memory routes are the agent's tools' only: no hook reads or writes the memory.
- * Off the allow-list, either gets its 404.
+ * error) nor the reminder block, nor the workflow step's question (`WorkflowPending`). The memory routes are the agent's
+ * tools' only: no hook reads or writes the memory. Off the allow-list, either gets its 404.
  */
 internal fun opens(target: RelayTarget, hooks: Boolean, client: Boolean): Boolean = when (target) {
     is RelayTarget.Hook -> hooks || client && target.longPoll
     is RelayTarget.Todo -> hooks || client && !target.hooksOnly
-    is RelayTarget.Catalog, RelayTarget.SignedCatalog, RelayTarget.Wake -> hooks
+    is RelayTarget.Catalog, RelayTarget.SignedCatalog, RelayTarget.Wake, RelayTarget.WorkflowPending -> hooks
     RelayTarget.NotFound -> true
     is RelayTarget.Mcp, is RelayTarget.Inference, RelayTarget.McpMethodNotAllowed, RelayTarget.Memory -> client
 }

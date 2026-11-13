@@ -16,9 +16,11 @@ import run.ostrom.cli.hooks.HookProcessor
 import run.ostrom.cli.hooks.HookRunner
 import run.ostrom.cli.hooks.HookRunnerImpl
 import run.ostrom.cli.hooks.LazyHookProcessor
+import run.ostrom.cli.hooks.runtime.FileSystemHookFiles
 import run.ostrom.cli.hooks.runtime.GateWait
 import run.ostrom.cli.hooks.runtime.RelayCalls
 import run.ostrom.cli.hooks.runtime.SessionHooks
+import run.ostrom.cli.hooks.runtime.WorkflowStopHook
 import run.ostrom.cli.launch.AgentRunner
 import run.ostrom.cli.launch.AgentRunnerImpl
 import run.ostrom.cli.launcher.CredentialStore
@@ -314,6 +316,11 @@ class CliDependencies(
                 // the todo's hooks (`todo-stop`, `todo-context`) have their own runner: they fail open, never refuse;
                 // `todo-stop --wake` is the one Stop hook of a session that has both: the todo first, then the hold
                 override fun run(arguments: List<String>): Int {
+                    // the workflow step's Stop hook has its own too: it fails open, and says nothing but its block
+                    if (arguments == listOf(WorkflowStopHook.COMMAND)) {
+                        val files = FileSystemHookFiles(FileSystem.SYSTEM, SessionHooks::epochMillis)
+                        return WorkflowStopHook(console, environment, LoopbackHttpImpl(), files::read).run()
+                    }
                     val todo = arguments.firstOrNull()?.takeIf { it in TodoHookRunner.KINDS }
                     val holds = arguments == listOf(TodoHookRunner.STOP, TodoHookRunner.WAKE)
                     if (todo == null || arguments.size > 1 && !holds) return gate.run(arguments)

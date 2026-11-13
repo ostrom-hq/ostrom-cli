@@ -22,3 +22,24 @@ by the server's own instructions of the tool, at the MCP handshake.
 
 A server that does not announce `workflows.deliver.v1` (or cannot answer `GET /api/v1/capabilities`) gets neither the
 server nor the line: the session starts as before.
+
+## The Stop hook: `ostrom hook workflow-stop`
+
+An agent can end its turn without calling `deliver` and without asking a person. Where the hook is installed (Claude Code,
+one more `Stop` entry beside the gate's, the wait's hold and the todo's, none replacing another; only when the delivery
+tool is connected), the first such stop is sent back to work once; the second ends the turn as before (the run then fails
+`ended_without_delivery`). Codex has no such hook here: the server's own reminder covers it.
+
+- It reads nothing but `hook_event_name` and `stop_hook_active` of its input.
+- It prints nothing and exits 0 when `stop_hook_active` is true, on any error (unreadable input, no relay or token, a
+  server without the route, a refusal) and when it took more than 2 seconds in all: a problem of Ostrom never keeps the
+  agent from stopping.
+- Otherwise it asks `GET /api/v1/workflows/session/pending` (`pendingWorkflowSession`; coming soon: the server does not serve it yet) through the launch's relay, which
+  opens that read to the hooks' capability only and names the session it knows. When `needsAction`, it prints
+  `{"decision":"block","reason":…}`: the reason names the step (its title, one cleaned line) and the form of the
+  deliverable (never its schema or instruction), and tells the agent to call `deliver` of `ostrom-workflow` with the
+  result or, if it needs a person's answer, `ask_human` of `ostrom`, then end its turn.
+- Nothing of the agent's messages is read, kept, logged or sent.
+
+Not exercised with a real Claude Code session or a server that serves the route yet; the logic, the relay's route and the
+installed command are tested.

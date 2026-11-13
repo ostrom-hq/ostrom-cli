@@ -136,7 +136,7 @@ private class Relay(
         when (target) {
             is RelayTarget.Hook -> hooks.forward(call, target.longPoll)
             RelayTarget.Wake -> hooks.hold(call)
-            is RelayTarget.Todo -> todo.forward(call)
+            is RelayTarget.Todo, RelayTarget.WorkflowPending -> todo.forward(call)
             RelayTarget.Memory -> memoryCalls.forward(call)
             is RelayTarget.Catalog -> call.respondText(target.catalog, ContentType.Application.Json)
             RelayTarget.SignedCatalog -> policy.forward(call)
