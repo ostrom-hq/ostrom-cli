@@ -244,6 +244,51 @@ class RelayHooksTest {
     }
 
     @Test
+    fun theStopHooksHoldIsForwardedWithTheAgentTokenAsALongPollForTheHooksCapabilityOnly() {
+        val ostrom = FakeOstrom {
+            delay(600.milliseconds)
+            respond("""{"open":true,"messages":["[Ostrom wait answered] go"]}""", HttpStatusCode.OK, json)
+        }
+        relayTest(ostrom, hookTimeout = 200.milliseconds, clientToken = CLIENT_TOKEN) {
+            // no `wait=` query: the hold is a long poll all the same, under the relay's longer bound
+            val held = client.post("/api/v1/waits/wake?session=ses-1") {
+                bearerAuth(TOKEN)
+                contentType(ContentType.Application.Json)
+                setBody("""{"waitMillis":25000}""")
+            }
+            assertEquals(HttpStatusCode.OK, held.status)
+            assertEquals("""{"open":true,"messages":["[Ostrom wait answered] go"]}""", held.bodyAsText())
+            val sent = ostrom.requests.single()
+            assertEquals("${SERVER}/api/v1/waits/wake?session=ses-1", sent.url.toString())
+            assertEquals(HttpMethod.Post, sent.method)
+            assertEquals(listOf("Bearer $AGENT_TOKEN"), sent.headers.getAll(HttpHeaders.Authorization))
+            assertEquals("""{"waitMillis":25000}""", sent.body.toByteArray().decodeToString())
+            // the agent could otherwise wake itself with a call of its own
+            val own = client.post("/api/v1/waits/wake?session=ses-1") {
+                bearerAuth(CLIENT_TOKEN)
+                contentType(ContentType.Application.Json)
+                setBody("{}")
+            }
+            assertEquals(HttpStatusCode.Forbidden, own.status)
+            assertEquals(1, ostrom.requests.size, "the agent's capability reached nothing")
+        }
+    }
+
+    @Test
+    fun aWakeBodyBeyondTheBoundIsRefused() {
+        val ostrom = FakeOstrom { respond("{}", HttpStatusCode.OK, json) }
+        relayTest(ostrom) {
+            val response = client.post("/api/v1/waits/wake?session=ses-1") {
+                bearerAuth(TOKEN)
+                contentType(ContentType.Application.Json)
+                setBody(ByteArray(2 * 1024 * 1024 + 1) { 'a'.code.toByte() })
+            }
+            assertEquals(HttpStatusCode.PayloadTooLarge, response.status)
+            assertTrue(ostrom.requests.isEmpty())
+        }
+    }
+
+    @Test
     fun anEngineFailureIsUnreachableToo() {
         val ostrom = FakeOstrom { error("TLS handshake failed") }
         relayTest(ostrom) {

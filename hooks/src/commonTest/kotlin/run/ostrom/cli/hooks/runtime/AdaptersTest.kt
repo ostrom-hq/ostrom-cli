@@ -188,16 +188,18 @@ class AdaptersTest {
         assertEquals(mapOf("Authorization" to "Bearer t0k"), asked.headers)
         assertEquals("/usr/bin/git", capture.captured.first().first(), "never the git of the agent's PATH (S2-30)")
         val missing = Variables(mapOf("OSTROM_RELAY_URL" to "http://127.0.0.1:4100", "OSTROM_RELAY_TOKEN_FILE" to "/x"))
-        SessionHooks.processor(missing, fileSystem, capture, http, SessionHooks::epochMillis)
+        SessionHooks.processor(missing, fileSystem, capture, http, clock = SessionHooks::epochMillis)
             .process(HookKind.GATE, push.encodeToByteArray(), "claude")
         assertEquals(emptyMap(), http.sent.last().second.headers, "no token file, no token")
         // Grok's hooks get a budget: a call that would end after it is not made, and the gate refuses
         val grok = Variables(mapOf("OSTROM_RELAY_URL" to "http://127.0.0.1:4100", "OSTROM_HOOK_BUDGET_MS" to "100"))
         val sent = http.sent.size
-        SessionHooks.processor(grok, fileSystem, capture, http, SessionHooks::epochMillis)
+        SessionHooks.processor(grok, fileSystem, capture, http, clock = SessionHooks::epochMillis)
             .process(HookKind.GATE, push.encodeToByteArray(), "claude")
         assertEquals(sent, http.sent.size, "no time left for any call")
-        val plain = SessionHooks.processor(Variables(emptyMap()), fileSystem, capture, http, SessionHooks::epochMillis)
+        val plain = SessionHooks.processor(
+            Variables(emptyMap()), fileSystem, capture, http, sleep = {}, clock = SessionHooks::epochMillis,
+        )
         assertEquals(HookReply(), plain.process(HookKind.SESSION, null, "claude"))
         assertTrue(SessionHooks.epochMillis() > 1_700_000_000_000)
     }
@@ -285,6 +287,19 @@ class AdaptersTest {
         val start = """{"hook_event_name":"SessionStart","session_id":"a1"}"""
         val unrecorded = processor.process(HookKind.SESSION, start.encodeToByteArray(), "claude").stderr
         assertEquals("Ostrom unreachable (HTTP 404): session not recorded.\n", unrecorded)
+    }
+
+    @Test
+    fun theWakeHookHoldsThroughThePortsCallsAndSleep() {
+        val bad = CallResult.Failed("HTTP 502", status = 502)
+        val calls = FakeCalls().on("/api/v1/waits/wake", bad, ok("""{"open":false}"""))
+        val slept = mutableListOf<Long>()
+        val ports = HookPorts(calls, FakeFiles(), { _, _ -> "" }, { it }, "/w", sleep = { slept += it })
+        val processor = SessionHookProcessor(contextOf(), ports)
+        val stop = """{"hook_event_name":"Stop","session_id":"a1"}""".encodeToByteArray()
+        assertEquals(HookReply(), processor.process(HookKind.WAKE, stop, "claude"))
+        assertEquals(listOf(5_000L), slept)
+        assertEquals(2, calls.calls.size)
     }
 
     @Test

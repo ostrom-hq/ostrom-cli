@@ -30,6 +30,9 @@ object Routes {
     /** `GET`: the models of the inference gateway; a 2xx with models means the organisation relays inference. */
     const val INFERENCE_MODELS = "/api/v1/inference/v1/models"
 
+    /** `GET`: what the server speaks and serves (the keys of `ServerFeatures`). */
+    const val CAPABILITIES = "/api/v1/capabilities"
+
     /** `POST {launchId}`: the launcher's sign of life. */
     fun alive(session: String) = "/api/v1/sessions/${encode(session)}/alive"
 

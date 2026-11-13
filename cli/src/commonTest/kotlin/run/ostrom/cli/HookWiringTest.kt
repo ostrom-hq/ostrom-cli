@@ -2,6 +2,8 @@
 package run.ostrom.cli
 
 import run.ostrom.cli.hooks.runtime.GateTexts
+import run.ostrom.cli.launcher.WAITS_WAKE
+import run.ostrom.core.api.models.ServerFeatures
 import run.ostrom.cli.platform.Console
 import run.ostrom.cli.platform.Environment
 import run.ostrom.cli.platform.OperatingSystem
@@ -35,6 +37,18 @@ class HookWiringTest {
         val console = EventConsole("{}")
         val code = CliDependencies.hookRunner(console, NoEnvironment()).run(listOf("gate"))
         assertEquals(2 to "${GateTexts.UNREAD_EVENT}\n", code to console.err.toString())
+    }
+
+    @Test
+    fun theWakeHookIsWiredAndAStopOfNoSessionHoldsNothing() {
+        val console = EventConsole("""{"hook_event_name":"Stop"}""")
+        assertEquals(0, CliDependencies.hookRunner(console, NoEnvironment()).run(listOf("wake")))
+        assertEquals("", console.err.toString())
+    }
+
+    @Test
+    fun theLaunchersFeatureKeyIsTheContractsKey() {
+        assertEquals(ServerFeatures.WAITS_WAKE, WAITS_WAKE)
     }
 
     @Test

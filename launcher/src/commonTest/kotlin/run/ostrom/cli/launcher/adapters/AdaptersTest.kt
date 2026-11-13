@@ -124,6 +124,24 @@ class AdaptersTest {
     }
 
     @Test
+    fun claudeHoldsItsStopOnlyWhenTheServerHoldsTheWaitsAnswer() {
+        // TC-WAI-11: a Stop hook that waits for an answer, with a timeout of a day; none unless the server serves it
+        ClaudeAdapter().prepare(layout(), files)
+        val none = checkNotNull(parseObject(files.texts[join("/tmp/run", "plugin", "hooks", "hooks.json")]))
+        assertNull(none.child("hooks")?.get("Stop"))
+        ClaudeAdapter().prepare(layout(waitsWake = true), files)
+        val hooks = checkNotNull(parseObject(files.texts[join("/tmp/run", "plugin", "hooks", "hooks.json")]))
+        assertEquals(
+            """[{"hooks":[{"type":"command","command":"\"/opt/ostrom\" hook wake","timeout":86400}]}]""",
+            hooks.child("hooks")?.get("Stop").toString(),
+        )
+        assertEquals(
+            setOf("PreToolUse", "PostToolUse", "SessionStart", "SessionEnd", "Stop"),
+            hooks.child("hooks")?.keys,
+        )
+    }
+
+    @Test
     fun claudeKeepsThePackagesManifestAndRunsWithoutServers() {
         val manifest = join("/tmp/run", "plugin", ".claude-plugin", "plugin.json")
         files.texts[manifest] = """{"name":"acme"}"""
@@ -379,6 +397,7 @@ class AdaptersTest {
         inference: Boolean = false,
         rules: String = "",
         variables: Map<String, String> = emptyMap(),
+        waitsWake: Boolean = false,
     ) = SessionLayout(
         temporary = "/tmp/run",
         plugin = join("/tmp/run", "plugin"),
@@ -389,5 +408,6 @@ class AdaptersTest {
         home = "/home/dev",
         variable = { variables[it] },
         relay = RelayView("http://127.0.0.1:4100", "relay-token", mcp, inference),
+        waitsWake = waitsWake,
     )
 }

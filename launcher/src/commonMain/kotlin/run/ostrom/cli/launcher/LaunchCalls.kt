@@ -4,12 +4,25 @@ package run.ostrom.cli.launcher
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 /** A launch created by Ostrom. */
 internal data class Launch(val launchId: String, val agentToken: String)
 
+/**
+ * The feature key of the Stop hook's hold (`POST /api/v1/waits/wake`), `ServerFeatures.WAITS_WAKE` of ostrom-core: the
+ * launcher depends on no other module, so the CLI's tests check that the two are the same.
+ */
+const val WAITS_WAKE = "waits.wake.v1"
+
 /** What a launch read of Ostrom before its agent starts ([AgentLaunchUseCase]). */
-internal class LaunchReads(val pack: SessionPackage?, val keys: String, val mcp: List<String>, val inference: Boolean)
+internal class LaunchReads(
+    val pack: SessionPackage?,
+    val keys: String,
+    val mcp: List<String>,
+    val inference: Boolean,
+    val waitsWake: Boolean,
+)
 
 /**
  * [read]'s outcome, to be given later: its value, or the [LaunchStopped] it threw, thrown again when asked, so that a
@@ -160,12 +173,25 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
             // the notes come back with the list they are about: said once it has answered, whichever answer is last
             val mcp = async { mutableListOf<String>().let { notes -> mcpServers(site) { notes += it } to notes } }
             val inference = async { inferenceRelayed(request, site, launch) }
+            val wake = async { wakeServed(request, site) }
             val pack = packageOf(repo, site, keep = true)
             val read = keys.await()()
             val (servers, notes) = mcp.await()
             notes.forEach(dependencies.say)
-            LaunchReads(pack, read, servers, inference.await())
+            LaunchReads(pack, read, servers, inference.await(), wake.await())
         }
+
+    /**
+     * Whether the Stop hook that holds the agent for a wait's answer is worth installing: Claude Code only, and the
+     * server advertises [WAITS_WAKE]. A server that cannot say (a failure, an older one) gets no hook: the answer then
+     * stays on the wait, as for an agent that cannot be held.
+     */
+    private suspend fun wakeServed(request: LaunchRequest, site: LaunchSite): Boolean {
+        if (request.agent != Agent.CLAUDE) return false
+        val answer = dependencies.server.get(Routes.CAPABILITIES, site.credentials.token, CAPABILITIES_MILLIS)
+        return answer is ServerAnswer.Ok &&
+            answer.body.list("features").any { (it as? JsonPrimitive)?.content == WAITS_WAKE }
+    }
 
     private suspend fun inferenceRelayed(request: LaunchRequest, site: LaunchSite, launch: Launch): Boolean {
         val choice = site.variable(INFERENCE_VARIABLE)
@@ -198,6 +224,7 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
         private const val KEYS_MILLIS = 5_000L
         private const val END_MILLIS = 5_000L
         private const val INFERENCE_MILLIS = 3_000L
+        private const val CAPABILITIES_MILLIS = 3_000L
         private const val INFERENCE_VARIABLE = "OSTROM_INFERENCE"
         private val ON = setOf("on", "1", "true")
         private val OFF = setOf("off", "0", "false")

@@ -8,6 +8,13 @@ internal sealed interface RelayTarget {
     /** A hook call, forwarded to the same path. [longPoll] for `GET /api/v1/gates/{id}`, which may wait. */
     data class Hook(val longPoll: Boolean) : RelayTarget
 
+    /**
+     * `POST /api/v1/waits/wake?session=`: the Stop hook of a local Claude Code session, which Ostrom holds until a wait
+     * of the session is answered. Forwarded as a long poll, for the hooks' capability only: the agent that asked the
+     * question must not be the one to wake itself on a call of its own.
+     */
+    data object Wake : RelayTarget
+
     /** `POST /mcp/{server}`, forwarded to `/api/v1/mcp/{server}`. */
     data class Mcp(val server: String) : RelayTarget
 
@@ -48,6 +55,7 @@ internal val SESSION_REOPEN = Regex("/api/v1/sessions/$SESSION/reopen")
 private const val API_PREFIX = "/api/v1/"
 private const val MCP_PREFIX = "/mcp/"
 private const val GATE_CATALOG = "/api/v1/gates/catalog"
+internal const val WAITS_WAKE = "/api/v1/waits/wake"
 internal const val SIGNED_GATE_CATALOG = "/api/v1/gates/catalog/signed"
 
 /**
@@ -59,7 +67,9 @@ internal const val SIGNED_GATE_CATALOG = "/api/v1/gates/catalog/signed"
  * file is readable by the agent's own user (S2-20), so a report is the developer machine's word, never a proof.
  * Reading check runs (`GET /api/v1/checks`) is the console's, not a hook's: not on this list. A refusal the hook made
  * on the workstation (`POST /api/v1/gates/local-denials`, `reportLocalGateDenial`, audit A6) is the hooks' too: it
- * only writes a line in the organisation's audit log, never lets anything through.
+ * only writes a line in the organisation's audit log, never lets anything through. So is the hold of the Stop hook
+ * (`POST /api/v1/waits/wake`, `wakeWaits`): a long poll, with the agent token like the other hook routes, and never
+ * for the agent's own capability.
  */
 private val HOOK_POST =
     Regex("/api/v1/(sessions|gates|gates/local-denials|notifications|checks)|/api/v1/sessions/$SESSION/(reopen|seen)")
@@ -84,6 +94,7 @@ internal fun resolveTarget(method: HttpMethod, path: String, config: RelayConfig
 
 private fun hookTarget(method: HttpMethod, path: String, catalog: String?): RelayTarget = when {
     method == HttpMethod.Post && HOOK_POST.matches(path) -> RelayTarget.Hook(longPoll = false)
+    method == HttpMethod.Post && path == WAITS_WAKE -> RelayTarget.Wake
     method == HttpMethod.Get && path == SIGNED_GATE_CATALOG -> RelayTarget.SignedCatalog
     method == HttpMethod.Get && path == GATE_CATALOG ->
         if (catalog == null) RelayTarget.Hook(longPoll = false) else RelayTarget.Catalog(catalog)
@@ -111,7 +122,7 @@ private fun inferenceTarget(method: HttpMethod, path: String): RelayTarget {
  */
 internal fun opens(target: RelayTarget, hooks: Boolean, client: Boolean): Boolean = when (target) {
     is RelayTarget.Hook -> hooks || client && target.longPoll
-    is RelayTarget.Catalog, RelayTarget.SignedCatalog -> hooks
+    is RelayTarget.Catalog, RelayTarget.SignedCatalog, RelayTarget.Wake -> hooks
     RelayTarget.NotFound -> true
     is RelayTarget.Mcp, is RelayTarget.Inference, RelayTarget.McpMethodNotAllowed -> client
 }

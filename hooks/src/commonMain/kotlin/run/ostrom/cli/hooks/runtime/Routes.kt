@@ -26,6 +26,13 @@ object Routes {
     const val NOTIFICATIONS = "/api/v1/notifications"
 
     /**
+     * `POST ?session=`: holds the call until an answer to a wait of the session arrives, `{"open", "messages"}`
+     * (`wakeWaits`, feature `waits.wake.v1`); the Stop hook of a local Claude Code session, for the agent token's
+     * person only. Forwarded for the hooks' capability, never for the agent's.
+     */
+    const val WAITS_WAKE = "/api/v1/waits/wake"
+
+    /**
      * `GET`: the organisation's gate policy for [repository], signed by the instance with a short expiry
      * (`ostrom.gates/1`, security audit S2-20); the relay keeps it in its memory for 30 s.
      */

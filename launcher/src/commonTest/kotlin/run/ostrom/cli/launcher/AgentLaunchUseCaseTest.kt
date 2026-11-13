@@ -485,6 +485,37 @@ class AgentLaunchUseCaseTest : AgentLaunchKit() {
     }
 
     @Test
+    fun theStopHookIsAskedForOnlyWhenClaudeRunsAgainstAServerThatHoldsIt() = runTest {
+        serveALaunch()
+        server["GET ${Routes.POLICY}?agent=codex&dev=alice"] = 200 to """{"allowed":true}"""
+        val wakes = mutableListOf<Boolean>()
+        adapters = listOf(Agent.CLAUDE, Agent.CODEX).map { which ->
+            object : AgentAdapter {
+                override val agent = which
+
+                override fun prepare(layout: run.ostrom.cli.launcher.adapters.SessionLayout, files: LaunchFiles) =
+                    AgentLaunch(emptyList(), emptyMap()).also { wakes += layout.waitsWake }
+            }
+        }
+        val capabilities = "GET ${Routes.CAPABILITIES}"
+        server[capabilities] = 200 to """{"apiVersion":1,"features":["waits.v1",[1],"$WAITS_WAKE"]}"""
+        start()
+        server[capabilities] = 200 to """{"apiVersion":1,"features":["waits.v1"]}"""
+        start()
+        server[capabilities] = 200 to """{"apiVersion":1}"""
+        start()
+        server[capabilities] = 500 to """{"error":{"type":"internal","message":"x"}}"""
+        start()
+        server.unreachable = setOf(capabilities)
+        start()
+        server.unreachable = emptySet()
+        server[capabilities] = 200 to """{"apiVersion":1,"features":["$WAITS_WAKE"]}"""
+        start(Agent.CODEX)
+        assertEquals(listOf(true, false, false, false, false, false), wakes)
+        assertEquals(5, server.sent(capabilities).size, "Codex is never asked: it cannot be held")
+    }
+
+    @Test
     fun withoutAPathTheAgentGetsOstromsFolderAndNeverTheWorkingOne() = runTest {
         serveALaunch()
         variables["PATH"] = ""

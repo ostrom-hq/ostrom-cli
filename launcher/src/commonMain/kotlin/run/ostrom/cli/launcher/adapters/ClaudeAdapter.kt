@@ -162,15 +162,16 @@ class ClaudeAdapter : AgentAdapter {
                 ),
             ).toMap(),
         )
-        val hooks = objectOf(
-            "hooks" to mapOf(
-                // a gate hook that fails or runs past its timeout blocks the tool: Claude Code runs it otherwise
-                "PreToolUse" to entry("gate", layout.beforeToolSeconds, MATCHER, blocking = true),
-                "PostToolUse" to entry("gate", AFTER_SECONDS, "$MATCHER|Skill|Task|Agent"),
-                "SessionStart" to entry("session", START_SECONDS, null),
-                "SessionEnd" to entry("session", END_SECONDS, null),
-            ),
+        val events = mapOf(
+            // a gate hook that fails or runs past its timeout blocks the tool: Claude Code runs it otherwise
+            "PreToolUse" to entry("gate", layout.beforeToolSeconds, MATCHER, blocking = true),
+            "PostToolUse" to entry("gate", AFTER_SECONDS, "$MATCHER|Skill|Task|Agent"),
+            "SessionStart" to entry("session", START_SECONDS, null),
+            "SessionEnd" to entry("session", END_SECONDS, null),
         )
+        // the one hook that holds: the stop waits for the answer of a wait of the session, up to a day (TC-WAI-11)
+        val stop = if (layout.waitsWake) mapOf("Stop" to entry("wake", WAKE_SECONDS, null)) else emptyMap()
+        val hooks = objectOf("hooks" to events + stop)
         files.write(join(layout.plugin, "hooks", "hooks.json"), pretty(hooks))
     }
 
@@ -206,6 +207,9 @@ class ClaudeAdapter : AgentAdapter {
         private const val AFTER_SECONDS = 10L
         private const val START_SECONDS = 20L
         private const val END_SECONDS = 30L
+
+        /** The Stop hook's timeout: it holds the agent for a wait's answer, a day at most. */
+        private const val WAKE_SECONDS = 86_400L
         private const val SETTINGS = "--settings"
         private const val SETTING_SOURCES = "--setting-sources"
         private const val ADD_DIR = "--add-dir"
