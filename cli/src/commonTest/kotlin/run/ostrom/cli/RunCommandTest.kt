@@ -35,7 +35,7 @@ class RunCommandTest : CliKit() {
         assertEquals(7, cli(environment = withServer).run(arrayOf("claude", "--model", "opus", "-p", "hi")))
         assertEquals(LaunchRequest(Agent.CLAUDE, listOf("-p", "hi"), null, "opus"), launches.single().first)
         val notice = "ostrom: `ostrom claude` is deprecated and goes away in the next release: " +
-            "use `ostrom run claude -- <its arguments>`\n"
+            "use `ostrom run claude [options] -- <its arguments>`\n"
         assertTrue(console.err.toString().startsWith(notice), console.err.toString())
         assertEquals(1, console.err.toString().lines().count { it.contains("deprecated") }, "one line")
     }

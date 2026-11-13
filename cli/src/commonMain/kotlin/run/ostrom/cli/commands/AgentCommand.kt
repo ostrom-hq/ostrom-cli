@@ -56,7 +56,9 @@ internal class AgentCommand(
     val agentArguments by argument("agent-args", help = "After --: passed to the agent as they are").multiple()
 
     override fun run() {
-        if (deprecated) dependencies.console.err(deprecation(agent.command, "${runPath(agent)} -- <its arguments>"))
+        if (deprecated) {
+            dependencies.console.err(deprecation(agent.command, "${runPath(agent)} [options] -- <its arguments>"))
+        }
         refuseOptionsTogether()
         // a usage error before the server or the sign-in is looked at: 64, never 65 for a developer signed out
         if (cloud && agentArguments.isNotEmpty()) {

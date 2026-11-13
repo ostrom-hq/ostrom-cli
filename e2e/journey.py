@@ -4,7 +4,7 @@
     5.1 ostrom login (the device flow, approved from a browser session)  2.1 ostrom init
     2.6 ostrom invite, 2.7 the invitation accepted, ostrom members        3.4 and 3.3 ostrom policy
     3.1 ostrom policy rules                                               3.2 and 4.1 ostrom harness
-    5.2 ostrom run claude (a fake Claude Code plays the hooks)                5.3 the deployment it tries is held
+    5.2 ostrom run claude (a fake Claude Code plays the hooks)            5.3 the deployment it tries is held
     5.6 the asker's own yes refused, 5.4 the second person's yes          5.5 ostrom wait lets it through
     5.7 the signed receipt, pulled and verified                         6.1 ostrom logs
     2.9 ostrom mcp: a server of the organisation, called through the session's relay
