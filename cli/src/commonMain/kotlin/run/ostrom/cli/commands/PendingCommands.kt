@@ -20,6 +20,8 @@ fun pendingCommands(implemented: List<CliktCommand>): List<CliktCommand> {
         named("verify"),
         named("logs"),
         named("attach"),
+        named("github"),
+        named("cloud"),
         named("harness"),
         named("login"),
         named("logout"),
