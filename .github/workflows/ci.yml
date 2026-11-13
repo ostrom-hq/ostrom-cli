@@ -296,6 +296,10 @@ jobs:
           retention-days: 7
       - name: The bench's build contract
         run: ./ci/build-linux.sh && ldd dist/ostrom
+      # S2-49, moved from ostrom-server with the runner: one session of the template image, run as the server's Docker
+      # driver runs it, with the binary an init container copies in; the agent must not reach the runner token.
+      - name: Cloud session, the agent cannot read the runner token (S2-49)
+        run: ci/runner-isolation.sh dist/ostrom
       # docs-truth (ostrom-core's tools/docs-truth) at a pinned commit, whose api/contract/served-routes.txt says what
       # ostrom-server main serves; moved out of the workspace, so that no check of this repository scans it.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -364,6 +368,52 @@ jobs:
           chmod 755 bin/linuxArm64/releaseExecutable/ostrom.kexe &&
           python3 scripts/measure.py --label linuxArm64 --binary bin/linuxArm64/releaseExecutable/ostrom.kexe
           --max-hook-p95-ms 20 --max-version-p95-ms 30 --max-cold-ms 300 --max-hook-memory-mb 25
+
+  # The runner image of cloud sessions from main, ghcr.io/ostrom-hq/ostrom-runner:edge (and :sha-<commit>): the image a
+  # session's init container copies `ostrom` out of, before a release tags it (release.yml publishes the versions).
+  runner-image:
+    needs: ci
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    timeout-minutes: 20
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/ostrom-hq/ostrom-runner
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ostrom-binaries
+          path: bins
+      - name: Image build context
+        run: |
+          set -eu
+          mkdir -p image-context/amd64 image-context/arm64
+          cp bins/linuxX64/releaseExecutable/ostrom.kexe image-context/amd64/ostrom
+          cp bins/linuxArm64/releaseExecutable/ostrom.kexe image-context/arm64/ostrom
+          chmod 755 image-context/*/ostrom
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with: { cache-image: false }
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with: { cache-binary: false }
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: image-context
+          file: docker/runner/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:edge
+            ${{ env.IMAGE }}:sha-${{ github.sha }}
 
   # Waits for the binaries ci cross-compiles, not for its tests to pass: a test that fails only on Windows must show
   # there too, on a branch already red elsewhere.
