@@ -74,9 +74,10 @@ class GithubCommandsTest : SetupKit() {
     @Test
     fun linksListsEveryMembersAccount() {
         val body = """{"items":[{"memberId":"m1","state":"linked","appConfigured":true,"login":"maya-k"},""" +
-            """{"memberId":"m2","state":"reconnect_required","appConfigured":true}]}"""
+            """{"memberId":"m2","state":"reconnect_required","appConfigured":true},{"login":"ghost"}]}"""
         assertEquals(0, github(mapOf(links to (200 to body)), "github", "links"))
-        assertOut("Acme · 2 members with a GitHub link\n  m1  @maya-k  linked\n  m2  -  reconnect_required\n")
+        assertOut("Acme · 3 members with a GitHub link\n  m1  @maya-k  linked\n  m2  -  reconnect_required\n")
+        assertOut("  -  @ghost  -\n")
         console.out.clear()
         val one = """{"items":[{"memberId":"m1","state":"linked","appConfigured":true,"login":"maya-k"}]}"""
         assertEquals(0, github(mapOf(links to (200 to one)), "github", "links"))

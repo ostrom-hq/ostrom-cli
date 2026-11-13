@@ -114,8 +114,8 @@ internal class GithubLinksCommand(private val dependencies: CliDependencies) : C
         dependencies.console.out("${access.org.name} · $count with a GitHub link\n")
         items.forEach { item ->
             val login = item.text("login")?.let { "@$it" } ?: "-"
-            val member = item.text("memberId").orEmpty()
-            dependencies.console.out("  $member  $login  ${item.text("state").orEmpty()}\n")
+            val member = item.text("memberId") ?: "-"
+            dependencies.console.out("  $member  $login  ${item.text("state") ?: "-"}\n")
         }
     }
 }
