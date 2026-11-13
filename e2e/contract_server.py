@@ -8,7 +8,7 @@ the run then points OSTROM_URL at the real server and keeps every assertion.
     python3 e2e/contract_server.py --port 0 --log requests.jsonl --ready ready.txt [--package vectors/package.json] \
         [--without-session-reads] [--actions N]
 
-It keeps the sessions the hooks start, their gates and their end, and serves them back to `ostrom logs` with the
+It keeps the sessions the hooks start, their gates and their end, and serves them back to `ostrom sessions show` with the
 device's token (`GET /api/v1/sessions`, `GET /api/v1/sessions/{id}`); a gate, as ostrom-server, it does not give that
 token (403).
 `--without-session-reads` plays an older server that does not serve those reads.
@@ -216,7 +216,7 @@ def make_handler(state):
             return self._error(404, "not_found", f"no {method} {path} in the e2e contract server")
 
         def _session_read(self, path, query):
-            """`ostrom logs`' reads, as (status, body), or None for another route."""
+            """`ostrom sessions show`' reads, as (status, body), or None for another route."""
             if path == "/api/v1/sessions":
                 dev = query.get("dev", [None])[0]
                 with state["lock"]:

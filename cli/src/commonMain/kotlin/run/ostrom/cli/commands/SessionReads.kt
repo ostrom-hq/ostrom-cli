@@ -13,7 +13,8 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
-// What `ostrom logs` reads of a session: the session and its receipt, the developer's last one, the gates it asked.
+// What `ostrom sessions` reads: the sessions, a session: the session and its receipt, the developer's last one, the
+// gates it asked.
 
 private const val SESSIONS = "/api/v1/sessions"
 private const val GATES = "/api/v1/gates"
@@ -66,7 +67,7 @@ private fun served(signed: SignedIn, list: ServerAnswer) {
     if (list is ServerAnswer.Failed && list.status == NOT_FOUND) {
         throw PrintMessage(
             "ostrom: ${signed.serverUrl} does not serve the sessions' reads (GET $SESSIONS): " +
-                "ostrom logs needs a newer Ostrom server. Ask your admin to update it.",
+                "ostrom sessions needs a newer Ostrom server. Ask your admin to update it.",
             ExitCode.UNREACHABLE.code,
             printError = true,
         )
@@ -74,6 +75,34 @@ private fun served(signed: SignedIn, list: ServerAnswer) {
 }
 
 private fun mine(signed: SignedIn) = "$SESSIONS?dev=${Routes.encode(signed.login)}"
+
+/**
+ * What `ostrom sessions list` asks for: the sessions of [dev] (everyone's when null), of [repo], only those still
+ * running when [open], the page after [before].
+ */
+internal data class SessionsQuery(val dev: String?, val repo: String?, val open: Boolean, val before: String?) {
+    /** The route with its query, only the parameters given. */
+    fun path(): String {
+        val parameters = listOfNotNull(
+            dev?.let { "dev=${Routes.encode(it)}" },
+            repo?.let { "repo=${Routes.encode(it)}" },
+            "open=true".takeIf { open },
+            before?.let { "before=${Routes.encode(it)}" },
+        )
+        return if (parameters.isEmpty()) SESSIONS else "$SESSIONS?" + parameters.joinToString("&")
+    }
+}
+
+/** A page of sessions, newest first, and the cursor of the next one when there is more. */
+internal class SessionsPage(val items: List<JsonObject>, val next: String?)
+
+/** The page of sessions [query] asks for; 69 on a server that does not serve them, 65 once signed out. */
+internal suspend fun listSessions(signed: SignedIn, query: SessionsQuery): SessionsPage {
+    val answer = signed.server.get(query.path(), signed.token)
+    served(signed, answer)
+    val body = answer.orStop(signed.serverUrl, "No sessions on ${signed.serverUrl}.")
+    return SessionsPage(body.list("items").filterIsInstance<JsonObject>(), body.text("next"))
+}
 
 /**
  * [readSession] for a turn of `--follow`: null when the server fails or cannot be reached, so the next turn asks

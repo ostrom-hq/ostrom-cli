@@ -77,6 +77,7 @@ hooks written for the former path go on working until the release after.
 | Former path | Path | Since |
 | --- | --- | --- |
 | `ostrom <agent> [options] [agent args]` (`claude`, `codex`, `opencode`, `gemini`, `grok`, `hermes`, `pi`) | `ostrom run <agent> [options] -- [agent args]` | this release |
+| `ostrom logs [session] [-f] [--json]` | `ostrom sessions show [session] [-f] [--json]` | this release |
 
 `ostrom run <agent>` passes everything after `--` to the agent untouched; before `--`, an option that is not Ostrom's
 (`-p`, `--resume`) is a usage error (exit 64) rather than something passed on, as TeamCode does. `ostrom init` writes

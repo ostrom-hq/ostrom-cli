@@ -19,7 +19,7 @@ fun pendingCommands(implemented: List<CliktCommand>): List<CliktCommand> {
         named("hooks"),
         named("receipts"),
         named("verify"),
-        named("logs"),
+        named("sessions"),
         named("attach"),
         named("github"),
         named("cloud"),
