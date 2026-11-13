@@ -39,6 +39,7 @@ import run.ostrom.cli.commands.UpdateCommand
 import run.ostrom.cli.commands.VerifyCommand
 import run.ostrom.cli.commands.VersionCommand
 import run.ostrom.cli.commands.WaitCommand
+import run.ostrom.cli.commands.WhoAmICommand
 import run.ostrom.cli.commands.pendingCommands
 import run.ostrom.cli.commands.setupCommands
 import run.ostrom.cli.help.colourLevel
@@ -189,6 +190,7 @@ class OstromCli(private val dependencies: CliDependencies) {
             StatusCommand(dependencies),
             AttachCommand(dependencies),
             LoginCommand(dependencies),
+            WhoAmICommand(dependencies),
             UpdateCommand(dependencies),
             LogoutCommand(dependencies),
             ConfigCommand(dependencies),
