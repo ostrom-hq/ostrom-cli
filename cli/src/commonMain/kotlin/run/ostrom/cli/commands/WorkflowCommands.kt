@@ -5,6 +5,7 @@ import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.Context
 import com.github.ajalt.clikt.core.PrintMessage
 import com.github.ajalt.clikt.core.ProgramResult
+import com.github.ajalt.clikt.core.subcommands
 import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.options.convert
 import com.github.ajalt.clikt.parameters.options.default
@@ -114,6 +115,19 @@ private fun CliDependencies.standardInput(): String =
 /** `ostrom workflows`: the workflows the server runs. */
 internal class WorkflowsCommand :
     GroupCommand("workflows", "Workflows the server runs, and their runs", comingSoon = false)
+
+/** `ostrom workflows` with its subcommands. */
+internal fun workflowsCommand(dependencies: CliDependencies): CliktCommand = WorkflowsCommand().subcommands(
+    WorkflowsListCommand(dependencies),
+    WorkflowsShowCommand(dependencies),
+    WorkflowsCreateCommand(dependencies),
+    WorkflowsUpdateCommand(dependencies),
+    WorkflowsDeleteCommand(dependencies),
+    WorkflowsRunCommand(dependencies),
+    WorkflowsRunsCommand(dependencies),
+    WorkflowsRunShowCommand(dependencies),
+    WorkflowsCancelCommand(dependencies),
+)
 
 /** `ostrom workflows list`. */
 internal class WorkflowsListCommand(private val dependencies: CliDependencies) : CliktCommand(name = "list") {

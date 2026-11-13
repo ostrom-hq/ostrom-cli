@@ -163,8 +163,12 @@ class WorkflowsCommandsTest : SetupKit() {
         assertTrue(text.endsWith("Edges:\n  build -delivered-> ask\n  ask -go-> call\n  call -next-> end\n"), text)
         console.out.clear()
         assertEquals(0, run(routes(show to (200 to bare)), "workflows", "show", "deploy"))
-        val empty = "Bare  [b]  proposed\nDomain: Ops\nUpdated 1970-01-10T21:00:00Z\n\nInputs:\n  none\n\nNodes:\n\nEdges:\n  none\n"
+        val empty = "Bare  [b]  proposed\nDomain: Ops\nUpdated 1970-01-10T21:00:00Z\n\n" +
+            "Inputs:\n  none\n\nNodes:\n\nEdges:\n  none\n"
         assertEquals(empty, console.out.toString())
+        console.out.clear()
+        assertEquals(0, run(routes(show to (200 to proposed)), "workflows", "show", "deploy"))
+        assertFalse(console.out.contains("Updated"), console.out.toString())
         console.out.clear()
         assertEquals(0, run(routes(show to (200 to stored)), "workflows", "show", "deploy", "--json"))
         assertEquals("$stored\n", console.out.toString())
@@ -236,10 +240,12 @@ class WorkflowsCommandsTest : SetupKit() {
         val bad = """{"id":"x","name":"X","domain":"d","status":"accepted","foundAt":"x","start":"nowhere",""" +
             """"inputs":[{"id":"env","label":"E"}],"nodes":[{"id":"a","kind":"agent","label":"A",""" +
             """"run":{"instructions":"  "}},{"id":"norun","kind":"agent","label":"N"},""" +
-            """{"id":"a","kind":"wait","label":"B","detail":"{{inputs.zzz}} {{foo.bar}} {{x.y.z}} {{nodes.a.input}} """ +
+            """{"id":"a","kind":"wait","label":"B","detail":"{{inputs.zzz}} {{foo.bar}} {{x.y.z}} """ +
+            """{{nodes.a.input}} """ +
             """{{nodes.ghost.output}} {{nodes.a.output}} {{inputs.env}} {{other}} {{nodes.a.output.x}}"},""" +
             """{"id":"lost","kind":"step","label":"L","run":{"message":"{{nodes.a.output}}"}}],""" +
-            """"edges":[{"from":"a","to":"gone","on":"delivered"},{"from":"ghost","to":"a"},{"from":"lost","to":"void"}]}"""
+            """"edges":[{"from":"a","to":"gone","on":"delivered"},{"from":"ghost","to":"a"},""" +
+            """{"from":"lost","to":"void"}]}"""
         file(bad)
         assertEquals(64, run(routes(), "workflows", "create", "--file", "w.json"))
         val message = console.err.toString()
@@ -368,7 +374,8 @@ class WorkflowsCommandsTest : SetupKit() {
             assertEquals(64, run(read, "workflows", "run", "deploy", *args))
             assertErr("ostrom: $message\n")
         }
-        refused("\"Deploy\" has no input \"zone\". Its inputs: env, note, tag.", "--input", "env=a", "--input", "zone=b")
+        val unknown = "\"Deploy\" has no input \"zone\". Its inputs: env, note, tag."
+        refused(unknown, "--input", "env=a", "--input", "zone=b")
         refused("Input env is given twice: pass --input env=... once.", "--input", "env=a", "--input", "env=b")
         refused("Input env is 9 characters long; the most it takes is 8.", "--input", "env=123456789")
         refused("\"Deploy\" needs env (Environment): pass --input env=....")
