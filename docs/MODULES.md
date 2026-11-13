@@ -328,7 +328,7 @@ Every pull request marked ready runs one required check on Linux, `ci` (drafts u
   above a 15 ms median, and a p95 of 20 ms for the hook and 30 ms for `version`) and with the file cache emptied first
   (300 ms, median of 5 starts), the hook's peak memory (25 MB; on Linux the figure read is never below the Python
   script's own, about 14 MB, so the budget catches a hook above 25 MB, not a growth under it) and the binary sizes
-  (15 MB, Windows 17); `ci/build-linux.sh` leaves `dist/ostrom` for the end-to-end bench. linuxArm64 holds the same
+  (16 MB, Windows 18); `ci/build-linux.sh` leaves `dist/ostrom` for the end-to-end bench. linuxArm64 holds the same
   start-up and memory budgets. macOS runners vary by about 3 times from one machine to the next, so macOS holds about
   twice its slowest runner: a 30 ms median, a p95 of 45 ms for the hook and 60 ms for `version`, a 1500 ms median
   with the cache emptied, the same 25 MB. The `git push` budget is held on linuxX64 only, and Windows holds only its 40 ms
