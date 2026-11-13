@@ -29,9 +29,19 @@ class TodoHookRunner(
     private val capture: ProcessCapture,
     private val io: CoroutineDispatcher,
 ) {
-    /** Runs the hook [kind] ([STOP] or [CONTEXT]) on the event on stdin; its exit code, always 0. */
+    /**
+     * Runs the hook [kind] ([STOP] or [CONTEXT]) on the event on stdin; its exit code, always 0. Whatever fails on the
+     * way (the read, the relay, a hook-error that fails too) prints nothing: the agent stops or starts as usual.
+     * [Throwable], as the gate's runner: this is the hook process's blocking entry, no cancellation can reach it.
+     */
+    @Suppress("TooGenericExceptionCaught")
     fun run(kind: String): Int {
-        answer(kind)?.let { console.data("$it\n") }
+        val answer = try {
+            answer(kind)
+        } catch (ignored: Throwable) { // not coroutine-reachable: the hook process's blocking entry, its own guard
+            null
+        }
+        answer?.let { console.data("$it\n") }
         return 0
     }
 

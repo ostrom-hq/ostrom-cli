@@ -84,6 +84,13 @@ class TodoHookRunnerTest {
     }
 
     @Test
+    fun aRelayThatFailsInAnUnforeseenWayLetsTheAgentGoOn() {
+        val relay = Relay { throw IllegalStateException("the relay broke") }
+        assertEquals(0 to "", run(TodoHookRunner.STOP, "{}", relay), "the stop, and its hook-error, both failed")
+        assertEquals(0 to "", run(TodoHookRunner.CONTEXT, """{"source":"resume"}""", relay))
+    }
+
+    @Test
     fun withoutTheLaunchsRelayOrAnEventNothingIsAskedNorSaid() {
         files.write("/empty".toPath()) { writeUtf8("\n") }
         val relay = Relay { error("never asked") }
