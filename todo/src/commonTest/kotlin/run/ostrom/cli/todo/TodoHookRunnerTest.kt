@@ -55,10 +55,11 @@ class TodoHookRunnerTest {
         relay: Relay,
         variables: Map<String, String> = launch,
         input: StandardInput = StandardInput.Read(event.encodeToByteArray()),
+        then: ((Console) -> Int)? = null,
     ): Pair<Int, String> {
         val console = HookConsole(input)
         val runner = TodoHookRunner(console, Variables(variables), files, relay, FakeCapture(), Dispatchers.Unconfined)
-        return runner.run(kind) to console.out.toString()
+        return runner.run(kind, then) to console.out.toString()
     }
 
     @Test
@@ -69,6 +70,23 @@ class TodoHookRunnerTest {
         val (port, request) = relay.sent.single()
         assertEquals(4100 to "/api/v1/todos/session/stop", port to request.path)
         assertEquals("Bearer hooks-cap", request.headers["Authorization"])
+    }
+
+    @Test
+    fun aStopTheTodoLetsPassIsThenHeldOnTheSameEventOneItBlocksNever() {
+        val event = """{"hook_event_name":"Stop"}"""
+        val read = mutableListOf<String>()
+        val hold: (Console) -> Int = { console ->
+            read += (console.readStandardInput(1, 1) as StandardInput.Read).bytes.decodeToString()
+            console.data("held")
+            3
+        }
+        assertEquals(3 to "held", run(TodoHookRunner.STOP, event, Relay { """{"action":"allow"}""" }, then = hold))
+        assertEquals(listOf(event), read, "the hold reads the event the todo read")
+        val blocked = run(TodoHookRunner.STOP, event, Relay { """{"action":"block","reason":"Finish."}""" }, then = hold)
+        assertEquals(0 to "{\"decision\":\"block\",\"reason\":\"Finish.\"}\n", blocked)
+        assertEquals(1, read.size, "a blocked stop is never held")
+        assertEquals(TodoHookRunner.STOP to "--wake", TodoHookRunner.STOP to TodoHookRunner.WAKE)
     }
 
     @Test

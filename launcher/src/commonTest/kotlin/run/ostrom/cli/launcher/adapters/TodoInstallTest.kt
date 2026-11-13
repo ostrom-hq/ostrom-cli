@@ -58,11 +58,10 @@ class TodoInstallTest {
     }
 
     @Test
-    fun claudeRunsTheTodosStopHookBesideTheWaitsHold() {
+    fun claudeRunsOneStopHookTheTodoFirstThenTheWaitsHold() {
         ClaudeAdapter().prepare(layout(todo = true, wake = true), files)
         assertEquals(
-            """[{"hooks":[{"type":"command","command":"\"/opt/ostrom\" hook wake","timeout":86400}]},""" +
-                """{"hooks":[{"type":"command","command":"\"/opt/ostrom\" hook todo-stop","timeout":150}]}]""",
+            """[{"hooks":[{"type":"command","command":"\"/opt/ostrom\" hook todo-stop --wake","timeout":86400}]}]""",
             claudeHooks()?.get("Stop").toString(),
         )
     }

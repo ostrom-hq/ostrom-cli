@@ -173,10 +173,14 @@ class ClaudeAdapter : AgentAdapter {
             "SessionStart" to start,
             "SessionEnd" to entry("session", END_SECONDS, null),
         )
-        // the one hook that holds: the stop waits for the answer of a wait of the session, up to a day (TC-WAI-11);
-        // the todo's runs beside it, and the server lets the stop pass while a wait is open
-        val stop = (if (layout.waitsWake) entry("wake", WAKE_SECONDS, null) else emptyList()) +
-            if (todo) entry(TODO_STOP, TODO_STOP_SECONDS, null) else emptyList()
+        // one Stop hook, as TeamCode's `todo-stop --wake`: Claude Code runs an event's hooks side by side, so the todo
+        // decides first, and only a stop it lets pass is held for a wait's answer, up to a day (TC-WAI-11)
+        val stop = when {
+            layout.waitsWake && todo -> entry("$TODO_STOP $TODO_WAKE", WAKE_SECONDS, null)
+            layout.waitsWake -> entry("wake", WAKE_SECONDS, null)
+            todo -> entry(TODO_STOP, TODO_STOP_SECONDS, null)
+            else -> emptyList()
+        }
         val hooks = objectOf("hooks" to if (stop.isEmpty()) events else events + ("Stop" to stop))
         files.write(join(layout.plugin, "hooks", "hooks.json"), pretty(hooks))
     }
@@ -220,6 +224,7 @@ class ClaudeAdapter : AgentAdapter {
         private const val WAKE_SECONDS = 86_400L
 
         private const val TODO_STOP = "todo-stop"
+        private const val TODO_WAKE = "--wake"
         private const val TODO_CONTEXT = "todo-context"
         private const val CONTEXT_SOURCES = "compact|resume"
         private const val TODO_CONTEXT_SECONDS = 25L

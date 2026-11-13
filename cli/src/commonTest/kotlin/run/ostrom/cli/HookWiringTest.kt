@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli
 
+import run.ostrom.cli.hooks.HookKind
+import run.ostrom.cli.hooks.HookProcessor
+import run.ostrom.cli.hooks.HookReply
 import run.ostrom.cli.hooks.runtime.GateTexts
 import run.ostrom.cli.launcher.WAITS_WAKE
 import run.ostrom.cli.launcher.team.TEAM_SKILLS
@@ -68,5 +71,25 @@ class HookWiringTest {
         assertEquals(0, CliDependencies.hookRunner(console, NoEnvironment()).run(listOf("todo-context")))
         assertEquals("", console.err.toString())
         assertEquals(64, CliDependencies.hookRunner(console, NoEnvironment()).run(emptyList()), "usage")
+    }
+
+    @Test
+    fun theTodosStopThenTheHoldIsOneHookThatGivesTheHoldTheSameEvent() {
+        // no relay: the todo lets the stop pass, so the hold runs, on the event the todo read
+        val event = """{"hook_event_name":"Stop","session_id":"s"}"""
+        val held = mutableListOf<Pair<HookKind, String?>>()
+        val processor = object : HookProcessor {
+            override fun process(kind: HookKind, input: ByteArray?, dialect: String): HookReply {
+                held += kind to input?.decodeToString()
+                return HookReply(stdout = "held", exitCode = 0)
+            }
+        }
+        val console = EventConsole(event)
+        val runner = CliDependencies.hookRunner(console, NoEnvironment()) { processor }
+        assertEquals(0, runner.run(listOf("todo-stop", "--wake")))
+        assertEquals(listOf(HookKind.WAKE to event), held)
+        assertEquals(64, runner.run(listOf("todo-stop", "--other")), "usage")
+        assertEquals(64, runner.run(listOf("gate", "--wake")), "usage")
+        assertEquals(listOf(HookKind.WAKE to event), held, "nothing else held")
     }
 }

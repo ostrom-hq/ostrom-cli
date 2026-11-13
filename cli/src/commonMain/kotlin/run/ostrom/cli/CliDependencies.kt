@@ -11,6 +11,7 @@ import run.ostrom.cli.capabilities.ServerCapabilities
 import run.ostrom.cli.capabilities.ServerCapabilitiesImpl
 import run.ostrom.cli.cloud.CloudRunner
 import run.ostrom.cli.cloud.CloudRunnerImpl
+import run.ostrom.cli.hooks.HookKind
 import run.ostrom.cli.hooks.HookProcessor
 import run.ostrom.cli.hooks.HookRunner
 import run.ostrom.cli.hooks.HookRunnerImpl
@@ -297,13 +298,18 @@ class CliDependencies(
             val gate = HookRunnerImpl(console, environment, LazyHookProcessor(session))
             val io = Dispatchers.IO
             return object : HookRunner {
-                // the todo's hooks (`todo-stop`, `todo-context`) have their own runner: they fail open, never refuse
+                // the todo's hooks (`todo-stop`, `todo-context`) have their own runner: they fail open, never refuse;
+                // `todo-stop --wake` is the one Stop hook of a session that has both: the todo first, then the hold
                 override fun run(arguments: List<String>): Int {
-                    val todo = arguments.singleOrNull()?.takeIf { it in TodoHookRunner.KINDS }
-                        ?: return gate.run(arguments)
+                    val todo = arguments.firstOrNull()?.takeIf { it in TodoHookRunner.KINDS }
+                    val holds = arguments == listOf(TodoHookRunner.STOP, TodoHookRunner.WAKE)
+                    if (todo == null || arguments.size > 1 && !holds) return gate.run(arguments)
                     val http = LoopbackHttpImpl()
                     val runner = TodoHookRunner(console, environment, FileSystem.SYSTEM, http, ProcessCaptureImpl(), io)
-                    return runner.run(todo)
+                    if (!holds) return runner.run(todo)
+                    return runner.run(todo) { replayed ->
+                        HookRunnerImpl(replayed, environment, LazyHookProcessor(session)).run(listOf(HookKind.WAKE.command))
+                    }
                 }
             }
         }
