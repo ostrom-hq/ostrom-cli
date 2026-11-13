@@ -37,7 +37,7 @@ internal fun parseDefinition(text: String): JsonObject {
     val workflow = try {
         OstromJson.decodeFromJsonElement(Workflow.serializer(), clean)
     } catch (error: SerializationException) {
-        val reason = error.message.orEmpty().lineSequence().first().take(MAX_REASON)
+        val reason = "${error.message}".lineSequence().first().take(MAX_REASON)
         refuse("The definition is not a workflow: $reason. A workflow has an id, name, domain, status, foundAt, " +
             "nodes (id, kind, label) and edges (from, to).")
     }

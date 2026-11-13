@@ -22,11 +22,15 @@ internal fun JsonObject.workflowLine(now: Long): String = listOfNotNull(
 internal fun JsonObject.workflowDetails(): String = buildList {
     val version = number("version")?.let { "  v$it" }.orEmpty()
     add("${text("name")}  [${text("id")}]$version  ${text("status")}")
-    text("description")?.takeIf { it.isNotBlank() }?.let { add(it) }
+    text("description")?.let { add(it) }
     val repos = items("repos").takeIf { it.isNotEmpty() }?.let { "; repositories: ${it.joinToString(", ")}" }
     add("Domain: ${text("domain")}${repos.orEmpty()}")
     text("start")?.let { add("Start: $it") }
-    text("updatedAt")?.let { add("Updated $it" + text("updatedBy")?.let { by -> " by $by" }.orEmpty()) }
+    val updatedAt = text("updatedAt")
+    if (updatedAt != null) {
+        val by = text("updatedBy")
+        add("Updated $updatedAt" + if (by == null) "" else " by $by")
+    }
     add("")
     add("Inputs:")
     val inputs = objects("inputs")

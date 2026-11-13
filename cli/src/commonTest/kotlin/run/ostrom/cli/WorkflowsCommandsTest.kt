@@ -32,7 +32,8 @@ class WorkflowsCommandsTest : SetupKit() {
 
     private val definition = """{"id":"deploy","name":"Deploy","domain":"Backend","status":"accepted",""" +
         """"foundAt":"1970-01-10T21:00:00Z","start":"build","inputs":[{"id":"env","label":"Environment",""" +
-        """"required":true,"maxLength":8},{"id":"note","label":"Note","default":"none"}],"nodes":[""" +
+        """"required":true,"maxLength":8},{"id":"note","label":"Note","required":true,"default":"none"},""" +
+        """{"id":"tag","label":"Tag"}],"nodes":[""" +
         """{"id":"build","kind":"agent","label":"Build","run":{"instructions":"Build it for {{inputs.env}}"}},""" +
         """{"id":"ask","kind":"wait","label":"Ship it?","wait":{"title":"Ship {{nodes.build.output}}?",""" +
         """"actions":[{"id":"go","label":"Go"}]}},{"id":"call","kind":"workflow","workflowId":"notify",""" +
@@ -45,7 +46,11 @@ class WorkflowsCommandsTest : SetupKit() {
     private val proposed = """{"id":"b","name":"Bare","domain":"Ops","status":"proposed","foundAt":"x","start":"s",""" +
         """"nodes":[{"id":"s","kind":"step","label":"S"}],"edges":[{"from":"s","to":null}]}"""
     private val bare = """{"id":"b","name":"Bare","domain":"Ops","status":"proposed","foundAt":"x","nodes":[],""" +
-        """"edges":[]}"""
+        """"edges":[],"updatedAt":"1970-01-10T21:00:00Z"}"""
+    private val unnamed = """{"id":"deploy"}"""
+    private val odd = """{"id":"odd","kind":"notify","label":"Odd","run":{"message":"hi"},"wait":{},""" +
+        """"detail":"${"long ".repeat(30)}"}"""
+    private val shown = stored.replace("""}],"edges":""", """},$odd],"edges":""")
 
     private fun runJson(
         id: String = "r1",
@@ -105,9 +110,11 @@ class WorkflowsCommandsTest : SetupKit() {
 
     @Test
     fun theWorkflowsAreListedWithTheirVersionStatusSizeAndAge() {
-        assertEquals(0, run(routes(list to (200 to """{"items":[$stored,$bare]}""")), "workflows", "list"))
+        val items = routes(list to (200 to """{"items":[$stored,$bare,$proposed]}"""))
+        assertEquals(0, run(items, "workflows", "list"))
         assertEquals(
-            "deploy  Deploy  v3  accepted  3 nodes  2 inputs  3h\nb  Bare  proposed  0 nodes  0 inputs  ?\n",
+            "deploy  Deploy  v3  accepted  3 nodes  3 inputs  3h\nb  Bare  proposed  0 nodes  0 inputs  3h\n" +
+                "b  Bare  proposed  1 nodes  0 inputs  ?\n",
             console.out.toString(),
         )
         assertEquals(listOf(list), calls())
@@ -140,20 +147,23 @@ class WorkflowsCommandsTest : SetupKit() {
 
     @Test
     fun aWorkflowIsShownWithItsInputsNodesAndEdges() {
-        assertEquals(0, run(routes(show to (200 to stored)), "workflows", "show", "deploy"))
+        assertEquals(0, run(routes(show to (200 to shown)), "workflows", "show", "deploy"))
         val text = console.out.toString()
         val head = "Deploy  [deploy]  v3  accepted\nShips it\nDomain: Backend; repositories: acme/*\n"
         assertTrue(text.startsWith(head), text)
         assertTrue(text.contains("Start: build\nUpdated 1970-01-10T21:00:00Z by lena\n"), text)
-        val inputs = "Inputs:\n  env  Environment (required)\n  note  Note (optional, default \"none\")\n"
+        val inputs = "Inputs:\n  env  Environment (required)\n  note  Note (required, default \"none\")\n" +
+            "  tag  Tag (optional)\n"
         assertTrue(text.contains(inputs), text)
         assertTrue(text.contains("  build  agent  Build\n    instructions: Build it for {{inputs.env}}\n"), text)
         assertTrue(text.contains("  ask  wait  Ship it?\n    asks: Ship {{nodes.build.output}}?\n"), text)
         assertTrue(text.contains("  call  workflow  Tell everyone\n    runs workflow notify\n    Calls notify\n"), text)
+        val cut = "  odd  notify  Odd\n    ${"long ".repeat(17)}long…\n"
+        assertTrue(text.contains(cut), text)
         assertTrue(text.endsWith("Edges:\n  build -delivered-> ask\n  ask -go-> call\n  call -next-> end\n"), text)
         console.out.clear()
         assertEquals(0, run(routes(show to (200 to bare)), "workflows", "show", "deploy"))
-        val empty = "Bare  [b]  proposed\nDomain: Ops\n\nInputs:\n  none\n\nNodes:\n\nEdges:\n  none\n"
+        val empty = "Bare  [b]  proposed\nDomain: Ops\nUpdated 1970-01-10T21:00:00Z\n\nInputs:\n  none\n\nNodes:\n\nEdges:\n  none\n"
         assertEquals(empty, console.out.toString())
         console.out.clear()
         assertEquals(0, run(routes(show to (200 to stored)), "workflows", "show", "deploy", "--json"))
@@ -183,7 +193,7 @@ class WorkflowsCommandsTest : SetupKit() {
         file(proposed)
         console.out.clear()
         assertEquals(0, run(routes(create to (201 to "{}")), "workflows", "create", "--file", "w.json"))
-        assertEquals("Saved b [b].\n", console.out.toString())
+        assertEquals("Saved the workflow [?].\n", console.out.toString())
     }
 
     @Test
@@ -225,10 +235,11 @@ class WorkflowsCommandsTest : SetupKit() {
     fun everyObviousMistakeIsListedWithItsNode() {
         val bad = """{"id":"x","name":"X","domain":"d","status":"accepted","foundAt":"x","start":"nowhere",""" +
             """"inputs":[{"id":"env","label":"E"}],"nodes":[{"id":"a","kind":"agent","label":"A",""" +
-            """"run":{"instructions":"  "}},{"id":"a","kind":"wait","label":"B","detail":"{{inputs.zzz}} """ +
+            """"run":{"instructions":"  "}},{"id":"norun","kind":"agent","label":"N"},""" +
+            """{"id":"a","kind":"wait","label":"B","detail":"{{inputs.zzz}} {{foo.bar}} {{x.y.z}} {{nodes.a.input}} """ +
             """{{nodes.ghost.output}} {{nodes.a.output}} {{inputs.env}} {{other}} {{nodes.a.output.x}}"},""" +
             """{"id":"lost","kind":"step","label":"L","run":{"message":"{{nodes.a.output}}"}}],""" +
-            """"edges":[{"from":"a","to":"gone","on":"delivered"},{"from":"ghost","to":"a"}]}"""
+            """"edges":[{"from":"a","to":"gone","on":"delivered"},{"from":"ghost","to":"a"},{"from":"lost","to":"void"}]}"""
         file(bad)
         assertEquals(64, run(routes(), "workflows", "create", "--file", "w.json"))
         val message = console.err.toString()
@@ -238,6 +249,8 @@ class WorkflowsCommandsTest : SetupKit() {
             "  - The start node \"nowhere\" does not exist.",
             "  - An edge leaves \"ghost\", which does not exist.",
             "  - Node \"a\" goes on \"delivered\" to \"gone\", which does not exist.",
+            "  - Node \"lost\" goes on \"next\" to \"void\", which does not exist.",
+            "  - Agent node \"norun\" has no instructions (run.instructions).",
             "  - Agent node \"a\" has no instructions (run.instructions).",
             "  - Node \"a\" uses {{inputs.zzz}}, but the workflow declares no input \"zzz\".",
             "  - Node \"a\" uses {{nodes.ghost.output}}, but there is no node \"ghost\".",
@@ -248,13 +261,15 @@ class WorkflowsCommandsTest : SetupKit() {
         val loose = """{"id":"x","name":"X","domain":"d","status":"accepted","foundAt":"x","nodes":[""" +
             """{"id":"t","kind":"trigger","label":"T"},""" +
             """{"id":"s","kind":"step","label":"S","detail":"{{nodes.t.output}}"},""" +
-            """{"id":"island","kind":"step","label":"I"}],"edges":[{"from":"t","to":"s"},{"from":"s","to":null}]}"""
+            """{"id":"island","kind":"step","label":"I"}],""" +
+            """"edges":[{"from":"t","to":"s"},{"from":"s","to":"t"},{"from":"s","to":null}]}"""
         file(loose)
         console.err.clear()
         assertEquals(64, run(routes(), "workflows", "create", "--file", "w.json"))
         assertErr("  - Node \"island\" cannot be reached from the start node.")
         assertFalse(console.err.contains("The start node"), console.err.toString())
-        file("""{"id":"x","name":"X","domain":"d","status":"accepted","foundAt":"x","nodes":[],"edges":[]}""")
+        file("""{"id":"x","name":"X","domain":"d","status":"accepted","foundAt":"x","nodes":[""" +
+            """{"id":"s","kind":"step","label":"S"}],"edges":[{"from":"s","to":null}]}""")
         console.err.clear()
         assertEquals(64, run(routes(), "workflows", "create", "--file", "w.json"))
         assertErr("  - No start: set \"start\" to a node id, or add a trigger node.")
@@ -337,10 +352,10 @@ class WorkflowsCommandsTest : SetupKit() {
         assertNull(requests.first { it.second.path == "/api/v1/capabilities" }.second.idempotencyKey)
         // an answer without a version or an id still says what it can
         console.out.clear()
-        val bareRun = routes(show to (200 to bare.replace("\"id\":\"b\"", "\"id\":\"deploy\"")), start to (201 to "{}"))
+        val bareRun = routes(show to (200 to unnamed), start to (201 to "{}"))
         assertEquals(0, run(bareRun, "workflows", "run", "deploy"))
         assertEquals(
-            "Started run ? of Bare.\nFollow it: ostrom workflows run-show ?   Stop it: ostrom workflows cancel ?\n",
+            "Started run ? of deploy.\nFollow it: ostrom workflows run-show ?   Stop it: ostrom workflows cancel ?\n",
             console.out.toString(),
         )
     }
@@ -353,7 +368,7 @@ class WorkflowsCommandsTest : SetupKit() {
             assertEquals(64, run(read, "workflows", "run", "deploy", *args))
             assertErr("ostrom: $message\n")
         }
-        refused("\"Deploy\" has no input \"zone\". Its inputs: env, note.", "--input", "env=a", "--input", "zone=b")
+        refused("\"Deploy\" has no input \"zone\". Its inputs: env, note, tag.", "--input", "env=a", "--input", "zone=b")
         refused("Input env is given twice: pass --input env=... once.", "--input", "env=a", "--input", "env=b")
         refused("Input env is 9 characters long; the most it takes is 8.", "--input", "env=123456789")
         refused("\"Deploy\" needs env (Environment): pass --input env=....")
@@ -366,6 +381,8 @@ class WorkflowsCommandsTest : SetupKit() {
         val none = routes(show to (200 to bare.replace("\"id\":\"b\"", "\"id\":\"deploy\"")))
         assertEquals(64, run(none, "workflows", "run", "deploy", "--input", "a=b"))
         assertErr("\"Bare\" has no input \"a\". It takes no inputs.")
+        assertEquals(64, run(routes(show to (200 to unnamed)), "workflows", "run", "deploy", "--input", "a=b"))
+        assertErr("\"The workflow\" has no input \"a\". It takes no inputs.")
         assertTrue(calls().none { it.startsWith("POST") }, "nothing was started")
         assertEquals(66, run(routes(), "workflows", "run", "deploy"))
         assertErr("No workflow deploy in acme.\n")
@@ -522,6 +539,10 @@ class WorkflowsCommandsTest : SetupKit() {
         assertEquals(0, run(routes(runs to (200 to """{"items":[],"next":"x"}""")), "workflows", "runs"))
         assertFalse(console.err.contains("More exist"), console.err.toString())
         console.err.clear()
+        val empty = routes("GET /api/v1/runs?limit=1" to (200 to """{"items":[$first],"next":""}"""))
+        assertEquals(0, run(empty, "workflows", "runs", "--limit", "1"))
+        assertFalse(console.err.contains("More exist"), console.err.toString())
+        console.err.clear()
         val more = routes("GET /api/v1/runs?limit=1" to (200 to """{"items":[$first],"next":"r1"}"""))
         assertEquals(0, run(more, "workflows", "runs", "--limit", "1"))
         assertErr("More exist: ostrom workflows runs --before r1\n")
@@ -609,6 +630,7 @@ class WorkflowsCommandsTest : SetupKit() {
         ).forEach { assertNotEquals(it, failureWords(it), it) }
         assertEquals("something new", failureWords("something new"))
         assertEquals("?", age("not a date", 0))
+        assertEquals("?", age(null, 0))
         assertEquals("0s", age("1970-01-02T00:00:00Z", 0))
         val at = "1970-01-01T00:00:00Z"
         assertEquals("59s", age(at, 59_000L))

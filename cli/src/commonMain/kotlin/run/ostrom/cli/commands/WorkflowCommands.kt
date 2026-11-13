@@ -156,8 +156,11 @@ internal class WorkflowsShowCommand(private val dependencies: CliDependencies) :
     }
 }
 
-private fun saved(body: JsonObject, id: String) =
-    "Saved ${body.text("name") ?: id} [${body.text("id") ?: id}]" + (body["version"]?.let { " as v$it" } ?: "") + "."
+private fun saved(body: JsonObject): String {
+    val version = body["version"]
+    val at = if (version == null) "" else " as v$version"
+    return "Saved ${body.text("name") ?: "the workflow"} [${body.text("id") ?: "?"}]$at."
+}
 
 /** `ostrom workflows create --file FILE.json|-`. */
 internal class WorkflowsCreateCommand(private val dependencies: CliDependencies) : CliktCommand(name = "create") {
@@ -181,8 +184,7 @@ internal class WorkflowsCreateCommand(private val dependencies: CliDependencies)
         val body = dependencies.workflows(server, org) {
             it.write("POST", WORKFLOWS, document, "No workflows in ${it.org.slug}.", governance = decided)
         }
-        val id = body.text("id") ?: document.text("id").orEmpty()
-        dependencies.console.data(if (json) "$body\n" else saved(body, id) + "\n")
+        dependencies.console.data(if (json) "$body\n" else saved(body) + "\n")
     }
 }
 
@@ -213,7 +215,7 @@ internal class WorkflowsUpdateCommand(private val dependencies: CliDependencies)
             val request = objectOf("workflow" to document, "expectedVersion" to version)
             it.write("PUT", workflowPath(id), request, "No workflow $id in ${it.org.slug}.", governance = true)
         }
-        dependencies.console.data(if (json) "$body\n" else saved(body, id) + "\n")
+        dependencies.console.data(if (json) "$body\n" else saved(body) + "\n")
     }
 }
 

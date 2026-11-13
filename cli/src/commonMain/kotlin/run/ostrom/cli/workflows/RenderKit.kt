@@ -20,9 +20,8 @@ internal fun oneLine(text: String, max: Int = SHORT): String =
 /** The objects of the array field [key]. */
 internal fun JsonObject.objects(key: String): List<JsonObject> = list(key).filterIsInstance<JsonObject>()
 
-/** The number or boolean field [key], as written; null when it is absent or a string. */
-internal fun JsonObject.number(key: String): String? =
-    (this[key] as? JsonPrimitive)?.takeIf { !it.isString }?.content
+/** The field [key] as written (a number is a number); null when it is absent. */
+internal fun JsonObject.number(key: String): String? = this[key]?.toString()
 
 /** The strings of the array field [key]. */
 internal fun JsonObject.items(key: String): List<String> =
