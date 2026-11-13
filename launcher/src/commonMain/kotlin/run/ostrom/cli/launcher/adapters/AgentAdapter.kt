@@ -43,6 +43,9 @@ data class RelayView(val url: String, val token: String, val mcpServers: List<St
  * installs `ostrom hook wake`. No other agent holds its stop, so none installs it.
  * @property todo The server serves the session todo (`todos.v1`): the agent gets the `ostrom-todo` MCP server, and the
  * todo's Stop and SessionStart hooks where it has them (docs/TODOS.md).
+ * @property workflowDelivery The server takes a workflow step's delivery (`workflows.deliver.v1`): the agent gets the
+ * `ostrom-workflow` MCP server (one of [RelayView.mcpServers]), the rules say when to call it, and Claude Code gets
+ * the Stop hook that sends a step's agent back to work once.
  * @property teamHooks The team hooks the member approved, installed: run next to Ostrom's own, on their events.
  */
 data class SessionLayout(
@@ -62,6 +65,7 @@ data class SessionLayout(
     val trustProject: Boolean = false,
     val waitsWake: Boolean = false,
     val todo: Boolean = false,
+    val workflowDelivery: Boolean = false,
     val teamHooks: List<TeamHook> = emptyList(),
 ) {
     /** `"<ostrom>" hook gate|session|wake`, the command an agent's hook runs. */
@@ -97,6 +101,15 @@ data class SessionLayout(
 
         /** The session todo's MCP server (the CLI's `todo` module serves it). */
         const val TODO_SERVER = "ostrom-todo"
+
+        /** The workflow step's delivery server, relayed (`ostrom mcp --session … --server ostrom-workflow`). */
+        const val WORKFLOW_SERVER = "ostrom-workflow"
+
+        /** Told to the agent with the rules while the delivery tool is connected (as TeamCode's). */
+        const val WORKFLOW_INSTRUCTIONS =
+            "When you are working on a workflow step (the message that gave you the task ends by telling you to " +
+                "deliver), finish by calling `deliver` of the `ostrom-workflow` MCP server once, with exactly what " +
+                "the step asked for, then end your turn. Do not call it for an ordinary session."
         private const val CHECK_MARGIN_SECONDS = 20L
         private const val MIN_SECONDS = 10L
     }
