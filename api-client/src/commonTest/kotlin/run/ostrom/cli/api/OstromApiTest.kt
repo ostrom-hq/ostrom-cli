@@ -67,8 +67,20 @@ class OstromApiTest {
     }
 
     @Test
+    fun aCallThatMustNotBeRepeatedCarriesItsIdempotencyKey() = runTest {
+        val engine = MockEngine { request ->
+            assertEquals("key-1", request.headers[IDEMPOTENCY_HEADER])
+            respond("{}", HttpStatusCode.Created)
+        }
+        val api = OstromApiImpl("https://ostrom.example", "ostrom/0.1.0", HttpClient(engine) { install(HttpTimeout) })
+        val request = ServerRequest("POST", "/api/v1/waits", "{}", "t0k", idempotencyKey = "key-1")
+        assertEquals(201, api.send(request).status)
+    }
+
+    @Test
     fun anAnonymousCallHasNoTokenNorBody() = runTest {
         val engine = MockEngine { request ->
+            assertNull(request.headers[IDEMPOTENCY_HEADER], "no key unless the call names one")
             assertNull(request.headers[HttpHeaders.Authorization])
             assertNull(request.headers[ORG_HEADER], "no organisation named: the server resolves it")
             assertEquals(0L, request.body.contentLength ?: 0L)

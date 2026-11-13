@@ -11,6 +11,7 @@ import kotlinx.serialization.json.JsonObject
  * @property body The JSON body, or null.
  * @property token The bearer token: the device token, or the launch's agent token.
  * @property timeoutMillis How long the whole call may take.
+ * @property idempotencyKey Sent as `Idempotency-Key`, or null.
  */
 data class ServerCall(
     val method: String,
@@ -18,6 +19,7 @@ data class ServerCall(
     val body: String?,
     val token: String?,
     val timeoutMillis: Long,
+    val idempotencyKey: String? = null,
 )
 
 /**
@@ -59,6 +61,7 @@ class ServerJson(private val transport: ServerTransport) {
      * @param path An absolute path under `/api/v1`, with its query.
      * @param body The JSON body, or null.
      * @param token The bearer token: the device token, or the launch's agent token.
+     * @param idempotencyKey Sent as `Idempotency-Key`, or null.
      */
     suspend fun call(
         method: String,
@@ -66,8 +69,9 @@ class ServerJson(private val transport: ServerTransport) {
         body: JsonObject?,
         token: String?,
         timeoutMillis: Long,
+        idempotencyKey: String? = null,
     ): ServerAnswer {
-        val reply = transport.send(ServerCall(method, path, body?.toString(), token, timeoutMillis))
+        val reply = transport.send(ServerCall(method, path, body?.toString(), token, timeoutMillis, idempotencyKey))
         val status = reply.status
         val json = parseObject(reply.body)
         return when {

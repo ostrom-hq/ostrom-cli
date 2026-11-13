@@ -22,7 +22,9 @@ import kotlin.time.Clock
  */
 class ApiServerTransport(private val api: OstromApi, private val org: String? = null) : ServerTransport {
     override suspend fun send(call: ServerCall): ServerReply = try {
-        val response = api.send(ServerRequest(call.method, call.path, call.body, call.token, call.timeoutMillis, org))
+        val response = api.send(
+            ServerRequest(call.method, call.path, call.body, call.token, call.timeoutMillis, org, call.idempotencyKey),
+        )
         ServerReply(response.status, response.body)
     } catch (e: ServerUnreachableException) {
         ServerReply(null, e.reason)

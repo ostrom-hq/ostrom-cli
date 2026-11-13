@@ -52,6 +52,8 @@ class LaunchWiringTest {
         assertEquals(ServerReply(null, "connection refused"), transport.send(ServerCall("GET", "/down", null, null, 1)))
         ApiServerTransport(api, "acme").send(ServerCall("GET", "/api/v1/policy/agents", null, "t", 5_000))
         assertEquals("acme", sent.last().org, "the organisation of the launch, on every call")
+        transport.send(ServerCall("POST", "/api/v1/waits", "{}", "t", 5_000, "key-1"))
+        assertEquals("key-1", sent.last().idempotencyKey)
     }
 
     @Test
