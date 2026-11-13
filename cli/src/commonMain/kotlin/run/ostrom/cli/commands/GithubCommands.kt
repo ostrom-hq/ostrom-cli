@@ -92,6 +92,9 @@ private fun CliDependencies.githubStatus(org: String?, server: String?, json: Bo
 /** The whole number [key], or null when it is absent or not one. */
 private fun JsonObject.int(key: String): Int? = (this[key] as? JsonPrimitive)?.intOrNull
 
+/** The statuses of a poll that did not get to GitHub: none (unreachable) and 503. */
+private val LOST = setOf<Int?>(null, 503)
+
 /** The length of `2026-11-13`, the day of an ISO timestamp. */
 private const val DAY = 10
 
@@ -216,7 +219,6 @@ internal class GithubLinkCommand(private val dependencies: CliDependencies) : Cl
         const val DEFAULT_SECONDS = 5
         const val MAX_SECONDS = 60
         const val MILLIS = 1_000L
-        val LOST = setOf<Int?>(null, 503)
 
         /** GitHub ends a device code in 15 minutes: a server that never says so is not waited on for longer. */
         const val GIVE_UP_MILLIS = 20 * 60 * MILLIS
