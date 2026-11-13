@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""A coding agent as `ostrom <agent>` sees one: it reads the harness Ostrom laid down for the session the way Claude
+"""A coding agent as `ostrom run <agent>` sees one: it reads the harness Ostrom laid down for the session the way Claude
 Code (`--plugin-dir` → hooks/hooks.json) or Codex (`-c hooks.<Event>=[…]`) reads it, then plays the hooks a real
 session fires: session start, a harmless tool, a gated deployment (and, when the gate says so, `ostrom wait` as its own
 command, the way a model obeys the refusal; $E2E_OSTROM names the binary), the after-tool hook, session end. With

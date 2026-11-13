@@ -23,14 +23,24 @@ import run.ostrom.core.api.models.ServerFeatures
 import kotlinx.coroutines.runBlocking
 
 /**
- * `ostrom <agent>`: the developer's only entry point. The agent runs in this terminal under the team's harness, its
- * exit code becomes ostrom's (CLI.md § 2.2).
+ * `ostrom run <agent> [options] [-- <agent-args>]`: the developer's entry point, as TeamCode's `teamcode run <agent>`.
+ * The agent runs in this terminal under the team's harness, its exit code becomes ostrom's (CLI.md § 2.2). What
+ * follows `--` goes to the agent untouched; an option before it that is not Ostrom's is a usage error, never passed
+ * on.
+ *
+ * @param deprecated True for the former path `ostrom <agent>`, kept hidden for one release: it says on stderr that
+ * it goes away, then runs as it did, the agent's options mixed with Ostrom's.
  */
-internal class AgentCommand(private val agent: Agent, private val dependencies: CliDependencies) :
-    CliktCommand(name = agent.command) {
+internal class AgentCommand(
+    private val agent: Agent,
+    private val dependencies: CliDependencies,
+    private val deprecated: Boolean = false,
+) : CliktCommand(name = agent.command) {
     override fun help(context: Context) = "Start ${agent.displayName} under your team's harness"
 
-    override val treatUnknownOptionsAsArgs = true
+    override val hiddenFromHelp = deprecated
+
+    override val treatUnknownOptionsAsArgs = deprecated
     val repo by option("--repo", help = "Repository, owner/name (else read from origin, else the folder's name)")
     val model by option("--model", help = "Model for the agent")
     val cloud by option("--cloud", help = "Run the session in Ostrom's cloud, attached here (Ctrl-] detaches)")
@@ -43,16 +53,19 @@ internal class AgentCommand(private val agent: Agent, private val dependencies: 
         help = "Claude Code: read this repository's settings, hooks and MCP servers too; Gemini CLI: load its .env " +
             "files too. They can run its programs and turn Ostrom's gate off: only for a repository your team trusts",
     ).flag()
-    val agentArguments by argument("agent-args", help = "Passed to the agent as they are").multiple()
+    val agentArguments by argument("agent-args", help = "After --: passed to the agent as they are").multiple()
 
     override fun run() {
+        if (deprecated) {
+            dependencies.console.err(deprecation(agent.command, "${runPath(agent)} [options] -- <its arguments>"))
+        }
         refuseOptionsTogether()
         // a usage error before the server or the sign-in is looked at: 64, never 65 for a developer signed out
         if (cloud && agentArguments.isNotEmpty()) {
             throw stop(
                 ExitCode.USAGE,
                 "agent arguments do not go to a cloud session (${agentArguments.joinToString(" ")}): " +
-                    "start it with `ostrom ${agent.command} --cloud`, then type in it",
+                    "start it with `${runPath(agent)} --cloud`, then type in it",
             )
         }
         val environment = dependencies.environment
@@ -94,7 +107,10 @@ internal class AgentCommand(private val agent: Agent, private val dependencies: 
         // the agents that read a repository's own configuration only when the developer asks
         val trusting = agent == Agent.CLAUDE || agent == Agent.GEMINI
         if (trustProjectSettings && (cloud || !trusting)) {
-            throw UsageError("$TRUST_PROJECT_SETTINGS is for `ostrom claude` and `ostrom gemini` on this machine")
+            throw UsageError(
+                "$TRUST_PROJECT_SETTINGS is for `${runPath(Agent.CLAUDE)}` and `${runPath(Agent.GEMINI)}` " +
+                    "on this machine",
+            )
         }
     }
 
@@ -110,3 +126,6 @@ internal class AgentCommand(private val agent: Agent, private val dependencies: 
         const val SIGN_IN = "no Ostrom server: run `ostrom login`, or set OSTROM_URL"
     }
 }
+
+/** `ostrom run <agent>`, the path that starts [agent]. */
+internal fun runPath(agent: Agent) = "ostrom $RUN_COMMAND ${agent.command}"

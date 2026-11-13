@@ -21,7 +21,7 @@ import okio.IOException
 import kotlin.coroutines.CoroutineContext
 
 /**
- * What `ostrom <agent> --cloud` asks for.
+ * What `ostrom run <agent> --cloud` asks for.
  *
  * @property agent The agent; only those Ostrom's cloud runs ([CloudSessionUseCase.CLOUD_AGENTS]).
  * @property model The model, or null for the agent's own.

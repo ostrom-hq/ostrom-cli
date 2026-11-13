@@ -23,7 +23,7 @@ import run.ostrom.cli.platform.ProcessLauncher
 import run.ostrom.cli.relay.LocalRelayStarter
 import kotlinx.coroutines.CoroutineDispatcher
 
-/** `ostrom <agent>`, once the server and the developer are known; returns the exit code. */
+/** `ostrom run <agent>`, once the server and the developer are known; returns the exit code. */
 fun interface AgentRunner {
     /** Launches [request] at [site]. */
     suspend fun run(request: LaunchRequest, site: LaunchSite): Int
@@ -65,7 +65,7 @@ class AgentRunnerImpl(
 
     /** The agents this build can launch. */
     companion object {
-        /** The agents `ostrom <agent>` launches in this version. */
+        /** The agents `ostrom run <agent>` launches in this version. */
         private val ADAPTERS: List<AgentAdapter> = listOf(
             ClaudeAdapter(),
             CodexAdapter(),

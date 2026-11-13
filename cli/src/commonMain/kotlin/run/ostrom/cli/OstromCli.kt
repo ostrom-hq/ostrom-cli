@@ -30,6 +30,7 @@ import run.ostrom.cli.commands.ReceiptsListCommand
 import run.ostrom.cli.commands.ReceiptsPullCommand
 import run.ostrom.cli.commands.ReceiptsShowCommand
 import run.ostrom.cli.commands.RootCommand
+import run.ostrom.cli.commands.RunCommand
 import run.ostrom.cli.commands.StatusCommand
 import run.ostrom.cli.commands.TelemetryCommand
 import run.ostrom.cli.commands.UpdateCommand
@@ -168,7 +169,9 @@ class OstromCli(private val dependencies: CliDependencies) {
     /** The full tree, in the order of the help screen. */
     internal fun tree(): RootCommand {
         val root = RootCommand(dependencies)
-        val agents = Agent.entries.map { AgentCommand(it, dependencies) }
+        val run = RunCommand().subcommands(Agent.entries.map { AgentCommand(it, dependencies) })
+        // the former `ostrom <agent>`, hidden, for one release (TeamCode's path is `run <agent>`)
+        val formerAgents = Agent.entries.map { AgentCommand(it, dependencies, deprecated = true) }
         val implemented = listOf(
             InboxCommand(dependencies),
             ApproveCommand(dependencies),
@@ -195,7 +198,8 @@ class OstromCli(private val dependencies: CliDependencies) {
         // The root always has a help screen: no null to handle.
         val help = HelpCommand(dependencies) { "${root.getFormattedHelp()}" }
         val completion = CompletionCommand(dependencies)
-        return root.subcommands(agents + pendingCommands(implemented) + plumbing + completion + help)
+        val visible = listOf(run) + pendingCommands(implemented)
+        return root.subcommands(visible + plumbing + completion + help + formerAgents)
     }
 
     internal companion object {

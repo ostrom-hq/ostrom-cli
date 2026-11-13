@@ -72,7 +72,7 @@ class LogsCommandTest : CliKit() {
         console.out.clear()
         val none = mapOf("GET /api/v1/sessions?dev=maya" to (200 to """{"items":[]}"""))
         assertEquals(0, serving(none).run(arrayOf("logs")))
-        assertEquals("No sessions yet. Start one: ostrom claude\n", console.out.toString())
+        assertEquals("No sessions yet. Start one: ostrom run claude\n", console.out.toString())
         console.out.clear()
         assertEquals(0, serving(none).run(arrayOf("logs", "--json")))
         assertEquals("""{"session":null,"receipt":null,"gates":[]}""" + "\n", console.out.toString(), "json stays json")

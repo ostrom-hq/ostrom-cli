@@ -12,7 +12,7 @@ import okio.Path
 import okio.Path.Companion.toPath
 
 /**
- * [AgentSessions] by the variables `ostrom <agent>` gives the agent, then by the launches' private folders on this
+ * [AgentSessions] by the variables `ostrom run <agent>` gives the agent, then by the launches' private folders on this
  * device (`<temporary>/ostrom-run-*`): one whose local relay still answers on the loopback is a session running, even
  * when the agent cleared its own variables before calling `ostrom update`.
  *
@@ -51,7 +51,7 @@ class AgentSessionsImpl(
     }
 }
 
-/** The variables `ostrom <agent>` gives the agent: any of them set is a session. */
+/** The variables `ostrom run <agent>` gives the agent: any of them set is a session. */
 private val SESSION_VARIABLES =
     listOf("OSTROM_LAUNCH_ID", "OSTROM_RELAY_URL", "OSTROM_SESSION_FILE", "OSTROM_RELAY_TOKEN")
 private const val RUN_PREFIX = "ostrom-run-"

@@ -37,5 +37,5 @@ internal fun CliDependencies.requireFeature(serverUrl: String, token: String, fe
     if (stop != null) throw PrintMessage("ostrom: $stop", ExitCode.UNREACHABLE.code, printError = true)
 }
 
-/** What `ostrom <agent> --cloud` and `ostrom attach` say to a server that runs no cloud session. */
+/** What `ostrom run <agent> --cloud` and `ostrom attach` say to a server that runs no cloud session. */
 internal const val NO_CLOUD = "This Ostrom server runs no cloud session: start the agent here, without --cloud."

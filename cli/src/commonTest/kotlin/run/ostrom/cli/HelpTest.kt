@@ -46,7 +46,7 @@ class HelpTest : CliKit() {
         assertEquals(0, cli().run(arrayOf("--help")))
         val help = console.out.toString()
         assertTrue(help.endsWith("plumbing).\n\n${guideOf("")!!.render()}\n"), help)
-        assertTrue(help.contains("  ostrom login    sign in to your team's server\n"), help)
+        assertTrue(help.contains("  ostrom login        sign in to your team's server\n"), help)
     }
 
     @Test

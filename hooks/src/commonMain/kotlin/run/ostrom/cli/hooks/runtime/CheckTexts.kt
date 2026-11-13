@@ -14,12 +14,12 @@ object CheckTexts {
     /** The hook view of the package cannot be read: nothing it guards can be checked. */
     fun unreadableView(path: String) =
         "Ostrom: the session's workflow package cannot be read ($path), so its checks cannot run and this " +
-            "action was not run. Restart the session (`ostrom <agent>`)."
+            "action was not run. Restart the session (`ostrom run <agent>`)."
 
     /** An enforced check whose script is not in the package: what it guards cannot be checked. */
     fun missingScript(hook: CompiledHook) =
         "Ostrom: check ${hook.id} names a script (${hook.scriptId ?: "none"}) the session's workflow package does " +
-            "not hold, so it cannot run and this action was not run. Restart the session (`ostrom <agent>`)."
+            "not hold, so it cannot run and this action was not run. Restart the session (`ostrom run <agent>`)."
 
     /** A push Ostrom cannot tie to the commits it sends. */
     fun unreadablePush(label: String, reason: String) =

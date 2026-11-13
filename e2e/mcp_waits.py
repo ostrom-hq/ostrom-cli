@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """4.3 of demo/PARCOURS.md on the CLI side: an agent asks a person through Ostrom's own MCP server.
 
-In an `ostrom claude` session, the fake agent starts `ostrom mcp --session <session-env.json> --server ostrom`, as an
+In an `ostrom run claude` session, the fake agent starts `ostrom mcp --session <session-env.json> --server ostrom`, as an
 agent that only starts stdio servers does. The session's local relay sends `/mcp/ostrom` to the server's waits MCP
 server (`/api/v1/waits/mcp`), with the launch's agent token and the session its start hook opened. The agent asks two
 questions (`ask_human`); the person who launched it sees them on the console and answers the first; the agent reads
@@ -42,7 +42,7 @@ class McpWaits:
             self.agent_saw(seen, session)
 
     def session_answered(self, session):
-        """`ostrom claude` with the fake agent asking; the console answers its first question: the agent's report."""
+        """`ostrom run claude` with the fake agent asking; the console answers its first question: the agent's report."""
         j = self.journey
         agents = fake_claude(j)
         report = os.path.join(j.work, "claude-waits-report.json")
@@ -55,7 +55,7 @@ class McpWaits:
                  "E2E_OSTROM": j.binary, "E2E_WAITS": asked}
         # files, not pipes: nobody reads them while the agent waits for the answer
         out, err = (tempfile.TemporaryFile("w+") for _ in range(2))
-        running = subprocess.Popen([j.binary, "claude", "-p", "hello"], cwd=self.maya["repo"], stdout=out,
+        running = subprocess.Popen([j.binary, "run", "claude", "--", "-p", "hello"], cwd=self.maya["repo"], stdout=out,
                                    stderr=err, text=True, env=j.environment(self.maya, False, extra),
                                    stdin=subprocess.DEVNULL)
         try:
@@ -64,7 +64,7 @@ class McpWaits:
         except subprocess.TimeoutExpired:
             running.kill()
             running.wait()
-            j.check(False, "ostrom claude ends (still running after 300 s)")
+            j.check(False, "ostrom run claude ends (still running after 300 s)")
             return None
         finally:
             if running.poll() is None:
@@ -73,8 +73,8 @@ class McpWaits:
         out.seek(0)
         err.seek(0)
         stdout, stderr = out.read(), err.read()
-        j.record(self.maya, "ostrom claude -p hello", code, stdout, stderr)
-        j.check(code == 0, f"ostrom claude runs the agent and hands back its exit 0 ({code}): {stderr.strip()[-300:]}")
+        j.record(self.maya, "ostrom run claude -- -p hello", code, stdout, stderr)
+        j.check(code == 0, f"ostrom run claude runs the agent and hands back its exit 0 ({code}): {stderr.strip()[-300:]}")
         if not j.check(os.path.exists(report), "the agent was started with Ostrom's harness"):
             return None
         with open(report) as handle:

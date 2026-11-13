@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """6.2 of demo/PARCOURS.md on the CLI side: a session in Ostrom's cloud, started and attached to from the terminal.
 
-`ostrom claude --cloud`, with the token of `ostrom login`, asks the server for a cloud session (no repository: the
+`ostrom run claude --cloud`, with the token of `ostrom login`, asks the server for a cloud session (no repository: the
 machine's folder has no GitHub origin), waits until it runs, then gives it this terminal: the session's bytes come to
 stdout. Ctrl-] (0x1d on stdin) detaches and leaves it running. `ostrom attach <id>` gives it the terminal again, and
 the keys typed reach the session: Ctrl-C ends Claude Code (no account in the CI: it waits in its first-run
@@ -127,7 +127,7 @@ class Cloud:
 
     def run(self):
         j = self.journey
-        j.begin("6.2", "ostrom claude --cloud and ostrom attach: a cloud session, detached, attached again, stopped")
+        j.begin("6.2", "ostrom run claude --cloud and ostrom attach: a cloud session, detached, attached again, stopped")
         if not j.options.cloud_sessions:
             j.step["missing"] = ["--cloud-sessions (a runtime driver for the server's cloud sessions)"]
             if j.options.strict:
@@ -217,14 +217,14 @@ class Cloud:
         return status, body if isinstance(body, dict) else {}
 
     def started(self):
-        """`ostrom claude --cloud` with the device's token: the session starts, its terminal shows here, Ctrl-]."""
+        """`ostrom run claude --cloud` with the device's token: the session starts, its terminal shows here, Ctrl-]."""
         j = self.journey
-        claude = self.terminal("claude", "--cloud")
+        claude = self.terminal("run", "claude", "--cloud")
         named = claude.wait_until(lambda: STARTED.search(claude.stderr()), 60)
         found = STARTED.search(claude.stderr())
         if named and found:
             self.session = found.group(1)
-        if not j.check(named, f"ostrom claude --cloud asks Ostrom for a session ({self.session})"):
+        if not j.check(named, f"ostrom run claude --cloud asks Ostrom for a session ({self.session})"):
             claude.type(DETACH)
             claude.end(10)
             return False

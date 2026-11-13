@@ -52,7 +52,7 @@ internal class InitCommand(private val dependencies: CliDependencies) : CliktCom
             val done = JsonObject(summary.filterValues { it != null }.mapValues { jsonOf(it.value) })
             dependencies.console.data("$done\n")
         } else {
-            say("Nothing is written in this repository. Next: ostrom claude")
+            say("Nothing is written in this repository. Next: ostrom run claude")
         }
     }
 
@@ -135,7 +135,7 @@ internal class InitCommand(private val dependencies: CliDependencies) : CliktCom
         val lines = block.trimEnd()
         when {
             file == null ->
-                say("  Hooks       start them as ostrom <agent>, or add to your shell's startup file:\n$lines")
+                say("  Hooks       start them as ostrom run <agent>, or add to your shell's startup file:\n$lines")
             next == null -> say("! Hooks       $file has Ostrom's markers, but not as init writes them: fix them, " +
                 "or add these lines yourself:\n$lines")
             next == current -> say("✓ Hooks       $names start with Ostrom's hooks (aliases in $file)")

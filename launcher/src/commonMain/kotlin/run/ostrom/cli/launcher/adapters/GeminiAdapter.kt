@@ -29,8 +29,9 @@ import kotlin.random.nextULong
  * Ostrom's hooks get names no repository can know in advance, and the variables that decide the folder's trust or the
  * shell of the hooks are Ostrom's too ([GeminiEnvironment]).
  *
- * By default the repository does not configure the agent, as for `ostrom claude` (reviews REVUES-CLI-6 and -7, probed
- * on Gemini CLI 0.66), since what it configures ran its programs outside the gate, faster than a list of names can
+ * By default the repository does not configure the agent, as for `ostrom run claude` (reviews REVUES-CLI-6 and -7,
+ * probed on Gemini CLI 0.66), since what it configures ran its programs outside the gate, faster than a list of names
+ * can
  * follow. The session's settings say `advanced.ignoreLocalEnv`: Gemini loads no `.env` of the repository's into its
  * environment (a lower-case `google_application_credentials` naming an executable, a `RIPGREP_CONFIG_PATH` with a
  * `--pre` script), and it is not started where it would still load a repository's `.gemini/.env`. They say
@@ -38,8 +39,8 @@ import kotlin.random.nextULong
  * extensions' settings, whose values replace `${extensionPath}` in those extensions' hooks; the developer's extensions
  * then run without the settings they keep in Gemini (said at launch). And Gemini is not started where a command of the
  * repository would run its programs, nor where the repository has an agent ([GeminiProjectFiles]). A team that trusts
- * its repository asks for all of it with `ostrom gemini --trust-project-settings` ([SessionLayout.trustProject]), said
- * before the agent starts: the guarantee is then the variables' pins only.
+ * its repository asks for all of it with `ostrom run gemini --trust-project-settings` ([SessionLayout.trustProject]),
+ * said before the agent starts: the guarantee is then the variables' pins only.
  *
  * @param nonce A value of the session no repository can guess, for the names of Ostrom's hooks.
  */
@@ -163,7 +164,7 @@ class GeminiAdapter(private val nonce: () -> String = { Random.nextULong().toStr
     private fun unconfigured(names: List<String>) = "gemini: your extensions ${names.joinToString(", ")} run " +
         "without the settings you gave them in Gemini: Gemini would read them from this repository's .env too, " +
         "where a repository can rewrite what those extensions' hooks run. Set them in your environment, or run " +
-        "`ostrom gemini --trust-project-settings` if your team trusts this repository"
+        "`ostrom run gemini --trust-project-settings` if your team trusts this repository"
 
     /**
      * The developer's own rules: the gate is the organization's, so their settings do not turn the hooks off

@@ -15,8 +15,8 @@ import run.ostrom.cli.launcher.join
  *   asking in `--yolo` or where the developer's policy allows it. A prompt that takes arguments (`{{args}}`) runs the
  *   `!{…}` of a file it injects with `@{…}` too: the shell step reads the prompt after the files are put in.
  * - An agent, a `.md` file of `.gemini/agents` (not one starting with `_`): any of them (review REVUES-CLI-8), as
- *   `ostrom claude` loads none of the repository's agents. Its front matter's `mcp_servers` are programs Gemini starts
- *   when the agent is called, outside the gate, after an acknowledgement that does not show them, and they read
+ *   `ostrom run claude` loads none of the repository's agents. Its front matter's `mcp_servers` are programs Gemini
+ * starts   when the agent is called, outside the gate, after an acknowledgement that does not show them, and they read
  *   Ostrom's relay token from their parent's environment; a remote agent's `auth` (`agent_card_url`,
  *   `agent_card_json`) runs a command (`!…`) by `bash -c` or sends a variable (`$…`, the relay token) to the card's
  *   address when Gemini starts, acknowledged by that address and not by the text. Gemini 0.66 has no setting that
@@ -140,7 +140,7 @@ internal object GeminiProjectFiles {
     }
 
     private fun refuse(what: String): Nothing = throw AdapterException(
-        "gemini: $what, so Gemini is not started. Remove it, or run `ostrom gemini --trust-project-settings` if " +
+        "gemini: $what, so Gemini is not started. Remove it, or run `ostrom run gemini --trust-project-settings` if " +
             "your team trusts this repository, to work with Ostrom",
     )
 

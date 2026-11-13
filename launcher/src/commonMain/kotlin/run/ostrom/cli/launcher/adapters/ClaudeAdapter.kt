@@ -33,7 +33,7 @@ import kotlinx.serialization.json.JsonPrimitive
  * setting: the working folder and the repository's top are given back by `--add-dir` with
  * `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD`, which reads their `CLAUDE.md`, `.claude/CLAUDE.md` and
  * `.claude/rules` and nothing else of the repository (probed on Claude Code 2.1.318). A team that trusts its
- * repository asks for its settings with `ostrom claude --trust-project-settings`
+ * repository asks for its settings with `ostrom run claude --trust-project-settings`
  * ([SessionLayout.trustProject]), said before the agent starts: the guarantee is then the variables' pins only.
  *
  * Nor does the developer's side turn the gate off (review REVUES-CLI-5): Claude Code is not started with `--bare` or
@@ -79,7 +79,7 @@ class ClaudeAdapter : AgentAdapter {
         } ?: return
         throw AdapterException(
             "claude: $mode turns off Claude Code's hooks, Ostrom's gate included, so Claude Code is not started with " +
-                "it. Run `ostrom claude` without $mode to work with Ostrom",
+                "it. Run `ostrom run claude` without $mode to work with Ostrom",
         )
     }
 
@@ -258,7 +258,7 @@ class ClaudeAdapter : AgentAdapter {
 
         private fun untrusted(theirs: String) =
             "claude: your --setting-sources $theirs is not used: Ostrom reads your user settings only, so that a " +
-                "repository's cannot turn its gate off (its CLAUDE.md is read). Run `ostrom claude " +
+                "repository's cannot turn its gate off (its CLAUDE.md is read). Run `ostrom run claude " +
                 "--trust-project-settings` to read the repository's settings too"
         private const val KEPT_ON =
             "claude: your --settings turns hooks off (disableAllHooks): Ostrom keeps them on for this session"

@@ -55,7 +55,7 @@ another API:
 
 | Command | Feature | Said when the server does not serve it |
 | --- | --- | --- |
-| `ostrom claude --cloud` (any agent), `ostrom attach` | `runners.cloud.v1` | This Ostrom server runs no cloud session: start the agent here, without --cloud. |
+| `ostrom run claude --cloud` (any agent), `ostrom attach` | `runners.cloud.v1` | This Ostrom server runs no cloud session: start the agent here, without --cloud. |
 | `ostrom github` (`link`, `links`, `unlink`) | `github.link.v1` | This Ostrom server does not link GitHub accounts: ask your admin to update it. |
 | `ostrom cloud github` | `runners.cloud.github.v1` | This Ostrom server does not share a GitHub account with cloud sessions: ask your admin to update it. |
 | `ostrom import teamcode` | `import.teamcode.v1` | This Ostrom server does not import TeamCode teams: ask your admin to update it. |
@@ -66,3 +66,18 @@ once (exit 69).
 
 The CLI has no command for the other optional features yet (billing, Slack, push notifications); each gets the
 same check when it comes.
+
+## Former command paths
+
+The command tree follows TeamCode's (`teamcode run claude -- <args>`). A
+command that moves keeps its former path for one release, hidden from `ostrom --help` and from completion: it runs as
+before and first says on stderr, in one line, that it goes away and which path to use. Scripts, shell aliases and
+hooks written for the former path go on working until the release after.
+
+| Former path | Path | Since |
+| --- | --- | --- |
+| `ostrom <agent> [options] [agent args]` (`claude`, `codex`, `opencode`, `gemini`, `grok`, `hermes`, `pi`) | `ostrom run <agent> [options] -- [agent args]` | this release |
+
+`ostrom run <agent>` passes everything after `--` to the agent untouched; before `--`, an option that is not Ostrom's
+(`-p`, `--resume`) is a usage error (exit 64) rather than something passed on, as TeamCode does. `ostrom init` writes
+the shell aliases with the new path (`alias claude='ostrom run claude --'`): run it again to replace the former ones.

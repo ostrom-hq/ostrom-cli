@@ -87,13 +87,13 @@ import kotlin.time.TimeSource
  * @property workingDirectory The folder `ostrom` runs in, its links resolved.
  * @property executable This binary, or null when the system does not say.
  * @property temporaryDirectory Where a launch makes its private folder.
- * @property agents Runs `ostrom <agent>`.
+ * @property agents Runs `ostrom run <agent>`.
  * @property gateWait Builds `ostrom wait`, which asks through the session's relay.
  * @property sleep Waits the given milliseconds (the device flow of login; virtual in tests).
  * @property capture Runs short child processes and reads their output (`mysql` for `ostrom import teamcode`).
  * @property readLine Reads a line the developer typed, or null at the end of the input.
  * @property openUrl Opens a page in the developer's browser; false when it could not.
- * @property cloud Runs `ostrom <agent> --cloud` and `ostrom attach`.
+ * @property cloud Runs `ostrom run <agent> --cloud` and `ostrom attach`.
  * @property selfUpdate `ostrom update`.
  * @property updateNotice The once-a-day update notice, kept in the CLI folder; null when there is none.
  * @property stderrIsTerminal Whether stderr is a terminal, where the update notice is said.
@@ -164,7 +164,7 @@ class CliDependencies(
             val statistics by lazy { StatisticsSender() }
             val finder = ExecutableFinderImpl(environment)
             // One client per server for the whole command (PERF-CLI): its calls share one connection, so one TLS
-            // handshake, where `ostrom claude` used to open one to look its organisation up and another to launch.
+            // handshake, where `ostrom run claude` used to open one to look its organisation up and another to launch.
             // A caller's close() keeps it open for the next: the process ends with the command. The URL is the one the
             // client sends to (no trailing slash), so `https://x/` and `https://x` share it. No lock: every client is
             // asked for while a command is wired or started, one after the other, never from two threads at once.
@@ -255,7 +255,7 @@ class CliDependencies(
             ReleaseTrust(floor = BuildInfo.FLOOR),
         )
 
-        /** `ostrom <agent> --cloud` and `ostrom attach`: the session runs in Ostrom's cloud, its terminal here. */
+        /** `ostrom run <agent> --cloud` and `ostrom attach`: the session runs in Ostrom's cloud, its terminal here. */
         private fun cloudRunner(console: Console, api: (String) -> OstromApi) = CloudRunnerImpl(
             console = console,
             api = api,

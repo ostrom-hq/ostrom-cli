@@ -4,7 +4,7 @@ package run.ostrom.cli.hooks.runtime
 import run.ostrom.cli.hooks.gate.ShellPaths
 
 /**
- * The session a hook runs in, read from the environment the launcher gave the agent (`ostrom <agent>`).
+ * The session a hook runs in, read from the environment the launcher gave the agent (`ostrom run <agent>`).
  *
  * @property repository The repository the session was opened for (`OSTROM_REPO`), else the folder name of [launchTop].
  * @property developer Who runs the session (`OSTROM_DEV`).

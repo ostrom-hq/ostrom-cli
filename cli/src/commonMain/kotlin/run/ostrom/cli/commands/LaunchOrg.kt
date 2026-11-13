@@ -13,8 +13,8 @@ internal fun CliDependencies.keptOrg(wanted: String?): String? = wanted?.takeIf 
     ?: ConfigStoreImpl(files, configFile(directory())).get(ConfigKey.ORG)
 
 /**
- * The id of the organisation `ostrom <agent>` acts in, sent in `Ostrom-Org` (the contract's id, never a short name):
- * the one [keptOrg] names, looked up among the caller's; null when none is named, and the server then takes the
+ * The id of the organisation `ostrom run <agent>` acts in, sent in `Ostrom-Org` (the contract's id, never a short
+ * name): the one [keptOrg] names, looked up among the caller's; null when none is named, and the server then takes the
  * person's only organisation. One named that the person is not a member of stops the launch (66).
  */
 internal fun CliDependencies.launchOrg(serverUrl: String, token: String, wanted: String?): String? {

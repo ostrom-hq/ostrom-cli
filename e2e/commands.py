@@ -163,7 +163,7 @@ def coming(machine):
 def lines(machine, other, nowhere):
     version = machine.run("--version").stdout.split()[1]
     return [
-        ("the home screen", [], 0, "Start an agent   ostrom claude", None),
+        ("the home screen", [], 0, "Start an agent   ostrom run claude", None),
         ("the version", ["version"], 0, "ostrom ", None),
         ("the version option", ["--version"], 0, "ostrom ", None),
         ("the exit codes", ["help", "exit-codes"], 0, "   64  Bad usage", None),
@@ -171,7 +171,7 @@ def lines(machine, other, nowhere):
         ("an unknown option", ["doctor", "--bad"], 64, "Run 'ostrom doctor --help' for usage.", None),
         ("an unknown help topic", ["help", "nope"], 64, "Topics: plumbing, exit-codes.", None),
         ("a shell without completion", ["completion", "tcsh"], 64, "tcsh", None),
-        ("agent arguments to a cloud session", ["claude", "--cloud", "-p", "hi"], 64, "do not go to a cloud", None),
+        ("agent arguments to a cloud session", ["run", "claude", "--cloud", "--", "-p", "hi"], 64, "do not go to a cloud", None),
     ] + [
         (f"a command not built yet, {name}", [name], 70, "not implemented yet", None) for name in coming(machine)
     ] + [

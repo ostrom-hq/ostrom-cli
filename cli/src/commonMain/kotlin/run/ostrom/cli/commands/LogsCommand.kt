@@ -46,7 +46,7 @@ private suspend fun CliDependencies.logs(asked: String?, follow: Boolean, json: 
     val id = asked ?: lastSession(signed)
     when {
         id == null && json -> console.data("$NO_SESSION\n")
-        id == null -> console.out("No sessions yet. Start one: ostrom claude\n")
+        id == null -> console.out("No sessions yet. Start one: ostrom run claude\n")
         json -> console.data(readSession(signed, id, mutableMapOf()).json() + "\n")
         else -> tail(signed, id, follow)
     }

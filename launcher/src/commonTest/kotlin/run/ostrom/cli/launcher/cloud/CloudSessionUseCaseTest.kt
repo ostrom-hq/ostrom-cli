@@ -20,7 +20,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-/** `ostrom <agent> --cloud` and `ostrom attach` against a scripted server, socket and terminal. */
+/** `ostrom run <agent> --cloud` and `ostrom attach` against a scripted server, socket and terminal. */
 class CloudSessionUseCaseTest {
     /** Each route answers its replies in order, the last one again and again. */
     private val replies = mutableMapOf<String, ArrayDeque<ServerReply>>()

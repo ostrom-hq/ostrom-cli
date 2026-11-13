@@ -21,7 +21,7 @@ object GateTexts {
      */
     const val GATE_FAILED =
         "Ostrom: denied. The gate failed on this tool call. Do not run it again nor work around it: tell the " +
-            "user, and wait for their answer. A new session (`ostrom <agent>`) starts the gate again."
+            "user, and wait for their answer. A new session (`ostrom run <agent>`) starts the gate again."
 
     /**
      * No gate policy to trust (unsigned, expired, the relay or Ostrom unreachable, the package changed): every action
@@ -29,7 +29,7 @@ object GateTexts {
      */
     fun held(reason: String): String =
         "Ostrom: denied. $reason, so every action of this session is held and this one was not run. Do not work " +
-            "around it; tell the user. A new session (`ostrom <agent>`) reads the policy again."
+            "around it; tell the user. A new session (`ostrom run <agent>`) reads the policy again."
 
     /** A guarded action run in another repository than the session's. */
     fun foreign(context: HookContext, mine: RealRepository, real: RealRepository): String {
@@ -73,8 +73,8 @@ object GateTexts {
     /** The session is closed and could not be reopened. */
     fun closed(action: String, message: String): String =
         "Ostrom: denied. \"$action\" needs a yes, and this session is closed on Ostrom's side and could not " +
-            "be reopened ($message). The action was not run. Tell the user; a new session (`ostrom <agent>`) asks " +
-            "again."
+            "be reopened ($message). The action was not run. Tell the user; a new session (`ostrom run <agent>`) " +
+            "asks again."
 
     /** Ostrom is unreachable and the organisation fails open. */
     fun letThrough(action: String, message: String): String =

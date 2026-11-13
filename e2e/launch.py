@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""5.9: what a launch costs from `ostrom claude` to the decision on the first gated tool, end to end.
+"""5.9: what a launch costs from `ostrom run claude` to the decision on the first gated tool, end to end.
 
 N successive launches (E2E_LAUNCH_ONLY of the fake agent: its start time, SessionStart, one `kubectl apply` that the
 gate holds with exit 2). Each is cut into:
-- the launcher's own part: from the start of the `ostrom claude` process to the start of the agent (the fake agent's
+- the launcher's own part: from the start of the `ostrom run claude` process to the start of the agent (the fake agent's
   Python start-up, some tens of ms, is in it);
 - SessionStart, and the first gated PreToolUse: the hook's wall time as the agent sees it;
 - the server's part: the sum of `duration_ms` of its `request served` log lines (--server-log-command) that appeared
@@ -48,7 +48,7 @@ class LaunchLatency:
     def run(self):
         journey, runs = self.journey, self.journey.options.launch_runs
         command = journey.options.server_log_command
-        journey.begin("5.9", f"the launch, end to end: {runs} times from ostrom claude to the first gated tool")
+        journey.begin("5.9", f"the launch, end to end: {runs} times from ostrom run claude to the first gated tool")
         seen = set(served(command)) if command else set()
         series, routes, first_run = [], {}, None
         for i in range(runs):

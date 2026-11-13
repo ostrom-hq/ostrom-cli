@@ -203,7 +203,7 @@ class GateWaitTest {
     @Test
     fun aRelayWhoseLaunchHasEndedStopsTheWaitAtOnce() {
         val down = CallResult.Failed("the local relay is unreachable", CallResult.UNREACHABLE, relayDown = true)
-        val line = "the session's local relay is not running (its `ostrom <agent>` has ended). Do not run the " +
+        val line = "the session's local relay is not running (its `ostrom run <agent>` has ended). Do not run the " +
             "command; tell the user."
         assertEquals(WaitOutcome(69, line), await(FakeCalls().on("/api/v1/gates/g1", down)))
         assertEquals(emptyList(), sleeps)
@@ -212,7 +212,7 @@ class GateWaitTest {
     @Test
     fun aFailureThatAskingAgainCannotChangeEndsTheWaitAtOnce() {
         for (failure in listOf(
-            CallResult.Failed("no Ostrom relay in this session (run the agent with `ostrom <agent>`)"),
+            CallResult.Failed("no Ostrom relay in this session (run the agent with `ostrom run <agent>`)"),
             CallResult.Failed("HTTP 401", "unauthorized"),
         )) {
             val outcome = await(FakeCalls().on("/api/v1/gates/g1", failure))

@@ -40,7 +40,7 @@ class ProcessLauncherImpl : ProcessLauncher {
 
 /**
  * Platform half of [ProcessLauncherImpl]. On macOS, Linux and Windows the variables are set in this process before the
- * child starts (it inherits them): `ostrom <agent>` starts one child and ends with it.
+ * child starts (it inherits them): `ostrom run <agent>` starts one child and ends with it.
  */
 internal expect fun spawnAndWait(command: List<String>, environment: Map<String, String?>): ProcessResult
 

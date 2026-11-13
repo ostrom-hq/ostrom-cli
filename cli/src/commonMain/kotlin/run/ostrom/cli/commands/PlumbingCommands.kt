@@ -128,7 +128,7 @@ private val PLUMBING = """
 
 /** The table of `ostrom help exit-codes`, from [ExitCode]: the code, then what it means. */
 internal fun exitCodes(): String = buildString {
-    append("Exit codes of ostrom (ostrom <agent> returns the agent's own once it has started):\n")
+    append("Exit codes of ostrom (ostrom run <agent> returns the agent's own once it has started):\n")
     ExitCode.entries.forEach { append("  ${it.code.toString().padStart(EXIT_CODE_WIDTH)}  ${it.meaning}\n") }
 }
 

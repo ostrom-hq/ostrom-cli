@@ -33,10 +33,11 @@
 receipts. One Kotlin/Native binary for macOS (arm64), Linux (x64, arm64) and Windows (x64).
 
 ```
-ostrom                 home screen
-ostrom claude          start Claude Code under the harness (also codex, opencode, gemini, grok, hermes, pi)
-ostrom doctor          check this device
-ostrom --help          every command
+ostrom                       home screen
+ostrom run claude            start Claude Code under the harness (also codex, opencode, gemini, grok, hermes, pi)
+ostrom run claude -- -p hi   everything after -- goes to the agent as it is
+ostrom doctor                check this device
+ostrom --help                every command
 ```
 
 ## Quick start

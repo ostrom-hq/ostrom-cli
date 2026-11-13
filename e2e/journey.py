@@ -4,12 +4,12 @@
     5.1 ostrom login (the device flow, approved from a browser session)  2.1 ostrom init
     2.6 ostrom invite, 2.7 the invitation accepted, ostrom members        3.4 and 3.3 ostrom policy
     3.1 ostrom policy rules                                               3.2 and 4.1 ostrom harness
-    5.2 ostrom claude (a fake Claude Code plays the hooks)                5.3 the deployment it tries is held
+    5.2 ostrom run claude (a fake Claude Code plays the hooks)            5.3 the deployment it tries is held
     5.6 the asker's own yes refused, 5.4 the second person's yes          5.5 ostrom wait lets it through
     5.7 the signed receipt, pulled and verified                         6.1 ostrom logs
     2.9 ostrom mcp: a server of the organisation, called through the session's relay
     4.3 ostrom mcp --server ostrom: the agent asks a person, the console answers, the agent reads the answer
-    6.2 ostrom claude --cloud and ostrom attach: a session in Ostrom's cloud, detached and attached again
+    6.2 ostrom run claude --cloud and ostrom attach: a session in Ostrom's cloud, detached and attached again
     6.6 ostrom import teamcode: a TeamCode team into Ostrom, read back by its API
 
     python3 e2e/journey.py --binary ostrom --server http://127.0.0.1:4600 --mail-dir /tmp/mail \\
@@ -509,7 +509,7 @@ class Journey:
             if self.admin_signed_in(maya):
                 done = self.governed(maya, "policy", "set", "models", models)
                 self.check(done == 0, f"policy set models, with the admin token ({done})")
-        self.begin("3.4", "ostrom policy check: what ostrom claude is told")
+        self.begin("3.4", "ostrom policy check: what ostrom run claude is told")
         if self.needs(("GET", "/api/v1/policy/agents"), org=True):
             done = self.ostrom(maya, "policy", "check", "claude")
             self.check(done.returncode in (0, 77), f"policy check answers yes or no ({done.returncode}): "
@@ -538,7 +538,7 @@ class Journey:
             if self.needs(("POST", "/api/v1/workflows"), on_main=True, org=True):
                 gated = self.gate_workflow(maya)
 
-        self.begin("5.2", "ostrom claude: the launch, the session, the hooks")
+        self.begin("5.2", "ostrom run claude: the launch, the session, the hooks")
         if self.needs(*SESSION_ROUTES, org=True):
             if gated:
                 self.gated_session(maya, tom_email)
@@ -556,7 +556,7 @@ class Journey:
                 self.check(status in (200, 204), f"the owner removes it ({status}): {error_of(body)[:200]}")
 
         self.begin("6.1", "ostrom logs: the thread of the session that just ran")
-        # the session read is the one ostrom claude just ran: the routes of 5.2 too
+        # the session read is the one ostrom run claude just ran: the routes of 5.2 too
         if self.needs(*SESSION_ROUTES, ("GET", "/api/v1/sessions"), org=True):
             self.guarded(self.logs, maya, gated)
 
@@ -627,7 +627,7 @@ class Journey:
             if not any(gate.get("status") for gate in gates if isinstance(gate, dict)):
                 # a gate the device's token may not read is shown bare: its answer is then not on the thread
                 print(f"  note  no gate of the thread could be read: {gates[:3]}", flush=True)
-        # ostrom claude has returned: the session is over, and -f on it must print and return, not wait
+        # ostrom run claude has returned: the session is over, and -f on it must print and return, not wait
         if not self.check(session.get("endedAt") and any("session ended" in line for line in lines),
                           f"to its end ({session.get('endedAt')})"):
             return
@@ -792,7 +792,7 @@ class Journey:
                                                        f"{measured[name]['p95']} ms < {server}")
 
     def claude(self, maya, hold=None, env=None):
-        """Starts `ostrom claude` with the fake agent; [claude_ended] waits for it and checks what it saw."""
+        """Starts `ostrom run claude` with the fake agent; [claude_ended] waits for it and checks what it saw."""
         agents = os.path.join(self.work, "agents")
         os.makedirs(agents, exist_ok=True)
         script = os.path.join(agents, "claude.py")
@@ -808,13 +808,13 @@ class Journey:
                  **(env or {})}
         # files, not pipes: nobody reads them while the session waits for its yes
         out, err = (open(os.path.join(self.work, f"claude.{name}"), "w+") for name in ("out", "err"))
-        process = subprocess.Popen([self.binary, "claude", "-p", "hello"], cwd=maya["repo"],
+        process = subprocess.Popen([self.binary, "run", "claude", "--", "-p", "hello"], cwd=maya["repo"],
                                    env=self.environment(maya, False, extra), stdin=subprocess.DEVNULL,
                                    stdout=out, stderr=err, text=True)
         return {"process": process, "step": self.step, "report": report, "maya": maya, "out": out, "err": err}
 
     def claude_ended(self, started):
-        """The end of `ostrom claude`, checked in its own step (5.2); the agent's report, or None."""
+        """The end of `ostrom run claude`, checked in its own step (5.2); the agent's report, or None."""
         current, self.step = self.step, started["step"]
         try:
             return self.claude_checks(started)
@@ -829,9 +829,9 @@ class Journey:
             process.kill()
             process.wait()
         stdout, stderr = (said(started[name]) for name in ("out", "err"))
-        self.step["commands"].append({"who": maya["name"], "command": "ostrom claude -p hello",
+        self.step["commands"].append({"who": maya["name"], "command": "ostrom run claude -- -p hello",
                                       "exit": process.returncode, "stdout": stdout, "stderr": stderr})
-        self.check(process.returncode == 0, f"ostrom claude runs the agent and hands back its exit 0 "
+        self.check(process.returncode == 0, f"ostrom run claude runs the agent and hands back its exit 0 "
                                             f"({process.returncode}): {stderr.strip()[-300:]}")
         if not self.check(os.path.exists(report), "the agent was started with Ostrom's harness"):
             return None
@@ -1013,7 +1013,7 @@ class Journey:
 CODE = re.compile(r"one-time code: (\S+)")
 # the link a held governance write is confirmed at (ostrom-cli ConfirmationWait)
 CONFIRM = re.compile(r"Confirm it on the console: \S*/confirm/([^\s/?#]+)")
-# what ostrom claude needs from the server (5.2), and so does the read of the session it ran (6.1)
+# what ostrom run claude needs from the server (5.2), and so does the read of the session it ran (6.1)
 SESSION_ROUTES = (("GET", "/api/v1/policy/agents"), ("POST", "/api/v1/launches"), ("POST", "/api/v1/sessions"))
 
 # what ostrom status --json always holds (CLI.md principle 6: null when unknown, never missing)
@@ -1098,7 +1098,7 @@ def main():
     parser.add_argument("--teamcode-key-file", help="6.6: the file of its credential key")
     # 5.9: what a launch costs, end to end; at most 60 launches an hour and a person (the server's LaunchLimit.DEFAULT)
     parser.add_argument("--launch-runs", type=int, default=20,
-                        help="5.9: successive launches of `ostrom claude` timed to the first gated tool (0: none; max 60)")
+                        help="5.9: successive launches of `ostrom run claude` timed to the first gated tool (0: none; max 60)")
     parser.add_argument("--server-log-command",
                         help="5.9: the command that prints the server's logs (docker logs ostrom-server): the server's "
                              "share of each launch is read from its `request served` lines; without it, not shown")

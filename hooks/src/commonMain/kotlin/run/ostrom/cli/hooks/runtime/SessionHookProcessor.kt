@@ -32,7 +32,7 @@ data class HookPorts(
 )
 
 /**
- * The hooks of `ostrom <agent>`: the gate, the session hook and the wake hook. An event the gate cannot read (too
+ * The hooks of `ostrom run <agent>`: the gate, the session hook and the wake hook. An event the gate cannot read (too
  * large, late, not JSON) is refused: the gate never lets through what it did not read (S2-30).
  */
 class SessionHookProcessor(private val context: HookContext, private val ports: HookPorts) : HookProcessor {

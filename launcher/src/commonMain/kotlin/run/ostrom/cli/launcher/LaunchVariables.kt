@@ -2,8 +2,8 @@
 package run.ostrom.cli.launcher
 
 /**
- * The environment `ostrom <agent>` gives the agent, read back by `ostrom hook gate|session` (hooks `HookContext`) and
- * `ostrom mcp`. Only the agent's own capability on the local relay goes in it: the device token, the launch's agent
+ * The environment `ostrom run <agent>` gives the agent, read back by `ostrom hook gate|session` (hooks `HookContext`)
+ * and `ostrom mcp`. Only the agent's own capability on the local relay goes in it: the device token, the launch's agent
  * token and the hooks' capability never do (audit A12/A13, S2-25).
  */
 object LaunchVariables {

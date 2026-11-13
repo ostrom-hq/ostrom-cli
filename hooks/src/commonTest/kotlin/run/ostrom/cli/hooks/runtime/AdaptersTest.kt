@@ -109,7 +109,7 @@ class AdaptersTest {
         val http = answer(200, "{}")
         for (url in listOf(null, "https://api.ostrom.run", "http://127.0.0.1:x", "http://10.0.0.1:80")) {
             val result = RelayCalls(url, "t", http).call("/", null, 1)
-            val expected = "no Ostrom relay in this session (run the agent with `ostrom <agent>`)"
+            val expected = "no Ostrom relay in this session (run the agent with `ostrom run <agent>`)"
             assertEquals(CallResult.Failed(expected), result)
         }
         assertTrue(http.sent.isEmpty())

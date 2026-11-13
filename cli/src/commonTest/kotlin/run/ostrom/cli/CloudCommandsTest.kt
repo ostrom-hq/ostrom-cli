@@ -8,11 +8,12 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-/** `ostrom <agent> --cloud` and `ostrom attach`. */
+/** `ostrom run <agent> --cloud` and `ostrom attach`. */
 class CloudCommandsTest : CliKit() {
     @Test
     fun agentArgumentsWithCloudAreAUsageErrorBeforeTheSignIn() {
-        assertEquals(64, cli(environment = withServer).run(arrayOf("claude", "--cloud", "-p", "hello")), "not 65")
+        val arguments = arrayOf("run", "claude", "--cloud", "--", "-p", "hello")
+        assertEquals(64, cli(environment = withServer).run(arguments), "not 65")
         val said = console.err.toString()
         assertTrue(said.startsWith("ostrom: agent arguments do not go to a cloud session"), said)
     }
@@ -20,14 +21,14 @@ class CloudCommandsTest : CliKit() {
     @Test
     fun cloudStartsTheAgentInOstromsCloudWithTheCredentialsOfThisDevice() {
         signIn("/home/maya/.config/ostrom")
-        val arguments = arrayOf("codex", "--cloud", "--repo", "acme/api", "--model", "gpt-5")
+        val arguments = arrayOf("run", "codex", "--cloud", "--repo", "acme/api", "--model", "gpt-5")
         val cloud = serverOf(mapOf(capabilities("runners.cloud.v1")))
         assertEquals(5, cli(environment = withServer, api = cloud).run(arguments), "the session's exit code")
         val site = CloudSite("https://ostrom.example", "ost_1", "/work/acme")
         assertEquals(listOf(CloudStart(Agent.CODEX, "gpt-5", "acme/api") to site), clouds)
-        assertEquals(64, cli(environment = withServer).run(arrayOf("claude", "--cloud", "-p", "hello")))
+        assertEquals(64, cli(environment = withServer).run(arrayOf("run", "claude", "--cloud", "--", "-p", "hello")))
         val said = "ostrom: agent arguments do not go to a cloud session (-p hello): start it with " +
-            "`ostrom claude --cloud`, then type in it\n"
+            "`ostrom run claude --cloud`, then type in it\n"
         assertTrue(console.err.endsWith(said), console.err.toString())
         assertEquals(1, clouds.size, "nothing started")
         assertTrue(launches.isEmpty(), "never launched here")

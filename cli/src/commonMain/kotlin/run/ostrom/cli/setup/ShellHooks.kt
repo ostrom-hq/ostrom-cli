@@ -6,9 +6,9 @@ import run.ostrom.cli.platform.OperatingSystem
 
 /**
  * How `ostrom init` puts Ostrom's hooks on the agents of this device. The hooks themselves are never written where the
- * agent could edit them: `ostrom <agent>` lays them in a private folder at each launch, with the session's signed
+ * agent could edit them: `ostrom run <agent>` lays them in a private folder at each launch, with the session's signed
  * package (S2-20, CLI.md § 2.2). What init installs is the way in: an alias per detected agent in the shell's startup
- * file, so that typing `claude` starts `ostrom claude`, hooks included. The block sits between two markers, so a
+ * file, so that typing `claude` starts `ostrom run claude`, hooks included. The block sits between two markers, so a
  * second init replaces it rather than adding another.
  */
 object ShellHooks {
@@ -34,7 +34,8 @@ object ShellHooks {
 
     /** Ostrom's block for [agents], an alias each, ending with a new line. */
     fun block(agents: List<Agent>): String =
-        (listOf(BEGIN) + agents.map { "alias ${it.command}='ostrom ${it.command}'" } + END).joinToString("\n") + "\n"
+        (listOf(BEGIN) + agents.map { "alias ${it.command}='ostrom run ${it.command} --'" } + END)
+            .joinToString("\n") + "\n"
 
     /**
      * [current] (the startup file, empty when there is none) with Ostrom's [block] in it: in place of the one already

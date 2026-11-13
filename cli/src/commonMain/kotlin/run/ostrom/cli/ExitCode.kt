@@ -3,7 +3,7 @@ package run.ostrom.cli
 
 /**
  * The exit codes of `ostrom` (spec CLI.md § 2.3). 64 to 78 follow `sysexits.h`, like the prototype launcher.
- * `ostrom <agent>` returns the agent's own code once it has started. `ostrom help exit-codes` prints the table, the
+ * `ostrom run <agent>` returns the agent's own code once it has started. `ostrom help exit-codes` prints the table, the
  * same as `docs/MODULES.md` (ExitCodesTest).
  *
  * @property meaning What the code tells a script, as `ostrom help exit-codes` prints it.

@@ -247,8 +247,8 @@ private fun orgOf(view: JsonObject): Org? {
 }
 
 /**
- * The repository the working folder is in, named as `ostrom <agent>` names it: `OSTROM_REPO`, else `owner/name` of its
- * `origin`, else the folder of the git top; null outside a git repository.
+ * The repository the working folder is in, named as `ostrom run <agent>` names it: `OSTROM_REPO`, else `owner/name` of
+ * its `origin`, else the folder of the git top; null outside a git repository.
  */
 internal fun CliDependencies.currentRepo(): String? =
     environment[LaunchVariables.REPO]?.takeIf { it.isNotEmpty() } ?: gitTopName()

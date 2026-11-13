@@ -202,7 +202,7 @@ class CapabilitiesCommandsTest : CliKit() {
     @Test
     fun aCloudSessionNeedsAServerThatRunsThem() {
         signIn(home)
-        val arguments = arrayOf("claude", "--cloud")
+        val arguments = arrayOf("run", "claude", "--cloud")
         assertEquals(69, cli(environment = withServer, api = serverOf(mapOf(capabilities()))).run(arguments))
         assertTrue(err().endsWith("ostrom: This Ostrom server runs no cloud session: start the agent here, without " +
             "--cloud.\n"), err())
