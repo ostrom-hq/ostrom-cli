@@ -40,4 +40,4 @@ if (providers.gradleProperty("ostrom.core.local").orNull == "true") {
     }
 }
 
-include(":platform", ":api-client", ":hooks", ":launcher", ":mcp", ":relay", ":cli")
+include(":platform", ":api-client", ":hooks", ":launcher", ":mcp", ":relay", ":todo", ":cli")

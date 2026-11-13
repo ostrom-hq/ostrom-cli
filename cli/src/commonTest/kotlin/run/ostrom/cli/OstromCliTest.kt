@@ -365,6 +365,7 @@ class OstromCliTest : CliKit() {
         val nowhere = UpdateRequest("1.0.0", "linux-x64", "/nowhere-ostrom/ostrom", "https://releases.example")
         assertEquals(66, runBlocking { dependencies.selfUpdate.rollback(nowhere) })
         dependencies.mcpBridge(BridgeTarget(1, "t", "ostrom"))
+        dependencies.mcpBridge(BridgeTarget(1, "t", "ostrom-todo"))
         // Nothing listens on the discard port of the loopback: the sender is built on this first send and drops the
         // refused connection.
         runBlocking { dependencies.sendStatistics("http://127.0.0.1:9/batch/", "{}") }

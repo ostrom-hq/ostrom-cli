@@ -31,6 +31,18 @@ class McpDispatcherTest {
     }
 
     @Test
+    fun aNamedServerGivesItsNameAndItsInstructions() {
+        val named = McpDispatcher("0.1.0", name = "ostrom-todo", instructions = "Keep the todo.")
+        assertEquals(
+            rpc(
+                """"id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},""" +
+                    """"serverInfo":{"name":"ostrom-todo","version":"0.1.0"},"instructions":"Keep the todo."}}""",
+            ),
+            named.handle(rpc(""""id":1,"method":"initialize","params":{}}""")),
+        )
+    }
+
+    @Test
     fun anUnknownProtocolVersionGetsTheNewest() {
         val params = """"params":{"protocolVersion":"2099-01-01"}}"""
         val reply = dispatcher.handle(rpc(""""id":"a","method":"initialize",$params"""))

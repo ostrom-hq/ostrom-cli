@@ -29,8 +29,15 @@ interface McpTool {
  *
  * @param version The CLI version, given as `serverInfo.version`.
  * @param tools The tools offered; none in the socle.
+ * @param name The server's name, given as `serverInfo.name`.
+ * @param instructions What the agent is told about the server (the handshake's `instructions`), or nothing.
  */
-class McpDispatcher(private val version: String, tools: List<McpTool> = emptyList()) {
+class McpDispatcher(
+    private val version: String,
+    tools: List<McpTool> = emptyList(),
+    private val name: String = "ostrom",
+    private val instructions: String? = null,
+) {
     private val tools = tools.associateBy { it.name }
 
     /**
@@ -67,14 +74,15 @@ class McpDispatcher(private val version: String, tools: List<McpTool> = emptyLis
 
     private fun initializeResult(params: JsonObject): JsonObject {
         val asked = (params["protocolVersion"] as? JsonPrimitive)?.content
+        val told = instructions?.let { mapOf("instructions" to JsonPrimitive(it)) }.orEmpty()
         return JsonObject(
             mapOf(
                 "protocolVersion" to JsonPrimitive(asked.takeIf { it in SUPPORTED_VERSIONS } ?: NEWEST_VERSION),
                 "capabilities" to JsonObject(mapOf("tools" to JsonObject(emptyMap()))),
                 "serverInfo" to JsonObject(
-                    mapOf("name" to JsonPrimitive("ostrom"), "version" to JsonPrimitive(version)),
+                    mapOf("name" to JsonPrimitive(name), "version" to JsonPrimitive(version)),
                 ),
-            ),
+            ) + told,
         )
     }
 

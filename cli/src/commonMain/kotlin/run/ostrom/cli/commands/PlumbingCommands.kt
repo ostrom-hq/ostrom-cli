@@ -63,7 +63,10 @@ class WaitCommand(private val dependencies: CliDependencies) : CliktCommand(name
 class McpCommand(private val dependencies: CliDependencies) : CliktCommand(name = "mcp") {
     private val workflow by argument("workflow").optional()
     private val session by option("--session", help = "The session's settings (session-env.json): bridge to its relay")
-    private val server by option("--server", help = "The relayed MCP server to bridge to").default("ostrom")
+    private val server by option(
+        "--server",
+        help = "The relayed MCP server to bridge to (ostrom-todo: the session todo, served here)",
+    ).default("ostrom")
 
     override val hiddenFromHelp = true
 

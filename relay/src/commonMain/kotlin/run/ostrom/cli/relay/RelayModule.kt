@@ -107,6 +107,7 @@ private class Relay(
     private val exchange = UpstreamExchange(notices)
     private val session = AgentSession()
     private val hooks = HookForwarder(config, shared, exchange, timeouts, session)
+    private val todo = TodoForwarder(config, shared, exchange, timeouts.hook, session)
     private val mcp = McpForwarder(config, upstream, exchange, session)
     private val inference = InferenceForwarder(config, upstream, exchange)
     private val policy = SignedCatalogForwarder(config, shared, exchange, timeouts.hook, memory)
@@ -134,6 +135,7 @@ private class Relay(
         when (target) {
             is RelayTarget.Hook -> hooks.forward(call, target.longPoll)
             RelayTarget.Wake -> hooks.hold(call)
+            is RelayTarget.Todo -> todo.forward(call)
             is RelayTarget.Catalog -> call.respondText(target.catalog, ContentType.Application.Json)
             RelayTarget.SignedCatalog -> policy.forward(call)
             is RelayTarget.Mcp -> mcp.forward(call, target.server)

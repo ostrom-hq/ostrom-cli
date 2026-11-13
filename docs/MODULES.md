@@ -15,6 +15,7 @@ all Ostrom repositories are in `ostrom-core/docs/CONVENTIONS.md`; this page only
 | `launcher` | `run.ostrom.cli.launcher` | the agents (`Agent`) and starting one in this terminal | `platform` |
 | `mcp` | `run.ostrom.cli.mcp` | the local MCP server on stdio (`ostrom mcp`) | `platform` |
 | `relay` | `run.ostrom.cli.relay` | the launch's local relay on `127.0.0.1` (Ktor CIO): hooks, MCP and inference reach Ostrom through it | `platform` |
+| `todo` | `run.ostrom.cli.todo` | the session todo's `ostrom-todo` MCP server (`ostrom mcp --server ostrom-todo`, served in-process) and its checks run on this machine (`gh`, a shell command): [TODOS.md](TODOS.md) | `platform`, `mcp`, ostrom-core `api` |
 | `cli` | `run.ostrom.cli` | the command tree (Clikt), `main`, the wiring (`CliDependencies`), the executable | all of the above |
 
 Rules that keep the binary fast and the modules apart:
@@ -88,7 +89,11 @@ alternative: a second private file for `ostrom wait`, which a command of the age
   one, S2-20 and S2-38), `POST /mcp/{server}` for the launch's servers (to `/api/v1/mcp/{server}`, streamed, 401/403 from
   Ostrom become 502; Ostrom's own server, `ostrom`, goes to the waits server `/api/v1/waits/mcp`, with
   `?session=` the session segment Ostrom answered to the start hook, `<id>~r<n>` once resumed, none before), and with inference `/v1/messages`, `/v1/chat/completions`, `/v1/models` (to
-  `/api/v1/inference/…`, 4 MiB, the response streamed, only the provider headers forwarded). Coming soon on the
+  `/api/v1/inference/…`, 4 MiB, the response streamed, only the provider headers forwarded). The session todo's
+  routes (`/api/v1/todos/session`, its items' `start`, `notes`, `proof`, `link` and `drop`) are forwarded with the
+  session segment the relay knows in place of any `sessionId` the caller names (the query of a read, the body of a
+  write); the agent's capability opens them, while the Stop and SessionStart hooks' own (`stop`, `hook-error`,
+  `GET …/context`) take the hooks' capability only ([TODOS.md](TODOS.md)). Coming soon on the
   server: ostrom-server `main` does not serve `/api/v1/notifications` nor `/api/v1/checks` yet (ostrom-core's
   `api/contract/served-routes.txt`); the sessions and the signed policy are served since ostrom-server d9301e4.
 - Ostrom unreachable or too slow: 502 with `{"error":{"type":"unreachable","message":"Ostrom is unreachable (…)"}}`,

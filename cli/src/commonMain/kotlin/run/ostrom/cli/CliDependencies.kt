@@ -29,6 +29,12 @@ import run.ostrom.cli.mcp.McpBridge
 import run.ostrom.cli.mcp.McpDispatcher
 import run.ostrom.cli.mcp.McpServer
 import run.ostrom.cli.mcp.McpServerImpl
+import run.ostrom.cli.todo.CommandCheck
+import run.ostrom.cli.todo.GitHub
+import run.ostrom.cli.todo.RelayTodoApi
+import run.ostrom.cli.todo.TODO_SERVER
+import run.ostrom.cli.todo.TodoChecks
+import run.ostrom.cli.todo.TodoTools
 import run.ostrom.cli.platform.ConfigStore
 import run.ostrom.cli.platform.ConfigStoreImpl
 import run.ostrom.cli.platform.Console
@@ -180,7 +186,7 @@ class CliDependencies(
                 api = api,
                 hookRunner = hookRunner(console, environment),
                 mcpServer = { McpServerImpl(McpDispatcher(BuildInfo.VERSION), console) },
-                mcpBridge = { McpBridge(it, LoopbackHttpImpl(), console) },
+                mcpBridge = { target -> mcpBridge(target, console, environment) },
                 credentials = { directory ->
                     val path = join(directory, "credentials.json")
                     FileCredentialStore(launchFiles, path, secrets, { console.err("$it\n") }) { environment[it] }
@@ -215,6 +221,19 @@ class CliDependencies(
         }
 
         private val USER_AGENT = "ostrom/${BuildInfo.VERSION}"
+
+        /**
+         * `ostrom mcp --session … --server <name>`: a stdio bridge to the relay for a relayed server; for the session
+         * todo ([TODO_SERVER]) the server itself, served in this process, which calls the relay's todo routes and runs
+         * the checks on this machine (docs/TODOS.md).
+         */
+        internal fun mcpBridge(target: BridgeTarget, console: Console, environment: Environment): McpServer {
+            if (target.server != TODO_SERVER) return McpBridge(target, LoopbackHttpImpl(), console)
+            val api = RelayTodoApi(LoopbackHttpImpl(), target.port, target.token)
+            val capture = ProcessCaptureImpl()
+            val checks = TodoChecks(GitHub(capture), CommandCheck(capture, environment.operatingSystem))
+            return McpServerImpl(TodoTools(api, checks).dispatcher(BuildInfo.VERSION), console)
+        }
 
         /** `ostrom wait`: asks through the relay of the session this process runs in. */
         private fun gateWait(environment: Environment, console: Console): GateWait {

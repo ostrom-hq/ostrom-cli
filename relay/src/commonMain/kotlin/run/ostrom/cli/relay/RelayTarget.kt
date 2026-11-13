@@ -18,6 +18,13 @@ internal sealed interface RelayTarget {
     /** `POST /mcp/{server}`, forwarded to `/api/v1/mcp/{server}`. */
     data class Mcp(val server: String) : RelayTarget
 
+    /**
+     * A route of the session's todo (`/api/v1/todos/session…`), forwarded with the session the relay knows in place
+     * of any the caller names. [hooksOnly] for the Stop and SessionStart hooks' own routes (a stop, a hook error, the
+     * reminder block), which the agent's capability does not open.
+     */
+    data class Todo(val hooksOnly: Boolean) : RelayTarget
+
     /** `GET /api/v1/gates/catalog`, answered with the package's verified [catalog] without leaving the machine. */
     data class Catalog(val catalog: String) : RelayTarget
 
@@ -75,6 +82,12 @@ private val HOOK_POST =
     Regex("/api/v1/(sessions|gates|gates/local-denials|notifications|checks)|/api/v1/sessions/$SESSION/(reopen|seen)")
 private val HOOK_GET = Regex("/api/v1/gates/$ID")
 
+/** The todo routes the agent's `ostrom-todo` server calls (`getSessionTodo` is a GET of the root). */
+private const val TODO_ROOT = "/api/v1/todos/session"
+private val TODO_AGENT_POST = Regex("$TODO_ROOT(/items(/$ID/(start|notes|proof|link|drop))?)?")
+private val TODO_HOOK_POST = Regex("$TODO_ROOT/(stop|hook-error)")
+private const val TODO_CONTEXT = "$TODO_ROOT/context"
+
 /** An MCP server name, as the server accepts it. */
 internal val MCP_SERVER_NAME = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
@@ -95,6 +108,10 @@ internal fun resolveTarget(method: HttpMethod, path: String, config: RelayConfig
 private fun hookTarget(method: HttpMethod, path: String, catalog: String?): RelayTarget = when {
     method == HttpMethod.Post && HOOK_POST.matches(path) -> RelayTarget.Hook(longPoll = false)
     method == HttpMethod.Post && path == WAITS_WAKE -> RelayTarget.Wake
+    method == HttpMethod.Post && TODO_AGENT_POST.matches(path) -> RelayTarget.Todo(hooksOnly = false)
+    method == HttpMethod.Post && TODO_HOOK_POST.matches(path) -> RelayTarget.Todo(hooksOnly = true)
+    method == HttpMethod.Get && path == TODO_ROOT -> RelayTarget.Todo(hooksOnly = false)
+    method == HttpMethod.Get && path == TODO_CONTEXT -> RelayTarget.Todo(hooksOnly = true)
     method == HttpMethod.Get && path == SIGNED_GATE_CATALOG -> RelayTarget.SignedCatalog
     method == HttpMethod.Get && path == GATE_CATALOG ->
         if (catalog == null) RelayTarget.Hook(longPoll = false) else RelayTarget.Catalog(catalog)
@@ -118,10 +135,12 @@ private fun inferenceTarget(method: HttpMethod, path: String): RelayTarget {
  * hook routes take the hooks' capability, which never enters the agent's environment; the MCP and inference routes
  * take the agent's (security audit S2-25). The agent's opens one hook route, reading where a gate stands
  * (`GET /api/v1/gates/{id}`, which `ostrom wait` calls from the agent's shell): it neither asks, consumes nor closes
- * anything. Off the allow-list, either gets its 404.
+ * anything. The agent's opens the todo routes its `ostrom-todo` server calls, never the Stop hook's (a stop, a hook
+ * error) nor the reminder block. Off the allow-list, either gets its 404.
  */
 internal fun opens(target: RelayTarget, hooks: Boolean, client: Boolean): Boolean = when (target) {
     is RelayTarget.Hook -> hooks || client && target.longPoll
+    is RelayTarget.Todo -> hooks || client && !target.hooksOnly
     is RelayTarget.Catalog, RelayTarget.SignedCatalog, RelayTarget.Wake -> hooks
     RelayTarget.NotFound -> true
     is RelayTarget.Mcp, is RelayTarget.Inference, RelayTarget.McpMethodNotAllowed -> client
