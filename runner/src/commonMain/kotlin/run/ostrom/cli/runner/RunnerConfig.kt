@@ -231,7 +231,7 @@ exec bash -l
      */
     fun path(path: String?, binary: String): String {
         val directory = binary.substringBeforeLast('/', "").ifEmpty { "/" }
-        val rest = path?.split(':')?.filter { it.isNotEmpty() && it != directory }.orEmpty()
+        val rest = path?.split(':').orEmpty().filter { it.isNotEmpty() && it != directory }
         return (listOf(directory) + rest.ifEmpty { DEFAULT_PATH }).joinToString(":")
     }
 

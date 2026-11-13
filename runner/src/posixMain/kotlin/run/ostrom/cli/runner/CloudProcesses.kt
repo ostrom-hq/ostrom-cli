@@ -5,34 +5,28 @@ package run.ostrom.cli.runner
 
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.convert
-import kotlinx.cinterop.cstr
 import kotlinx.cinterop.alloc
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.ptr
 import platform.posix.getuid
 import platform.posix.lstat
 import platform.posix.stat
-import run.ostrom.cli.runner.pty.ostrom_check_host_harden
-import run.ostrom.cli.runner.pty.ostrom_check_host_sweep
 import kotlinx.cinterop.staticCFunction
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.network.selector.SelectorManager
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.launch
 import kotlinx.cinterop.toKString
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.time.Duration.Companion.seconds
-import kotlinx.io.IOException
 import kotlinx.io.buffered
 import kotlinx.io.files.Path
 import kotlinx.io.files.SystemFileSystem
@@ -41,10 +35,6 @@ import platform.posix.SIGTERM
 import platform.posix._exit
 import platform.posix.chmod
 import platform.posix.getenv
-import platform.posix.free
-import platform.posix.mkdtemp
-import platform.posix.realpath
-import platform.posix.system
 import platform.posix.signal
 import platform.posix.fflush
 import platform.posix.fprintf
@@ -60,6 +50,9 @@ import kotlin.time.Clock
  * directory the agent's container does not mount). `ostrom cloud credential` is git's credential helper in the agent's
  * container. `ostrom cloud machine` is a registered runner on a machine of the organization: it signs of life with its
  * key until the server refuses it.
+ *
+ * @param command One of [CloudProcess]'s commands.
+ * @param args The arguments after it.
  */
 actual fun runCloudProcess(command: String, args: List<String>): Nothing {
     val environment = readEnvironment()
@@ -204,122 +197,6 @@ private class LinkListener(
 }
 
 /**
- * The check host (R4): the pid 1 of its container, under the scripts' uid. It stops being dumpable, links to the
- * runner, then runs the checks the runner asks for one after the other, each in a new home, killing what each left
- * behind. When the link ends it exits: the runner accepts no second link, so later checks fail rather than reach
- * another process.
- */
-private fun checkHost(socket: String, workspace: String): Nothing {
-    signal(SIGTERM, staticCFunction<Int, Unit> { _exit(0) })
-    if (ostrom_check_host_harden() != 0) log("the check host could not stop being dumpable")
-    runBlocking {
-        val selector = SelectorManager(Dispatchers.IO)
-        val connect = suspend { AgentSocket.connect(selector, socket) }
-        val link = linkToRunner(connect)
-        log("check host linked to the runner")
-        val terminals = CheckTerminals(PtyTerminal.Pipes, NativeCheckHomes, workspace, ::realPath)
-        CheckHost(AgentHost(terminals), connect, ::log).serve(link)
-    }
-    log("the runner closed the check link")
-    exitProcess(EXIT_LINK_CLOSED)
-}
-
-/** The first connection to the runner, retried while it starts. */
-private suspend fun linkToRunner(connect: suspend () -> AgentConnection): AgentConnection {
-    repeat(LINK_ATTEMPTS - 1) {
-        try {
-            return connect()
-        } catch (error: CancellationException) {
-            throw error
-        } catch (_: Exception) {
-            delay(LINK_RETRY_MILLIS)
-        }
-    }
-    return connect()
-}
-
-/** The real path of [path], links resolved, or null when it does not exist. */
-private fun realPath(path: String): String? {
-    val resolved = realpath(path, null) ?: return null
-    return try {
-        resolved.toKString()
-    } finally {
-        free(resolved)
-    }
-}
-
-/** The checks' homes, under /tmp; a release kills every other process of the uid first (pid 1 only). */
-private object NativeCheckHomes : CheckHomes {
-    override fun create(): String = memScoped {
-        val template = "/tmp/check-XXXXXX".cstr.getPointer(this)
-        mkdtemp(template)?.toKString() ?: error("no home for the check")
-    }
-
-    override fun release(home: String) {
-        if (ostrom_check_host_sweep() != 0) log("the check host could not kill what the check left behind")
-        // The path is mkdtemp's: /tmp/check- and six letters or digits, nothing to quote.
-        if (system("rm -rf -- $home") != 0) log("the check host could not remove a check's home")
-    }
-}
-
-/**
- * A registered runner (`ostrom cloud machine`): heartbeats with its key until the server refuses it three times in a
- * row (exit 3) or the machine stops it (SIGTERM, exit 0). With a Docker Engine (`OSTROM_DOCKER_API_URL`), it runs the
- * cloud sessions the server hands it. A bad configuration, an unreadable key file included, exits with 2.
- */
-private fun machine(environment: Map<String, String>): Nothing {
-    signal(SIGTERM, staticCFunction<Int, Unit> { _exit(0) })
-    val config = try {
-        MachineConfig.from(environment) { path ->
-            try {
-                SystemFileSystem.source(Path(path)).buffered().use { it.readString() }
-            } catch (error: IOException) {
-                throw IllegalArgumentException("OSTROM_RUNNER_KEY_FILE cannot be read (${error::class.simpleName}).")
-            }
-        }
-    } catch (error: IllegalArgumentException) {
-        log("invalid configuration: ${error.message}")
-        exitProcess(EXIT_BAD_CONFIGURATION)
-    }
-    log("starting $config")
-    val code = runBlocking {
-        val client = HttpClient {
-            expectSuccess = false
-            install(HttpTimeout) {
-                connectTimeoutMillis = CONNECT_TIMEOUT_MILLIS
-                requestTimeoutMillis = CONNECT_TIMEOUT_MILLIS
-            }
-        }
-        // An image pull can take minutes: the engine's calls have their own, longer timeout.
-        val engine = config.docker?.let {
-            HttpClient {
-                expectSuccess = false
-                install(HttpTimeout) {
-                    connectTimeoutMillis = CONNECT_TIMEOUT_MILLIS
-                    requestTimeoutMillis = DOCKER_TIMEOUT_MILLIS
-                }
-            }
-        }
-        try {
-            val sessions = config.docker?.let { docker ->
-                MachineSessions(
-                    HttpDockerEngine(checkNotNull(engine), docker.apiUrl, config.runnerId),
-                    PlanGuard(config.runnerId, docker.network, docker.image),
-                    docker.maxSessions,
-                    ::log,
-                )
-            }
-            MachineRunner(HttpMachineApi(client, config), config.interval, ::log, sessions, MachineRunner.WAIT).run()
-        } finally {
-            client.close()
-            engine?.close()
-        }
-    }
-    log("exiting with $code")
-    exitProcess(code)
-}
-
-/**
  * Git's credential helper (`ostrom cloud credential get`), in the agent's container: asks the runner's credential
  * socket for the remote git describes on stdin and prints what it answers. Every other operation, and every failure,
  * prints nothing and succeeds, so git moves on.
@@ -357,7 +234,7 @@ private fun host(socket: String, host: AgentHost): Nothing {
 /** The binary this process runs (`/proc/self/exe`), at the same path in the agent's container; null elsewhere. */
 private fun selfPath(): String? = realPath("/proc/self/exe")
 
-private fun log(line: String) {
+internal fun log(line: String) {
     fprintf(stderr, "%s\n", "ostrom cloud: $line")
     fflush(stderr)
 }
@@ -381,13 +258,10 @@ private val KNOWN_VARIABLES = listOf(
     "OSTROM_GH_CONFIG_DIR",
 )
 
-private const val CONNECT_TIMEOUT_MILLIS = 10_000L
+internal const val CONNECT_TIMEOUT_MILLIS = 10_000L
 
 /** The longest the first GitHub token may take before the agent starts without it. */
 private val GITHUB_FIRST_TIMEOUT = 10.seconds
-
-/** An image pull, the longest call to the engine. */
-private const val DOCKER_TIMEOUT_MILLIS = 600_000L
 
 /** rw for the host's uid and the shared group, nothing for others (0660). */
 private const val SOCKET_MODE = 0x1B0
@@ -395,12 +269,5 @@ private const val SOCKET_MODE = 0x1B0
 /** rw for all (0666): the checks' socket, in a directory only the agent's and the runner's containers mount. */
 private const val OPEN_MODE = 0x1B6
 
-/** The check host links to the runner as the session starts: it tries for a minute. */
-private const val LINK_ATTEMPTS = 120
-private const val LINK_RETRY_MILLIS = 500L
-
-/** The check host's exit once the runner closed the link. */
-private const val EXIT_LINK_CLOSED = 3
-
 /** The exit code of a bad configuration (1 is an execution the server ended). */
-private const val EXIT_BAD_CONFIGURATION = 2
+internal const val EXIT_BAD_CONFIGURATION = 2

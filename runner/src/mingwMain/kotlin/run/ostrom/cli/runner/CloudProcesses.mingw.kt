@@ -6,6 +6,12 @@ import kotlin.system.exitProcess
 
 // coverage: a cloud session's containers run Linux; this target only says so.
 @ExcludeFromCoverage
+/**
+ * Says that a cloud session's processes run on Linux, and exits with 2.
+ *
+ * @param command One of [CloudProcess]'s commands.
+ * @param args The arguments after it.
+ */
 actual fun runCloudProcess(command: String, args: List<String>): Nothing {
     println("ostrom cloud $command runs in a cloud session's Linux containers only.")
     exitProcess(EXIT_UNSUPPORTED)
