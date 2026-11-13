@@ -32,8 +32,8 @@ internal class DecideTeamHookUseCase(private val hooks: TeamHooks, private val a
     }
 
     private fun problem(hook: EffectiveHook, requested: String?, read: String?): Pair<ExitCode, String>? {
-        val given = requested?.trim()?.lowercase()
-        val wanted = given?.let { if (it.startsWith(PREFIX)) it else PREFIX + it }
+        val given = requested?.let { it.trim().lowercase() }
+        val wanted = given?.let { PREFIX + it.removePrefix(PREFIX) }
         val expected = wanted ?: read
         val name = shown(hook.name)
         val delivered = shown(hook.digest)
@@ -51,9 +51,7 @@ internal class DecideTeamHookUseCase(private val hooks: TeamHooks, private val a
                 "server now delivers $delivered). Read it again with ostrom hooks show $name."
         }
     }
-
-    private companion object {
-        const val PREFIX = "sha256:"
-        val DIGEST = Regex("(sha256:)?[0-9a-f]{64}")
-    }
 }
+
+private const val PREFIX = "sha256:"
+private val DIGEST = Regex("(sha256:)?[0-9a-f]{64}")

@@ -103,7 +103,7 @@ internal class HooksShowCommand(private val dependencies: CliDependencies) : Cli
             console.out("\n--- ${shown("${file.path} ($mode, ${file.content.size} bytes)")} ---\n")
             // what hides or reorders code is shown as <U+XXXX>, never given to the terminal; only bytes that are not
             // UTF-8 are withheld
-            console.out((text?.let(HookText::visible) ?: "(binary content not shown)") + "\n")
+            console.out((if (text == null) "(binary content not shown)" else HookText.visible(text)) + "\n")
         }
         when {
             dependencies.windows -> console.err("\n$NOT_ON_WINDOWS\n")
