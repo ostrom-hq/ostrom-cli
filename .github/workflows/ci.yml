@@ -145,11 +145,13 @@ jobs:
       # floor on Linux (measure.py, peak_memory_mb; 6.5 MB on macOS). A start with the file cache emptied, median of 5:
       # 29-89 ms on x64, up to 114 ms on arm64 (runs 41541750442, 41612349833, 41625900506, 41628920178; one start
       # reached 620 ms). Budgets: 20 ms (perf pass), 30 ms, 300 ms and 25 MB, the runner's noise left.
+      # Binary sizes: linuxX64 14.56 MB on main (run 43436474566), 15.07 MB with the session todo (run 43439881093);
+      # budgets 16 MB, Windows 18.
       - name: Start-up (15 ms median, 20 ms p95, 40 ms for a git push), first start, memory and binary sizes
         run: >-
           python3 scripts/measure.py --label linuxX64 --max-push-ms 40
           --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
-          --sizes cli/build/bin/*/releaseExecutable/ostrom.* --max-size-mb 15 --size-budget mingwX64=17
+          --sizes cli/build/bin/*/releaseExecutable/ostrom.* --max-size-mb 16 --size-budget mingwX64=18
           --max-hook-p95-ms 20 --max-version-p95-ms 30 --max-cold-ms 300 --max-hook-memory-mb 25
       - name: End to end, the real binary with fake Claude Code and Codex against the contract's server
         run: python3 e2e/run.py --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
@@ -162,7 +164,7 @@ jobs:
       - name: Hook cost in a session (median of 20)
         run: >-
           python3 e2e/perf.py --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe --label linuxX64
-          --max-hook-ms 20 --max-cold-version-ms 500 --max-cold-hook-ms 500 --max-size-mb 15
+          --max-hook-ms 20 --max-cold-version-ms 500 --max-cold-hook-ms 500 --max-size-mb 16
           --max-burst-requests 0.1 --max-spaced-requests 0.5 --max-spaced-ms 20 --max-installed-ms 20
       - name: End to end, init, invite, members, policy and harness against the contract's server
         run: python3 e2e/setup_e2e.py --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
@@ -472,7 +474,7 @@ jobs:
         run: >-
           python3 scripts/measure.py --label macosArm64
           --binary cli/build/bin/macosArm64/releaseExecutable/ostrom.kexe
-          --sizes cli/build/bin/macosArm64/releaseExecutable/ostrom.kexe --max-size-mb 15
+          --sizes cli/build/bin/macosArm64/releaseExecutable/ostrom.kexe --max-size-mb 16
           --max-hook-ms 30 --max-hook-p95-ms 45 --max-version-p95-ms 60 --max-cold-ms 1500 --max-hook-memory-mb 25
       # `ostrom` moves the device token to the Keychain: a keychain of the run's own, unlocked, without a time limit, so
       # that no question of the Keychain holds a session (the runner's login keychain may ask, and nobody answers)
@@ -496,7 +498,7 @@ jobs:
           security list-keychains -d user -s ostrom-ci.keychain
           security default-keychain -d user -s ostrom-ci.keychain
           python3 e2e/perf.py --binary cli/build/bin/macosArm64/releaseExecutable/ostrom.kexe --label macosArm64 \
-            --max-hook-ms 70 --max-cold-version-ms 1500 --max-cold-hook-ms 1500 --max-size-mb 15 --max-installed-ms 100 \
+            --max-hook-ms 70 --max-cold-version-ms 1500 --max-cold-hook-ms 1500 --max-size-mb 16 --max-installed-ms 100 \
             --max-burst-requests 0.1 --max-spaced-requests 0.5 --max-spaced-ms 120
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

@@ -114,6 +114,7 @@ kotlin {
                 implementation(projects.mcp)
                 implementation(projects.apiClient)
                 implementation(projects.relay)
+                implementation(projects.todo)
                 implementation(libs.clikt)
                 implementation(libs.coroutines.core)
                 implementation(libs.serialization.json)
