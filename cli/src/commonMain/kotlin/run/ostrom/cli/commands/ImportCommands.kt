@@ -24,11 +24,12 @@ internal class ImportCommand :
     GroupCommand("import", "Bring a team from another tool into Ostrom (admin)", comingSoon = false)
 
 /**
- * `ostrom import teamcode --db URL --key-file FILE [--team T] [--yes | --cutover [--confirm cutover]]`: TeamCode's MCP
- * servers, secrets, tool policies and shared accounts into this organisation (ostrom-server#28). Shows Ostrom's plan;
- * imports with `--yes`. `--cutover` is the owner's final pass once TeamCode is stopped (ostrom-server#86): its plan,
- * then, only once `cutover` is typed (or given to `--confirm`), the shared accounts' tokens rotated and the accounts
- * revived.
+ * `ostrom import teamcode --db URL --key-file FILE [--team T] [--yes] [--access-only | --cutover [--confirm cutover]]`:
+ * TeamCode's MCP servers, secrets, tool policies and shared accounts into this organisation (ostrom-server#28). Shows
+ * Ostrom's plan; imports with `--yes`. `--access-only` is TeamCode's trial: the accounts serve their access tokens and
+ * are never renewed by Ostrom. `--cutover` is the owner's final pass once TeamCode is stopped (ostrom-server#86): its
+ * plan, then, only once `cutover` is typed (or given to `--confirm`), the shared accounts handed over, their tokens
+ * rotated and the accounts revived.
  */
 internal class ImportTeamCodeCommand(private val dependencies: CliDependencies) : CliktCommand(name = "teamcode") {
     override fun help(context: Context) = "Import a TeamCode team: MCP servers, secrets, tool policies, accounts"
@@ -44,6 +45,10 @@ internal class ImportTeamCodeCommand(private val dependencies: CliDependencies) 
             "(owner; asks you to type cutover)",
     ).flag()
     private val confirm by option("--confirm", help = "With --cutover and no terminal: the word cutover")
+    private val accessOnly by option(
+        "--access-only",
+        help = "A trial: the shared accounts serve TeamCode's access tokens, never renewed, until they expire",
+    ).flag()
     private val server by option("--server", help = "Ostrom server URL (else OSTROM_URL, else the one of ostrom login)")
 
     override fun run() {
@@ -52,6 +57,11 @@ internal class ImportTeamCodeCommand(private val dependencies: CliDependencies) 
         // a typed word, never --yes: the cutover rotates tokens TeamCode may still be using
         when {
             confirm != null && !cutover -> throw stopWith(ExitCode.USAGE, "ostrom: --confirm goes with --cutover")
+            // TeamCode: "Choose either refresh ownership or access-only activation."
+            cutover && accessOnly -> throw stopWith(
+                ExitCode.USAGE,
+                "ostrom: choose either --cutover (Ostrom renews the tokens) or --access-only (it never does)",
+            )
             cutover && yes -> throw stopWith(ExitCode.USAGE, "ostrom: type $CUTOVER to confirm --cutover, never --yes")
             cutover && confirm == null && !dependencies.console.isInteractive ->
                 throw stopWith(ExitCode.USAGE, "ostrom: no terminal to type $CUTOVER: add --confirm $CUTOVER")
@@ -71,6 +81,14 @@ internal class ImportTeamCodeCommand(private val dependencies: CliDependencies) 
             ServerFeatures.IMPORT_TEAMCODE,
             "This Ostrom server does not import TeamCode teams: ask your admin to update it.",
         )
+        if (accessOnly) {
+            dependencies.requireFeature(
+                serverUrl,
+                token,
+                ServerFeatures.SHARING_HANDOVER,
+                "This Ostrom server has no access-only import: ask your admin to update it.",
+            )
+        }
         val typed = { (confirm ?: dependencies.ask("Type $CUTOVER to run it: ", "--confirm $CUTOVER")) == CUTOVER }
         val import = ImportTeamCodeUseCase(
             TeamCodeDatabase(dependencies.capture),
@@ -79,7 +97,7 @@ internal class ImportTeamCodeCommand(private val dependencies: CliDependencies) 
             typed,
             { dependencies.console.out(it) },
         ) { dependencies.console.err(it) }
-        val request = ImportTeamCodeRequest(db, dependencies.files.read(keyFile), team, yes, cutover)
+        val request = ImportTeamCodeRequest(db, dependencies.files.read(keyFile), team, yes, cutover, accessOnly)
         throw ProgramResult(runBlocking { import(request) })
     }
 }

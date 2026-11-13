@@ -33,6 +33,7 @@ fun pendingCommands(implemented: List<CliktCommand>): List<CliktCommand> {
         named("version"),
         named("invite"),
         named("members"),
+        named("accounts"),
         named("policy"),
         ImportCommand().subcommands(named("teamcode")),
         CheckCommand(),

@@ -87,4 +87,29 @@ class ImportTeamCodeCommandTest : CliKit() {
         assertOut("Type cutover to run it: ")
         assertEquals(listOf("ost_console"), requests.map { it.second.token }.distinct())
     }
+
+    @Test
+    fun theAccessOnlyTrialIsNoCutoverAndNeedsAServerThatHasIt() {
+        val import = arrayOf("import", "teamcode", "--db", "mysql://ro@db/teamcode", "--key-file", "/keys/tc.key")
+        val admin = withServer + ("OSTROM_TOKEN" to "ost_console")
+        fileSystem.createDirectories("/keys".toPath())
+        fileSystem.write("/keys/tc.key".toPath()) { writeUtf8(Sealed.KEY + "\n") }
+        fun run(features: Pair<String, Pair<Int, String>>, vararg more: String): Int {
+            val routes = mapOf(
+                features,
+                "GET /api/v1/members" to (200 to """{"items":[]}"""),
+                "POST /api/v1/import/teamcode?dryRun=true&accessOnly=true" to (200 to """{"items":[],"accessOnly":1}"""),
+            )
+            return cli(environment = admin, api = serverOf(routes), capture = FakeMysql(FULL_SCHEMA, TEAM_TABLES))
+                .run(import + more)
+        }
+        assertEquals(64, run(importing, "--cutover", "--access-only", "--confirm", "cutover"))
+        assertTrue("choose either --cutover (Ostrom renews the tokens) or --access-only" in console.err.toString())
+        assertTrue(requests.isEmpty(), "nothing asked of Ostrom")
+        assertEquals(69, run(importing, "--access-only"))
+        assertTrue("This Ostrom server has no access-only import" in console.err.toString(), console.err.toString())
+        assertEquals(0, run(capabilities("import.teamcode.v1", "sharing.handover.v1"), "--access-only"))
+        assertOut("0 created, 0 updated, 0 unchanged, 0 skipped.\n")
+        assertEquals("/api/v1/import/teamcode?dryRun=true&accessOnly=true", requests.last().second.path)
+    }
 }

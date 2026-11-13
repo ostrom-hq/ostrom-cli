@@ -19,6 +19,8 @@ import kotlinx.serialization.json.intOrNull
  * @property team The TeamCode team id.
  * @property apply False for the plan only (Ostrom's dry run); true to import after it.
  * @property cutover True for the owner's final pass once TeamCode is stopped (`--cutover`, ostrom-server#86).
+ * @property accessOnly True for TeamCode's trial (`--access-only`): the accounts serve their access tokens, never
+ *   renewed.
  */
 data class ImportTeamCodeRequest(
     val db: String,
@@ -26,6 +28,7 @@ data class ImportTeamCodeRequest(
     val team: String,
     val apply: Boolean,
     val cutover: Boolean = false,
+    val accessOnly: Boolean = false,
 )
 
 /**
@@ -33,7 +36,10 @@ data class ImportTeamCodeRequest(
  * e-mail, then TeamCode username against the GitHub login), asks Ostrom for the plan (`?dryRun=true`) and prints it,
  * then imports only with `--yes`. TeamCode is only read; no secret is printed nor written to disk.
  *
- * A normal pass refreshes no token: a shared account TeamCode still uses waits, reported `revive_at_cutover`. The final
+ * A normal pass refreshes no token. An account it brings in waits for its handover (TeamCode's « Refresh ownership »):
+ * TeamCode may still renew its tokens, so it serves nothing until `ostrom accounts handover` or the cutover; with
+ * `--access-only` it serves its access token instead, never renewed. A shared account TeamCode has disconnected waits,
+ * reported `revive_at_cutover`. The final
  * pass (`cutover`, the owner's, audited by Ostrom) shows its plan, then runs only once the owner has confirmed it:
  * Ostrom tests and rotates those accounts' tokens at their provider and revives them.
  *
@@ -58,7 +64,7 @@ class ImportTeamCodeUseCase(
         val map = memberMap(tables, members())
         val (body, skipped) = TeamCodePlan(key, request.team).request(tables, map)
         skipped.forEach { say("! Left out: $it\n") }
-        if (request.cutover) cutover(body) else normal(body, request.apply)
+        if (request.cutover) cutover(body) else normal(body, request.apply, request.accessOnly)
     } catch (e: TeamCodeReadException) {
         fail("ostrom import teamcode: ${e.message}\n")
         ExitCode.FAILED.code
@@ -68,10 +74,11 @@ class ImportTeamCodeUseCase(
     }
 
     /** The normal pass: the plan, then the import with `--yes`; the accounts waiting for the cutover are said. */
-    private suspend fun normal(body: JsonObject, apply: Boolean): Int {
-        var last = report("Plan (nothing imported yet):", ok(import("?dryRun=true", body)))
+    private suspend fun normal(body: JsonObject, apply: Boolean, accessOnly: Boolean): Int {
+        val trial = if (accessOnly) "accessOnly=true" else ""
+        var last = report("Plan (nothing imported yet):", ok(import("?dryRun=true${trial.prefixed("&")}", body)))
         if (apply) {
-            last = report("Imported:", ok(import("", body)))
+            last = report("Imported:", ok(import(trial.prefixed("?"), body)))
         } else {
             say("Run the same command with --yes to import.\n")
         }
@@ -79,6 +86,18 @@ class ImportTeamCodeUseCase(
         if (waiting > 0) {
             val wait = if (waiting == 1) "waits" else "wait"
             say("! ${shared(waiting)} $wait for the final pass once TeamCode stops: ostrom import teamcode --cutover\n")
+        }
+        val pending = count(last, PENDING)
+        if (pending > 0) {
+            val wait = if (pending == 1) "serves nothing until it is" else "serve nothing until they are"
+            say(
+                "! ${shared(pending)} $wait handed over, as TeamCode may still renew their tokens: once it no " +
+                    "longer does, ostrom accounts handover <name> --confirm, or the cutover\n",
+            )
+        }
+        val trialled = count(last, ACCESS_ONLY)
+        if (trialled > 0) {
+            say("! ${shared(trialled)} serve TeamCode's access tokens, never renewed: import again once they expire\n")
         }
         return ExitCode.OK.code
     }
@@ -185,7 +204,8 @@ class ImportTeamCodeUseCase(
         say("$title\n")
         for (item in body.list("items").mapNotNull { it as? JsonObject }) {
             val reason = item.text("reason")?.let { " ($it)" }.orEmpty()
-            say("  ${item.text("action")}  ${item.text("kind")}  ${item.text("name")}$reason\n")
+            val owner = item.text("refreshOwnership")?.let { "  [${it.replace('_', ' ')}]" }.orEmpty()
+            say("  ${item.text("action")}  ${item.text("kind")}  ${item.text("name")}$owner$reason\n")
         }
         val counts = COUNTS.joinToString(", ") { "${count(body, it)} $it" }
         val revive = count(body, REVIVE).takeIf { waiting && it > 0 }?.let { ", $it to revive at the cutover" }
@@ -249,12 +269,17 @@ class ImportTeamCodeUseCase(
         private const val REVIVE = "reviveAtCutover"
         private const val SKIPPED = "skipped"
         private const val PLANNED = "planned"
+        private const val PENDING = "pendingHandover"
+        private const val ACCESS_ONLY = "accessOnly"
 
         /** The cutover tests and rotates each shared account's tokens at its provider, one after another. */
         private const val CUTOVER_MILLIS = 600_000L
         private val COUNTS = listOf("created", "updated", "unchanged", "skipped")
     }
 }
+
+/** This query part after [separator], or nothing when empty. */
+private fun String.prefixed(separator: String) = if (isEmpty()) "" else "$separator$this"
 
 /** "1 shared account", "2 shared accounts". */
 private fun shared(count: Int) = if (count == 1) "1 shared account" else "$count shared accounts"

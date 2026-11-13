@@ -178,6 +178,14 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
         "ostrom cloud github ses_41b2 --access shared" to "let anyone who may use the session instruct the agent",
         "ostrom cloud github ses_41b2 --access none" to "no GitHub token (pause the session first)",
     ),
+    "accounts" to guide(
+        "migrate-from-teamcode",
+        "ostrom accounts handover \"Team Max\" --confirm" to "let Ostrom renew an imported account's tokens",
+    ),
+    "accounts handover" to guide(
+        "migrate-from-teamcode",
+        "ostrom accounts handover \"Team Max\" --confirm" to "once TeamCode no longer renews its tokens",
+    ),
     "policy" to guide(
         "organizations",
         "ostrom policy show" to "the policy of your organisation",
@@ -217,6 +225,8 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
             "bring your TeamCode in (password: MYSQL_PWD)",
         "ostrom import teamcode --db mysql://teamcode@db.acme.dev/teamcode --key-file teamcode.key --yes" to
             "without the confirmation",
+        "ostrom import teamcode --db mysql://teamcode@db.acme.dev/teamcode --key-file teamcode.key --yes " +
+            "--access-only" to "a trial: the accounts serve their access tokens, never renewed",
     ),
     "check" to guide("workflows", "ostrom check tests" to "run a workflow check (agents call it)"),
     "wait" to guide("approvals", "ostrom wait apr_3f9c --timeout 600" to "wait for a yes (agents call it)"),
