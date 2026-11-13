@@ -23,13 +23,27 @@ const val WAITS_WAKE = "waits.wake.v1"
 const val TODOS = "todos.v1"
 
 /**
+ * The feature key of a workflow step's delivery (`ServerFeatures.WORKFLOWS_DELIVER` of ostrom-core): the
+ * `ostrom-workflow` MCP server and the Stop hook that sends a step's agent back to work. The launcher depends on no
+ * other module, so the CLI's tests check that the two are the same.
+ */
+const val WORKFLOWS_DELIVER = "workflows.deliver.v1"
+
+/**
  * The hooks a session runs besides Ostrom's own.
  *
  * @property waitsWake The server holds the Stop hook for a wait's answer ([WAITS_WAKE]), for Claude Code only.
  * @property todos The server serves the session todo ([TODOS]): its MCP server and hooks are installed.
+ * @property workflowDelivery The server takes a workflow step's delivery ([WORKFLOWS_DELIVER]): the `ostrom-workflow`
+ * MCP server is connected.
  * @property team The team hooks the member approved, installed, that the session runs.
  */
-internal class LaunchHooks(val waitsWake: Boolean, val todos: Boolean, val team: List<TeamHook> = emptyList())
+internal class LaunchHooks(
+    val waitsWake: Boolean,
+    val todos: Boolean,
+    val workflowDelivery: Boolean,
+    val team: List<TeamHook> = emptyList(),
+)
 
 /** What a launch read of Ostrom before its agent starts ([AgentLaunchUseCase]). */
 internal class LaunchReads(
@@ -210,7 +224,8 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
             val served = features.await()
             // the Stop hook that holds the agent for a wait's answer: Claude Code only
             val wake = request.agent == Agent.CLAUDE && WAITS_WAKE in served
-            LaunchReads(pack, read, servers, inference.await(), LaunchHooks(wake, TODOS in served, teamHooks))
+            val launchHooks = LaunchHooks(wake, TODOS in served, WORKFLOWS_DELIVER in served, teamHooks)
+            LaunchReads(pack, read, servers, inference.await(), launchHooks)
         }
 
     /**

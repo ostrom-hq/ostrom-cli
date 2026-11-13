@@ -57,6 +57,37 @@ class RelayWaitsMcpTest {
     }
 
     @Test
+    fun theWorkflowStepsDeliveryServerIsBoundToTheSegmentAndTheAgentNamesNoOther() {
+        val ostrom = ostrom()
+        relayTest(ostrom, relayConfig(mcpServers = setOf("ostrom", "ostrom-workflow"))) {
+            client.post("/mcp/ostrom-workflow") { bearerAuth(TOKEN) }
+            start()
+            client.post("/mcp/ostrom-workflow?session=another-session&run=r-1") { bearerAuth(TOKEN) }
+        }
+        val sent = ostrom.requests.map { request ->
+            request.url.encodedPath to request.url.parameters.entries().associate { it.key to it.value }
+        }
+        assertEquals(
+            listOf(
+                "/api/v1/workflows/mcp" to emptyMap(),
+                "/api/v1/sessions" to emptyMap(),
+                // the segment Ostrom answered: the agent's own `session` and `run` never go upstream
+                "/api/v1/workflows/mcp" to mapOf("session" to listOf("claude-session-1~r2")),
+            ),
+            sent,
+        )
+    }
+
+    @Test
+    fun theWorkflowServerIsOpenOnlyWhenTheLaunchConnectedIt() {
+        val ostrom = ostrom()
+        relayTest(ostrom, ostromServers) {
+            assertEquals(HttpStatusCode.NotFound, client.post("/mcp/ostrom-workflow") { bearerAuth(TOKEN) }.status)
+        }
+        assertEquals(emptyList(), ostrom.requests.map { it.url.encodedPath })
+    }
+
+    @Test
     fun aSessionTheServerRefusedOrThatNamesNoUsableIdBindsNothing() {
         val answers = listOf(
             SEGMENT to HttpStatusCode.Forbidden,

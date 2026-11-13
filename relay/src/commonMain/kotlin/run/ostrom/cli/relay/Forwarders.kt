@@ -31,6 +31,14 @@ private const val MCP_SESSION_HEADER = "Mcp-Session-Id"
 /** The MCP server every launch connects (the launcher's built-in one): Ostrom's waits server, not a relayed one. */
 internal const val OSTROM_SERVER = "ostrom"
 private const val WAITS_MCP = "/api/v1/waits/mcp"
+
+/**
+ * The delivery tool of a workflow step (`workflows.deliver.v1`): Ostrom's `ostrom-workflow` server, one tool,
+ * `deliver {output}`. Served at [WORKFLOWS_MCP] for the session the relay knows; that route is the only one of the
+ * workflows the relay opens to the agent (nothing reads, starts or cancels a run through it).
+ */
+internal const val WORKFLOW_SERVER = "ostrom-workflow"
+private const val WORKFLOWS_MCP = "/api/v1/workflows/mcp"
 private const val SESSION_PARAMETER = "session"
 private val MCP_REQUEST_HEADERS = listOf("MCP-Protocol-Version", MCP_SESSION_HEADER, HttpHeaders.Accept)
 private val MCP_RESPONSE_HEADERS = listOf(MCP_SESSION_HEADER)
@@ -126,10 +134,17 @@ internal class McpForwarder(
         }
     }
 
-    /** Where [server]'s messages go: its gateway, or for Ostrom's own server the waits server of this session (4.3). */
+    /**
+     * Where [server]'s messages go: its gateway, or for Ostrom's own servers (the waits server, the workflow step's
+     * delivery) their route, with the session the relay knows, never one the agent names (4.3).
+     */
     private fun HttpRequestBuilder.target(server: String) {
-        if (server != OSTROM_SERVER) return url("${config.serverUrl}/api/v1/mcp/$server")
-        url("${config.serverUrl}$WAITS_MCP")
+        val own = when (server) {
+            OSTROM_SERVER -> WAITS_MCP
+            WORKFLOW_SERVER -> WORKFLOWS_MCP
+            else -> return url("${config.serverUrl}/api/v1/mcp/$server")
+        }
+        url("${config.serverUrl}$own")
         session.current?.let { url.parameters.append(SESSION_PARAMETER, it) }
     }
 }
