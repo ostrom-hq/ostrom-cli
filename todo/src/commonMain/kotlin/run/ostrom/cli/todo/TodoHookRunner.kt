@@ -40,7 +40,7 @@ class TodoHookRunner(
      * the same event on its stdin). The todo decides first: a stop it blocks is never held.
      */
     @Suppress("TooGenericExceptionCaught")
-    fun run(kind: String, then: ((Console) -> Int)? = null): Int {
+    fun run(kind: String, then: ((Console) -> Int)?): Int {
         var event: StandardInput = StandardInput.Unavailable(StandardInputFailure.ERROR)
         val answer = try {
             event = console.readStandardInput(MAX_INPUT, READ_MILLIS)
