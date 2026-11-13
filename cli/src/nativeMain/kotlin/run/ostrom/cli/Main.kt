@@ -7,6 +7,8 @@ import run.ostrom.cli.hooks.runtime.HookReplies
 import run.ostrom.cli.platform.ConsoleImpl
 import run.ostrom.cli.platform.EnvironmentImpl
 import run.ostrom.cli.platform.exitOnCrash
+import run.ostrom.cli.runner.CloudProcess
+import run.ostrom.cli.runner.runCloudProcess
 import run.ostrom.cli.update.installationProbeExit
 import run.ostrom.core.api.models.ServerFeatures
 import kotlin.system.exitProcess
@@ -29,6 +31,8 @@ fun main(args: Array<String>) {
         }
         exitProcess(CliDependencies.hookRunner(ConsoleImpl(), environment).run(args.drop(1)))
     }
+    // the processes of a cloud session's containers (hidden): git's credential helper among them, started per request
+    CloudProcess.of(args.asList())?.let { runCloudProcess(it, args.drop(2)) }
     exitProcess(OstromCli(CliDependencies.create()).run(args))
 }
 
