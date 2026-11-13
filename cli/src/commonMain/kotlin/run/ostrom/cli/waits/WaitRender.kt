@@ -75,6 +75,16 @@ private fun JsonObject.answered(): List<String> {
     return listOf("", "Answer: ${text("action")} by ${text("author")} at ${text("answeredAt")}") + values
 }
 
+private fun JsonObject.resolvedAt(): String {
+    val at = text("resolvedAt")
+    return if (at == null) "" else " at $at"
+}
+
+private fun JsonObject.answerLines(): List<String> {
+    val answer = child("answer")
+    return if (answer == null) emptyList() else answer.answered()
+}
+
 /** `ostrom waits show`: everything a person needs to answer. */
 internal fun JsonObject.details(): String {
     val question = child("question") ?: JsonObject(emptyMap())
@@ -82,20 +92,13 @@ internal fun JsonObject.details(): String {
     return (
         listOf(
             "${question.text("title")}  [${text("id")}]",
-            "Status: ${text("status")}" + (text("resolvedAt")?.let { " at $it" } ?: "") + "; kind: ${text("kind")}",
+            "Status: ${text("status")}${resolvedAt()}; kind: ${text("kind")}",
             "Asked of: ${text("assignee")}; session: ${text("sessionId") ?: "-"}; created ${text("createdAt")}",
         ) +
             listOfNotNull(question.text("body")).flatMap { listOf("", it) } +
             objects("refs").section("References:") { "  ${it.text("kind")}  ${it.text("id") ?: it.text("url")}" } +
             objects("fields").section("Fields (id, type, label):") { it.describe() } +
             objects("actions").section("Actions:") { it.action() } +
-            (child("answer")?.answered() ?: emptyList())
+            answerLines()
         ).joinToString("\n")
-}
-
-/** `NAME=VALUE` split at its first `=`; a usage message when there is no name. */
-internal fun pairOf(text: String): Pair<String, String> {
-    val at = text.indexOf('=')
-    if (at <= 0) refuse("\"${text.substringBefore('=')}\" needs the form NAME=VALUE.")
-    return text.substring(0, at) to text.substring(at + 1)
 }

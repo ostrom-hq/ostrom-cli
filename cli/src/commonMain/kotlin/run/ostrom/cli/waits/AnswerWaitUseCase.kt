@@ -120,9 +120,12 @@ internal class AnswerWaitUseCase(private val server: WaitsServer) {
         }
     }
 
-    private fun number(text: String): JsonPrimitive? =
-        text.toLongOrNull()?.let { JsonPrimitive(it) }
-            ?: text.toDoubleOrNull()?.takeIf { it.isFinite() }?.let { JsonPrimitive(it) }
+    private fun number(text: String): JsonPrimitive? {
+        val whole = text.toLongOrNull()
+        if (whole != null) return JsonPrimitive(whole)
+        val real = text.toDoubleOrNull()
+        return if (real != null && real.isFinite()) JsonPrimitive(real) else null
+    }
 
     /** The action named, or the only one the wait has (`done` when it declares none). */
     private fun action(declared: List<JsonObject>, requested: String?): String {

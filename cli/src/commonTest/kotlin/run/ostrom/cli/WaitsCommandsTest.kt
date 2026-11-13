@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli
 
+import run.ostrom.cli.api.OstromApi
+import run.ostrom.cli.api.ServerRequest
+import run.ostrom.cli.api.ServerResponse
+import run.ostrom.cli.api.ServerUnreachableException
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
@@ -226,6 +230,24 @@ class WaitsCommandsTest : SetupKit() {
         val ended = routes(ask to (409 to error("session_not_running", "The session is over.")))
         assertEquals(64, run(ended, "waits", "ask", "--session", "ses1", "--title", "T"))
         assertErr("The session is over.")
+    }
+
+    @Test
+    fun aServerThatCannotBeReachedIsReportedWithoutAHint() {
+        signIn("/home/maya/.config/ostrom")
+        val fixed = serverOf(mapOf(orgs(acme)) + routes())
+        val api: (String) -> OstromApi = { url ->
+            val served = fixed(url)
+            object : OstromApi {
+                override suspend fun get(path: String) = send(ServerRequest("GET", path))
+                override suspend fun send(request: ServerRequest): ServerResponse {
+                    if (request.path != "/api/v1/waits/w1") return served.send(request)
+                    throw ServerUnreachableException(url, Exception("reset"))
+                }
+            }
+        }
+        assertEquals(69, cli(environment = withServer, api = api).run(arrayOf("waits", "show", "w1")))
+        assertErr("Ostrom is unreachable at https://ostrom.example. Check your network")
     }
 
     @Test

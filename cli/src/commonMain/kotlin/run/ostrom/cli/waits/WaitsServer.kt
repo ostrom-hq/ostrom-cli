@@ -60,3 +60,10 @@ internal fun requireId(value: String, what: String = "wait id"): String {
     }
     return value
 }
+
+/** `NAME=VALUE` split at its first `=`; a usage message when there is no name. */
+internal fun pairOf(text: String): Pair<String, String> {
+    val at = text.indexOf('=')
+    if (at <= 0) refuse("\"${text.substringBefore('=')}\" needs the form NAME=VALUE.")
+    return text.substring(0, at) to text.substring(at + 1)
+}
