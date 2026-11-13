@@ -11,6 +11,7 @@ import run.ostrom.cli.launcher.join
 import run.ostrom.cli.launcher.objectOf
 import run.ostrom.cli.launcher.parseObject
 import run.ostrom.cli.launcher.pretty
+import run.ostrom.cli.launcher.quoted
 import run.ostrom.cli.launcher.separator
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -181,8 +182,15 @@ class ClaudeAdapter : AgentAdapter {
             todo -> entry(TODO_STOP, TODO_STOP_SECONDS, null)
             else -> emptyList()
         }
-        val hooks = objectOf("hooks" to if (stop.isEmpty()) events else events + ("Stop" to stop))
-        files.write(join(layout.plugin, "hooks", "hooks.json"), pretty(hooks))
+        val ours = if (stop.isEmpty()) events else events + ("Stop" to stop)
+        // the team hooks the member approved run after Ostrom's on each event, by the absolute path of their command
+        val team = layout.teamHooks.flatMap { hook ->
+            val handler = mapOf("type" to "command", "command" to quoted(hook.command), "timeout" to hook.seconds)
+            val group = listOfNotNull(hook.matcher?.let { "matcher" to it }, "hooks" to listOf(handler)).toMap()
+            hook.events.map { it to group }
+        }.groupBy({ it.first }, { it.second })
+        val all = (ours.keys + team.keys).associateWith { ours[it].orEmpty() + team[it].orEmpty() }
+        files.write(join(layout.plugin, "hooks", "hooks.json"), pretty(objectOf("hooks" to all)))
     }
 
     /** The relayed MCP servers, or null when there is none. */

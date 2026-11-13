@@ -4,6 +4,8 @@ package run.ostrom.cli.launcher.team
 import run.ostrom.cli.launcher.join
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class HookApprovalsTest {
     private val files = mutableMapOf<String, String>()
@@ -46,5 +48,12 @@ class HookApprovalsTest {
         assertEquals(mapOf("guard" to "d3", "audit" to "d2"), approvals.shown())
         files[shownFile] = """{"guard":1,"audit":"d2","x":{}}"""
         assertEquals(mapOf("audit" to "d2"), approvals.shown())
+    }
+
+    @Test
+    fun approvalsReadOnlyWriteNothing() {
+        val reader = HookApprovals("/config", files::get)
+        assertFailsWith<okio.IOException> { reader.decide("guard", HookDecision("d1", approved = true)) }
+        assertTrue(files.isEmpty())
     }
 }

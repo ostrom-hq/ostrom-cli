@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli.launcher
 
+import run.ostrom.cli.launcher.team.TeamHook
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.JsonObject
@@ -22,18 +23,21 @@ const val WAITS_WAKE = "waits.wake.v1"
 const val TODOS = "todos.v1"
 
 /**
- * What a launch read of Ostrom before its agent starts ([AgentLaunchUseCase]).
+ * The hooks a session runs besides Ostrom's own.
  *
  * @property waitsWake The server holds the Stop hook for a wait's answer ([WAITS_WAKE]), for Claude Code only.
  * @property todos The server serves the session todo ([TODOS]): its MCP server and hooks are installed.
+ * @property team The team hooks the member approved, installed, that the session runs.
  */
+internal class LaunchHooks(val waitsWake: Boolean, val todos: Boolean, val team: List<TeamHook> = emptyList())
+
+/** What a launch read of Ostrom before its agent starts ([AgentLaunchUseCase]). */
 internal class LaunchReads(
     val pack: SessionPackage?,
     val keys: String,
     val mcp: List<String>,
     val inference: Boolean,
-    val waitsWake: Boolean,
-    val todos: Boolean,
+    val hooks: LaunchHooks,
 )
 
 /**
@@ -192,15 +196,21 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
             val skills = async {
                 mutableListOf<String>().also { team.syncSkills(request.agent, site, features.await(), it::add) }
             }
+            val hooks = async {
+                val notes = mutableListOf<String>()
+                team.teamHooks(request, site, features.await(), notes::add) to notes
+            }
             val pack = packageOf(repo, site, keep = true)
             val read = keys.await()()
             val (servers, notes) = mcp.await()
             notes.forEach(dependencies.say)
             skills.await().forEach(dependencies.say)
+            val (teamHooks, hookNotes) = hooks.await()
+            hookNotes.forEach(dependencies.say)
             val served = features.await()
             // the Stop hook that holds the agent for a wait's answer: Claude Code only
             val wake = request.agent == Agent.CLAUDE && WAITS_WAKE in served
-            LaunchReads(pack, read, servers, inference.await(), wake, TODOS in served)
+            LaunchReads(pack, read, servers, inference.await(), LaunchHooks(wake, TODOS in served, teamHooks))
         }
 
     /**

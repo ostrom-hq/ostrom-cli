@@ -31,6 +31,7 @@ import okio.IOException
  * @property dryRun `--dry-run`: the checks of a launch and the harness that would apply, then exit 0 without starting
  *   the agent, creating a launch or writing any file.
  * @property trustProjectSettings `--trust-project-settings` (Claude Code): the repository's own settings are read too.
+ * @property teamHooks False for `--no-team-hooks`: this launch runs none of the team hooks the member approved.
  */
 data class LaunchRequest(
     val agent: Agent,
@@ -39,6 +40,7 @@ data class LaunchRequest(
     val model: String?,
     val dryRun: Boolean = false,
     val trustProjectSettings: Boolean = false,
+    val teamHooks: Boolean = true,
 )
 
 /**
@@ -91,7 +93,8 @@ class LaunchDependencies(
     val userAgent: String,
     // gives back the memory the launch no longer holds, before the agent's long session (reclaimMemory)
     val reclaim: () -> Unit = ::reclaimMemory,
-    // the agent's own skills folder, which team skills are installed into, and the mode of their executable files
+    // the agent's own skills folder, which team skills are installed into, the team hooks' installed versions, and the
+    // owner-only mode of their folders and executable files
     val skillFiles: FileSystem = FileSystem.SYSTEM,
     val restrict: (String, Boolean) -> Unit = ::restrictToOwner,
 )
@@ -183,8 +186,9 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         val keys = reads.keys
         val mcpServers = reads.mcp
         val inference = reads.inference
-        val waitsWake = reads.waitsWake
-        val todos = reads.todos
+        val waitsWake = reads.hooks.waitsWake
+        val todos = reads.hooks.todos
+        val teamHooks = reads.hooks.team
         val plugin = join(temporary, "plugin")
         val relayTokenFile = join(temporary, "relay-token")
         val sessionFile = join(temporary, "session-id")
@@ -258,6 +262,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
             trustProject = run.request.trustProjectSettings,
             waitsWake = run.waitsWake,
             todo = run.todos,
+            teamHooks = run.teamHooks,
         )
         return try {
             run.adapter.prepare(layout, dependencies.files)

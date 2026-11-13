@@ -75,6 +75,18 @@ class OstromCliTest : CliKit() {
     }
 
     @Test
+    fun aLaunchRunsTheTeamHooksUnlessItSaysNotTo() {
+        signIn("/home/maya/.config/ostrom")
+        assertEquals(7, cli(environment = withServer).run(arrayOf("codex", "--no-team-hooks", "exec", "hi")))
+        assertEquals(
+            LaunchRequest(Agent.CODEX, listOf("exec", "hi"), null, null, teamHooks = false),
+            launches.single().first,
+        )
+        assertEquals(7, cli(environment = withServer).run(arrayOf("codex", "exec", "hi")))
+        assertTrue(launches.last().first.teamHooks)
+    }
+
+    @Test
     fun trustingTheRepositorysClaudeSettingsIsAskedForByName() {
         // REVUES-CLI-4: Claude Code is started without the repository's settings unless the developer asks for them
         signIn("/home/maya/.config/ostrom")

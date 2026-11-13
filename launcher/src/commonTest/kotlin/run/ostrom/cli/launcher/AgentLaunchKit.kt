@@ -4,6 +4,7 @@ package run.ostrom.cli.launcher
 import run.ostrom.cli.launcher.adapters.AgentAdapter
 import run.ostrom.cli.launcher.adapters.ClaudeAdapter
 import run.ostrom.cli.launcher.adapters.CodexAdapter
+import run.ostrom.cli.launcher.team.FailingFileSystem
 import run.ostrom.cli.platform.CaptureResult
 import run.ostrom.cli.platform.ExecutableFinder
 import run.ostrom.cli.platform.ProcessCapture
@@ -22,7 +23,7 @@ open class AgentLaunchKit {
     protected val said = mutableListOf<String>()
 
     /** The developer's own folders, where team skills are installed. */
-    protected val skillFiles = FakeFileSystem()
+    internal val skillFiles = FailingFileSystem(FakeFileSystem())
 
     /** What is said about the repository's name, kept apart so the other tests read the rest as before. */
     protected val warned = mutableListOf<String>()
@@ -92,6 +93,9 @@ open class AgentLaunchKit {
 
     protected val temporary = join("/tmp", "ostrom-run-42")
 
+    /** What separates the entries of PATH on the faked machine (`;` on Windows). */
+    protected var pathSeparator = ':'
+
     @Suppress("LongParameterList") // one default per fact of a launch a test changes
     protected suspend fun TestScope.start(
         agent: Agent = Agent.CLAUDE,
@@ -100,6 +104,7 @@ open class AgentLaunchKit {
         model: String? = null,
         executable: String = join("/opt/bin", "ostrom"),
         dryRun: Boolean = false,
+        teamHooks: Boolean = true,
     ): Int {
         val dependencies = LaunchDependencies(
             server = ServerJson(server),
@@ -128,10 +133,10 @@ open class AgentLaunchKit {
             configDirectory = "/config",
             temporaryDirectory = "/tmp",
             home = "/home/dev",
-            pathSeparator = ':',
+            pathSeparator = pathSeparator,
             variable = { variables[it] },
         )
-        val request = LaunchRequest(agent, arguments, repo, model, dryRun)
+        val request = LaunchRequest(agent, arguments, repo, model, dryRun, teamHooks = teamHooks)
         return AgentLaunchUseCase(dependencies, adapters).launch(request, site)
     }
 

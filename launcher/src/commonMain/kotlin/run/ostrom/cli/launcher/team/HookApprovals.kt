@@ -8,6 +8,7 @@ import run.ostrom.cli.launcher.parseObject
 import run.ostrom.cli.launcher.text
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import okio.IOException
 
 /** The member's decision on one version of a team hook: [digest] approved, or refused. */
 data class HookDecision(val digest: String, val approved: Boolean)
@@ -34,12 +35,12 @@ enum class HookState(val words: String) {
  * to its files or definition, needs a new one. A file that cannot be read is no decision: nothing is approved.
  *
  * @param read The text of a file, or null.
- * @param write Writes a file readable by its owner only.
+ * @param write Writes a file readable by its owner only; by default, none is written (a launch only reads).
  */
 class HookApprovals(
     configDirectory: String,
     private val read: (String) -> String?,
-    private val write: (String, String) -> Unit,
+    private val write: (String, String) -> Unit = ::readOnly,
 ) {
     private val approvals = join(configDirectory, FOLDER, "approvals.json")
     private val shown = join(configDirectory, FOLDER, "shown.json")
@@ -86,3 +87,6 @@ class HookApprovals(
         const val FOLDER = "hooks"
     }
 }
+
+private fun readOnly(path: String, @Suppress("UNUSED_PARAMETER") text: String): Unit =
+    throw IOException("$path is not written by a launch")
