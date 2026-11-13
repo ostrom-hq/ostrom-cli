@@ -159,6 +159,19 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
         "ostrom waits ask --title \"Region\" --field r:choice:Region:required --option r=eu --option r=us" to
             "ask with a typed field",
     ),
+    "hooks" to guide(
+        "harness",
+        "ostrom hooks" to "the team hooks delivered to you, and where each stands",
+        "ostrom hooks show guard" to "read a hook before you decide",
+    ),
+    "hooks list" to guide("harness", "ostrom hooks list" to "the team hooks delivered to you, and where each stands"),
+    "hooks show" to guide("harness", "ostrom hooks show guard" to "its definition and files, checked by digest"),
+    "hooks approve" to guide(
+        "harness",
+        "ostrom hooks approve guard" to "run the version you read in your sessions",
+        "ostrom hooks approve guard --digest sha256:9f2c…" to "approve only that exact version",
+    ),
+    "hooks refuse" to guide("harness", "ostrom hooks refuse guard" to "never run this version"),
     "members" to guide("organizations", "ostrom members list" to "the members of your organisation"),
     "members list" to guide("organizations", "ostrom members list" to "the members of your organisation"),
     "members role" to guide("organizations", "ostrom members role lena admin" to "change someone's role"),
