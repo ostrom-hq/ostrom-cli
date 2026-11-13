@@ -74,5 +74,7 @@ private fun visitLines(visit: JsonObject): List<String> = buildList {
 }
 
 /** The last line of a followed run: its status, and why when it failed. */
-internal fun JsonObject.endLine(): String =
-    "Run ${text("id")} ${text("status")}" + (failureOf()?.let { ": ${failureWords(it)}" } ?: "") + "."
+internal fun JsonObject.endLine(): String {
+    val line = "Run ${text("id")} ${text("status")}" + (failureOf()?.let { ": ${failureWords(it)}" } ?: "")
+    return if (line.endsWith('.')) line else "$line."
+}
