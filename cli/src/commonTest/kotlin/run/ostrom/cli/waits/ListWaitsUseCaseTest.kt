@@ -29,10 +29,10 @@ class ListWaitsUseCaseTest {
     @Test
     fun theQueryNamesTheAssigneeTheSessionAndTheCursor() = runTest {
         fake.answer("GET /api/v1/waits?status=all&assignee=all&limit=10", 200, """{"items":[]}""")
-        val filtered = "GET /api/v1/waits?status=resolved&assignee=lena&sessionId=ses1&before=c0&limit=5"
+        val filtered = "GET /api/v1/waits?status=resolved&assignee=lena&sessionId=ses_41b2&before=c0&limit=5"
         fake.answer(filtered, 200, """{"items":[]}""")
         list(ListWaits("all", "all", null, null, 10))
-        list(ListWaits("resolved", "@lena", "ses1", "c0", 5))
+        list(ListWaits("resolved", "@lena", "ses_41b2", "c0", 5))
         assertEquals(2, fake.calls.size)
         assertEquals(listOf("GET", "GET"), fake.calls.map { it.method })
     }

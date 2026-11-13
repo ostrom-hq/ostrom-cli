@@ -51,7 +51,7 @@ internal class WaitsServer(private val server: ServerJson, private val token: St
         }
 }
 
-private val WAIT_ID = Regex("[a-zA-Z0-9-]{1,36}")
+private val WAIT_ID = Regex("[a-zA-Z0-9_-]{1,36}")
 
 /** [value] when it can be the id of a wait or a session, else a usage message naming [what]. */
 internal fun requireId(value: String, what: String = "wait id"): String {
