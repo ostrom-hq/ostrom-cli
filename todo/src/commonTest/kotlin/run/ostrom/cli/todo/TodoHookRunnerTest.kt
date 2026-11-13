@@ -2,6 +2,7 @@
 package run.ostrom.cli.todo
 
 import kotlinx.coroutines.Dispatchers
+import okio.IOException
 import okio.Path.Companion.toPath
 import okio.fakefilesystem.FakeFileSystem
 import run.ostrom.cli.platform.Console
@@ -17,7 +18,7 @@ import kotlin.test.assertEquals
 
 class TodoHookRunnerTest {
     /** The hook's streams: [event] on stdin, what it prints kept. */
-    private class HookConsole(private val event: StandardInput) : Console {
+    private class HookConsole(private val event: StandardInput?) : Console {
         val out = StringBuilder()
         override val isInteractive = false
 
@@ -27,7 +28,7 @@ class TodoHookRunnerTest {
 
         override fun err(text: String) = error("a todo hook says nothing on stderr")
 
-        override fun readStandardInput(maxBytes: Int, timeoutMillis: Int) = event
+        override fun readStandardInput(maxBytes: Int, timeoutMillis: Int) = event ?: throw IOException("stdin broke")
     }
 
     private class Variables(private val values: Map<String, String>) : Environment {
@@ -54,7 +55,7 @@ class TodoHookRunnerTest {
         event: String,
         relay: Relay,
         variables: Map<String, String> = launch,
-        input: StandardInput = StandardInput.Read(event.encodeToByteArray()),
+        input: StandardInput? = StandardInput.Read(event.encodeToByteArray()),
         then: ((Console) -> Int)? = null,
     ): Pair<Int, String> {
         val console = HookConsole(input)
@@ -86,7 +87,12 @@ class TodoHookRunnerTest {
         val blocked = run(TodoHookRunner.STOP, event, Relay { """{"action":"block","reason":"Finish."}""" }, then = hold)
         assertEquals(0 to "{\"decision\":\"block\",\"reason\":\"Finish.\"}\n", blocked)
         assertEquals(1, read.size, "a blocked stop is never held")
-        assertEquals(TodoHookRunner.STOP to "--wake", TodoHookRunner.STOP to TodoHookRunner.WAKE)
+        val broken = run(TodoHookRunner.STOP, event, Relay { error("never asked") }, input = null) { console ->
+            read += console.readStandardInput(1, 1).toString()
+            0
+        }
+        assertEquals(0 to "", broken, "a stdin that breaks: the hold still runs, and sees no event")
+        assertEquals("Unavailable(reason=ERROR)", read.last())
     }
 
     @Test

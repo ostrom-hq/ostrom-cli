@@ -11,6 +11,7 @@ import run.ostrom.cli.platform.Environment
 import run.ostrom.cli.platform.LoopbackHttp
 import run.ostrom.cli.platform.ProcessCapture
 import run.ostrom.cli.platform.StandardInput
+import run.ostrom.cli.platform.StandardInputFailure
 
 /**
  * `ostrom hook todo-stop|todo-context`, the todo's hooks, reached from `main`'s fast path like the gate. They reach
@@ -40,8 +41,9 @@ class TodoHookRunner(
      */
     @Suppress("TooGenericExceptionCaught")
     fun run(kind: String, then: ((Console) -> Int)? = null): Int {
-        val event = console.readStandardInput(MAX_INPUT, READ_MILLIS)
+        var event: StandardInput = StandardInput.Unavailable(StandardInputFailure.ERROR)
         val answer = try {
+            event = console.readStandardInput(MAX_INPUT, READ_MILLIS)
             (event as? StandardInput.Read)?.let { answer(kind, it.bytes.decodeToString()) }
         } catch (ignored: Throwable) { // not coroutine-reachable: the hook process's blocking entry, its own guard
             null
