@@ -38,6 +38,7 @@ class ImportTeamCodeUseCaseTest {
         key: String? = Sealed.KEY,
         mysql: FakeMysql = FakeMysql(FULL_SCHEMA, TEAM_TABLES),
         cutover: (() -> Boolean)? = null,
+        accessOnly: Boolean = false,
     ): Int {
         val confirm = cutover ?: { error("a normal pass asks nothing") }
         val database = TeamCodeDatabase(mysql)
@@ -45,7 +46,9 @@ class ImportTeamCodeUseCaseTest {
             failed.append(it)
             said.append(it)
         }
-        return useCase(ImportTeamCodeRequest("mysql://ro@db/teamcode", key, "default", apply, cutover != null))
+        val cut = cutover != null
+        val request = ImportTeamCodeRequest("mysql://ro@db/teamcode", key, "default", apply, cut, accessOnly)
+        return useCase(request)
     }
 
     @Test
@@ -68,6 +71,39 @@ class ImportTeamCodeUseCaseTest {
         assertEquals(calls[1].body, calls[2].body)
         assertEquals("/api/v1/import/teamcode", calls[2].path)
         assertTrue(said.endsWith("Imported:\n4 created, 0 updated, 0 unchanged, 0 skipped.\n"), said.toString())
+    }
+
+    @Test
+    fun anImportedAccountWaitsForItsHandoverAndATrialServesItsAccessTokenOnly() = runTest {
+        // TeamCode's « Refresh ownership »: imported, an account serves nothing while TeamCode may renew its tokens
+        replies["POST /api/v1/import/teamcode"] = ServerReply(200, PENDING)
+        assertEquals(0, import(apply = true))
+        assertTrue("  created  account  Team Max  [pending handover] (TeamCode may still renew)\n" in said, "$said")
+        assertTrue("1 created, 0 updated, 0 unchanged, 0 skipped.\n" in said, "$said")
+        val handover = "! 2 shared accounts serve nothing until they are handed over, as TeamCode may still renew " +
+            "their tokens: once it no longer does, ostrom accounts handover <name> --confirm, or the cutover\n"
+        assertTrue(said.endsWith(handover), "$said")
+        // the trial: the same import, asked access-only, each account serving its access token, never renewed
+        said.clear()
+        calls.clear()
+        replies["POST /api/v1/import/teamcode?dryRun=true&accessOnly=true"] = ServerReply(200, REPORT)
+        replies["POST /api/v1/import/teamcode?accessOnly=true"] = ServerReply(200, TRIAL)
+        assertEquals(0, import(apply = true, accessOnly = true))
+        val paths = calls.map { it.path }.drop(1)
+        val asked = listOf(
+            "/api/v1/import/teamcode?dryRun=true&accessOnly=true",
+            "/api/v1/import/teamcode?accessOnly=true",
+        )
+        assertEquals(asked, paths)
+        assertTrue("  updated  account  Team Max  [access only]\n" in said, "$said")
+        val trial = "! 1 shared account serves TeamCode's access token, never renewed: import again once they expire\n"
+        assertTrue(said.endsWith(trial), "$said")
+        said.clear()
+        val trialled = """{"items":[],"pendingHandover":1,"accessOnly":2}"""
+        replies["POST /api/v1/import/teamcode"] = ServerReply(200, trialled)
+        assertEquals(0, import(apply = true))
+        assertTrue("! 1 shared account serves nothing until it is handed over" in said, "$said")
+        assertTrue("! 2 shared accounts serve TeamCode's access tokens, never renewed" in said, "$said")
     }
 
     @Test
@@ -307,6 +343,11 @@ class ImportTeamCodeUseCaseTest {
         const val REPORT = """{"items":[{"kind":"mcp_server","name":"grafana","action":"created"},""" +
             """{"kind":"account","name":"Team Max","action":"skipped","reason":"no account importer yet"},"x"],""" +
             """"created":2,"unchanged":1,"skipped":1,"updated":"many"}"""
+        const val PENDING = """{"items":[{"kind":"account","name":"Team Max","action":"created",""" +
+            """"refreshOwnership":"pending_handover","reason":"TeamCode may still renew"}],"created":1,""" +
+            """"pendingHandover":2}"""
+        const val TRIAL = """{"items":[{"kind":"account","name":"Team Max","action":"updated",""" +
+            """"refreshOwnership":"access_only"}],"updated":1,"accessOnly":1}"""
         const val WAITING = """{"items":[{"kind":"account","name":"Team Max","action":"revive_at_cutover",""" +
             """"reason":"TeamCode still uses it"}],"updated":1,"reviveAtCutover":2}"""
         const val CUTOVER_PLAN = """{"items":[{"kind":"account","name":"Team Max","action":"planned"},""" +
