@@ -59,7 +59,9 @@ internal class SessionsListCommand(private val dependencies: CliDependencies) : 
             console.data(JsonArray(page.items).toString() + "\n")
         } else {
             page.items.forEach { console.out(it.sessionLine(dependencies.clock()) + "\n") }
-            if (page.items.isEmpty()) console.err("No sessions yet. Start one: ostrom run claude\n")
+            val filtered = repo != null || open || before != null
+            val none = if (filtered) "No sessions match." else "No sessions yet. Start one: ostrom run claude"
+            if (page.items.isEmpty()) console.err("$none\n")
         }
         page.next?.let { console.err("More exist: ostrom sessions list --before $it\n") }
     }
@@ -102,8 +104,8 @@ internal class SessionsShowCommand(
 /** `ses_41b2  claude  acme/api  running  5m`: one row of `ostrom sessions list`, its age from [now]. */
 private fun JsonObject.sessionLine(now: Long): String {
     val state = when {
-        text("endedAt") == null -> "running"
         (this["lost"] as? JsonPrimitive)?.booleanOrNull == true -> "lost"
+        text("endedAt") == null -> "running"
         else -> "ended"
     }
     val fields = listOf(text("id") ?: "?", text("agent") ?: "-", text("repo") ?: "-", state)

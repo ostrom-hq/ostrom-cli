@@ -43,7 +43,7 @@ class SessionsCommandsTest : CliKit() {
         val items = """{"items":[{"id":"ses_41b2","agent":"claude","repo":"acme/api",""" +
             """"startedAt":"2026-10-30T14:02:11Z"},{"id":"ses_9","agent":"codex",""" +
             """"startedAt":"2026-10-30T12:07:11Z","endedAt":"2026-10-30T13:00:00Z"},""" +
-            """{"id":"ses_8","endedAt":"x","lost":true},{}],"next":"ses_8"}"""
+            """{"id":"ses_8","lost":true},{}],"next":"ses_8"}"""
         val routes = mapOf("GET /api/v1/sessions?dev=maya" to (200 to items))
         assertEquals(0, serving(routes).run(arrayOf("sessions", "list")))
         assertEquals(
@@ -65,6 +65,16 @@ class SessionsCommandsTest : CliKit() {
         val none = mapOf("GET /api/v1/sessions" to (200 to """{"items":[]}"""))
         assertEquals(0, serving(none).run(arrayOf("sessions", "list", "--all")))
         assertEquals("No sessions yet. Start one: ostrom run claude\n", console.err.toString())
+        console.err.clear()
+        val emptyPage = mapOf("GET /api/v1/sessions?dev=maya&before=ses_8" to (200 to """{"items":[]}"""))
+        assertEquals(0, serving(emptyPage).run(arrayOf("sessions", "list", "--before", "ses_8")))
+        assertEquals("No sessions match.\n", console.err.toString())
+        console.err.clear()
+        val noRepo = mapOf("GET /api/v1/sessions?dev=maya&repo=a%2Fb" to (200 to """{"items":[]}"""))
+        assertEquals(0, serving(noRepo).run(arrayOf("sessions", "list", "--repo", "a/b")))
+        val noOpen = mapOf("GET /api/v1/sessions?dev=maya&open=true" to (200 to """{"items":[]}"""))
+        assertEquals(0, serving(noOpen).run(arrayOf("sessions", "list", "--open")))
+        assertEquals("No sessions match.\nNo sessions match.\n", console.err.toString())
         assertEquals(69, serving(emptyMap()).run(arrayOf("sessions", "list")), "a server without the sessions' reads")
     }
 
