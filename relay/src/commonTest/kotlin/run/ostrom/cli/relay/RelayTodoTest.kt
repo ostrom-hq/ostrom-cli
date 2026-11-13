@@ -99,6 +99,12 @@ class RelayTodoTest {
                 bearerAuth(TOKEN)
                 setBody("""{"phase":"begin","sessionId":"someone-else"}""")
             }
+            val posts = ostrom.requests
+                .filter { it.url.encodedPath.startsWith("/api/v1/todos") && it.method == HttpMethod.Post }
+            assertEquals(
+                listOf("""{"text":"n"}""", """{"phase":"begin","sessionId":"claude-session-1~r2"}"""),
+                posts.map { it.body.toByteArray().decodeToString() },
+            )
         }
         val sent = ostrom.requests.filter { it.url.encodedPath.startsWith("/api/v1/todos") }
         assertEquals(
@@ -109,11 +115,6 @@ class RelayTodoTest {
                 "/api/v1/todos/session/stop" to null,
             ),
             sent.map { it.url.encodedPath to it.url.parameters["sessionId"] },
-        )
-        val bodies = sent.filter { it.method == HttpMethod.Post }.map { it.body.toByteArray().decodeToString() }
-        assertEquals(
-            listOf("""{"text":"n"}""", """{"phase":"begin","sessionId":"claude-session-1~r2"}"""),
-            bodies,
         )
         assertEquals(listOf("Bearer $AGENT_TOKEN"), sent.first().headers.getAll("Authorization"))
     }

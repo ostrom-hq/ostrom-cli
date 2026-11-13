@@ -40,7 +40,6 @@ class GhRun(val status: String?, val conclusion: String?, val workflowName: Stri
  * one that fails, times out or answers something else is an [UnknownCheck].
  */
 class GitHub(private val capture: ProcessCapture) {
-    private var me: String? = null
 
     /** `gh <arguments>`'s output, or null when it failed, timed out or could not start. */
     private fun gh(vararg arguments: String): String? {
@@ -49,8 +48,7 @@ class GitHub(private val capture: ProcessCapture) {
     }
 
     /** The token's login, asked once: a PR found by its marker must be the agent's own. */
-    private fun login(): String? =
-        me ?: gh("api", "user", "--jq", ".login")?.let { answer -> answer.trim().also { me = it } }
+    private val login: String? by lazy { gh("api", "user", "--jq", ".login")?.trim() }
 
     /**
      * The pull request of [item]: the one it is linked to, else the one of [repo] whose body carries its marker and
@@ -76,7 +74,7 @@ class GitHub(private val capture: ProcessCapture) {
         val found = objects(answer).map(::pullRequestOf).filter { it.body.orEmpty().contains(marker) }
         if (found.isEmpty()) return null
         // only the agent's own PR: when the token's login cannot be read, nothing found can be told apart
-        val login = login() ?: throw UnknownCheck("gh could not say whose token this is (gh api user)")
+        val login = login ?: throw UnknownCheck("gh could not say whose token this is (gh api user)")
         return found.filter { it.author == login }.maxByOrNull { it.number }
     }
 

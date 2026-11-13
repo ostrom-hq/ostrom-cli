@@ -128,7 +128,7 @@ class RelayTodoApi(
 
     private companion object {
         const val UNKNOWN_ITEM = "unknown_item"
-        val ITEM_ID = Regex("[A-Za-z0-9_-]{1,128}")
+        private val ITEM_ID = Regex("[A-Za-z0-9_-]{1,128}")
     }
 }
 
