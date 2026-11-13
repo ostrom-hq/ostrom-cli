@@ -79,6 +79,16 @@ class AutomationRenderTest {
     }
 
     @Test
+    fun anActionWithoutAnAgentOrAPromptIsStillWrittenInWords() {
+        val bare = json("""{"id":"b","name":"Bare","action":{"prompt":"p"}}""")
+        assertEquals("b  Bare  webhook  paused  claude  ?", bare.automationLine(now))
+        val blank = json("""{"id":"b","name":"Bare","action":{"prompt":"  ","inputs":{}}}""")
+        val lines = blank.automationDetails(emptyList()).lines()
+        assertEquals(listOf("Bare  [b]  paused", "Runs: webhook", "Starts: claude"), lines.take(3))
+        assertTrue("Prompt" !in blank.automationDetails(emptyList()))
+    }
+
+    @Test
     fun theWebhookIsCalledSignedAtTheLatestOrAPinnedVersion() {
         val latest = webhook.webhookAddress("latest", null, "https://o.example/")
         assertEquals("Webhook (signed): POST https://o.example/hooks/abc/trigger", latest.first())

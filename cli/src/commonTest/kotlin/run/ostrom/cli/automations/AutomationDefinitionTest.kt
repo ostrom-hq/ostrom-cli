@@ -187,6 +187,25 @@ class AutomationDefinitionTest {
     }
 
     @Test
+    fun aSavedAutomationMissingPartsIsEditedWithoutThem() {
+        val noTrigger = json("""{"name":"n","action":{"prompt":"p"}}""")
+        val toHook = definitionOf(noTrigger, AutomationOptions(webhook = true), null)
+        val expected = """{"name":"n","trigger":{"kind":"webhook"},"action":{"prompt":"p"},"variables":[]}"""
+        assertEquals(json(expected), toHook)
+        val emptyTrigger = json("""{"name":"n","trigger":{},"action":{"prompt":"p"}}""")
+        assertTrue("needs a trigger" in refused(emptyTrigger, AutomationOptions()))
+        val bareWorkflow = json(
+            """{"name":"n","trigger":{"kind":"webhook"},"action":{"workflowId":"w1"},"version":1}""",
+        )
+        val same = definitionOf(bareWorkflow, AutomationOptions(), null)
+        assertEquals(json("""{"workflowId":"w1"}"""), same["action"])
+        val explicit = definitionOf(bareWorkflow, AutomationOptions(action = "workflow"), null)
+        assertEquals(json("""{"workflowId":"w1"}"""), explicit["action"])
+        val named = definitionOf(bareWorkflow, AutomationOptions(action = "workflow", workflow = "W"), "w9")
+        assertEquals(json("""{"workflowId":"w9"}"""), named["action"])
+    }
+
+    @Test
     fun aWorkflowActionKeepsItsSettingsOnlyWhileItIsTheSameWorkflow() {
         val edit = definitionOf(webhookWorkflow, AutomationOptions(inputs = listOf("x" to "y"), repository = "r"), null)
         assertEquals(

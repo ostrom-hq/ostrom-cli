@@ -27,10 +27,11 @@ import run.ostrom.cli.automations.parsePayload
 import run.ostrom.cli.automations.parseVariables
 import run.ostrom.cli.automations.refuse
 import run.ostrom.cli.automations.requireRepository
+import run.ostrom.cli.automations.str
+import run.ostrom.cli.automations.sub
 import run.ostrom.cli.automations.urlVersionOf
 import run.ostrom.cli.automations.variablesFromFile
 import run.ostrom.cli.automations.webhookAddress
-import run.ostrom.cli.launcher.child
 import run.ostrom.cli.launcher.flag
 import run.ostrom.cli.launcher.objectOf
 import run.ostrom.cli.launcher.text
@@ -48,6 +49,10 @@ private const val PAGE = 100
 private const val MAX_LISTED_RUNS = 500
 private const val DEFAULT_RUNS = 20
 private val DELIVERY_KEY = Regex("[A-Za-z0-9._:-]{1,128}")
+private val SKIPPED = mapOf(
+    "skipped_overlap" to "a run of it still works",
+    "skipped_budget" to "it used its runs of the day",
+)
 private const val BAD_VERSION = "--url-version is latest, current or vN, such as v3."
 
 /** `ostrom automations` with its subcommands. */
@@ -413,7 +418,7 @@ internal class AutomationsRunsCommand(private val dependencies: CliDependencies)
         var before: String? = null
         var read = 0
         do {
-            val query = "?limit=$PAGE" + (before?.let { "&before=${segment(it)}" } ?: "")
+            val query = "?limit=$PAGE" + before?.let { "&before=${segment(it)}" }.orEmpty()
             val page = access.read("${automationPath(id)}/runs$query", "No automation $ref in ${access.org.slug}.")
             val items = page.objects("items")
             read += items.size
@@ -454,7 +459,7 @@ internal class AutomationsRunCommand(private val dependencies: CliDependencies) 
             val notFound = "No automation $ref in ${access.org.slug}."
             val id = access.automationId(ref)
             val automation = access.read(automationPath(id), notFound)
-            if (given != null && automation.child("trigger")?.text("kind") == "cron") {
+            if (given != null && automation.sub("trigger").str("kind") == "cron") {
                 refuse("${automation.text("name")} is a cron automation: it takes no payload.")
             }
             val request = objectOf("payload" to given, "dryRun" to true.takeIf { dryRun })
@@ -497,13 +502,6 @@ internal class AutomationsRunCommand(private val dependencies: CliDependencies) 
             answer.objects("problems").forEach { console.err("Problem: ${it.text("path")} (${it.text("rule")})\n") }
             throw ProgramResult(ExitCode.FAILED.code)
         }
-    }
-
-    private companion object {
-        val SKIPPED = mapOf(
-            "skipped_overlap" to "a run of it still works",
-            "skipped_budget" to "it used its runs of the day",
-        )
     }
 }
 

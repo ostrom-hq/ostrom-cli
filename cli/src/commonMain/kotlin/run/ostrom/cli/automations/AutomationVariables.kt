@@ -7,9 +7,6 @@ import run.ostrom.cli.launcher.text
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 
-/** What the person typed that the server would refuse: said before anything is sent, exit 64. */
-internal class AutomationInputException(message: String) : Exception(message)
-
 /** Stops with [message], which names what to change and never repeats a prompt or a payload. */
 internal fun refuse(message: String): Nothing = throw AutomationInputException(message)
 
