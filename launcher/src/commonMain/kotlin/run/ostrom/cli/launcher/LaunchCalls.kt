@@ -52,6 +52,7 @@ internal suspend fun <T> stopOf(read: suspend () -> T): () -> T {
 /** The calls of a launch to Ostrom before the agent runs, with the device token or the launch's agent token. */
 internal class LaunchCalls(private val dependencies: LaunchDependencies) {
     private val trust = PackageTrust(dependencies.server, dependencies.files, dependencies.clock::now, dependencies.say)
+    private val team = LaunchTeam(dependencies)
 
     /**
      * `--dry-run`: every read a launch makes before the agent starts, and the harness that would apply (the package,
@@ -175,9 +176,10 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
 
     /**
      * What a launch reads of Ostrom once it has its agent token: the session package, the instance's keys, the MCP
-     * servers and whether the models are relayed. None depends on another, so they are asked together (PERF-CLI): the
-     * agent waits on one round trip for the four, not four. A refused package stops the launch first, then keys that
-     * cannot be read, as when they were asked one after the other; the notes are said in that order too.
+     * servers, whether the models are relayed and what the server serves, with the team skills synced meanwhile. None
+     * depends on another, so they are asked together (PERF-CLI): the agent waits on one round trip for them, not one
+     * each. A refused package stops the launch first, then keys that cannot be read, as when they were asked one after
+     * the other; the notes are said in that order too, the team skills' last.
      */
     suspend fun reads(request: LaunchRequest, site: LaunchSite, repo: String, launch: Launch): LaunchReads =
         coroutineScope {
@@ -186,10 +188,14 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
             val mcp = async { mutableListOf<String>().let { notes -> mcpServers(site) { notes += it } to notes } }
             val inference = async { inferenceRelayed(request, site, launch) }
             val features = async { features(site) }
+            val skills = async {
+                mutableListOf<String>().also { team.syncSkills(request.agent, site, features.await(), it::add) }
+            }
             val pack = packageOf(repo, site, keep = true)
             val read = keys.await()()
             val (servers, notes) = mcp.await()
             notes.forEach(dependencies.say)
+            skills.await().forEach(dependencies.say)
             val served = features.await()
             // the Stop hook that holds the agent for a wait's answer: Claude Code only
             val wake = request.agent == Agent.CLAUDE && WAITS_WAKE in served

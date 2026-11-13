@@ -12,6 +12,7 @@ import run.ostrom.cli.platform.ExecutableFinder
 import run.ostrom.cli.platform.ProcessCapture
 import run.ostrom.cli.platform.ProcessLauncher
 import run.ostrom.cli.platform.ProcessResult
+import run.ostrom.cli.platform.restrictToOwner
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancelAndJoin
@@ -20,6 +21,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import okio.FileSystem
 import okio.IOException
 
 /**
@@ -89,6 +91,9 @@ class LaunchDependencies(
     val userAgent: String,
     // gives back the memory the launch no longer holds, before the agent's long session (reclaimMemory)
     val reclaim: () -> Unit = ::reclaimMemory,
+    // the agent's own skills folder, which team skills are installed into, and the mode of their executable files
+    val skillFiles: FileSystem = FileSystem.SYSTEM,
+    val restrict: (String, Boolean) -> Unit = ::restrictToOwner,
 )
 
 /** The launch stops before the agent runs, with an exit code of the spec (CLI.md § 2.3). */

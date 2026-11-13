@@ -4,12 +4,15 @@ package run.ostrom.cli.launcher
 import run.ostrom.cli.launcher.adapters.AdapterException
 import run.ostrom.cli.launcher.adapters.AgentAdapter
 import run.ostrom.cli.launcher.adapters.AgentLaunch
+import run.ostrom.cli.launcher.team.Artifacts
+import run.ostrom.cli.launcher.team.TEAM_SKILLS
 import run.ostrom.cli.platform.CaptureResult
 import run.ostrom.cli.platform.ExecutableFinder
 import run.ostrom.cli.platform.ProcessResult
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
+import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -498,7 +501,7 @@ class AgentLaunchUseCaseTest : AgentLaunchKit() {
             }
         }
         val capabilities = "GET ${Routes.CAPABILITIES}"
-        server[capabilities] = 200 to """{"apiVersion":1,"features":["waits.v1",[1],"$WAITS_WAKE"]}"""
+        server[capabilities] = 200 to """{"apiVersion":1,"features":["waits.v1",[1],7,"$WAITS_WAKE"]}"""
         start()
         server[capabilities] = 200 to """{"apiVersion":1,"features":["waits.v1"]}"""
         start()
@@ -513,6 +516,40 @@ class AgentLaunchUseCaseTest : AgentLaunchKit() {
         start(Agent.CODEX)
         assertEquals(listOf(true, false, false, false, false, false), wakes)
         assertEquals(6, server.sent(capabilities).size, "asked once a launch, Codex too: the todo is for every agent")
+    }
+
+    @Test
+    fun teamSkillsAreSyncedIntoTheAgentsOwnFolderWhenTheServerServesThem() = runTest {
+        serveALaunch()
+        val skill = listOf(Artifacts.Source("SKILL.md", "# Review\n"))
+        val digest = Artifacts.digest(skill)
+        server["GET ${Routes.SKILL_DELIVERY}"] = 200 to
+            """{"memberId":"m1","skills":[{"name":"review","version":"1","digest":"$digest"}]}"""
+        val artifact = """{"name":"review","version":"1","digest":"$digest","files":[${Artifacts.entry(skill[0])}]}"""
+        server["GET ${Routes.skill("review", "1")}"] = 200 to artifact
+        server["PUT ${Routes.SKILL_INSTALLATIONS}"] = 204 to ""
+        val capabilities = "GET ${Routes.CAPABILITIES}"
+        server[capabilities] = 200 to """{"apiVersion":1,"features":["waits.v1"]}"""
+        assertEquals(3, start())
+        assertTrue(server.sent("GET ${Routes.SKILL_DELIVERY}").isEmpty(), "not served: not asked")
+        server[capabilities] = 200 to """{"apiVersion":1,"features":["$TEAM_SKILLS"]}"""
+        assertEquals(3, start())
+        val skillFile = join("/home/dev", ".claude", "skills", "review", "SKILL.md").toPath()
+        assertEquals("# Review\n", skillFiles.read(skillFile) { readUtf8() })
+        assertTrue("ostrom: team skills installed: review 1" in said)
+        assertEquals("dev-token", server.sent("PUT ${Routes.SKILL_INSTALLATIONS}").single().token, "the device's")
+        server["GET ${Routes.POLICY}?agent=gemini&dev=alice"] = 200 to """{"allowed":true}"""
+        installed["gemini"] = "/usr/bin/gemini"
+        adapters = listOf(
+            object : AgentAdapter {
+                override val agent = Agent.GEMINI
+
+                override fun prepare(layout: run.ostrom.cli.launcher.adapters.SessionLayout, files: LaunchFiles) =
+                    AgentLaunch(emptyList(), emptyMap())
+            },
+        )
+        start(Agent.GEMINI)
+        assertEquals(1, server.sent("GET ${Routes.SKILL_DELIVERY}").size, "an agent without a skills folder gets none")
     }
 
     @Test

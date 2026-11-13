@@ -12,6 +12,7 @@ import run.ostrom.cli.platform.ProcessResult
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import okio.fakefilesystem.FakeFileSystem
 
 /** What the tests of `ostrom <agent>` end to end share: fakes of the server, the agent, git and the developer. */
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -19,6 +20,9 @@ open class AgentLaunchKit {
     protected val server = FakeServer()
     protected val files = MemoryFiles()
     protected val said = mutableListOf<String>()
+
+    /** The developer's own folders, where team skills are installed. */
+    protected val skillFiles = FakeFileSystem()
 
     /** What is said about the repository's name, kept apart so the other tests read the rest as before. */
     protected val warned = mutableListOf<String>()
@@ -113,6 +117,8 @@ open class AgentLaunchKit {
             reclaim = {
                 reclaims += Triple(server.requests.map { it.path }, relaySettings.isNotEmpty(), commands.isNotEmpty())
             },
+            skillFiles = skillFiles,
+            restrict = { _, _ -> },
         )
         val site = LaunchSite(
             serverUrl = "https://ostrom.example",

@@ -33,6 +33,15 @@ object Routes {
     /** `GET`: what the server speaks and serves (the keys of `ServerFeatures`). */
     const val CAPABILITIES = "/api/v1/capabilities"
 
+    /** `GET`, with the device token: the team skills the member receives (`SkillManifest`). */
+    const val SKILL_DELIVERY = "/api/v1/skill-delivery"
+
+    /** `PUT {installations}`, with the device token: the team skills this workstation holds. */
+    const val SKILL_INSTALLATIONS = "/api/v1/skill-delivery/installations"
+
+    /** `GET`: the files of a team skill's effective version (`SkillArtifact`). */
+    fun skill(name: String, version: String) = "/api/v1/skill-delivery/${encode(name)}/${encode(version)}"
+
     /** `POST {launchId}`: the launcher's sign of life. */
     fun alive(session: String) = "/api/v1/sessions/${encode(session)}/alive"
 
