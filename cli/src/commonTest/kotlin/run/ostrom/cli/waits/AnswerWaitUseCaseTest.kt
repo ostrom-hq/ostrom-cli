@@ -57,6 +57,16 @@ class AnswerWaitUseCaseTest {
     }
 
     @Test
+    fun everyWordOfAConfirmationIsRead() = runTest {
+        val words = mapOf("true" to true, "yes" to true, "y" to true, "false" to false, "no" to false, "n" to false)
+        serve(wait("[${field("ok", "confirm")}]"))
+        for ((word, value) in words) {
+            answer(ask("ok=$word"))
+            assertEquals("""{"action":"done","values":{"ok":$value}}""", fake.calls.last().body, word)
+        }
+    }
+
+    @Test
     fun aMultipleChoiceRepeatsItsOptionAndAFreeAnswerNeedsAllowOther() = runTest {
         val tags = field("tags", "choice", ""","options":["a","b"],"multiple":true,"allowOther":true""")
         serve(wait("[$tags]"))
