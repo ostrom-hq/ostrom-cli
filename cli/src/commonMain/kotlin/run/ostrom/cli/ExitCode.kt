@@ -13,10 +13,13 @@ enum class ExitCode(val code: Int, val meaning: String) {
     OK(0, "Done."),
 
     /** The check asked for failed (`verify` invalid, `doctor` with a ✗). */
-    FAILED(1, "The check asked for failed: verify found the receipt invalid, doctor found a problem."),
+    FAILED(
+        1,
+        "The check asked for failed: verify found the receipt invalid, doctor found a problem, a followed run failed.",
+    ),
 
     /** Incomplete, cancelled, or a no. */
-    INCOMPLETE(2, "Incomplete, cancelled, or a no."),
+    INCOMPLETE(2, "Incomplete, cancelled (a followed run too), or a no."),
 
     /** Bad usage: unknown option or agent, an option this version does not have yet, a question without a terminal. */
     USAGE(
@@ -43,7 +46,11 @@ enum class ExitCode(val code: Int, val meaning: String) {
     CANNOT_WRITE(73, "A local file could not be written."),
 
     /** Still waiting (`wait` at its deadline), or a governance change nobody confirmed in time. */
-    STILL_WAITING(75, "Still waiting: wait reached its deadline, or nobody confirmed a governance change in time."),
+    STILL_WAITING(
+        75,
+        "Still waiting: wait reached its deadline, a followed run is unfinished at its timeout, " +
+            "or nobody confirmed a governance change in time.",
+    ),
 
     /** Refused: policy, role, self-approval, other organisation. */
     REFUSED(77, "Refused: the policy, your role, a self-approval, another organisation."),
