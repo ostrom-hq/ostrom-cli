@@ -74,7 +74,8 @@ private fun CliDependencies.githubStatus(org: String?, server: String?, json: Bo
         return
     }
     val login = link.text("login").orEmpty()
-    val since = link.text("linkedAt")?.take(DAY)?.let { " since $it" }.orEmpty()
+    val linkedAt = link.text("linkedAt")
+    val since = if (linkedAt == null) "" else " since ${linkedAt.take(DAY)}"
     val said = when (link.text("state")) {
         "linked" -> "✓ Linked to GitHub as @$login$since."
         "reconnect_required" ->
@@ -113,7 +114,8 @@ internal class GithubLinksCommand(private val dependencies: CliDependencies) : C
         val count = if (items.size == 1) "1 member" else "${items.size} members"
         dependencies.console.out("${access.org.name} · $count with a GitHub link\n")
         items.forEach { item ->
-            val login = item.text("login")?.let { "@$it" } ?: "-"
+            val name = item.text("login")
+            val login = if (name == null) "-" else "@$name"
             val member = item.text("memberId") ?: "-"
             dependencies.console.out("  $member  $login  ${item.text("state") ?: "-"}\n")
         }
@@ -173,7 +175,8 @@ internal class GithubLinkCommand(private val dependencies: CliDependencies) : Cl
         console.out((if (opened) "Opened $page" else "Open $page") + " and enter the code: $code\n")
         console.out("Waiting for you to authorize on GitHub (Ctrl-C to stop)...\n")
         val link = wait(access, id, (started.int("interval") ?: DEFAULT_SECONDS).coerceIn(1, MAX_SECONDS))
-        val login = link.text("login")?.let { "@$it" } ?: "your account"
+        val name = link.text("login")
+        val login = if (name == null) "your account" else "@$name"
         console.out("✓ Linked to GitHub as $login.\n")
     }
 
@@ -204,7 +207,7 @@ internal class GithubLinkCommand(private val dependencies: CliDependencies) : Cl
     }
 
     /** A poll that did not reach GitHub or the server: the next one may. */
-    private fun transient(answer: ServerAnswer.Failed) = answer.status == null || answer.status == UNAVAILABLE
+    private fun transient(answer: ServerAnswer.Failed) = answer.status in LOST
 
     private fun JsonObject.link(): JsonObject = child("link") ?: JsonObject(emptyMap())
 
@@ -213,7 +216,7 @@ internal class GithubLinkCommand(private val dependencies: CliDependencies) : Cl
         const val DEFAULT_SECONDS = 5
         const val MAX_SECONDS = 60
         const val MILLIS = 1_000L
-        const val UNAVAILABLE = 503
+        val LOST = setOf<Int?>(null, 503)
 
         /** GitHub ends a device code in 15 minutes: a server that never says so is not waited on for longer. */
         const val GIVE_UP_MILLIS = 20 * 60 * MILLIS
