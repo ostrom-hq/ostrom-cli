@@ -178,6 +178,9 @@ class WaitsCommandsTest : SetupKit() {
         assertEquals("""{"assignee":"lena","question":$question}""", first.body)
         assertNotNull(first.idempotencyKey)
         assertEquals(0, run(created, "waits", "ask", "--title", "Which region?"))
+        console.out.clear()
+        assertEquals(0, run(routes(ask to (201 to """{"id":"w9"}""")), "waits", "ask", "--title", "Hello"))
+        assertEquals("Asked: w9 (Hello).\n", console.out.toString())
         val second = requests.last { it.second.path == "/api/v1/waits" }.second
         assertNotEquals(first.idempotencyKey, second.idempotencyKey)
         assertNull(requests.first { it.second.path == "/api/v1/capabilities" }.second.idempotencyKey)

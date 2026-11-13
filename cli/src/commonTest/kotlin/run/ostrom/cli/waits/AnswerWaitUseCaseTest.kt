@@ -27,7 +27,8 @@ class AnswerWaitUseCaseTest {
         action: String? = null,
     ) = AnswerWait("w1", action, sets.map(::pairOf), json.map(::pairOf))
 
-    private fun field(id: String, type: String, extra: String = "") = """{"id":"$id","type":"$type","label":"L"$extra}"""
+    private fun field(id: String, type: String, extra: String = "") =
+        """{"id":"$id","type":"$type","label":"L"$extra}"""
 
     @Test
     fun aValueIsConvertedByTheTypeItsFieldDeclaresAndSentWithTheOnlyAction() = runTest {

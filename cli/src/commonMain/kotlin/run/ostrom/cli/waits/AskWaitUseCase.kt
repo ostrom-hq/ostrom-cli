@@ -15,6 +15,9 @@ private val REF_KINDS = listOf("artifact", "session", "url")
 private const val MAX_TITLE = 200
 private const val MAX_BODY = 32_000
 
+/** `ID:TYPE:LABEL…`: three parts, the label keeping any further colon. */
+private const val FIELD_PARTS = 3
+
 /**
  * What `ostrom waits ask` is given, as typed.
  *
@@ -74,8 +77,8 @@ internal class AskWaitUseCase(private val server: WaitsServer, private val newKe
 
     /** `--field ID:TYPE:LABEL[:required]`, with the choices of `--option` for a `choice` field. */
     private fun field(text: String, options: Map<String, List<String>>): Field {
-        val parts = text.split(":", limit = 3)
-        if (parts.size < 3) refuse(FIELD_USAGE)
+        val parts = text.split(":", limit = FIELD_PARTS)
+        if (parts.size < FIELD_PARTS) refuse(FIELD_USAGE)
         val (id, type, rest) = parts
         if (!FIELD_ID.matches(id)) {
             refuse("\"$id\" is not a field id: a letter, then letters, digits or _ (64 at most).")

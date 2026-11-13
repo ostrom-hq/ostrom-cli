@@ -29,7 +29,8 @@ class ListWaitsUseCaseTest {
     @Test
     fun theQueryNamesTheAssigneeTheSessionAndTheCursor() = runTest {
         fake.answer("GET /api/v1/waits?status=all&assignee=all&limit=10", 200, """{"items":[]}""")
-        fake.answer("GET /api/v1/waits?status=resolved&assignee=lena&sessionId=ses1&before=c0&limit=5", 200, """{"items":[]}""")
+        val filtered = "GET /api/v1/waits?status=resolved&assignee=lena&sessionId=ses1&before=c0&limit=5"
+        fake.answer(filtered, 200, """{"items":[]}""")
         list(ListWaits("all", "all", null, null, 10))
         list(ListWaits("resolved", "@lena", "ses1", "c0", 5))
         assertEquals(2, fake.calls.size)
@@ -38,8 +39,10 @@ class ListWaitsUseCaseTest {
 
     @Test
     fun morePagesAreReadUpToTheLimitAndTheCursorOfTheNextIsGiven() = runTest {
-        fake.answer("GET /api/v1/waits?status=open&mine=true&limit=100", 200, """{"items":[${items(100)}],"next":"w99"}""")
-        fake.answer("GET /api/v1/waits?status=open&mine=true&before=w99&limit=20", 200, """{"items":[${items(20, 100)}],"next":"w119"}""")
+        val first = "GET /api/v1/waits?status=open&mine=true&limit=100"
+        val second = "GET /api/v1/waits?status=open&mine=true&before=w99&limit=20"
+        fake.answer(first, 200, """{"items":[${items(100)}],"next":"w99"}""")
+        fake.answer(second, 200, """{"items":[${items(20, 100)}],"next":"w119"}""")
         val listing = list(open.copy(limit = 120))
         assertEquals(120, listing.items.size)
         assertEquals("w119", listing.next)
@@ -79,7 +82,8 @@ class ListWaitsUseCaseTest {
 
     @Test
     fun aRefusalOfTheServerIsPassedOn() = runTest {
-        fake.answer("GET /api/v1/waits?status=open&mine=true&limit=50", 403, """{"error":{"type":"forbidden","message":"nope"}}""")
+        val forbidden = """{"error":{"type":"forbidden","message":"nope"}}"""
+        fake.answer("GET /api/v1/waits?status=open&mine=true&limit=50", 403, forbidden)
         val refusal = assertFailsWith<WaitsRefusal> { list(open) }
         assertEquals(403, refusal.status)
         assertEquals("forbidden", refusal.type)

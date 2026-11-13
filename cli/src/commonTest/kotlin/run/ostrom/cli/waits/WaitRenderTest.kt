@@ -45,7 +45,7 @@ class WaitRenderTest {
             |{"id":"note","type":"text","label":"Note","default":null},
             |{"id":"free","type":"text","label":"Free"}],
             |"actions":[{"id":"go","label":"Go","requires":["region","note"]},{"id":"stop","label":"Stop"}]},
-            |"answer":{"action":"go","values":{"region":["eu"],"note":"ok"},"author":"lena","answeredAt":"12:00"}}
+            |"answer":{"action":"go","values":{"region":["eu"],"note":"ok","n":3},"author":"lena","answeredAt":"12:00"}}
             """.trimMargin().replace("\n", ""),
         )
         val expected = listOf(
@@ -74,6 +74,7 @@ class WaitRenderTest {
             "Answer: go by lena at 12:00",
             "  region = [\"eu\"]",
             "  note = ok",
+            "  n = 3",
         ).joinToString("\n")
         assertEquals(expected, wait.details())
     }
@@ -94,6 +95,7 @@ class WaitRenderTest {
         assertEquals("a" to "", pairOf("a="))
         val nameless = assertFailsWith<WaitInputException> { pairOf("=x") }
         assertEquals("\"\" needs the form NAME=VALUE.", nameless.message)
-        assertEquals("\"abc\" needs the form NAME=VALUE.", assertFailsWith<WaitInputException> { pairOf("abc") }.message)
+        val bare = assertFailsWith<WaitInputException> { pairOf("abc") }
+        assertEquals("\"abc\" needs the form NAME=VALUE.", bare.message)
     }
 }

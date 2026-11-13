@@ -63,6 +63,7 @@ class ServerJson(private val transport: ServerTransport) {
      * @param token The bearer token: the device token, or the launch's agent token.
      * @param idempotencyKey Sent as `Idempotency-Key`, or null.
      */
+    @Suppress("LongParameterList") // one parameter per part of the call
     suspend fun call(
         method: String,
         path: String,

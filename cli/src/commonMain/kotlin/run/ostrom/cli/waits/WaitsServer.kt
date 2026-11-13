@@ -18,7 +18,7 @@ private const val MILLIS = 15_000L
  * @property status The HTTP status, or null when the server was not reached.
  * @property type The contract's error type (`wait_closed`, `not_found`…), or null.
  */
-internal class WaitsRefusal(val status: Int?, val type: String?, message: String) : Exception(message)
+internal class WaitsRefusal(val status: Int?, val type: String?, val reason: String) : Exception(reason)
 
 /** The words of the person do not make a wait or an answer: refused before anything is sent (exit 64). */
 internal class WaitInputException(message: String) : Exception(message)

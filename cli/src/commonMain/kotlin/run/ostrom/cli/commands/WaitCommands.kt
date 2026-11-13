@@ -61,8 +61,8 @@ private fun <T> CliDependencies.waits(
     requireFeature(access.signed.serverUrl, access.signed.token, ServerFeatures.WAITS, NO_WAITS)
     return try {
         runBlocking { block(WaitsServer(access.server, access.signed.token)) }
-    } catch (e: WaitInputException) {
-        throw stopWith(ExitCode.USAGE, "ostrom: ${e.message}")
+    } catch (expected: WaitInputException) {
+        throw stopWith(ExitCode.USAGE, "ostrom: ${expected.message}")
     } catch (e: WaitsRefusal) {
         val failed = ServerAnswer.Failed(e.status, e.type, explained(e, right, access))
         throw failed.refusal(access.signed.serverUrl, notFound)
@@ -71,7 +71,7 @@ private fun <T> CliDependencies.waits(
 
 /** The server's words, with what a person can do when it refused this credential (403) or the wait is closed. */
 private fun explained(refusal: WaitsRefusal, right: Right, access: OrgAccess): String {
-    val message = refusal.message.orEmpty()
+    val message = refusal.reason
     return when {
         refusal.type == "wait_closed" ->
             "This wait was already answered or cancelled. Run ostrom waits show <id> to see how."

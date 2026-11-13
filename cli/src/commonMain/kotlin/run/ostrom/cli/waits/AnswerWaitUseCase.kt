@@ -78,7 +78,8 @@ internal class AnswerWaitUseCase(private val server: WaitsServer) {
         return when {
             several -> JsonArray(texts.map { convert(field, it) })
             texts.size > 1 -> refuse(
-                "Field ${field.text("id")} takes one value, not ${texts.size}: repeat --set only for a multiple choice.",
+                "Field ${field.text("id")} takes one value, not ${texts.size}: " +
+                    "repeat --set only for a multiple choice.",
             )
             else -> convert(field, texts.single())
         }
