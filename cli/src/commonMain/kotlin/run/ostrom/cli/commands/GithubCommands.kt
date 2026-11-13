@@ -181,24 +181,26 @@ internal class GithubLinkCommand(private val dependencies: CliDependencies) : Cl
     private fun wait(access: OrgAccess, id: String, first: Int): JsonObject {
         var seconds = first
         var waited = 0L
-        while (waited <= GIVE_UP_MILLIS) {
+        while (true) {
             access.pause(seconds * MILLIS)
             waited += seconds * MILLIS
             val answer = runBlocking {
                 access.server.call("POST", "$LINK/device/${segment(id)}", null, access.signed.token, WRITE_MILLIS)
             }
-            if (answer is ServerAnswer.Failed && !transient(answer)) {
-                throw answer.refusal(access.signed.serverUrl, OVER)
-            }
+            if (answer is ServerAnswer.Failed && !transient(answer)) throw answer.refusal(access.signed.serverUrl, OVER)
             val poll = (answer as? ServerAnswer.Ok)?.body
-            when (poll?.text("status")) {
-                "linked" -> return poll.link()
-                "denied" -> throw stopWith(ExitCode.INCOMPLETE, "ostrom: GitHub authorization was denied.")
-                "expired" -> throw stopWith(ExitCode.INCOMPLETE, EXPIRED)
-                else -> seconds = (poll?.int("interval") ?: seconds).coerceIn(1, MAX_SECONDS)
-            }
+            if (poll?.text("status") == "linked") return poll.link()
+            val gaveUp = if (waited > GIVE_UP_MILLIS) stopWith(ExitCode.INCOMPLETE, EXPIRED) else null
+            (ended(poll?.text("status")) ?: gaveUp)?.let { throw it }
+            seconds = (poll?.int("interval") ?: seconds).coerceIn(1, MAX_SECONDS)
         }
-        throw stopWith(ExitCode.INCOMPLETE, EXPIRED)
+    }
+
+    /** What a denied or expired attempt says, null while it goes on. */
+    private fun ended(status: String?) = when (status) {
+        "denied" -> stopWith(ExitCode.INCOMPLETE, "ostrom: GitHub authorization was denied.")
+        "expired" -> stopWith(ExitCode.INCOMPLETE, EXPIRED)
+        else -> null
     }
 
     /** A poll that did not reach GitHub or the server: the next one may. */

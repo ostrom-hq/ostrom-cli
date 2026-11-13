@@ -157,8 +157,8 @@ class GithubCommandsTest : SetupKit() {
         waits.clear()
         val elsewhere = started.replace("https://github.com/login/device", "https://evil.example/login")
             .replace(",\"interval\":7", "")
-        val routes = mapOf(start to (201 to elsewhere), poll to (200 to """{"status":"linked"}"""))
-        assertEquals(0, github(routes, "github", "link"))
+        val other = mapOf(start to (201 to elsewhere), poll to (200 to """{"status":"linked"}"""))
+        assertEquals(0, github(other, "github", "link"))
         assertTrue(opened.isEmpty(), "only GitHub's pages are opened")
         assertEquals(listOf(5_000L), waits, "five seconds when the server gives no pace")
     }
