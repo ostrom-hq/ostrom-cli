@@ -152,5 +152,7 @@ class WakeHookTest {
         assertEquals(block("real"), hook(calls).handle(stop()))
         val none = FakeCalls().on(wake, ok("""{"open":"yes","messages":"nope"}"""))
         assertEquals(HookReply(), hook(none).handle(stop()), "open must be true to go on")
+        val nested = FakeCalls().on(wake, ok("""{"open":[true]}"""))
+        assertEquals(HookReply(), hook(nested).handle(stop()), "nor is a list of it")
     }
 }

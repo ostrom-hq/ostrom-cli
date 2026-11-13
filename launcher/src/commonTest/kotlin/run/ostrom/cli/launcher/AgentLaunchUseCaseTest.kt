@@ -498,7 +498,7 @@ class AgentLaunchUseCaseTest : AgentLaunchKit() {
             }
         }
         val capabilities = "GET ${Routes.CAPABILITIES}"
-        server[capabilities] = 200 to """{"apiVersion":1,"features":["waits.v1","$WAITS_WAKE"]}"""
+        server[capabilities] = 200 to """{"apiVersion":1,"features":["waits.v1",[1],"$WAITS_WAKE"]}"""
         start()
         server[capabilities] = 200 to """{"apiVersion":1,"features":["waits.v1"]}"""
         start()

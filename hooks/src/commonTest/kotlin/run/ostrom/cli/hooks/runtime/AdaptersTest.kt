@@ -198,7 +198,7 @@ class AdaptersTest {
             .process(HookKind.GATE, push.encodeToByteArray(), "claude")
         assertEquals(sent, http.sent.size, "no time left for any call")
         val plain = SessionHooks.processor(
-            Variables(emptyMap()), fileSystem, capture, http, clock = SessionHooks::epochMillis,
+            Variables(emptyMap()), fileSystem, capture, http, sleep = {}, clock = SessionHooks::epochMillis,
         )
         assertEquals(HookReply(), plain.process(HookKind.SESSION, null, "claude"))
         assertTrue(SessionHooks.epochMillis() > 1_700_000_000_000)

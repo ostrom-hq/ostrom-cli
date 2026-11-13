@@ -281,7 +281,7 @@ class RelayHooksTest {
             val response = client.post("/api/v1/waits/wake?session=ses-1") {
                 bearerAuth(TOKEN)
                 contentType(ContentType.Application.Json)
-                setBody("x".repeat(2 * 1024 * 1024))
+                setBody(ByteArray(2 * 1024 * 1024 + 1) { 'a'.code.toByte() })
             }
             assertEquals(HttpStatusCode.PayloadTooLarge, response.status)
             assertTrue(ostrom.requests.isEmpty())
