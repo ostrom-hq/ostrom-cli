@@ -2,7 +2,7 @@
 """2.9 of demo/PARCOURS.md on the CLI side: an MCP server of the organisation, reached by an agent through Ostrom.
 
 The owner adds a server on the console (`POST /api/v1/mcp/servers`, a browser session signed in minutes ago) and gives
-it to everyone; Ostrom lists it to the agent (`?mine=true`, what `ostrom claude` connects); then, in an `ostrom claude`
+it to everyone; Ostrom lists it to the agent (`?mine=true`, what `ostrom run claude` connects); then, in an `ostrom run claude`
 session, the fake agent starts `ostrom mcp --session <session-env.json> --server <name>` as an agent that only starts
 stdio servers does, and asks it `initialize`, `tools/list` and `tools/call`: each line goes to the session's local
 relay, then to Ostrom's MCP relay, then to the server, a fake one in HTTPS on this machine. The server's address is
@@ -165,7 +165,7 @@ class McpRelay:
         if seen is None:
             return
         mcp = seen.get("mcp") or {}
-        j.check(mcp.get("listed"), f"ostrom claude hands the agent the server in its MCP config "
+        j.check(mcp.get("listed"), f"ostrom run claude hands the agent the server in its MCP config "
                                    f"({mcp.get('servers')})")
         bridge = mcp.get("bridge") or {}
         j.check(bridge.get("code") == 0, f"ostrom mcp --session … --server {self.name} exits 0 at the end of its "
@@ -190,21 +190,21 @@ class McpRelay:
                                              f"{len(journaled)}): {json.dumps(items[:3])[:300]}")
 
     def session_with_bridge(self):
-        """`ostrom claude` with the fake agent in its MCP mode: the agent's report, or None."""
+        """`ostrom run claude` with the fake agent in its MCP mode: the agent's report, or None."""
         j = self.journey
         agents = fake_claude(j)
         report = os.path.join(j.work, "claude-mcp-report.json")
         extra = {"PATH": agents + os.pathsep + os.environ["PATH"], "E2E_REPORT": report, "E2E_EXIT": "0",
                  "E2E_OSTROM": j.binary, "E2E_MCP": self.name, "E2E_MCP_SAY": SAID}
         try:
-            done = subprocess.run([j.binary, "claude", "-p", "hello"], cwd=self.maya["repo"], capture_output=True,
+            done = subprocess.run([j.binary, "run", "claude", "--", "-p", "hello"], cwd=self.maya["repo"], capture_output=True,
                                   text=True, env=j.environment(self.maya, False, extra), stdin=subprocess.DEVNULL,
                                   timeout=300)
         except subprocess.TimeoutExpired:
-            j.check(False, "ostrom claude ends (still running after 300 s)")
+            j.check(False, "ostrom run claude ends (still running after 300 s)")
             return None
-        j.record(self.maya, "ostrom claude -p hello", done.returncode, done.stdout, done.stderr)
-        j.check(done.returncode == 0, f"ostrom claude runs the agent and hands back its exit 0 ({done.returncode}): "
+        j.record(self.maya, "ostrom run claude -- -p hello", done.returncode, done.stdout, done.stderr)
+        j.check(done.returncode == 0, f"ostrom run claude runs the agent and hands back its exit 0 ({done.returncode}): "
                                       f"{done.stderr.strip()[-300:]}")
         if not j.check(os.path.exists(report), "the agent was started with Ostrom's harness"):
             return None

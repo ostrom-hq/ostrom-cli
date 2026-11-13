@@ -23,7 +23,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import okio.IOException
 
 /**
- * What the developer asked: `ostrom <agent> [--repo R] [--model M] [agent arguments…]`.
+ * What the developer asked: `ostrom run <agent> [--repo R] [--model M] [agent arguments…]`.
  *
  * @property model The `--model` given to ostrom (passed on to the agent), or null.
  * @property dryRun `--dry-run`: the checks of a launch and the harness that would apply, then exit 0 without starting
@@ -98,8 +98,9 @@ internal class LaunchStopped(val exitCode: Int, message: String) : Exception(mes
 internal fun stop(exitCode: Int, message: String): Nothing = throw LaunchStopped(exitCode, message)
 
 /**
- * `ostrom <agent>` (prototype `cmd_run`): the organisation's policy, the launch and its agent token, the signed session
- * package verified then laid down in a private folder, the gate catalogue, the local relay, the agent's own way to
+ * `ostrom run <agent>` (prototype `cmd_run`): the organisation's policy, the launch and its agent token, the signed
+ * session package verified then laid down in a private folder, the gate catalogue, the local relay, the agent's own way
+ * to
  * load the harness for this session only, the agent run with a sign of life to Ostrom, then the end of the session,
  * its receipts and the clean-up. The agent's exit code becomes the CLI's.
  */

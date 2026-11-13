@@ -54,7 +54,7 @@ class ClaudeSettingSourcesTest {
         assertEquals(
             listOf(
                 "claude: your --setting-sources user,project is not used: Ostrom reads your user settings only, so " +
-                    "that a repository's cannot turn its gate off (its CLAUDE.md is read). Run `ostrom claude " +
+                    "that a repository's cannot turn its gate off (its CLAUDE.md is read). Run `ostrom run claude " +
                     "--trust-project-settings` to read the repository's settings too",
             ),
             launch.notes,
@@ -101,7 +101,7 @@ class ClaudeSettingSourcesTest {
             val refused = assertFailsWith<AdapterException> { ClaudeAdapter().prepare(layout(arguments), files) }
             assertEquals(
                 "claude: $option turns off Claude Code's hooks, Ostrom's gate included, so Claude Code is not " +
-                    "started with it. Run `ostrom claude` without $option to work with Ostrom",
+                    "started with it. Run `ostrom run claude` without $option to work with Ostrom",
                 refused.reason,
                 arguments.toString(),
             )

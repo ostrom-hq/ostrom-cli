@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """What a hook costs the agent, which pays it at every tool call: the median of 20 of each figure, on the release
-binary, in a real session (`ostrom claude`, the local relay, Ostrom's signed policy checked) against
+binary, in a real session (`ostrom run claude`, the local relay, Ostrom's signed policy checked) against
 e2e/contract_server.py.
 
     python3 e2e/perf.py --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe --label linuxX64 [budgets]

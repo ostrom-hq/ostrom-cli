@@ -97,7 +97,7 @@ internal object EmbeddedPlugins {
         |  };
         |};
         |
-        |// the session also ends with the process (opencode run): `ostrom opencode` ends it anyway
+        |// the session also ends with the process (opencode run): `ostrom run opencode` ends it anyway
         |export default { id: 'ostrom', server, setup: async () => {} };
         |
     """.trimMargin()

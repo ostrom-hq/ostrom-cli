@@ -41,7 +41,7 @@ class InitCommandTest : SetupKit() {
         assertOut("  Agents      claude ✓\n")
         assertOut("✓ Hooks       claude typed in a new terminal start with Ostrom's hooks (/home/maya/.zshrc)\n")
         assertOut("  Rules       2 proposed for Acme:\n    r1  proposed  No push to main\n    r2\n")
-        assertOut("✓ 2 rules accepted\nNothing is written in this repository. Next: ostrom claude\n")
+        assertOut("✓ 2 rules accepted\nNothing is written in this repository. Next: ostrom run claude\n")
         assertConfig("/home/maya/.config/ostrom/config.toml", "acme")
         assertEquals(ShellHooks.block(listOf(Agent.CLAUDE)), text("/home/maya/.zshrc"))
         assertEquals("""{"ids":["r1","r2"],"status":"accepted"}""", bodyOf("POST /api/v1/rules/bulk"))
@@ -205,13 +205,13 @@ class InitCommandTest : SetupKit() {
         assertEquals(0, run(emptyMap(), "init", "--yes", "--repo", "api", environment = fish,
             installed = setOf("claude", "codex")))
         assertOut("  Agents      claude ✓ · codex ✓\n")
-        assertOut("  Hooks       start them as ostrom <agent>, or add to your shell's startup file:\n# >>> ostrom")
-        assertOut("alias codex='ostrom codex'\n# <<< ostrom <<<\n")
+        assertOut("  Hooks       start them as ostrom run <agent>, or add to your shell's startup file:\n# >>> ostrom")
+        assertOut("alias codex='ostrom run codex --'\n# <<< ostrom <<<\n")
         console.out.clear()
         // no home at all: the CLI's folder from OSTROM_HOME, no startup file to write
         val noHome = mapOf("OSTROM_URL" to "https://ostrom.example", "OSTROM_HOME" to "/cfg", "SHELL" to "/bin/zsh")
         assertEquals(0, run(emptyMap(), "init", "--yes", "--repo", "api", environment = noHome, home = "/cfg"))
-        assertOut("  Hooks       start them as ostrom <agent>, or add to your shell's startup file:\n")
+        assertOut("  Hooks       start them as ostrom run <agent>, or add to your shell's startup file:\n")
         assertConfig("/cfg/config.toml", "acme")
     }
 
@@ -226,7 +226,7 @@ class InitCommandTest : SetupKit() {
         fileSystem.write("/home/maya/.zshrc".toPath()) { writeUtf8(broken) }
         assertEquals(0, run(emptyMap(), "init", "--yes", "--repo", "api", environment = zsh))
         assertOut("! Hooks       /home/maya/.zshrc has Ostrom's markers, but not as init writes them: fix them")
-        assertOut("alias claude='ostrom claude'\n# <<< ostrom <<<\n")
+        assertOut("alias claude='ostrom run claude --'\n# <<< ostrom <<<\n")
         assertEquals(broken, text("/home/maya/.zshrc"), "the file is left as it was")
     }
 

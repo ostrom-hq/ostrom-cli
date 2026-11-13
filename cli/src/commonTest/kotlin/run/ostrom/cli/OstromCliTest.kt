@@ -49,7 +49,7 @@ class OstromCliTest : CliKit() {
     fun anAgentRunsWithTheServerAndTheCredentialsOfThisDevice() {
         signIn("/home/maya/.config/ostrom")
         val environment = withServer + ("OSTROM_URL" to "https://ostrom.example/")
-        val arguments = arrayOf("claude", "--model", "opus", "--resume", "-p", "hi")
+        val arguments = arrayOf("run", "claude", "--model", "opus", "--", "--resume", "-p", "hi")
         assertEquals(7, cli(environment = environment).run(arguments), "the agent's exit code")
         val (request, site) = launches.single()
         assertEquals(LaunchRequest(Agent.CLAUDE, listOf("--resume", "-p", "hi"), null, "opus"), request)
@@ -65,11 +65,42 @@ class OstromCliTest : CliKit() {
     }
 
     @Test
+    fun anOptionThatIsNotOstromsGoesAfterTheDoubleDash() {
+        // as `teamcode run claude -- <args>`: before --, an option Ostrom does not know is a usage error
+        signIn("/home/maya/.config/ostrom")
+        assertEquals(64, cli(environment = withServer).run(arrayOf("run", "claude", "-p", "hi")))
+        assertTrue(console.err.contains("-p"), console.err.toString())
+        assertTrue(launches.isEmpty(), "nothing launched")
+        val untouched = arrayOf("run", "claude", "--", "--repo", "x", "-p")
+        assertEquals(7, cli(environment = withServer).run(untouched))
+        assertEquals(listOf("--repo", "x", "-p"), launches.single().first.arguments, "after --, the agent's")
+        assertEquals(null, launches.single().first.repo)
+    }
+
+    @Test
+    fun runAloneListsTheAgents() {
+        assertEquals(0, cli().run(arrayOf("run")))
+        val help = console.out.toString()
+        for (agent in Agent.entries) assertTrue(Regex("""\n\s+${agent.command}\s""").containsMatchIn(help), help)
+    }
+
+    @Test
+    fun theFormerAgentPathStillRunsAndSaysWhereItWent() {
+        signIn("/home/maya/.config/ostrom")
+        assertEquals(7, cli(environment = withServer).run(arrayOf("claude", "--model", "opus", "-p", "hi")))
+        assertEquals(LaunchRequest(Agent.CLAUDE, listOf("-p", "hi"), null, "opus"), launches.single().first)
+        val notice = "ostrom: `ostrom claude` is deprecated and goes away in the next release: " +
+            "use `ostrom run claude -- <its arguments>`\n"
+        assertTrue(console.err.toString().startsWith(notice), console.err.toString())
+        assertEquals(1, console.err.toString().lines().count { it.contains("deprecated") }, "one line")
+    }
+
+    @Test
     fun dryRunIsHandedToTheLaunch() {
         signIn("/home/maya/.config/ostrom")
-        assertEquals(7, cli(environment = withServer).run(arrayOf("codex", "--dry-run", "--repo", "acme/api")))
+        assertEquals(7, cli(environment = withServer).run(arrayOf("run", "codex", "--dry-run", "--repo", "acme/api")))
         assertEquals(LaunchRequest(Agent.CODEX, emptyList(), "acme/api", null, dryRun = true), launches.single().first)
-        assertEquals(64, cli(environment = withServer).run(arrayOf("claude", "--cloud", "--dry-run")))
+        assertEquals(64, cli(environment = withServer).run(arrayOf("run", "claude", "--cloud", "--dry-run")))
         assertTrue(console.err.contains("it does not go with --cloud"), console.err.toString())
         assertEquals(1, launches.size, "nothing launched")
     }
@@ -78,18 +109,18 @@ class OstromCliTest : CliKit() {
     fun trustingTheRepositorysClaudeSettingsIsAskedForByName() {
         // REVUES-CLI-4: Claude Code is started without the repository's settings unless the developer asks for them
         signIn("/home/maya/.config/ostrom")
-        assertEquals(7, cli(environment = withServer).run(arrayOf("claude", TRUST, "-p", "hi")))
+        assertEquals(7, cli(environment = withServer).run(arrayOf("run", "claude", TRUST, "--", "-p", "hi")))
         assertEquals(
             LaunchRequest(Agent.CLAUDE, listOf("-p", "hi"), null, null, trustProjectSettings = true),
             launches.single().first,
         )
-        assertEquals(7, cli(environment = withServer).run(arrayOf("claude", "-p", "hi")))
+        assertEquals(7, cli(environment = withServer).run(arrayOf("run", "claude", "--", "-p", "hi")))
         assertEquals(false, launches.last().first.trustProjectSettings)
-        val elsewhere = listOf(arrayOf("codex", TRUST), arrayOf("claude", "--cloud", TRUST))
+        val elsewhere = listOf(arrayOf("run", "codex", TRUST), arrayOf("run", "claude", "--cloud", TRUST))
         for (arguments in elsewhere) {
             assertEquals(64, cli(environment = withServer).run(arguments))
             assertTrue(
-                console.err.contains("$TRUST is for `ostrom claude` and `ostrom gemini` on this machine"),
+                console.err.contains("$TRUST is for `ostrom run claude` and `ostrom run gemini` on this machine"),
                 console.err.toString(),
             )
         }
@@ -100,12 +131,12 @@ class OstromCliTest : CliKit() {
     fun trustingTheRepositorysGeminiEnvIsAskedForByName() {
         // REVUES-CLI-6: Gemini CLI is started without the repository's .env unless the developer asks for it
         signIn("/home/maya/.config/ostrom")
-        assertEquals(7, cli(environment = withServer).run(arrayOf("gemini", TRUST, "-p", "hi")))
+        assertEquals(7, cli(environment = withServer).run(arrayOf("run", "gemini", TRUST, "--", "-p", "hi")))
         assertEquals(
             LaunchRequest(Agent.GEMINI, listOf("-p", "hi"), null, null, trustProjectSettings = true),
             launches.single().first,
         )
-        assertEquals(64, cli(environment = withServer).run(arrayOf("gemini", "--cloud", TRUST)))
+        assertEquals(64, cli(environment = withServer).run(arrayOf("run", "gemini", "--cloud", TRUST)))
         assertEquals(1, launches.size, "nothing else launched")
     }
 
@@ -113,15 +144,15 @@ class OstromCliTest : CliKit() {
     fun theServerIsTheOptionsTheEnvironmentsOrTheOneOfLogin() {
         signIn("/home/maya/.config/ostrom", "https://cfg.example")
         val home = mapOf("HOME" to "/home/maya")
-        assertEquals(65, cli(environment = home).run(arrayOf("codex")))
+        assertEquals(65, cli(environment = home).run(arrayOf("run", "codex")))
         assertTrue(console.err.endsWith("ostrom: no Ostrom server: run `ostrom login`, or set OSTROM_URL\n"))
         assertEquals(0, cli(environment = home).run(arrayOf("config", "set", "server", "https://cfg.example")))
-        assertEquals(7, cli(environment = home).run(arrayOf("codex", "exec", "fix")))
+        assertEquals(7, cli(environment = home).run(arrayOf("run", "codex", "exec", "fix")))
         assertEquals("https://cfg.example", launches.last().second.serverUrl)
         assertEquals(listOf("exec", "fix"), launches.last().first.arguments)
-        assertEquals(65, cli(environment = withServer).run(arrayOf("codex")))
+        assertEquals(65, cli(environment = withServer).run(arrayOf("run", "codex")))
         assertTrue(console.err.endsWith("ostrom: not signed in to https://ostrom.example: run `ostrom login`\n"))
-        val other = arrayOf("pi", "--server", "https://cfg.example", "--repo", "acme/api")
+        val other = arrayOf("run", "pi", "--server", "https://cfg.example", "--repo", "acme/api")
         assertEquals(7, cli(environment = withServer, executable = null).run(other))
         assertEquals("acme/api", launches.last().first.repo)
         assertEquals("ostrom", launches.last().second.executable, "no path from the system: found on the PATH")
@@ -129,11 +160,11 @@ class OstromCliTest : CliKit() {
 
     @Test
     fun withoutAFolderForItsFilesOstromCannotLaunch() {
-        assertEquals(73, cli(environment = emptyMap()).run(arrayOf("claude")))
+        assertEquals(73, cli(environment = emptyMap()).run(arrayOf("run", "claude")))
         assertTrue(console.err.endsWith("ostrom: no folder for ostrom's files: set OSTROM_HOME\n"))
         signIn("/srv/ostrom")
         val bench = mapOf("OSTROM_HOME" to "/srv/ostrom", "OSTROM_URL" to "https://ostrom.example")
-        assertEquals(7, cli(environment = bench).run(arrayOf("gemini")))
+        assertEquals(7, cli(environment = bench).run(arrayOf("run", "gemini")))
         assertEquals("", launches.last().second.home, "no home folder known")
     }
 
@@ -156,7 +187,7 @@ class OstromCliTest : CliKit() {
         assertOut("ostrom ${BuildInfo.VERSION} (kotlin-native, Linux x64)\n")
         assertEquals(64, cli().run(arrayOf("doctor", "--version")), "doctor has no --version of its own")
         signIn("/home/maya/.config/ostrom")
-        assertEquals(7, cli(environment = withServer).run(arrayOf("codex", "--version")))
+        assertEquals(7, cli(environment = withServer).run(arrayOf("run", "codex", "--", "--version")))
         assertEquals(listOf("--version"), launches.single().first.arguments, "the agent's own --version, passed as is")
     }
 
@@ -165,7 +196,7 @@ class OstromCliTest : CliKit() {
         assertEquals(0, cli().run(emptyArray()))
         val home = console.out.toString()
         assertTrue(home.startsWith("Ostrom ${BuildInfo.VERSION}\nNot signed in. Next: ostrom login\n"), home)
-        assertOut("Start an agent   ostrom claude   (also: codex, opencode, gemini, grok, hermes, pi)")
+        assertOut("Start an agent   ostrom run claude   (also: codex, opencode, gemini, grok, hermes, pi)")
     }
 
     @Test
@@ -173,7 +204,7 @@ class OstromCliTest : CliKit() {
         assertEquals(0, cli().run(arrayOf("--help")))
         val help = console.out.toString()
         val commands = listOf(
-            "claude", "status", "inbox", "approve", "receipts", "verify",
+            "run", "status", "inbox", "approve", "receipts", "verify",
             "harness", "login", "init", "doctor", "invite", "members", "policy",
         )
         for (command in commands) {
@@ -188,7 +219,7 @@ class OstromCliTest : CliKit() {
         // built commands never say « (coming soon) » (DOCS-VERITE)
         assertTrue(flat.contains(" telemetry Anonymous usage statistics (off unless you turn them on) "), flat)
         assertTrue(!flat.contains("(off unless you turn them on) (coming soon)"), flat)
-        for (hidden in listOf("wait", "hook", "mcp", "check")) {
+        for (hidden in listOf("wait", "hook", "mcp", "check", "claude", "codex")) {
             assertTrue(!Regex("""\n\s+$hidden\s""").containsMatchIn(help), "$hidden should be hidden:\n$help")
         }
     }
@@ -378,8 +409,8 @@ class OstromCliTest : CliKit() {
 
     @Test
     fun theRealWiringKeepsOneClientPerServerForTheWholeCommand() {
-        // PERF-CLI: `ostrom claude` looked its organisation up with a client of its own, then launched with another:
-        // two connections, so two TLS handshakes with a real server, for one command
+        // PERF-CLI: `ostrom run claude` looked its organisation up with a client of its own, then launched with
+        // another: two connections, so two TLS handshakes with a real server, for one command
         val dependencies = CliDependencies.create()
         val server = dependencies.api("https://ostrom.example")
         server.close()
@@ -556,7 +587,7 @@ class OstromCliTest : CliKit() {
         assertEquals("https://api.ostrom.run", requests.first().first, "Ostrom's server by default")
         assertTrue(console.err.contains("! Copy your one-time code: 4F2C-9B1D"), console.err.toString())
         assertOut("✓ Signed in as @maya-k on https://api.ostrom.run\n")
-        assertOut("Next: cd into a repository and run ostrom claude\n")
+        assertOut("Next: cd into a repository and start an agent: ostrom run claude\n")
         assertEquals(listOf(1_000L), waits)
         val credentials = fileSystem.read("/home/maya/.config/ostrom/credentials.json".toPath()) { readUtf8() }
         assertTrue("ost_new" !in credentials && "maya-k" in credentials, credentials)

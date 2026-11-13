@@ -111,8 +111,8 @@ internal object GeminiEnvironment {
         refuse(
             "$path is not yours: Gemini loads its variables into the session, and a repository's variables can run " +
                 "its programs (its Google credentials, ripgrep's configuration), so Gemini is not started. Remove " +
-                "it, or run `ostrom gemini --trust-project-settings` if your team trusts this repository, to work " +
-                "with Ostrom",
+                "it, or run `ostrom run gemini --trust-project-settings` if your team trusts this repository, to " +
+                "work with Ostrom",
         )
     }
 

@@ -2,8 +2,8 @@
 package run.ostrom.cli.launcher
 
 /**
- * The coding agents `ostrom <agent>` starts (spec CLI.md § 2.2). Ostrom never installs an agent: when one is missing,
- * the CLI points to its official installation page and exits with 127.
+ * The coding agents `ostrom run <agent>` starts (spec CLI.md § 2.2). Ostrom never installs an agent: when one is
+ * missing, the CLI points to its official installation page and exits with 127.
  *
  * @property command The subcommand, `ostrom <command>`.
  * @property displayName How the agent is named in messages.

@@ -105,7 +105,7 @@ class GateWait(
         failure.type in UNKNOWN_GATE -> gone(id)
         failure.relayDown -> WaitOutcome(
             UNAVAILABLE,
-            "the session's local relay is not running (its `ostrom <agent>` has ended). Do not run the command; " +
+            "the session's local relay is not running (its `ostrom run <agent>` has ended). Do not run the command; " +
                 "tell the user.",
         )
         failure.unreachable || failure.sessionClosed -> null

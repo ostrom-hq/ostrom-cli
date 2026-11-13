@@ -399,7 +399,7 @@ class PackageChecksTest {
         val refusal = checks(listOf(orphan, tell)).before("npm publish")?.stderr
         assertEquals(
             "Ostrom: check orphan names a script (gone) the session's workflow package does not hold, so it cannot " +
-                "run and this action was not run. Restart the session (`ostrom <agent>`).\n",
+                "run and this action was not run. Restart the session (`ostrom run <agent>`).\n",
             refusal,
         )
         val unnamed = """{"id":"bare","nodeId":"n","kind":"check","event":"PreToolUse","tools":["Bash"],
@@ -454,7 +454,7 @@ class PackageChecksTest {
         val refusal = checks(viewText = "{\"hooks\":3}").before("ls")?.stderr
         assertEquals(
             "Ostrom: the session's workflow package cannot be read (/t/package.json), so its checks cannot run and " +
-                "this action was not run. Restart the session (`ostrom <agent>`).\n",
+                "this action was not run. Restart the session (`ostrom run <agent>`).\n",
             refusal,
         )
     }

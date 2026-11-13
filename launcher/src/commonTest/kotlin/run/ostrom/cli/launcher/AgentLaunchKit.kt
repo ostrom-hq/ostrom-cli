@@ -13,7 +13,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 
-/** What the tests of `ostrom <agent>` end to end share: fakes of the server, the agent, git and the developer. */
+/** What the tests of `ostrom run <agent>` end to end share: fakes of the server, the agent, git and the developer. */
 @OptIn(ExperimentalCoroutinesApi::class)
 open class AgentLaunchKit {
     protected val server = FakeServer()

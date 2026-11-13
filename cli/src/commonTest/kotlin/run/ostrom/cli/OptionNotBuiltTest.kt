@@ -13,8 +13,8 @@ class OptionNotBuiltTest : CliKit() {
     @Test
     fun aCommandNotBuiltIs70AndAnOptionNotBuilt64() {
         assertEquals(70, notImplemented(listOf("ostrom", "status")).statusCode)
-        val option = notImplemented(listOf("ostrom", "claude", "--cloud"))
+        val option = notImplemented(listOf("ostrom", "run", "claude", "--cloud"))
         assertEquals(64, option.statusCode)
-        assertEquals("ostrom claude --cloud: not in this version of ostrom yet.", option.message)
+        assertEquals("ostrom run claude --cloud: not in this version of ostrom yet.", option.message)
     }
 }

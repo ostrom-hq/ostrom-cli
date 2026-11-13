@@ -12,8 +12,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * What a repository cannot change in `ostrom <agent>`: the runner of the checks, the agent's PATH, the hooks' config
- * folder, an agent older than its adapter's minimum (security audit of the CLI n°2, H3), Claude's session variables
+ * What a repository cannot change in `ostrom run <agent>`: the runner of the checks, the agent's PATH, the hooks'
+ * config folder, an agent older than its adapter's minimum (security audit of the CLI n°2, H3), Claude's session
+ * variables
  * (H4).
  */
 @OptIn(ExperimentalCoroutinesApi::class)

@@ -14,8 +14,8 @@ import kotlin.test.assertTrue
 
 private const val NOT_YOURS = "is not yours: Gemini loads its variables into the session, and a repository's " +
     "variables can run its programs (its Google credentials, ripgrep's configuration), so Gemini is not started. " +
-    "Remove it, or run `ostrom gemini --trust-project-settings` if your team trusts this repository, to work with " +
-    "Ostrom"
+    "Remove it, or run `ostrom run gemini --trust-project-settings` if your team trusts this repository, to work " +
+    "with Ostrom"
 
 /**
  * Review REVUES-CLI-6, probed on Gemini CLI 0.66: the `.env` a repository leaves in the working folder ran its own
@@ -23,7 +23,7 @@ private const val NOT_YOURS = "is not yours: Gemini loads its variables into the
  * (google-auth-library reads `UPPER || lower`) with `GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=1` runs the
  * credentials' executable at the first call to the model; `RIPGREP_CONFIG_PATH=.rgrc` with `--pre=./pre.sh` runs the
  * script behind a `grep_search` the gate allows. A list of names cannot keep up with every program's variables: by
- * default the session does not load the repository's `.env` at all, as `ostrom claude` does not read its settings.
+ * default the session does not load the repository's `.env` at all, as `ostrom run claude` does not read its settings.
  */
 class GeminiRepositoryEnvTest {
     private val files = MemoryFiles().apply {

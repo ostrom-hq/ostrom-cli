@@ -31,7 +31,7 @@ import okio.IOException
  */
 data class CloudSite(val serverUrl: String, val token: String, val cwd: String, val org: String? = null)
 
-/** `ostrom <agent> --cloud` and `ostrom attach`; each returns the exit code. */
+/** `ostrom run <agent> --cloud` and `ostrom attach`; each returns the exit code. */
 interface CloudRunner {
     /** Starts [start] in Ostrom's cloud, the repository of [site]'s folder when [CloudStart.repo] is null. */
     suspend fun start(start: CloudStart, site: CloudSite): Int

@@ -94,7 +94,7 @@ def launch(binary, server, home, agents, repo, work, agent, arguments, extra=Non
     }
     with open(os.path.join(home, "credentials.json"), "w") as handle:
         json.dump({server: {"token": "ost_e2e_device", "login": "maya"}}, handle)
-    done = subprocess.run([os.path.abspath(binary), agent, *arguments], cwd=repo, env=environment,
+    done = subprocess.run([os.path.abspath(binary), "run", agent, "--", *arguments], cwd=repo, env=environment,
                           capture_output=True, text=True, timeout=120)
     print(done.stderr.rstrip())
     with open(report) as handle:
@@ -102,7 +102,7 @@ def launch(binary, server, home, agents, repo, work, agent, arguments, extra=Non
 
 
 def scenario_claude(binary, work):
-    print("ostrom claude, with a signed session package")
+    print("ostrom run claude, with a signed session package")
     server_process, server, log = start_server(work, package=True)
     try:
         home, agents, repo = setup(work)
@@ -259,7 +259,7 @@ def offline(binary, work, home):
 
 
 def scenario_codex(binary, work):
-    print("ostrom codex exec, without a package")
+    print("ostrom run codex exec, without a package")
     server_process, server, log = start_server(work, package=False)
     try:
         home, agents, repo = setup(work)

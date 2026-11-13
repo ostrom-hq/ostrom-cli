@@ -19,7 +19,7 @@ import kotlin.test.assertTrue
 /** Claude Code reads the developer's settings, and the memory of the working folder and the repository's top. */
 private val SOURCES = listOf("--setting-sources", "user", "--add-dir", "/work/acme-api/src", "/work/acme-api")
 
-/** `ostrom <agent>` end to end against fakes: what reaches the server, the agent and the developer. */
+/** `ostrom run <agent>` end to end against fakes: what reaches the server, the agent and the developer. */
 @OptIn(ExperimentalCoroutinesApi::class)
 class AgentLaunchUseCaseTest : AgentLaunchKit() {
     @Test
@@ -274,7 +274,7 @@ class AgentLaunchUseCaseTest : AgentLaunchKit() {
         serveALaunch()
         server["DELETE ${Routes.launch("L1")}"] = 204 to ""
         assertEquals(3, start())
-        // AUDIT-SECU-RUNNER-2 R2b: the agent token is revoked when ostrom <agent> ends, not 24 h later
+        // AUDIT-SECU-RUNNER-2 R2b: the agent token is revoked when ostrom run <agent> ends, not 24 h later
         val end = server.requests.last()
         assertEquals("DELETE ${Routes.launch("L1")}", "${end.method} ${end.path}", "after the session's end")
         assertEquals("agent-token", end.token, "the launch's own token, never the device token")

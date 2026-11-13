@@ -11,8 +11,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 
-private const val WAY_OUT = ", so Gemini is not started. Remove it, or run `ostrom gemini --trust-project-settings` " +
-    "if your team trusts this repository, to work with Ostrom"
+private const val WAY_OUT = ", so Gemini is not started. Remove it, or run " +
+    "`ostrom run gemini --trust-project-settings` if your team trusts this repository, to work with Ostrom"
 
 /**
  * Review REVUES-CLI-7, probed on Gemini CLI 0.66, three more ways a repository ran its programs outside the gate in
@@ -24,7 +24,7 @@ private const val WAY_OUT = ", so Gemini is not started. Remove it, or run `ostr
  *
  * Review REVUES-CLI-8 found two more in the agents: a front matter whose second line is `---` (Gemini closes it later
  * than Ostrom read it), and a remote agent, whose `auth` Gemini resolves when it starts. By default, then, no agent of
- * the repository is loaded, as `ostrom claude` loads none; the checks of their text stay, for a clearer refusal.
+ * the repository is loaded, as `ostrom run claude` loads none; the checks of their text stay, for a clearer refusal.
  */
 class GeminiProjectFilesTest {
     private val files = MemoryFiles().apply { texts[join("/usr/bin", "bash")] = "" }
@@ -57,7 +57,7 @@ class GeminiProjectFilesTest {
             listOf(
                 "gemini: your extensions myext run without the settings you gave them in Gemini: Gemini would read " +
                     "them from this repository's .env too, where a repository can rewrite what those extensions' " +
-                    "hooks run. Set them in your environment, or run `ostrom gemini --trust-project-settings` if " +
+                    "hooks run. Set them in your environment, or run `ostrom run gemini --trust-project-settings` if " +
                     "your team trusts this repository",
             ),
             launch.notes,
@@ -191,7 +191,7 @@ class GeminiProjectFilesTest {
 
     @Test
     fun aRepositorysAgentStopsTheLaunchByDefault() {
-        // as `ostrom claude` reads none of the repository's agents: what an agent can do outside the gate grew with
+        // as `ostrom run claude` reads none of the repository's agents: what an agent can do outside the gate grew with
         // each review (REVUES-CLI-7, -8), faster than a list of keys follows
         val agents = join("/w/app", ".gemini", "agents")
         val loaded = "is an agent of this repository, which Gemini loads: an agent can start programs " +

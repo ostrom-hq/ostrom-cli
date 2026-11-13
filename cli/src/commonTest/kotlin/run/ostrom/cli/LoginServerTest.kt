@@ -44,7 +44,7 @@ class LoginServerTest : CliKit() {
         // nor does an agent start with it
         console.err.clear()
         signIn("/home/maya/.config/ostrom", server = "http://ostrom.example")
-        assertEquals(64, cli(environment = clear).run(arrayOf("claude")))
+        assertEquals(64, cli(environment = clear).run(arrayOf("run", "claude")))
         assertTrue(console.err.toString().contains("the device's token would travel in clear"), console.err.toString())
     }
 

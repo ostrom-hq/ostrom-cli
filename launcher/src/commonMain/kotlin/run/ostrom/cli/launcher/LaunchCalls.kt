@@ -125,8 +125,9 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
     }
 
     /**
-     * Ends the launch when `ostrom <agent>` ends (AUDIT-SECU-RUNNER-2 R2b): its agent token is revoked at once instead
-     * of living out its 24 hours. Never stops anything: a token not revoked expires on its own, and is said. An older
+     * Ends the launch when `ostrom run <agent>` ends (AUDIT-SECU-RUNNER-2 R2b): its agent token is revoked at once
+     * instead of living out its 24 hours. Never stops anything: a token not revoked expires on its own, and is said. An
+     * older
      * server (404, 405) or a token already refused (401) has nothing to say.
      */
     suspend fun endLaunch(launch: Launch) {

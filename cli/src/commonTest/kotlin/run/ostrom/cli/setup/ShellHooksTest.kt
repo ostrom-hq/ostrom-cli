@@ -15,7 +15,7 @@ class ShellHooksTest {
     fun theBlockAliasesEachAgentToOstromBetweenItsMarkers() {
         assertEquals(
             "# >>> ostrom: agents start with the team's hooks >>>\n" +
-                "alias claude='ostrom claude'\nalias codex='ostrom codex'\n# <<< ostrom <<<\n",
+                "alias claude='ostrom run claude --'\nalias codex='ostrom run codex --'\n# <<< ostrom <<<\n",
             block,
         )
     }

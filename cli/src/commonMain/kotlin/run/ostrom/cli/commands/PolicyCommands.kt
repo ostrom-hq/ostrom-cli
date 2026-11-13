@@ -23,7 +23,7 @@ private const val MODELS = "/api/v1/policy/models"
 /** `GET`/`PUT`: who may approve their own request (SRV-REGLES). */
 private const val GATE_POLICY = "/api/v1/gates/policy"
 
-/** `GET ?agent&dev&model`: may this developer start this agent (SRV-LANCEUR, the route `ostrom claude` reads). */
+/** `GET ?agent&dev&model`: may this developer start this agent (SRV-LANCEUR, the route `ostrom run claude` reads). */
 private const val AGENTS = "/api/v1/policy/agents"
 
 /** The values of the self-approval policy (`setGatePolicy`). */
@@ -117,7 +117,9 @@ internal class PolicySetCommand(private val dependencies: CliDependencies) : Cli
     }
 }
 
-/** `ostrom policy check <agent> [--model M] [--dev LOGIN]`: what `ostrom <agent>` would be told before it starts. */
+/**
+ * `ostrom policy check <agent> [--model M] [--dev LOGIN]`: what `ostrom run <agent>` would be told before it starts.
+ */
 internal class PolicyCheckCommand(private val dependencies: CliDependencies) : CliktCommand(name = "check") {
     override fun help(context: Context) = "May a developer start this agent (and model)"
 

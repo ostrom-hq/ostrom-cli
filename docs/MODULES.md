@@ -39,7 +39,7 @@ Rules that keep the binary fast and the modules apart:
 
 ## The organisation of a launch
 
-`ostrom <agent>` (and `--cloud`, and `ostrom attach`) acts in one organisation: `--org`, else `OSTROM_ORG`, else the
+`ostrom run <agent>` (and `--cloud`, and `ostrom attach`) acts in one organisation: `--org`, else `OSTROM_ORG`, else the
 one `ostrom init` kept. It is looked up among the caller's (`GET /api/v1/orgs`, by id or short name) and its id is sent
 as `Ostrom-Org` on every call (`ApiServerTransport`); one the person is not a member of stops with 66. With none named,
 nothing is looked up, the header is left out and the server takes the person's only organisation; a member of several
@@ -47,7 +47,7 @@ gets 409 `org_required` from the policy check, and the launch stops with 64 and 
 
 ## The local relay
 
-While `ostrom <agent>` runs, the launcher starts a `LocalRelay`
+While `ostrom run <agent>` runs, the launcher starts a `LocalRelay`
 (`LocalRelayStarterImpl(report).start(RelayConfig(...))`) on `127.0.0.1` and a port chosen by the system, and closes
 it when the agent exits. The agent's hooks, its MCP client
 and, when the launch relays it, its inference reach Ostrom through it with one of two random capabilities (64
@@ -104,7 +104,7 @@ alternative: a second private file for `ostrom wait`, which a command of the age
 ## Exit codes
 
 `cli/.../ExitCode.kt`, from the spec (`CLI.md` § 2.3), printed by `ostrom help exit-codes`. The table below is the
-same, line for line (`ExitCodesTest` fails otherwise). `ostrom <agent>` returns the agent's own code once it has
+same, line for line (`ExitCodesTest` fails otherwise). `ostrom run <agent>` returns the agent's own code once it has
 started.
 
 | Code | Name | Meaning |
@@ -125,7 +125,7 @@ started.
 
 A command declared but not built exits with 70 (`NOT_IMPLEMENTED`) and says so on stderr; it disappears once every
 command is built. An option of a built command that this version does not have yet is a usage error instead: 64
-(`USAGE`); none is in that state since `--cloud` was built. `ostrom <agent> --cloud` and `ostrom attach` end with the
+(`USAGE`); none is in that state since `--cloud` was built. `ostrom run <agent> --cloud` and `ostrom attach` end with the
 session: 0 when it ends or the developer detaches, 64 for agent arguments (before any sign-in is read) or a `--repo`
 not on GitHub, 65 to sign in again, 66 for no such session, 69 when Ostrom or the connection is lost (the session
 keeps running: `ostrom attach <id>`), 77 for a session of someone else. `ostrom logs` exits 0 once the thread is printed
@@ -204,7 +204,7 @@ A subcommand of a group (`harness add`) works the same way, inside its group's `
 
 ## Add an agent adapter
 
-An adapter is what makes `ostrom <agent>` work for one agent: where its settings go (hooks, MCP servers) in a 0700
+An adapter is what makes `ostrom run <agent>` work for one agent: where its settings go (hooks, MCP servers) in a 0700
 temporary folder, which environment it gets, the hook dialect (`OSTROM_HOOK_DIALECT`), and how its hook events read.
 
 1. `launcher/.../Agent.kt`: add the agent (command, display name, executable, install URL once checked). The command
@@ -229,7 +229,7 @@ temporary folder, which environment it gets, the hook dialect (`OSTROM_HOOK_DIAL
    in a session, a bare repository of the developer's is used with `git --git-dir=<it>`, not by `cd <it> && git …`;
    the `.git` folders of a repository, a submodule and a worktree are not concerned (git 2.47).
 
-### What `ostrom claude` lets a repository configure
+### What `ostrom run claude` lets a repository configure
 
 Claude Code is started with `--setting-sources user` (review REVUES-CLI-4, 04/11/2026): the repository's
 `.claude/settings.json`, `.claude/settings.local.json` and `.mcp.json` are not read. They could otherwise run the
@@ -239,7 +239,7 @@ in `CLAUDE_CODE_SHELL_PREFIX`. The working folder and the repository's top are g
 `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`: the team's `CLAUDE.md`, `.claude/CLAUDE.md` and `.claude/rules` are
 read, as are the files they import from the repository. Probed on Claude Code 2.1.318, what the session reads:
 
-| From the repository | `ostrom claude` | `--trust-project-settings` |
+| From the repository | `ostrom run claude` | `--trust-project-settings` |
 | --- | --- | --- |
 | `.claude/settings.json`, `.claude/settings.local.json` (`env`, `hooks`, `apiKeyHelper`, `statusLine`, permissions) | no | yes |
 | `.mcp.json` | no | yes, when the settings approve it |
@@ -255,17 +255,17 @@ and the plugin on. A developer's own `--setting-sources` is not used, and said.
 What the developer's side cannot do either (review REVUES-CLI-5): Claude Code is not started with `--bare` or
 `--safe-mode`, which skip every hook and plugin (the launch stops, exit 70); `CLAUDE_CODE_SIMPLE` and
 `CLAUDE_CODE_SAFE_MODE`, the same modes by variable, are removed and written empty, never taken from the developer's
-shell. `ostrom` reads no argument file: `ostrom claude -p @TASK.md` passes `@TASK.md` to Claude Code as it is, so a
+shell. `ostrom` reads no argument file: `ostrom run claude -- -p @TASK.md` passes `@TASK.md` to Claude Code as it is, so a
 file of the repository cannot carry `--trust-project-settings` or `--settings`. A developer's own `--settings` is
 merged as before: it is theirs, typed on their command line.
 
-`ostrom claude --trust-project-settings` is for a team that trusts its repository: Claude Code reads
+`ostrom run claude --trust-project-settings` is for a team that trusts its repository: Claude Code reads
 `user,project,local` (or the developer's own `--setting-sources`), and the launch says before the agent starts that
 the repository's settings can run its programs and turn the gate off. It lowers the guarantee: the pins hold, the
 programs the repository's settings start do not go through the gate. The choice is said on the developer's terminal
 only; Ostrom's server does not record it (no field in the launch's contract).
 
-### What `ostrom gemini` lets a repository configure
+### What `ostrom run gemini` lets a repository configure
 
 Gemini CLI loads a `.env` file into its own environment, which every tool, hook and program it starts inherits. A
 repository's `.env` ran its own programs outside the gate (review REVUES-CLI-6, probed on Gemini CLI 0.66): a
@@ -275,7 +275,7 @@ lower-case `google_application_credentials` naming an external account with an e
 `grep_search` the gate allows. A list of names cannot follow every program's variables, so by default, as for
 Claude Code, the repository does not configure the agent:
 
-| From the repository | `ostrom gemini` | `--trust-project-settings` |
+| From the repository | `ostrom run gemini` | `--trust-project-settings` |
 | --- | --- | --- |
 | `.env` of the working folder or a folder above it | no (`advanced.ignoreLocalEnv` in the session's settings) | yes, Ostrom's pins win |
 | `.gemini/.env` of the working folder or a folder above it | Gemini is not started (exit 70): Gemini loads it even with `ignoreLocalEnv` | yes, Ostrom's pins win |
@@ -297,10 +297,10 @@ commands that run nothing are loaded as before; its agents are not (review REVUE
 line is `---` hid `mcp_servers` from a check of keys, and a remote agent's `auth` (`!…` run by `bash -c`, `$…` sent to
 the card's address) is resolved when Gemini starts, acknowledged by the card's address and not by the text. Gemini 0.66
 has no setting that skips the project's agents alone (`experimental.enableAgents: false` takes the developer's own and
-the built-in ones away too), so the launch stops there, as `ostrom claude` reads none of the repository's agents. The
+the built-in ones away too), so the launch stops there, as `ostrom run claude` reads none of the repository's agents. The
 developer's own agents, in their home, are loaded as before.
 
-`ostrom gemini --trust-project-settings` is for a team that trusts its repository: Gemini loads its `.env`, its commands
+`ostrom run gemini --trust-project-settings` is for a team that trusts its repository: Gemini loads its `.env`, its commands
 and its agents as it does outside Ostrom, and the launch says so before the agent starts. Ostrom still pins the variables it knows of (the shell,
 the loader, git, the interpreters, ripgrep's configuration, Gemini's account and credentials, `google_application_credentials`
 and `GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES` included), and still refuses a `.env` that names one it cannot set

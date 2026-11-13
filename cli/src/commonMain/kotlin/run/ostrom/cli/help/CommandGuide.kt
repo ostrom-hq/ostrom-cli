@@ -17,21 +17,30 @@ internal val guidedPaths: Set<String> get() = GUIDES.keys
 
 private fun guide(page: String, vararg examples: Pair<String, String>) = Guide(examples.toList(), page)
 
-private val AGENT_GUIDES = Agent.entries.associate { agent ->
-    agent.command to guide(
+private fun agentGuide(agent: Agent) = guide(
+    "agents",
+    "ostrom run ${agent.command}" to "start ${agent.command} under your team's harness",
+    "ostrom run ${agent.command} -- --help" to "everything after -- goes to ${agent.command} itself",
+    "ostrom run ${agent.command} --dry-run" to "show the harness that would apply, then exit",
+    "ostrom run ${agent.command} --cloud" to "run it in Ostrom's cloud, attached here (Ctrl-] detaches)",
+)
+
+/** `run <agent>`, and the former `<agent>` kept hidden for one release, which points to it. */
+private val AGENT_GUIDES = Agent.entries.flatMap { agent ->
+    listOf("run ${agent.command}" to agentGuide(agent), agent.command to agentGuide(agent))
+}.toMap() + mapOf(
+    "run" to guide(
         "agents",
-        "ostrom ${agent.command}" to "start ${agent.command} under your team's harness",
-        "ostrom ${agent.command} --dry-run" to "show the harness that would apply, then exit",
-        "ostrom ${agent.command} --cloud" to "run it in Ostrom's cloud, attached here (Ctrl-] detaches)",
-        "ostrom ${agent.command} -- --help" to "everything after -- goes to ${agent.command} itself",
-    )
-}
+        "ostrom run claude" to "start Claude Code under your team's harness",
+        "ostrom run codex -- exec \"fix the tests\"" to "its own arguments go after --",
+    ),
+)
 
 private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
     "" to guide(
         "quickstart",
         "ostrom login" to "sign in to your team's server",
-        "ostrom claude" to "start Claude Code under your team's harness",
+        "ostrom run claude" to "start Claude Code under your team's harness",
         "ostrom doctor" to "check everything and say what to do",
     ),
     "status" to guide(

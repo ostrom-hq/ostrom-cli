@@ -40,12 +40,12 @@ class CompletionTest : CliKit() {
         val bash = script("bash")
         val root = bash.lines().first { it.startsWith("        '') candidates='") }
         val words = root.substringAfter("candidates='").substringBefore("'").split(" ")
-        assertEquals(listOf("claude", "codex"), words.take(2), root)
+        assertEquals(listOf("run", "status"), words.take(2), root)
         assertTrue(words.containsAll(listOf("receipts", "completion", "--no-color")), root)
         assertFalse(words.any { it in setOf("wait", "hook", "mcp", "check") }, root)
         assertTrue(bash.contains("\n        'completion') candidates='bash zsh fish powershell --help -h' ;;\n"), bash)
         assertTrue(bash.contains("'--server'") && bash.contains(") ((i++)); continue ;;\n"), bash)
-        assertTrue(bash.contains("\n            'claude'|'codex'|"), bash)
+        assertTrue(bash.contains("\n            'run'|'run claude'|'run codex'|"), bash)
         assertTrue(bash.startsWith("# ostrom completion for bash. Load it from ~/.bashrc"), bash)
         assertTrue(bash.endsWith("\ncomplete -F _ostrom ostrom\n"), bash)
     }
@@ -63,7 +63,7 @@ class CompletionTest : CliKit() {
         val completion = "\n        case 'completion'\n            printf '%s\\n' 'bash' 'zsh' 'fish' 'powershell'"
         assertTrue(fish.contains("$completion '--help' '-h'\n"), fish)
         assertFalse(fish.contains("'wait'") || fish.contains("'hook'"), fish)
-        assertTrue(fish.contains("\n            case 'claude' 'codex' "), fish)
+        assertTrue(fish.contains("\n            case 'run' 'run claude' 'run codex' "), fish)
         assertTrue(fish.contains("'--server'") && fish.contains("\n                set skip 1\n"), fish)
         assertTrue(fish.endsWith("\ncomplete -c ostrom -f -a '(__ostrom_words)'\n"), fish)
     }
@@ -73,7 +73,7 @@ class CompletionTest : CliKit() {
         val script = script("powershell")
         assertTrue(script.contains("Register-ArgumentCompleter -Native -CommandName ostrom -ScriptBlock {"), script)
         val root = script.lines().first { it.startsWith("        '' = @(") }
-        assertTrue(root.startsWith("        '' = @('claude', 'codex'"), root)
+        assertTrue(root.startsWith("        '' = @('run', 'status'"), root)
         assertTrue(root.contains("'receipts'") && root.contains("'completion'") && root.contains("'--no-color'"), root)
         assertFalse(root.contains("'wait'") || root.contains("'hook'"), root)
         assertTrue(script.contains("\n        'receipts' = @('list', 'show', 'pull', "), script)

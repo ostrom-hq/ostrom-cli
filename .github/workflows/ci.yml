@@ -269,7 +269,7 @@ jobs:
             --env-file "$RUNNER_TEMP/server.env" "$IMAGE"
           for _ in $(seq 1 60); do curl -fsS 127.0.0.1:4600/ready >/dev/null 2>&1 && exit 0; sleep 1; done
           docker logs ostrom-server; exit 1
-      # demo/PARCOURS.md on the CLI side, from ostrom login to ostrom claude (e2e/journey.py, the script of the film).
+      # demo/PARCOURS.md on the CLI side, from ostrom login to ostrom run claude (e2e/journey.py, the script of the film).
       # A step whose route is not on main yet is skipped and named in the summary; OSTROM_CLI_REQUIRE_ALL_ROUTES=true
       # makes such a skip fail once the server serves the whole journey.
       - name: End to end, the CLI journey against the real server (login to claude)

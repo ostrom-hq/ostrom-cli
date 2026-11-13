@@ -32,7 +32,7 @@ class RootCommand(private val dependencies: CliDependencies) : CliktCommand(name
         context {
             helpFormatter = { OstromHelpFormatter(it) }
             // A word starting with `@` is an argument, never a file of more options (review REVUES-CLI-5): with
-            // `alias claude='ostrom claude'`, `claude -p @TASK.md` read Ostrom's own options from a file of the
+            // `alias claude='ostrom run claude --'`, `claude -p @TASK.md` read Ostrom's own options from a file of the
             // repository (`--trust-project-settings`). Clikt 5 expands them unless this is null; its
             // `expandArgumentFiles` no longer has any effect.
             readArgumentFile = null
@@ -84,7 +84,7 @@ class RootCommand(private val dependencies: CliDependencies) : CliktCommand(name
             |Ostrom ${BuildInfo.VERSION}
             |$account
             |
-            |Start an agent   ostrom ${Agent.CLAUDE.command}   (also: $others)
+            |Start an agent   ${runPath(Agent.CLAUDE)}   (also: $others)
             |See everything   ostrom status
             |All commands     ostrom --help
             |""".trimMargin(),

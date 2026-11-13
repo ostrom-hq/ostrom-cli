@@ -145,7 +145,7 @@ internal class LoginCommand(private val dependencies: CliDependencies) : CliktCo
             ConfigStoreImpl(dependencies.files, dependencies.configFile(directory)).set(ConfigKey.SERVER, serverUrl)
         }
         dependencies.console.out("✓ Signed in as @${outcome.credentials.login} on $serverUrl\n")
-        dependencies.console.out("Next: cd into a repository and run ostrom claude\n")
+        dependencies.console.out("Next: cd into a repository and start an agent: ostrom run claude\n")
     }
 
     /** Revokes [token] on [serverUrl], as best it can: its answer changes nothing here. */

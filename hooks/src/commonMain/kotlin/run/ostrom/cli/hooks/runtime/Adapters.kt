@@ -32,7 +32,7 @@ class RelayCalls(
         val headers = token?.let { mapOf("Authorization" to "Bearer $it") }.orEmpty()
         val request = LoopbackRequest(if (body == null) "GET" else "POST", path, headers, body?.toString())
         return if (port == null) {
-            CallResult.Failed("no Ostrom relay in this session (run the agent with `ostrom <agent>`)")
+            CallResult.Failed("no Ostrom relay in this session (run the agent with `ostrom run <agent>`)")
         } else {
             http.exchange(port, request, timeoutMillis).fold(
                 onSuccess = ::resultOf,
