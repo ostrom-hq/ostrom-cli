@@ -63,6 +63,11 @@ when Ostrom is unreachable or refuses, the agent stops and the failure is record
 hooks reach Ostrom through the launch's relay with the hooks' capability (`OSTROM_RELAY_TOKEN_FILE`), which alone
 opens the `stop`, `hook-error` and `context` routes.
 
+When the session also holds its stop for a wait's answer (`waits.wake.v1`, Claude Code), the two are one Stop hook,
+`ostrom hook todo-stop` with its wake argument, as TeamCode's: Claude Code runs an event's hooks side by side, so the
+todo decides first, and only a stop it lets pass goes on to `ostrom hook wake`'s hold, on the same event (timeout
+86400 s).
+
 `ostrom hook todo-context` is the SessionStart hook for `compact` and `resume`: it gives the agent the reference, the
 list and the next item again (`additionalContext`), nothing at any other start or on any failure.
 
@@ -72,7 +77,7 @@ A launch reads the server's capabilities; only when it announces `todos.v1` does
 
 | Agent | MCP server `ostrom-todo` | Stop hook | SessionStart (compact, resume) |
 | --- | --- | --- | --- |
-| Claude Code | stdio entry in the session's `--mcp-config` | `Stop`, 150 s | second `SessionStart` group, `compact\|resume`, 25 s |
+| Claude Code | stdio entry in the session's `--mcp-config` | `Stop`, 150 s (the todo then the wait's hold, 86400 s, with `waits.wake.v1`) | second `SessionStart` group, `compact\|resume`, 25 s |
 | Codex | `-c mcp_servers.ostrom-todo={command,args}` | `-c hooks.Stop`, 150 s, trusted by its hash | no: its transcript is not read either |
 | Gemini CLI, Grok, Hermes, OpenCode, Pi | through `ostrom mcp --session … --server ostrom-todo` | no | no |
 

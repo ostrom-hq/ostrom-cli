@@ -11,6 +11,7 @@ import run.ostrom.cli.platform.Environment
 import run.ostrom.cli.platform.LoopbackHttp
 import run.ostrom.cli.platform.ProcessCapture
 import run.ostrom.cli.platform.StandardInput
+import run.ostrom.cli.platform.StandardInputFailure
 
 /**
  * `ostrom hook todo-stop|todo-context`, the todo's hooks, reached from `main`'s fast path like the gate. They reach
@@ -30,27 +31,34 @@ class TodoHookRunner(
     private val io: CoroutineDispatcher,
 ) {
     /**
-     * Runs the hook [kind] ([STOP] or [CONTEXT]) on the event on stdin; its exit code, always 0. Whatever fails on the
-     * way (the read, the relay, a hook-error that fails too) prints nothing: the agent stops or starts as usual.
-     * [Throwable], as the gate's runner: this is the hook process's blocking entry, no cancellation can reach it.
+     * Runs the hook [kind] ([STOP] or [CONTEXT]) on the event on stdin; its exit code, 0 unless [then] says otherwise.
+     * Whatever fails on the way (the read, the relay, a hook-error that fails too) prints nothing: the agent stops or
+     * starts as usual. [Throwable], as the gate's runner: this is the hook process's blocking entry, no cancellation
+     * can reach it.
+     *
+     * @param then What runs when the hook lets the agent go on (`todo-stop --wake`: the hold for a wait's answer, given
+     * the same event on its stdin). The todo decides first: a stop it blocks is never held.
      */
     @Suppress("TooGenericExceptionCaught")
-    fun run(kind: String): Int {
+    fun run(kind: String, then: ((Console) -> Int)?): Int {
+        var event: StandardInput = StandardInput.Unavailable(StandardInputFailure.ERROR)
         val answer = try {
-            answer(kind)
+            event = console.readStandardInput(MAX_INPUT, READ_MILLIS)
+            (event as? StandardInput.Read)?.let { answer(kind, it.bytes.decodeToString()) }
         } catch (ignored: Throwable) { // not coroutine-reachable: the hook process's blocking entry, its own guard
             null
         }
-        answer?.let { console.data("$it\n") }
-        return 0
+        if (answer != null) {
+            console.data("$answer\n")
+            return 0
+        }
+        return then?.invoke(Replayed(console, event)) ?: 0
     }
 
-    private fun answer(kind: String): String? {
-        val read = console.readStandardInput(MAX_INPUT, READ_MILLIS) as? StandardInput.Read
+    private fun answer(kind: String, input: String): String? {
         val port = environment["OSTROM_RELAY_URL"]?.let { RELAY_URL.matchEntire(it) }?.let { it.groupValues[1].toInt() }
         val token = environment["OSTROM_RELAY_TOKEN_FILE"]?.let(::token)
-        if (read == null || port == null || token == null) return null
-        val input = read.bytes.decodeToString()
+        if (port == null || token == null) return null
         val hooks = RelayTodoHooks(http, port, token)
         return if (kind == CONTEXT) todoContext(input, hooks::context) else stopped(input, hooks, port, token)
     }
@@ -79,8 +87,16 @@ class TodoHookRunner(
         /** Both. */
         val KINDS = setOf(STOP, CONTEXT)
 
+        /** `todo-stop --wake`: once the todo lets the stop pass, the hold for a wait's answer runs ([run]'s `then`). */
+        const val WAKE = "--wake"
+
         private const val MAX_INPUT = 8 shl 20
         private const val READ_MILLIS = 5_000
         private val RELAY_URL = Regex("http://127\\.0\\.0\\.1:(\\d{1,5})/?")
     }
+}
+
+/** [console], whose stdin is [event], already read: the next hook of the same process reads it again. */
+private class Replayed(private val console: Console, private val event: StandardInput) : Console by console {
+    override fun readStandardInput(maxBytes: Int, timeoutMillis: Int) = event
 }
