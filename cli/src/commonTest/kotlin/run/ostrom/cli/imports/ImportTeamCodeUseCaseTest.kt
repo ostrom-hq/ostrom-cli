@@ -96,12 +96,14 @@ class ImportTeamCodeUseCaseTest {
         )
         assertEquals(asked, paths)
         assertTrue("  updated  account  Team Max  [access only]\n" in said, "$said")
-        val trial = "! 1 shared account serve TeamCode's access tokens, never renewed: import again once they expire\n"
+        val trial = "! 1 shared account serves TeamCode's access token, never renewed: import again once they expire\n"
         assertTrue(said.endsWith(trial), "$said")
         said.clear()
-        replies["POST /api/v1/import/teamcode"] = ServerReply(200, """{"items":[],"pendingHandover":1}""")
+        val trialled = """{"items":[],"pendingHandover":1,"accessOnly":2}"""
+        replies["POST /api/v1/import/teamcode"] = ServerReply(200, trialled)
         assertEquals(0, import(apply = true))
         assertTrue("! 1 shared account serves nothing until it is handed over" in said, "$said")
+        assertTrue("! 2 shared accounts serve TeamCode's access tokens, never renewed" in said, "$said")
     }
 
     @Test

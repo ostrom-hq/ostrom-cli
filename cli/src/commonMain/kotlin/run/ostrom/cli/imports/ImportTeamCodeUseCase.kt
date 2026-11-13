@@ -97,7 +97,8 @@ class ImportTeamCodeUseCase(
         }
         val trialled = count(last, ACCESS_ONLY)
         if (trialled > 0) {
-            say("! ${shared(trialled)} serve TeamCode's access tokens, never renewed: import again once they expire\n")
+            val serve = if (trialled == 1) "serves TeamCode's access token" else "serve TeamCode's access tokens"
+            say("! ${shared(trialled)} $serve, never renewed: import again once they expire\n")
         }
         return ExitCode.OK.code
     }
