@@ -3,6 +3,7 @@ package run.ostrom.cli
 
 import run.ostrom.cli.hooks.runtime.GateTexts
 import run.ostrom.cli.launcher.WAITS_WAKE
+import run.ostrom.cli.launcher.team.TEAM_SKILLS
 import run.ostrom.core.api.models.ServerFeatures
 import run.ostrom.cli.platform.Console
 import run.ostrom.cli.platform.Environment
@@ -49,6 +50,7 @@ class HookWiringTest {
     @Test
     fun theLaunchersFeatureKeyIsTheContractsKey() {
         assertEquals(ServerFeatures.WAITS_WAKE, WAITS_WAKE)
+        assertEquals(ServerFeatures.SKILLS, TEAM_SKILLS)
     }
 
     @Test
