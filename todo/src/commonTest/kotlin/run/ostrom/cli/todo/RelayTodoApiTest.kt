@@ -56,6 +56,7 @@ class RelayTodoApiTest {
             }
         }
         val api = RelayTodoApi(relay, 4100, "cap")
+        val hooks = RelayTodoHooks(relay, 4100, "cap")
         val input = TodoItemInput("fix", "Fix", "d", TodoDoneWhen("t", listOf(TodoCheck.PrMerged("a/b"))))
         assertEquals("fix", api.read()?.items?.single()?.id)
         api.create(CreateTodoRequest(reference = "r", items = listOf(input)))
@@ -65,9 +66,9 @@ class RelayTodoApiTest {
         api.complete("fix", CompleteTodoItemRequest(checks = emptyList()))
         api.link("fix", LinkTodoItemRequest(kind = TodoLinkKind.PR, ref = "https://github.com/a/b/pull/1"))
         api.drop("fix", DropTodoItemRequest(reason = "moot"))
-        assertEquals("block", api.context())
-        assertEquals(TodoStopAction.ALLOW, api.stop(TodoStopRequest(phase = TodoStopPhase.BEGIN)).action)
-        api.hookError(TodoHookErrorRequest(text = "failed"))
+        assertEquals("block", hooks.context())
+        assertEquals(TodoStopAction.ALLOW, hooks.stop(TodoStopRequest(phase = TodoStopPhase.BEGIN)).action)
+        hooks.hookError(TodoHookErrorRequest(text = "failed"))
         assertEquals(
             listOf(
                 "GET /api/v1/todos/session",
@@ -98,7 +99,7 @@ class RelayTodoApiTest {
             api.create(CreateTodoRequest(reference = "r", items = emptyList())).list()
         }
         assertEquals(TODO_NOT_FOUND, error.code)
-        assertNull(RelayTodoApi(FakeRelay { ok("""{"text":null}""") }, 1, "cap").context())
+        assertNull(RelayTodoHooks(FakeRelay { ok("""{"text":null}""") }, 1, "cap").context())
     }
 
     @Test
@@ -109,6 +110,7 @@ class RelayTodoApiTest {
                 Triple("todo_exists", 409, "This session already has a todo."),
             Result.success(LoopbackResponse(403, "This Ostrom capability does not open this route.")) to
                 Triple("http_403", 403, "Ostrom answered HTTP 403"),
+            Result.success(LoopbackResponse(101, "")) to Triple("http_101", 101, "Ostrom answered HTTP 101"),
             Result.failure<LoopbackResponse>(LoopbackException(LoopbackFailure.UNREACHABLE)) to
                 Triple("unreachable", null, "the local relay did not answer (the local relay is unreachable)"),
         )

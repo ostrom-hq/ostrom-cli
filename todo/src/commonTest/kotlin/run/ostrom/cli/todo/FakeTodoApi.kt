@@ -24,7 +24,7 @@ import run.ostrom.core.api.models.TodoStopRequest
 class FakeTodoApi(
     vararg reads: Todo?,
     var after: Todo? = reads.lastOrNull(),
-) : TodoApi {
+) : TodoApi, TodoHookApi {
     private val reads = reads.toMutableList()
     val refusals = mutableMapOf<String, MutableList<TodoApiException>>()
     val calls = mutableListOf<Pair<String, Any?>>()

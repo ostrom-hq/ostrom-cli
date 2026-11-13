@@ -11,7 +11,8 @@ import run.ostrom.core.api.models.TodoLinkKind
 /**
  * The `command` check: the stored command in the agent's shell (`sh -c`, `cmd /c` on Windows), its placeholders
  * replaced from the items' links, at most 120 seconds, its exit code compared and the end of its output kept as the
- * proof (300 characters, masked). A value not linked yet, a timeout or a shell that does not start is unknown.
+ * proof (masked, then its last 300 characters). A value not linked yet, a timeout or a shell that does not start is
+ * unknown.
  *
  * @param system The system of this machine (`cmd.exe` on Windows, `sh` elsewhere).
  */
@@ -22,7 +23,7 @@ class CommandCheck(private val capture: ProcessCapture, private val system: Oper
         val seconds = check.timeoutSeconds.coerceIn(1, MAX_SECONDS)
         return when (val result = capture.capture(shell(command, check.cwd), seconds * MILLIS_PER_SECOND)) {
             is CaptureResult.Exited -> {
-                val tail = Secrets.mask(result.output.trim().takeLast(MAX_OUTPUT))
+                val tail = Secrets.mask(result.output.trim()).takeLast(MAX_OUTPUT)
                 val shown = if (tail.isEmpty()) "" else ": $tail"
                 if (result.code == check.expectExit) {
                     CheckOutcome(true, "command exited ${result.code}$shown")
@@ -71,7 +72,7 @@ class CommandCheck(private val capture: ProcessCapture, private val system: Oper
         const val MAX_OUTPUT = 300
         const val SAFE = "._-/"
         const val NO_SHELL = "unknown: the shell could not be started"
-        val PLACEHOLDER = Regex("""\$\{(pr|release):([^.}]+)\.(number|mergeSha|tag)}""")
+        private val PLACEHOLDER = Regex("""\$\{(pr|release):([^.}]+)\.(number|mergeSha|tag)}""")
     }
 }
 

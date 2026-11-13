@@ -108,10 +108,7 @@ internal fun resolveTarget(method: HttpMethod, path: String, config: RelayConfig
 private fun hookTarget(method: HttpMethod, path: String, catalog: String?): RelayTarget = when {
     method == HttpMethod.Post && HOOK_POST.matches(path) -> RelayTarget.Hook(longPoll = false)
     method == HttpMethod.Post && path == WAITS_WAKE -> RelayTarget.Wake
-    method == HttpMethod.Post && TODO_AGENT_POST.matches(path) -> RelayTarget.Todo(hooksOnly = false)
-    method == HttpMethod.Post && TODO_HOOK_POST.matches(path) -> RelayTarget.Todo(hooksOnly = true)
-    method == HttpMethod.Get && path == TODO_ROOT -> RelayTarget.Todo(hooksOnly = false)
-    method == HttpMethod.Get && path == TODO_CONTEXT -> RelayTarget.Todo(hooksOnly = true)
+    path.startsWith(TODO_ROOT) -> todoTarget(method, path)
     method == HttpMethod.Get && path == SIGNED_GATE_CATALOG -> RelayTarget.SignedCatalog
     method == HttpMethod.Get && path == GATE_CATALOG ->
         if (catalog == null) RelayTarget.Hook(longPoll = false) else RelayTarget.Catalog(catalog)
@@ -123,6 +120,15 @@ private fun mcpTarget(method: HttpMethod, server: String, allowed: Set<String>):
     !MCP_SERVER_NAME.matches(server) || server !in allowed -> RelayTarget.NotFound
     method == HttpMethod.Post -> RelayTarget.Mcp(server)
     else -> RelayTarget.McpMethodNotAllowed
+}
+
+/** A todo route ([TODO_ROOT] and under): the agent's tools', or the hooks' own; anything else under it is a 404. */
+private fun todoTarget(method: HttpMethod, path: String): RelayTarget = when {
+    method == HttpMethod.Post && TODO_AGENT_POST.matches(path) -> RelayTarget.Todo(hooksOnly = false)
+    method == HttpMethod.Post && TODO_HOOK_POST.matches(path) -> RelayTarget.Todo(hooksOnly = true)
+    method == HttpMethod.Get && path == TODO_ROOT -> RelayTarget.Todo(hooksOnly = false)
+    method == HttpMethod.Get && path == TODO_CONTEXT -> RelayTarget.Todo(hooksOnly = true)
+    else -> RelayTarget.NotFound
 }
 
 private fun inferenceTarget(method: HttpMethod, path: String): RelayTarget {

@@ -22,8 +22,9 @@ class CheckOutcome(
 /**
  * Runs the typed checks of a todo item from the agent's environment, which holds the GitHub token (TeamCode's
  * `TodoChecks`, docs/todos.md "Where each check runs"): `gh` for pull requests, releases and CI, a shell for `command`.
- * The condition is the item Ostrom stored, never one the agent gives, so the agent chooses neither the command nor
- * the moment. Ostrom verifies `artifact_published` and `wait_answered` itself; `attested` is the agent's word.
+ * The condition is the one Ostrom stored when the list was written, never one given at completion: the agent cannot
+ * change it once the item exists. Ostrom verifies `artifact_published` and `wait_answered` itself; `attested` is the
+ * agent's word.
  */
 class TodoChecks(private val github: GitHub, private val commands: CommandCheck) {
     /**
@@ -83,7 +84,7 @@ class TodoChecks(private val github: GitHub, private val commands: CommandCheck)
     }
 
     private fun link(pr: GhPullRequest) =
-        LinkTodoItemRequest(kind = TodoLinkKind.PR, ref = pr.url, number = pr.number, sha = pr.mergeCommit?.oid)
+        LinkTodoItemRequest(kind = TodoLinkKind.PR, ref = pr.url, number = pr.number, sha = pr.mergeSha)
 
     private fun releaseContains(list: Todo, check: TodoCheck.ReleaseContains): CheckOutcome {
         val sha = check.commit ?: github.mergeSha(list, check.of ?: throw UnknownCheck(NO_ITEM), check.repo)

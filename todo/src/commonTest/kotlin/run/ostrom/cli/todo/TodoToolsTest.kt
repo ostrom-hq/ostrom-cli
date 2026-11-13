@@ -2,7 +2,6 @@
 package run.ostrom.cli.todo
 
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -210,7 +209,10 @@ class TodoToolsTest {
         val fix = """{"id":"fix"}"""
         assertEquals("Ostrom refused: Closed. (item_closed)." to true, tools(other, capture).call("todo_complete", fix))
         val linkFails = FakeTodoApi(list).also { it.refuse("link fix", "invalid_link", "Bad.") }
-        val found = FakeCapture("gh pr list" to printed("[${ghPr(5, "OPEN", marker("fix"))}]"))
+        val found = FakeCapture(
+            "gh pr list" to printed("[${ghPr(5, "OPEN", marker("fix"))}]"),
+            "gh api user" to printed("maya"),
+        )
         assertEquals("Ostrom refused: Bad. (invalid_link)." to true, tools(linkFails, found).call("todo_complete", fix))
     }
 
@@ -297,6 +299,6 @@ class TodoToolsTest {
         val items = tools(FakeTodoApi()).tools().single { it.name == "todo_create" }.definition
             .getValue("inputSchema").jsonObject.getValue("properties").jsonObject.getValue("items").jsonObject
         assertEquals(JsonPrimitive("object"), items.getValue("items").jsonObject["type"])
-        assertEquals(null, (items as JsonObject)["missing"])
+        assertEquals(null, items["missing"])
     }
 }

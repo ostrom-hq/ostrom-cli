@@ -57,7 +57,13 @@ interface TodoApi {
 
     /** Asks the session's owner to drop [item] (`requestTodoDrop`). */
     fun drop(item: String, request: DropTodoItemRequest): SessionTodo
+}
 
+/**
+ * The routes only the Stop and SessionStart hooks call, with the hooks' capability of the relay (the agent's does not
+ * open them).
+ */
+interface TodoHookApi {
     /** The reminder block, or null without an active list (`readTodoContext`). */
     fun context(): String?
 
@@ -74,61 +80,87 @@ fun SessionTodo.list(): Todo = todo ?: throw TodoApiException(TODO_NOT_FOUND, nu
 /** Ostrom's key for a session without a list. */
 const val TODO_NOT_FOUND = "todo_not_found"
 
+/** The root of the todo routes. */
+const val TODO_ROOT = "/api/v1/todos/session"
+
 /**
- * [TodoApi] over the launch's local relay on `127.0.0.1:[port]`, with a capability of the relay ([token]): the agent's
- * own for the MCP server, the hooks' for the Stop and SessionStart hooks. The relay lets through only the todo routes
- * (and the Stop hook's to the hooks' capability), and fills `sessionId` with the session it knows.
+ * [TodoApi] over the launch's local relay on `127.0.0.1:[port]`, with the agent's capability of the relay ([token]).
+ * The relay lets through only the todo routes, and fills `sessionId` with the session it knows.
  *
  * @param timeoutMillis The bound of one call: a slower answer is an infrastructure problem, never a reason to wait.
  */
 class RelayTodoApi(
-    private val http: LoopbackHttp,
-    private val port: Int,
-    private val token: String,
-    private val timeoutMillis: Int = CALL_MILLIS,
+    http: LoopbackHttp,
+    port: Int,
+    token: String,
+    timeoutMillis: Int = TodoRelay.CALL_MILLIS,
 ) : TodoApi {
-    override fun read(): Todo? = get(ROOT, SessionTodo.serializer()).todo
+    private val relay = TodoRelay(http, port, token, timeoutMillis)
+
+    override fun read(): Todo? = relay.get(TODO_ROOT, SessionTodo.serializer()).todo
 
     override fun create(request: CreateTodoRequest): SessionTodo =
-        post(ROOT, CreateTodoRequest.serializer(), request, SessionTodo.serializer())
+        relay.post(TODO_ROOT, CreateTodoRequest.serializer(), request, SessionTodo.serializer())
 
     override fun add(request: AddTodoItemRequest): SessionTodo =
-        post("$ROOT/items", AddTodoItemRequest.serializer(), request, SessionTodo.serializer())
+        relay.post("$TODO_ROOT/items", AddTodoItemRequest.serializer(), request, SessionTodo.serializer())
 
     override fun start(item: String, request: StartTodoItemRequest): StartTodoItemResponse =
-        post(item(item, "start"), StartTodoItemRequest.serializer(), request, StartTodoItemResponse.serializer())
+        relay.post(item(item, "start"), StartTodoItemRequest.serializer(), request, StartTodoItemResponse.serializer())
 
     override fun note(item: String, request: NoteTodoItemRequest): SessionTodo =
-        post(item(item, "notes"), NoteTodoItemRequest.serializer(), request, SessionTodo.serializer())
+        relay.post(item(item, "notes"), NoteTodoItemRequest.serializer(), request, SessionTodo.serializer())
 
     override fun complete(item: String, request: CompleteTodoItemRequest): SessionTodo =
-        post(item(item, "proof"), CompleteTodoItemRequest.serializer(), request, SessionTodo.serializer())
+        relay.post(item(item, "proof"), CompleteTodoItemRequest.serializer(), request, SessionTodo.serializer())
 
     override fun link(item: String, request: LinkTodoItemRequest): SessionTodo =
-        post(item(item, "link"), LinkTodoItemRequest.serializer(), request, SessionTodo.serializer())
+        relay.post(item(item, "link"), LinkTodoItemRequest.serializer(), request, SessionTodo.serializer())
 
     override fun drop(item: String, request: DropTodoItemRequest): SessionTodo =
-        post(item(item, "drop"), DropTodoItemRequest.serializer(), request, SessionTodo.serializer())
-
-    override fun context(): String? = get("$ROOT/context", TodoContext.serializer()).text
-
-    override fun stop(request: TodoStopRequest): TodoStopDecision =
-        post("$ROOT/stop", TodoStopRequest.serializer(), request, TodoStopDecision.serializer())
-
-    override fun hookError(request: TodoHookErrorRequest) {
-        post("$ROOT/hook-error", TodoHookErrorRequest.serializer(), request, SessionTodo.serializer())
-    }
+        relay.post(item(item, "drop"), DropTodoItemRequest.serializer(), request, SessionTodo.serializer())
 
     /** An item's route; an id that is no slug would reach another route of the relay, so it is refused here. */
     private fun item(id: String, action: String): String {
         if (!ITEM_ID.matches(id)) throw TodoApiException(UNKNOWN_ITEM, null, "No item '$id' in this todo.")
-        return "$ROOT/items/$id/$action"
+        return "$TODO_ROOT/items/$id/$action"
     }
 
-    private fun <T> get(path: String, answer: KSerializer<T>): T =
-        OstromJson.decodeFromString(answer, call("GET", path, null))
+    private companion object {
+        const val UNKNOWN_ITEM = "unknown_item"
+        val ITEM_ID = Regex("[A-Za-z0-9_-]{1,128}")
+    }
+}
 
-    private fun <I, O> post(path: String, body: KSerializer<I>, value: I, answer: KSerializer<O>): O =
+/** [TodoHookApi] over the launch's local relay, with the hooks' capability of the relay ([token]). */
+class RelayTodoHooks(
+    http: LoopbackHttp,
+    port: Int,
+    token: String,
+    timeoutMillis: Int = TodoRelay.CALL_MILLIS,
+) : TodoHookApi {
+    private val relay = TodoRelay(http, port, token, timeoutMillis)
+
+    override fun context(): String? = relay.get("$TODO_ROOT/context", TodoContext.serializer()).text
+
+    override fun stop(request: TodoStopRequest): TodoStopDecision =
+        relay.post("$TODO_ROOT/stop", TodoStopRequest.serializer(), request, TodoStopDecision.serializer())
+
+    override fun hookError(request: TodoHookErrorRequest) {
+        relay.post("$TODO_ROOT/hook-error", TodoHookErrorRequest.serializer(), request, SessionTodo.serializer())
+    }
+}
+
+/** One todo call through the relay on `127.0.0.1:[port]` with [token], bounded by [timeoutMillis]. */
+internal class TodoRelay(
+    private val http: LoopbackHttp,
+    private val port: Int,
+    private val token: String,
+    private val timeoutMillis: Int,
+) {
+    fun <T> get(path: String, answer: KSerializer<T>): T = OstromJson.decodeFromString(answer, call("GET", path, null))
+
+    fun <I, O> post(path: String, body: KSerializer<I>, value: I, answer: KSerializer<O>): O =
         OstromJson.decodeFromString(answer, call("POST", path, OstromJson.encodeToString(body, value)))
 
     private fun call(method: String, path: String, body: String?): String {
@@ -136,29 +168,27 @@ class RelayTodoApi(
         val response = http.exchange(port, request, timeoutMillis)
             .getOrElse { throw TodoApiException(UNREACHABLE, null, "the local relay did not answer (${it.message})") }
         if (response.status in SUCCESS) return response.body
-        // Ostrom's refusal is {"error":{"type","message"}}; the relay's own refusals are plain text
-        val error = try {
-            OstromJson.decodeFromString(ApiError.serializer(), response.body).error
-        } catch (_: SerializationException) {
-            null
-        }
-        val code = error?.type ?: "http_${response.status}"
-        throw TodoApiException(code, response.status, error?.message ?: "Ostrom answered HTTP ${response.status}")
+        throw refusal(response.status, response.body)
     }
 
-    /** The routes and limits of the todo calls. */
-    companion object {
-        /** The root of the todo routes. */
-        const val ROOT = "/api/v1/todos/session"
+    /** Ostrom's refusal is `{"error":{"type","message"}}`; the relay's own refusals are plain text. */
+    private fun refusal(status: Int, body: String): TodoApiException {
+        val error = try {
+            OstromJson.decodeFromString(ApiError.serializer(), body).error
+        } catch (_: SerializationException) {
+            return TodoApiException("http_$status", status, "Ostrom answered HTTP $status")
+        }
+        return TodoApiException(error.type, status, error.message)
+    }
 
+    /** The limits of the todo calls. */
+    companion object {
         /** One call to Ostrom, as TeamCode's Stop hook bounds it. */
         const val CALL_MILLIS = 20_000
 
         /** The key of a call that did not reach Ostrom. */
         const val UNREACHABLE = "unreachable"
 
-        private const val UNKNOWN_ITEM = "unknown_item"
         private val SUCCESS = 200..299
-        private val ITEM_ID = Regex("[A-Za-z0-9_-]{1,128}")
     }
 }

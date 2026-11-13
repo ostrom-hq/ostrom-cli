@@ -27,7 +27,8 @@ class CommandCheckTest {
     fun itsOutputIsBoundedAndMasked() {
         val output = "x".repeat(400) + " token ghp_abcdefghijklmnopqrstuvwxyz0123 and " + "a".repeat(64)
         val (_, observed) = outcome(printed(output), TodoCheck.Command("env"))
-        assertEquals("command exited 0: " + "x".repeat(190) + " token [REDACTED] and [REDACTED]", observed)
+        // masked first, then cut: a token across the cut is never half kept
+        assertEquals("command exited 0: " + "x".repeat(268) + " token [REDACTED] and [REDACTED]", observed)
     }
 
     @Test
@@ -86,6 +87,7 @@ class CommandCheckTest {
             "\${release:bare.tag}" to "waiting for the release of item bare",
             "\${pr:nosha.mergeSha}" to "item nosha has no mergeSha yet",
             "\${release:ship.number}" to "item ship has no number yet",
+            "\${pr:ship.number}" to "waiting for the pull request of item ship",
         )
         for ((run, said) in unknown) {
             val nothing = FakeCapture()

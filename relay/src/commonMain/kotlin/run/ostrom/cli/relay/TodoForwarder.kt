@@ -20,7 +20,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlin.time.Duration
 
 /** The field and the query parameter a todo call names its session with. */
-private const val SESSION_ID = "sessionId"
+private const val SESSION_FIELD = "sessionId"
 
 /**
  * The session todo's calls (`ostrom-todo`, the Stop and SessionStart hooks): the path as it came, the session the
@@ -48,7 +48,7 @@ internal class TodoForwarder(
             this.method = method
             url(config.serverUrl + call.request.path())
             if (method == HttpMethod.Get) {
-                known?.let { url.parameters.append(SESSION_ID, it) }
+                known?.let { url.parameters.append(SESSION_FIELD, it) }
             } else {
                 setBody(ByteArrayContent(withSession(body, known), ContentType.Application.Json))
             }
@@ -70,6 +70,6 @@ internal fun withSession(body: ByteArray, session: String?): ByteArray {
     } catch (_: SerializationException) {
         null
     } ?: return body
-    val named = session?.let { mapOf(SESSION_ID to JsonPrimitive(it)) }.orEmpty()
-    return JsonObject(parsed - SESSION_ID + named).toString().encodeToByteArray()
+    val named = session?.let { mapOf(SESSION_FIELD to JsonPrimitive(it)) }.orEmpty()
+    return JsonObject(parsed - SESSION_FIELD + named).toString().encodeToByteArray()
 }

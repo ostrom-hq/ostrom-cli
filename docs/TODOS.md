@@ -3,7 +3,8 @@
 A session's todo is a plan the agent writes once (a reference to the full plan and its items, each with the checks that
 say when it is done) and that Ostrom holds it to. Ostrom keeps the list (ostrom-server module `todos`, the routes under
 `/api/v1/todos/session`, feature `todos.v1`); the agent's machine does what only it can: run the checks with the
-agent's own `gh` and shell, and serve the tools the agent calls. This is a port of TeamCode's session todo
+agent's own `gh` and shell, and serve the tools the agent calls. Coming soon on the server: ostrom-server main does not serve
+the todo routes yet. This is a port of TeamCode's session todo
 (teamcode `docs/todos.md`, `cli/src/commonMain/kotlin/me/nathanfallet/teamcode/cli/todo/`).
 
 ## The `ostrom-todo` MCP server
@@ -32,7 +33,7 @@ passing state such as an open PR; an item that delivers a PR ends on `pr_merged`
 
 | Check | How it is observed |
 | --- | --- |
-| `pr_merged {repo}`, `pr_closed {repo}` | The PR linked to the item, or else the one found by its marker: `gh pr list --repo R --state all --search "<list8> <item> in:body"`, its body must carry the marker and its author must be the `gh` token's login (`gh api user`); the highest number wins. The PR found is linked to the item. |
+| `pr_merged {repo}`, `pr_closed {repo}` | The PR linked to the item (in the check's repository), or else the one found by its marker: `gh pr list --repo R --state all --search "<list8> <item> in:body"`, its body must carry the marker and its author must be the `gh` token's login (`gh api user`; unknown when it cannot be read); the highest number wins. The PR found is linked to the item. |
 | `release_contains {repo, of}` | The merge commit of item `of`'s PR, then the published releases (`gh release list --exclude-drafts`), newest first: the earliest release whose tag contains the merge (`gh api repos/R/compare/<sha>...<tag>`, `ahead` or `identical`). |
 | `ci_green {repo, of or ref, workflow?}` | `gh run list --commit <sha>` (the merge of item `of`'s PR, or `ref`): every run (of the workflow, when named) completed with success; none, or one still running, is not done. |
 | `command {run, cwd?, expectExit, timeoutSeconds}` | `sh -c` (`cmd.exe /c` on Windows), 1 to 120 s, the exit code compared, the last 300 characters of the output kept as proof, credentials masked. `${pr:<item>.number}`, `${pr:<item>.mergeSha}` and `${release:<item>.tag}` are replaced from the links; only the characters of a number, a SHA or a tag go in. |

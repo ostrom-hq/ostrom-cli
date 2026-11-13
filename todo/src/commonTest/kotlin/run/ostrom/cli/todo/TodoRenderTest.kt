@@ -18,7 +18,12 @@ class TodoRenderTest {
             item("bare-done", status = TodoItemStatus.DONE),
             item("gone", status = TodoItemStatus.DROPPED),
             item("asked", status = TodoItemStatus.DROP_REQUESTED),
-            item("doing", status = TodoItemStatus.DOING, origin = TodoItemOrigin.DISCOVERED),
+            item(
+                "doing",
+                status = TodoItemStatus.DOING,
+                origin = TodoItemOrigin.DISCOVERED,
+                dependsOn = listOf("plan"),
+            ),
             item("next", dependsOn = listOf("plan"), proof = TodoProof(AT, false, "PR #4 is OPEN")),
             item("later", dependsOn = listOf("next"), unverified = true),
             item("free"),

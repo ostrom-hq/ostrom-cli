@@ -6,6 +6,7 @@ import run.ostrom.cli.platform.CaptureResult
 import run.ostrom.cli.platform.OperatingSystem
 import run.ostrom.core.api.models.TodoCheck
 import run.ostrom.core.api.models.TodoCheckReport
+import run.ostrom.core.api.models.TodoLink
 import run.ostrom.core.api.models.TodoLinkKind
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -31,6 +32,7 @@ class TodoChecksTest {
                     ghPr(5, "MERGED", body = "fixes ${marker("fix")}", oid = "1234567890abc"),
                     ghPr(2, "CLOSED", body = marker("fix")),
                     ghPr(1, "OPEN", body = marker("fix"), author = null),
+                    ghPr(6, "MERGED"),
                 ).joinToString(",") + "]",
             ),
             "gh api user" to printed("maya\n"),
@@ -54,7 +56,10 @@ class TodoChecksTest {
 
     @Test
     fun aPullRequestNotMergedOrMissingIsNotDone() {
-        val open = FakeCapture("gh pr list" to printed("[${ghPr(9, "OPEN", marker("fix"), author = null)}]"))
+        val open = FakeCapture(
+            "gh pr list" to printed("[${ghPr(9, "OPEN", marker("fix"))}]"),
+            "gh api user" to printed("maya"),
+        )
         val outcome = checks(open).run(todo(item("fix", merged)), item("fix", merged)).single()
         assertEquals(false to "PR #9 is OPEN", outcome.passed to outcome.observed)
         assertEquals(null, outcome.links.single().sha, "an open PR is bound too, without a merge commit")
@@ -108,6 +113,7 @@ class TodoChecksTest {
             printed("", code = 1) to "unknown: gh could not search the pull requests of acme/web",
             CaptureResult.TimedOut to "unknown: gh could not search the pull requests of acme/web",
             printed("{\"not\":\"a list\"}") to "unknown: the check could not be read (",
+            printed("[{\"number\":1}]") to "unknown: gh answered without url",
         )
         for ((answer, said) in failing) {
             val (passed, text) = observed(FakeCapture("gh pr list" to answer), item("fix", merged)).single()
@@ -117,8 +123,31 @@ class TodoChecksTest {
     }
 
     @Test
+    fun aPullRequestWhoseAuthorCannotBeToldApartIsUnknownOrNotTheAgents() {
+        val found = "gh pr list" to printed("[${ghPr(9, "MERGED", marker("fix"), author = null)}]")
+        assertEquals(
+            listOf(null to "unknown: gh could not say whose token this is (gh api user)"),
+            observed(FakeCapture(found, "gh api user" to printed("", code = 1)), item("fix", merged)),
+        )
+        val ghost = observed(FakeCapture(found, "gh api user" to printed("maya")), item("fix", merged))
+        assertEquals(false, ghost.single().first, "a PR without author is nobody's")
+    }
+
+    @Test
+    fun aPullRequestLinkedInAnotherRepositoryIsNotTheProof() {
+        val elsewhere = TodoLink(TodoLinkKind.PR, "https://github.com/other/repo/pull/1", number = 1, at = AT)
+        val capture = FakeCapture("gh pr list" to printed("[]"))
+        val linked = item("fix", merged, links = listOf(releaseLink("v1"), elsewhere))
+        assertEquals(false, observed(capture, linked).single().first)
+        assertEquals("list", capture.commands.single()[2], "the marker is searched in the check's repository")
+    }
+
+    @Test
     fun theTokensLoginIsAskedOnce() {
-        val capture = FakeCapture("gh pr list" to printed("[]"), "gh api user" to printed("maya"))
+        val capture = FakeCapture(
+            "gh pr list" to printed("[${ghPr(9, "OPEN", marker("a"))}]"),
+            "gh api user" to printed("maya"),
+        )
         val both = checks(capture)
         val list = todo(item("a", merged), item("b", merged))
         both.run(list, list.items[0])
@@ -135,7 +164,8 @@ class TodoChecksTest {
             "gh api repos/acme/web/compare/abcdef1234567...web%2Fv2" to printed("identical"),
             "gh api repos/acme/web/compare/abcdef1234567...v1" to printed("behind"),
         )
-        val list = todo(item("fix", merged, links = listOf(prLink())), item("ship", release))
+        // the PR's link is found among the item's others
+        val list = todo(item("fix", merged, links = listOf(releaseLink("v0"), prLink())), item("ship", release))
         val outcome = checks(capture).run(list, list.items[1]).single()
         assertEquals(true to "release web/v2 contains abcdef1", outcome.passed to outcome.observed)
         val bound = outcome.links.single()

@@ -36,7 +36,7 @@ const val TODO_SERVER = "ostrom-todo"
 class ToolAnswer(val text: String, val error: Boolean = false)
 
 /** The agent's arguments cannot be used as they are: said to the agent, who fixes them. */
-class TodoUsageException(message: String) : Exception(message)
+class TodoUsageException(override val message: String) : Exception(message)
 
 /**
  * The tools of `ostrom-todo` (TeamCode's `TodoMcpServer`, its docs/todos.md "The teamcode_todo MCP server"): the agent
@@ -63,10 +63,10 @@ class TodoTools(private val api: TodoApi, private val checks: TodoChecks) {
         when (name) {
             "todo_help" -> ToolAnswer(TodoDocs.HELP)
             "todo_create" -> create(arguments)
-            "todo_show" -> ToolAnswer(
-                api.read()?.let(TodoRender::show)
-                    ?: "This session has no todo yet. Call todo_create (todo_help shows the format).",
-            )
+            "todo_show" -> when (val list = api.read()) {
+                null -> ToolAnswer("This session has no todo yet. Call todo_create (todo_help shows the format).")
+                else -> ToolAnswer(TodoRender.show(list))
+            }
             "todo_start" -> start(arguments)
             "todo_complete" -> complete(arguments)
             "todo_link" -> link(arguments)
@@ -88,7 +88,7 @@ class TodoTools(private val api: TodoApi, private val checks: TodoChecks) {
     } catch (e: TodoApiException) {
         ToolAnswer(listOfNotNull("Ostrom refused: ${e.message} (${e.code}).", hint(e.code)).joinToString(" "), true)
     } catch (e: TodoUsageException) {
-        ToolAnswer(e.message.orEmpty(), true)
+        ToolAnswer(e.message, true)
     }
 
     private fun create(arguments: JsonObject): ToolAnswer {
@@ -141,8 +141,8 @@ class TodoTools(private val api: TodoApi, private val checks: TodoChecks) {
     } catch (e: TodoApiException) {
         if (e.code != NOT_DONE) throw e
         // Ostrom's refusal carries only its key: what was seen is the proof it kept for the refusal
-        val seen = api.read()?.let { it.items.firstOrNull { item -> item.id == id } }?.proof?.text
-            ?: outcomes.joinToString("; ") { it.observed }
+        val kept = api.read()?.let { list -> list.items.firstOrNull { it.id == id }?.proof }
+        val seen = if (kept == null) outcomes.joinToString("; ") { it.observed } else kept.text
         ToolAnswer("Item $id is not done: $seen. ${hint(NOT_DONE)}", true)
     }
 
@@ -158,10 +158,11 @@ class TodoTools(private val api: TodoApi, private val checks: TodoChecks) {
     private fun link(arguments: JsonObject): ToolAnswer {
         val id = required(arguments, "id")
         val ref = required(arguments, "ref")
-        val kind = arguments.text("kind")?.let { named ->
+        val named = arguments.text("kind")
+        val kind = if (named != null) {
             KINDS.firstOrNull { it.value == named }
                 ?: throw TodoUsageException("kind is pr, release, artifact or wait.")
-        } ?: when {
+        } else when {
             PR_URL.matches(ref) -> TodoLinkKind.PR
             RELEASE_URL.matches(ref) -> TodoLinkKind.RELEASE
             else -> throw TodoUsageException("Name the kind of link: pr, release, artifact or wait.")
@@ -184,11 +185,11 @@ class TodoTools(private val api: TodoApi, private val checks: TodoChecks) {
         const val NOT_DONE = "not_done"
         const val ALREADY_LINKED = "already_linked"
         const val MAX_URLS = 10
-        val KINDS = listOf(TodoLinkKind.PR, TodoLinkKind.RELEASE, TodoLinkKind.ARTIFACT, TodoLinkKind.WAIT)
-        val PR_URL = Regex("https://github\\.com/[^/]+/[^/]+/pull/\\d+")
-        val RELEASE_URL = Regex("https://github\\.com/[^/]+/[^/]+/releases/tag/.+")
-        val PR_NUMBER = Regex("/pull/(\\d+)")
-        val RELEASE_TAG = Regex("/releases/tag/(.+)")
+        private val KINDS = listOf(TodoLinkKind.PR, TodoLinkKind.RELEASE, TodoLinkKind.ARTIFACT, TodoLinkKind.WAIT)
+        private val PR_URL = Regex("https://github\\.com/[^/]+/[^/]+/pull/\\d+")
+        private val RELEASE_URL = Regex("https://github\\.com/[^/]+/[^/]+/releases/tag/.+")
+        private val PR_NUMBER = Regex("/pull/(\\d+)")
+        private val RELEASE_TAG = Regex("/releases/tag/(.+)")
 
         /** Ostrom's refusals, each with what to do about it. */
         fun hint(code: String): String? = when (code) {
@@ -224,7 +225,7 @@ internal object Arguments {
         return try {
             OstromJson.decodeFromJsonElement(serializer, element)
         } catch (e: SerializationException) {
-            val why = e.message.orEmpty().lineSequence().first().take(MAX_REASON)
+            val why = e.message.toString().lineSequence().first().take(MAX_REASON)
             throw TodoUsageException("$what is not in the expected form: $why. Call todo_help for the format.")
         }
     }

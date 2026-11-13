@@ -1,8 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli.todo
 
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import run.ostrom.cli.platform.CaptureResult
 import run.ostrom.cli.platform.ProcessCapture
 import run.ostrom.core.api.models.Todo
@@ -13,32 +18,21 @@ import run.ostrom.core.api.models.TodoLinkKind
 /** A check that could not be read (`gh` down, a value not linked yet): reported unknown, never done. */
 class UnknownCheck(message: String) : Exception(message)
 
-/** A pull request as `gh` shows it: [state] is OPEN, CLOSED or MERGED. */
-@Serializable
+/**
+ * A pull request as `gh` shows it: [state] is OPEN, CLOSED or MERGED; [mergeSha] its merge commit once merged;
+ * [author] its author's login (null for a deleted account).
+ */
 class GhPullRequest(
     val number: Int,
     val url: String,
     val state: String,
-    val mergeCommit: GhCommit? = null,
-    val author: GhAuthor? = null,
-    val body: String? = null,
+    val mergeSha: String?,
+    val author: String?,
+    val body: String?,
 )
 
-/** A merge commit as `gh` shows it. */
-@Serializable
-class GhCommit(val oid: String)
-
-/** The author of a pull request as `gh` shows it. */
-@Serializable
-class GhAuthor(val login: String)
-
-/** A release of `gh release list`. */
-@Serializable
-class GhRelease(val tagName: String)
-
 /** A workflow run of `gh run list`. */
-@Serializable
-class GhRun(val status: String? = null, val conclusion: String? = null, val workflowName: String? = null)
+class GhRun(val status: String?, val conclusion: String?, val workflowName: String?)
 
 /**
  * GitHub as the agent's own `gh` sees it, with the agent's token: the checks run from the agent's machine (TeamCode's
@@ -46,7 +40,6 @@ class GhRun(val status: String? = null, val conclusion: String? = null, val work
  * one that fails, times out or answers something else is an [UnknownCheck].
  */
 class GitHub(private val capture: ProcessCapture) {
-    private val json = Json { ignoreUnknownKeys = true }
     private var me: String? = null
 
     /** `gh <arguments>`'s output, or null when it failed, timed out or could not start. */
@@ -64,20 +57,27 @@ class GitHub(private val capture: ProcessCapture) {
      * whose author is the token's login (the newest when several); null when none does.
      */
     fun pullRequest(list: Todo, item: TodoItem, repo: String): GhPullRequest? {
-        val linked = item.links.firstOrNull { it.kind == TodoLinkKind.PR }
-        if (linked != null) {
-            val answer = gh("pr", "view", linked.ref, "--json", PR_FIELDS)
-                ?: throw UnknownCheck("gh could not read ${linked.ref}")
-            return json.decodeFromString(GhPullRequest.serializer(), answer)
-        }
+        // a linked PR counts only in the check's repository: another repository's PR proves nothing here
+        val linked = item.links.firstOrNull { it.kind == TodoLinkKind.PR && it.ref.startsWith(pullsOf(repo)) }
+        return if (linked != null) viewed(linked.ref) else searched(list, item, repo)
+    }
+
+    private fun viewed(ref: String): GhPullRequest {
+        val answer = gh("pr", "view", ref, "--json", PR_FIELDS) ?: throw UnknownCheck("gh could not read $ref")
+        return pullRequestOf(Json.parseToJsonElement(answer))
+    }
+
+    private fun searched(list: Todo, item: TodoItem, repo: String): GhPullRequest? {
         val marker = marker(list, item.id)
         // the search narrows the candidates; the exact marker in the body decides, so another list's PR is never taken
         val search = "${list.id.take(LIST_PREFIX)} ${item.id} in:body"
         val answer = gh("pr", "list", "--repo", repo, "--state", "all", "--search", search, "--json", "$PR_FIELDS,body",
             "--limit", SEARCH_LIMIT) ?: throw UnknownCheck("gh could not search the pull requests of $repo")
-        val found = json.decodeFromString<List<GhPullRequest>>(answer).filter { it.body.orEmpty().contains(marker) }
-        val login = login()
-        return found.filter { login == null || it.author == null || it.author.login == login }.maxByOrNull { it.number }
+        val found = objects(answer).map(::pullRequestOf).filter { it.body.orEmpty().contains(marker) }
+        if (found.isEmpty()) return null
+        // only the agent's own PR: when the token's login cannot be read, nothing found can be told apart
+        val login = login() ?: throw UnknownCheck("gh could not say whose token this is (gh api user)")
+        return found.filter { it.author == login }.maxByOrNull { it.number }
     }
 
     /** The merge commit of the pull request of item [of]: from its link, else found by its marker. */
@@ -85,9 +85,10 @@ class GitHub(private val capture: ProcessCapture) {
         val target = list.items.firstOrNull { it.id == of } ?: throw UnknownCheck("item $of does not exist")
         val linked = target.links.firstOrNull { it.kind == TodoLinkKind.PR }?.sha
         if (linked != null) return linked
-        val prRepo = target.doneWhen.checks.filterIsInstance<TodoCheck.PrMerged>().firstOrNull()?.repo ?: repo
-        val merged = pullRequest(list, target, prRepo)?.takeIf { it.state == MERGED }?.mergeCommit
-        return merged?.oid ?: throw UnknownCheck("the pull request of item $of is not merged yet")
+        val ending = target.doneWhen.checks.filterIsInstance<TodoCheck.PrMerged>().firstOrNull()
+        val prRepo = if (ending == null) repo else ending.repo
+        val merged = pullRequest(list, target, prRepo)?.takeIf { it.state == MERGED }?.mergeSha
+        return merged ?: throw UnknownCheck("the pull request of item $of is not merged yet")
     }
 
     /**
@@ -98,8 +99,8 @@ class GitHub(private val capture: ProcessCapture) {
         val listed = gh("release", "list", "--repo", repo, "--exclude-drafts", "--limit", RELEASES, "--json", "tagName")
             ?: throw UnknownCheck("gh could not list the releases of $repo")
         var earliest: String? = null
-        for (release in json.decodeFromString<List<GhRelease>>(listed).take(MAX_COMPARES)) {
-            val tag = release.tagName
+        for (release in objects(listed).take(MAX_COMPARES)) {
+            val tag = release.required("tagName")
             val status = gh("api", "repos/$repo/compare/$sha...${tag.replace("/", "%2F")}", "--jq", ".status")
                 ?: throw UnknownCheck("gh could not compare $tag")
             if (status.trim() !in CONTAINS) break
@@ -112,7 +113,9 @@ class GitHub(private val capture: ProcessCapture) {
     fun runs(repo: String, sha: String, workflow: String?): List<GhRun> {
         val answer = gh("run", "list", "--repo", repo, "--commit", sha, "--json", "status,conclusion,workflowName",
             "--limit", RUNS) ?: throw UnknownCheck("gh could not list the runs of $repo")
-        return json.decodeFromString<List<GhRun>>(answer).filter { workflow == null || it.workflowName == workflow }
+        return objects(answer)
+            .map { GhRun(it.text("status"), it.text("conclusion"), it.text("workflowName")) }
+            .filter { workflow == null || it.workflowName == workflow }
     }
 
     /** What `gh` is asked and how long it may take. */
@@ -126,6 +129,9 @@ class GitHub(private val capture: ProcessCapture) {
         /** The marker of an item's pull request, as `startTodoItem` returns it. */
         fun marker(list: Todo, itemId: String) = "<!-- ostrom-todo: ${list.id.take(LIST_PREFIX)}/$itemId -->"
 
+        /** The address every pull request of [repo] starts with. */
+        private fun pullsOf(repo: String) = "https://github.com/$repo/pull/"
+
         private const val GH_TIMEOUT_MILLIS = 20_000
         private const val LIST_PREFIX = 8
         private const val MAX_COMPARES = 15
@@ -135,4 +141,32 @@ class GitHub(private val capture: ProcessCapture) {
         private const val RUNS = "50"
         private val CONTAINS = setOf("ahead", "identical")
     }
+}
+
+/** A text field of `gh`'s JSON, or null when absent or null. */
+private fun JsonObject.text(key: String): String? = this[key]?.let { it.jsonPrimitive.contentOrNull }
+
+/** A text field `gh` always gives: an answer without it is another shape, so the check is unknown. */
+private fun JsonObject.required(key: String): String = text(key) ?: throw UnknownCheck("gh answered without $key")
+
+/** [field] of the object under [key] (`mergeCommit.oid`, `author.login`), or null. */
+private fun JsonObject.inner(key: String, field: String): String? = (this[key] as? JsonObject)?.text(field)
+
+/**
+ * `gh`'s JSON read by hand, its unknown fields ignored. Another shape throws an [IllegalArgumentException] (a JSON
+ * that is no list of objects, a number that is not one) or an [UnknownCheck] (a field missing): unknown either way.
+ */
+private fun objects(answer: String): List<JsonObject> =
+    Json.parseToJsonElement(answer).jsonArray.map { it.jsonObject }
+
+private fun pullRequestOf(element: JsonElement): GhPullRequest {
+    val pr = element.jsonObject
+    return GhPullRequest(
+        number = pr.required("number").toInt(),
+        url = pr.required("url"),
+        state = pr.required("state"),
+        mergeSha = pr.inner("mergeCommit", "oid"),
+        author = pr.inner("author", "login"),
+        body = pr.text("body"),
+    )
 }
