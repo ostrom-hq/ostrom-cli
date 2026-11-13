@@ -93,12 +93,12 @@ Ostrom is before its first public release.
 | --- | --- | --- |
 | [ostrom-core](https://github.com/ostrom-hq/ostrom-core) | Shared Kotlin Multiplatform library: API contract, workflow model, signed receipts | Apache-2.0 |
 | **ostrom-cli** (this one) | The `ostrom` command line: runs coding agents under the team's rules | Apache-2.0 |
-| [ostrom-server](https://github.com/ostrom-hq/ostrom-server) | The server: gates, receipts, policies, the API | AGPL-3.0 + ee |
-| [ostrom-web](https://github.com/ostrom-hq/ostrom-web) | The web console | AGPL-3.0 + ee |
-| [ostrom-app](https://github.com/ostrom-hq/ostrom-app) | The iOS and Android app | AGPL-3.0 + ee |
+| [ostrom-server](https://github.com/ostrom-hq/ostrom-server) | The server: gates, receipts, policies, the API | Apache-2.0 + ee |
+| [ostrom-web](https://github.com/ostrom-hq/ostrom-web) | The web console | Apache-2.0 + ee |
+| [ostrom-app](https://github.com/ostrom-hq/ostrom-app) | The iOS and Android app | Apache-2.0 + ee |
 | [ostrom-e2e](https://github.com/ostrom-hq/ostrom-e2e) | Full-stack end-to-end and load tests | Apache-2.0 |
 | [ostrom-site](https://github.com/ostrom-hq/ostrom-site) | ostrom.run: website, documentation, blog | Apache-2.0 |
-| [ostrom-helm](https://github.com/ostrom-hq/ostrom-helm) | Helm chart and Docker Compose for self-hosting | AGPL-3.0 |
+| [ostrom-helm](https://github.com/ostrom-hq/ostrom-helm) | Helm chart and Docker Compose for self-hosting | Apache-2.0 |
 
 ## Contributing
 

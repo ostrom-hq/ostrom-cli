@@ -37,8 +37,6 @@ DEFAULT_EXCLUDE = [
 ]
 LICENSE_MARKERS = {
     "Apache-2.0": "Apache License",
-    "AGPL-3.0-only": "GNU AFFERO GENERAL PUBLIC LICENSE",
-    "AGPL-3.0-or-later": "GNU AFFERO GENERAL PUBLIC LICENSE",
     "MIT": "MIT License",
 }
 HEAD_LINES = 5
