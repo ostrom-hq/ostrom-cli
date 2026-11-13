@@ -119,6 +119,11 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
         "ostrom login --server https://ostrom.acme.dev" to "to a self-hosted server",
     ),
     "logout" to guide("quickstart", "ostrom logout" to "sign out and forget this device's token"),
+    "whoami" to guide(
+        "quickstart",
+        "ostrom whoami" to "who this device is signed in as, and your role in each organisation",
+        "ostrom whoami --json" to "the same, for a script",
+    ),
     "init" to guide(
         "quickstart",
         "ostrom init" to "set up this repository (admin: the organisation)",
@@ -250,7 +255,20 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
         "ostrom github unlink" to "remove your link",
         "ostrom github unlink --member mem_7d1a" to "remove a member's link (admin)",
     ),
-    "cloud" to guide("cloud-sessions", "ostrom cloud github ses_41b2 --access shared" to "share your GitHub account"),
+    "cloud" to guide(
+        "cloud-sessions",
+        "ostrom cloud list" to "your cloud sessions",
+        "ostrom cloud github ses_41b2 --access shared" to "share your GitHub account",
+    ),
+    "cloud list" to guide(
+        "cloud-sessions",
+        "ostrom cloud list" to "your cloud sessions, newest first",
+        "ostrom cloud list --status paused" to "only the paused ones",
+    ),
+    "cloud show" to guide("cloud-sessions", "ostrom cloud show ses_41b2" to "one cloud session"),
+    "cloud pause" to guide("cloud-sessions", "ostrom cloud pause ses_41b2" to "pause it: the agent finishes its turn"),
+    "cloud resume" to guide("cloud-sessions", "ostrom cloud resume ses_41b2" to "resume it"),
+    "cloud delete" to guide("cloud-sessions", "ostrom cloud delete ses_41b2 --yes" to "delete it and its workspace"),
     "cloud attach" to guide(
         "cloud-sessions",
         "ostrom cloud attach ses_41b2" to "attach again to a cloud session that kept running",
