@@ -306,11 +306,12 @@ class CliDependencies(
                     if (todo == null || arguments.size > 1 && !holds) return gate.run(arguments)
                     val http = LoopbackHttpImpl()
                     val runner = TodoHookRunner(console, environment, FileSystem.SYSTEM, http, ProcessCaptureImpl(), io)
-                    if (!holds) return runner.run(todo)
-                    return runner.run(todo) { replayed ->
-                        HookRunnerImpl(replayed, environment, LazyHookProcessor(session)).run(listOf(HookKind.WAKE.command))
-                    }
+                    val hold: ((Console) -> Int)? = if (holds) { replayed -> wake(replayed) } else null
+                    return runner.run(todo, hold)
                 }
+
+                private fun wake(replayed: Console): Int =
+                    HookRunnerImpl(replayed, environment, LazyHookProcessor(session)).run(listOf(HookKind.WAKE.command))
             }
         }
     }

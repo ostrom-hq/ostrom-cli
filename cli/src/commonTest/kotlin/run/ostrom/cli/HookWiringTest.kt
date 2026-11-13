@@ -82,10 +82,10 @@ class HookWiringTest {
     fun theTodosStopThenTheHoldIsOneHookThatGivesTheHoldTheSameEvent() {
         // no relay: the todo lets the stop pass, so the hold runs, on the event the todo read
         val event = """{"hook_event_name":"Stop","session_id":"s"}"""
-        val held = mutableListOf<Pair<HookKind, String?>>()
+        val held = mutableListOf<Pair<HookKind, String>>()
         val processor = object : HookProcessor {
             override fun process(kind: HookKind, input: ByteArray?, dialect: String): HookReply {
-                held += kind to input?.decodeToString()
+                held += kind to input?.decodeToString().orEmpty()
                 return HookReply(stdout = "held", exitCode = 0)
             }
         }
@@ -116,6 +116,7 @@ class HookWiringTest {
             override fun exists(path: String) = path in texts
             override fun link(target: String, link: String) = false
             override fun deleteRecursively(path: String) = Unit
+            override fun canonical(path: String) = path
         }
         val layout = SessionLayout(
             temporary = "/tmp/run",

@@ -15,18 +15,22 @@ import run.ostrom.cli.platform.StandardInput
 import run.ostrom.cli.platform.StandardInputFailure
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 
 class TodoHookRunnerTest {
     /** The hook's streams: [event] on stdin, what it prints kept. */
     private class HookConsole(private val event: StandardInput?) : Console {
         val out = StringBuilder()
+        val err = StringBuilder()
         override val isInteractive = false
 
         override fun out(text: String) {
             out.append(text)
         }
 
-        override fun err(text: String) = error("a todo hook says nothing on stderr")
+        override fun err(text: String) {
+            err.append(text)
+        }
 
         override fun readStandardInput(maxBytes: Int, timeoutMillis: Int) = event ?: throw IOException("stdin broke")
     }
@@ -50,17 +54,24 @@ class TodoHookRunnerTest {
     private val files = FakeFileSystem().also { it.write("/token".toPath()) { writeUtf8("hooks-cap\n") } }
     private val launch = mapOf("OSTROM_RELAY_URL" to "http://127.0.0.1:4100", "OSTROM_RELAY_TOKEN_FILE" to "/token")
 
+    /** What a hook reads besides its event: the launch's variables, its stdin (null: a read that throws). */
+    private class Launch(val variables: Map<String, String>, val input: StandardInput?)
+
     private fun run(
         kind: String,
         event: String,
         relay: Relay,
         variables: Map<String, String> = launch,
-        input: StandardInput? = StandardInput.Read(event.encodeToByteArray()),
         then: ((Console) -> Int)? = null,
-    ): Pair<Int, String> {
-        val console = HookConsole(input)
-        val runner = TodoHookRunner(console, Variables(variables), files, relay, FakeCapture(), Dispatchers.Unconfined)
-        return runner.run(kind, then) to console.out.toString()
+    ): Pair<Int, String> = run(kind, relay, Launch(variables, StandardInput.Read(event.encodeToByteArray())), then)
+
+    private fun run(kind: String, relay: Relay, launch: Launch, then: ((Console) -> Int)? = null): Pair<Int, String> {
+        val console = HookConsole(launch.input)
+        val variables = Variables(launch.variables)
+        val runner = TodoHookRunner(console, variables, files, relay, FakeCapture(), Dispatchers.Unconfined)
+        val code = runner.run(kind, then)
+        assertEquals("", console.err.toString(), "a todo hook says nothing on stderr")
+        return code to console.out.toString()
     }
 
     @Test
@@ -79,15 +90,23 @@ class TodoHookRunnerTest {
         val read = mutableListOf<String>()
         val hold: (Console) -> Int = { console ->
             read += (console.readStandardInput(1, 1) as StandardInput.Read).bytes.decodeToString()
+            // the hold writes to the hook's own streams
+            console.out("o")
+            console.help("h")
             console.data("held")
+            console.err("")
+            console.dataErr("")
+            assertFalse(console.isInteractive)
             3
         }
-        assertEquals(3 to "held", run(TodoHookRunner.STOP, event, Relay { """{"action":"allow"}""" }, then = hold))
+        val allowed = Relay { """{"action":"allow"}""" }
+        assertEquals(3 to "ohheld", run(TodoHookRunner.STOP, event, allowed, then = hold))
         assertEquals(listOf(event), read, "the hold reads the event the todo read")
-        val blocked = run(TodoHookRunner.STOP, event, Relay { """{"action":"block","reason":"Finish."}""" }, then = hold)
+        val blocking = Relay { """{"action":"block","reason":"Finish."}""" }
+        val blocked = run(TodoHookRunner.STOP, event, blocking, then = hold)
         assertEquals(0 to "{\"decision\":\"block\",\"reason\":\"Finish.\"}\n", blocked)
         assertEquals(1, read.size, "a blocked stop is never held")
-        val broken = run(TodoHookRunner.STOP, event, Relay { error("never asked") }, input = null) { console ->
+        val broken = run(TodoHookRunner.STOP, Relay { error("never asked") }, Launch(launch, null)) { console ->
             read += console.readStandardInput(1, 1).toString()
             0
         }
@@ -129,7 +148,7 @@ class TodoHookRunnerTest {
             assertEquals(0 to "", run(TodoHookRunner.STOP, "{}", relay, variables), variables.toString())
         }
         val noInput = StandardInput.Unavailable(StandardInputFailure.ERROR)
-        assertEquals(0 to "", run(TodoHookRunner.CONTEXT, "", relay, input = noInput))
+        assertEquals(0 to "", run(TodoHookRunner.CONTEXT, relay, Launch(launch, noInput)))
         assertEquals(setOf("todo-stop", "todo-context"), TodoHookRunner.KINDS)
     }
 }
