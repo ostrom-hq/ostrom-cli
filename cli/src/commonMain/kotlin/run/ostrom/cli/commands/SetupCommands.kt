@@ -33,6 +33,12 @@ internal fun setupCommands(dependencies: CliDependencies): List<CliktCommand> = 
         GithubUnlinkCommand(dependencies),
     ),
     CloudCommand().subcommands(CloudGithubCommand(dependencies)),
+    HooksCommand(dependencies).subcommands(
+        HooksListCommand(dependencies),
+        HooksShowCommand(dependencies),
+        HooksApproveCommand(dependencies),
+        HooksRefuseCommand(dependencies),
+    ),
     InviteCommand(dependencies),
     MembersCommand(dependencies).subcommands(
         MembersListCommand(dependencies),

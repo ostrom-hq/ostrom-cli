@@ -42,6 +42,12 @@ object Routes {
     /** `GET`: the files of a team skill's effective version (`SkillArtifact`). */
     fun skill(name: String, version: String) = "/api/v1/skill-delivery/${encode(name)}/${encode(version)}"
 
+    /** `GET`, with a person's credential: the team hooks the member receives (`HookManifest`). */
+    const val HOOK_DELIVERY = "/api/v1/hook-delivery"
+
+    /** `GET`: the definition and files of a team hook's effective version (`HookArtifact`). */
+    fun hook(name: String, version: String) = "/api/v1/hook-delivery/${encode(name)}/${encode(version)}"
+
     /** `POST {launchId}`: the launcher's sign of life. */
     fun alive(session: String) = "/api/v1/sessions/${encode(session)}/alive"
 

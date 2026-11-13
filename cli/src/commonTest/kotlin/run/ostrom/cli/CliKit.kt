@@ -75,13 +75,18 @@ open class CliKit {
         override fun readStandardInput(maxBytes: Int, timeoutMillis: Int): StandardInput = error("not used")
     }
 
-    protected class FakeEnvironment(private val values: Map<String, String>) : Environment {
+    protected class FakeEnvironment(
+        private val values: Map<String, String>,
+        override val operatingSystem: OperatingSystem = OperatingSystem.LINUX,
+    ) : Environment {
         override fun get(name: String) = values[name]
-        override val operatingSystem = OperatingSystem.LINUX
         override val architecture = "x64"
     }
 
     protected val console = FakeConsole()
+
+    /** The system the command line runs on. */
+    protected var operatingSystem = OperatingSystem.LINUX
     protected val fileSystem = FakeFileSystem()
     protected val hookCalls = mutableListOf<List<String>>()
     protected val statistics = mutableListOf<String>()
@@ -166,7 +171,7 @@ open class CliKit {
     ) = OstromCli(
         CliDependencies(
             console = console,
-            environment = FakeEnvironment(environment),
+            environment = FakeEnvironment(environment, operatingSystem),
             files = FileStoreImpl(fileSystem),
             finder = object : ExecutableFinder {
                 override fun find(name: String) = if (name in installed) "/usr/bin/$name" else null

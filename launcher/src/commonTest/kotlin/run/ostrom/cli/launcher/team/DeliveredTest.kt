@@ -4,6 +4,7 @@ package run.ostrom.cli.launcher.team
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import okio.ByteString
 import okio.ByteString.Companion.encodeUtf8
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -14,10 +15,15 @@ import kotlin.test.assertTrue
 /** A version's files as the server sends them, and their digest. */
 internal object Artifacts {
     /** One file: its path, its mode and its text. */
-    class Source(val path: String, val text: String, val mode: String = Delivered.FILE)
+    class Source(
+        val path: String,
+        val text: String,
+        val mode: String = Delivered.FILE,
+        val content: ByteString = text.encodeUtf8(),
+    )
 
     fun entry(source: Source): JsonObject {
-        val bytes = source.text.encodeUtf8()
+        val bytes = source.content
         return JsonObject(
             mapOf(
                 "path" to JsonPrimitive(source.path),
@@ -31,7 +37,7 @@ internal object Artifacts {
 
     fun digest(sources: List<Source>, prefix: String = ""): String = Delivered.digestOf(
         prefix + sources.sortedBy { it.path }.joinToString("") {
-            val bytes = it.text.encodeUtf8()
+            val bytes = it.content
             Delivered.line(it.path, it.mode, bytes.size.toLong(), bytes.sha256().hex())
         },
     )
