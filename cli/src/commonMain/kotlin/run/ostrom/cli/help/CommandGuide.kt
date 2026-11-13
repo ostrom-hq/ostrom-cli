@@ -163,6 +163,21 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
     "members list" to guide("organizations", "ostrom members list" to "the members of your organisation"),
     "members role" to guide("organizations", "ostrom members role lena admin" to "change someone's role"),
     "members remove" to guide("organizations", "ostrom members remove lena" to "remove someone"),
+    "github" to guide("cloud-sessions", "ostrom github status" to "the GitHub account your cloud sessions use"),
+    "github link" to guide("cloud-sessions", "ostrom github link" to "link your GitHub account with a device code"),
+    "github status" to guide("cloud-sessions", "ostrom github status" to "your link, and whether it works"),
+    "github links" to guide("cloud-sessions", "ostrom github links" to "the GitHub account of every member (admin)"),
+    "github unlink" to guide(
+        "cloud-sessions",
+        "ostrom github unlink" to "remove your link",
+        "ostrom github unlink --member mem_7d1a" to "remove a member's link (admin)",
+    ),
+    "cloud" to guide("cloud-sessions", "ostrom cloud github ses_41b2 --access shared" to "share your GitHub account"),
+    "cloud github" to guide(
+        "cloud-sessions",
+        "ostrom cloud github ses_41b2 --access shared" to "let anyone who may use the session instruct the agent",
+        "ostrom cloud github ses_41b2 --access none" to "no GitHub token (pause the session first)",
+    ),
     "policy" to guide(
         "organizations",
         "ostrom policy show" to "the policy of your organisation",

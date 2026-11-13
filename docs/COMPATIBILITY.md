@@ -56,11 +56,13 @@ another API:
 | Command | Feature | Said when the server does not serve it |
 | --- | --- | --- |
 | `ostrom claude --cloud` (any agent), `ostrom attach` | `runners.cloud.v1` | This Ostrom server runs no cloud session: start the agent here, without --cloud. |
+| `ostrom github` (`link`, `links`, `unlink`) | `github.link.v1` | This Ostrom server does not link GitHub accounts: ask your admin to update it. |
+| `ostrom cloud github` | `runners.cloud.github.v1` | This Ostrom server does not share a GitHub account with cloud sessions: ask your admin to update it. |
 | `ostrom import teamcode` | `import.teamcode.v1` | This Ostrom server does not import TeamCode teams: ask your admin to update it. |
 
 A server without capabilities is too old and stops the command too. One that fails to answer them (401, 5xx) lets the
 command go on: the feature's own route answers, in the command's words. A server that cannot be reached stops it at
 once (exit 69).
 
-The CLI has no command for the other optional features yet (billing, Slack, GitHub, push notifications); each gets the
+The CLI has no command for the other optional features yet (billing, Slack, push notifications); each gets the
 same check when it comes.

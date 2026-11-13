@@ -23,6 +23,13 @@ internal fun setupCommands(dependencies: CliDependencies): List<CliktCommand> = 
         WaitsCancelCommand(dependencies),
         WaitsAskCommand(dependencies),
     ),
+    GithubCommand(dependencies).subcommands(
+        GithubLinkCommand(dependencies),
+        GithubStatusCommand(dependencies),
+        GithubLinksCommand(dependencies),
+        GithubUnlinkCommand(dependencies),
+    ),
+    CloudCommand().subcommands(CloudGithubCommand(dependencies)),
     InviteCommand(dependencies),
     MembersCommand(dependencies).subcommands(
         MembersListCommand(dependencies),
