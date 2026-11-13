@@ -45,28 +45,33 @@ internal class AccountsHandoverCommand(private val dependencies: CliDependencies
             ServerFeatures.SHARING_HANDOVER,
             "This Ostrom server hands no account over: ask your admin to update it.",
         )
-        val accounts = access.read(ACCOUNTS, "No shared accounts here.").list("items").filterIsInstance<JsonObject>()
+        val accounts = access.read(ACCOUNTS, "No shared accounts here.").list("items")
+            .filterIsInstance<JsonObject>().mapNotNull { item ->
+                item.text("id")?.let { id -> Listed(id, item.text("label") ?: id, item.text("status")) }
+            }
         val target = named(accounts)
-        val id = target.text("id").orEmpty()
-        val done = access.write("POST", "$ACCOUNTS/${segment(id)}/handover", null, "No shared account $account.")
-        val name = done.text("label") ?: target.text("label") ?: id
+        val path = "$ACCOUNTS/${segment(target.id)}/handover"
+        val done = access.write("POST", path, null, "No shared account $account.")
         val status = done.text("status")?.let { " ($it)" }.orEmpty()
-        dependencies.console.out("✓ Ostrom renews the tokens of $name from now on$status.\n")
+        dependencies.console.out("✓ Ostrom renews the tokens of ${target.name} from now on$status.\n")
     }
 
     /** The account [account] names, by id first, then by name; none or several stop the command. */
-    private fun named(accounts: List<JsonObject>): JsonObject {
-        accounts.firstOrNull { it.text("id") == account }?.let { return it }
-        val found = accounts.filter { it.text("label") == account }
+    private fun named(accounts: List<Listed>): Listed {
+        accounts.firstOrNull { it.id == account }?.let { return it }
+        val found = accounts.filter { it.name == account }
         if (found.size == 1) return found.single()
         if (found.size > 1) {
-            val ids = found.mapNotNull { it.text("id") }.joinToString(", ")
+            val ids = found.joinToString(", ") { it.id }
             throw stopWith(ExitCode.USAGE, "Several shared accounts are named $account: give its id ($ids).")
         }
-        val waiting = accounts.filter { it.text("status") == PENDING }.mapNotNull { it.text("label") }
+        val waiting = accounts.filter { it.status == PENDING }.map { it.name }
         val hint = if (waiting.isEmpty()) "" else " Waiting for their handover: ${waiting.joinToString(", ")}."
         throw stopWith(ExitCode.NOT_FOUND, "No shared account $account.$hint")
     }
+
+    /** An account of the list: its id, its name (its id when it has none) and its status. */
+    private data class Listed(val id: String, val name: String, val status: String?)
 
     private companion object {
         const val ACCOUNTS = "/api/v1/accounts"

@@ -6,8 +6,8 @@ import com.github.ajalt.clikt.core.subcommands
 import run.ostrom.cli.CliDependencies
 
 /**
- * `init`, `harness`, `invite`, `members`, `accounts`, `policy`, and the `waits` of an organisation: setup and day-to-day
- * asks.
+ * `init`, `harness`, `invite`, `members`, `accounts`, `policy`, and the `waits` of an organisation: setup and
+ * day-to-day asks.
  */
 internal fun setupCommands(dependencies: CliDependencies): List<CliktCommand> = listOf(
     InitCommand(dependencies),

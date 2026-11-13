@@ -11,7 +11,8 @@ class SharedAccountCommandsTest : SetupKit() {
     private val list = "GET /api/v1/accounts" to (
         200 to """{"items":[{"id":"a1","label":"Team Max","status":"pending_handover"},""" +
             """{"id":"a2","label":"Team Bo","status":"ready"},{"id":"a3","label":"Twin","status":"ready"},""" +
-            """{"id":"a4","label":"Twin","status":"pending_handover"},"x"]}"""
+            """{"id":"a4","label":"Twin","status":"pending_handover"},{"label":"Nameless"},""" +
+            """{"id":"a5","status":"pending_handover"},"x"]}"""
         )
     private val handover = "POST /api/v1/accounts/a1/handover"
 
@@ -29,13 +30,18 @@ class SharedAccountCommandsTest : SetupKit() {
         val bare = mapOf(handing, list, handover to (200 to "{}"))
         assertEquals(0, run(bare, "accounts", "handover", "a1", "--confirm"), "by its id")
         assertOut("✓ Ostrom renews the tokens of Team Max from now on.\n")
+        console.out.clear()
+        val nameless = mapOf(handing, list, "POST /api/v1/accounts/a5/handover" to (200 to "{}"))
+        assertEquals(0, run(nameless, "accounts", "handover", "a5", "--confirm"))
+        assertOut("✓ Ostrom renews the tokens of a5 from now on.\n")
     }
 
     @Test
     fun anUnknownOrAmbiguousNameAnAgentAndAnOlderServerAreRefused() {
         val routes = mapOf(handing, list)
         assertEquals(66, run(routes, "accounts", "handover", "Ghost", "--confirm"))
-        assertErr("No shared account Ghost. Waiting for their handover: Team Max, Twin.\n")
+        assertErr("No shared account Ghost. Waiting for their handover: Team Max, Twin, a5.\n")
+        assertEquals(66, run(routes, "accounts", "handover", "Nameless", "--confirm"), "a row without id is no account")
         assertEquals(64, run(routes, "accounts", "handover", "Twin", "--confirm"))
         assertErr("Several shared accounts are named Twin: give its id (a3, a4).\n")
         val none = "GET /api/v1/accounts" to (200 to """{"items":[]}""")

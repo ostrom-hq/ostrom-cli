@@ -98,7 +98,8 @@ class ImportTeamCodeCommandTest : CliKit() {
             val routes = mapOf(
                 features,
                 "GET /api/v1/members" to (200 to """{"items":[]}"""),
-                "POST /api/v1/import/teamcode?dryRun=true&accessOnly=true" to (200 to """{"items":[],"accessOnly":1}"""),
+                "POST /api/v1/import/teamcode?dryRun=true&accessOnly=true" to
+                    (200 to """{"items":[],"accessOnly":1}"""),
             )
             return cli(environment = admin, api = serverOf(routes), capture = FakeMysql(FULL_SCHEMA, TEAM_TABLES))
                 .run(import + more)

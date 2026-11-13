@@ -46,7 +46,9 @@ class ImportTeamCodeUseCaseTest {
             failed.append(it)
             said.append(it)
         }
-        return useCase(ImportTeamCodeRequest("mysql://ro@db/teamcode", key, "default", apply, cutover != null, accessOnly))
+        val cut = cutover != null
+        val request = ImportTeamCodeRequest("mysql://ro@db/teamcode", key, "default", apply, cut, accessOnly)
+        return useCase(request)
     }
 
     @Test
@@ -88,7 +90,10 @@ class ImportTeamCodeUseCaseTest {
         replies["POST /api/v1/import/teamcode?accessOnly=true"] = ServerReply(200, TRIAL)
         assertEquals(0, import(apply = true, accessOnly = true))
         val paths = calls.map { it.path }.drop(1)
-        val asked = listOf("/api/v1/import/teamcode?dryRun=true&accessOnly=true", "/api/v1/import/teamcode?accessOnly=true")
+        val asked = listOf(
+            "/api/v1/import/teamcode?dryRun=true&accessOnly=true",
+            "/api/v1/import/teamcode?accessOnly=true",
+        )
         assertEquals(asked, paths)
         assertTrue("  updated  account  Team Max  [access only]\n" in said, "$said")
         val trial = "! 1 shared account serve TeamCode's access tokens, never renewed: import again once they expire\n"
