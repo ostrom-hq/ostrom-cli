@@ -41,17 +41,19 @@ class AnswerWaitUseCaseTest {
             field("no", "confirm"),
             field("region", "choice", ""","options":["eu","us"]"""),
             field("misc", "unknown"),
+            """{"id":"typeless","label":"L"}""",
         ).joinToString(",", "[", "]")
         serve(wait(fields, """[{"id":"approve","label":"Approve"}]"""))
         val done = answer(
             ask(
                 "note=a=b", "day=2026-11-13", "n= 42 ", "ratio=1.5", "ok=YES", "no=n", "region=eu", "misc=x",
+                "typeless=t",
             ),
         )
         assertEquals("resolved", done["status"].toString().trim('"'))
         assertEquals(
             """{"action":"approve","values":{"note":"a=b","day":"2026-11-13","n":42,"ratio":1.5,"ok":true,""" +
-                """"no":false,"region":"eu","misc":"x"}}""",
+                """"no":false,"region":"eu","misc":"x","typeless":"t"}}""",
             fake.calls.last().body,
         )
     }
