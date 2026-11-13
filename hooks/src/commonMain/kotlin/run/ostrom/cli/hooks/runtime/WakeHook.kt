@@ -76,7 +76,7 @@ class WakeHook(
 
     /** A refusal that will not change by asking again: the session is over, the route is not served. */
     private val CallResult.Failed.stopsHolding: Boolean
-        get() = status != null && status in CLIENT_ERRORS && status !in RETRIED
+        get() = status in REFUSALS
 
     private fun JsonObject.messages(): List<String> =
         (this["messages"] as? kotlinx.serialization.json.JsonArray).orEmpty()
@@ -111,7 +111,8 @@ class WakeHook(
         const val MAX_FAILURES = 6
         private const val RETRY_MILLIS = 5_000L
         private const val MIN_ROUND_MILLIS = 1_000L
-        private val CLIENT_ERRORS = 400..499
-        private val RETRIED = setOf(408, 429)
+
+        /** Every 4xx but a timeout (408) and a rate limit (429): asking again may succeed. */
+        private val REFUSALS = (400..499).toSet() - setOf(408, 429)
     }
 }
