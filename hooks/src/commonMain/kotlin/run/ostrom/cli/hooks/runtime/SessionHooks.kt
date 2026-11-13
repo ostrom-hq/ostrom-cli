@@ -17,12 +17,15 @@ object SessionHooks {
     /**
      * @param environment The variables the launcher gave the agent (and so its hooks).
      * @param clock The current time in milliseconds since the epoch ([epochMillis]).
+     * @param sleep Waits the given milliseconds (the wake hook between two failed calls).
      */
+    @Suppress("LongParameterList")
     fun processor(
         environment: Environment,
         fileSystem: FileSystem,
         capture: ProcessCapture,
         http: LoopbackHttp,
+        sleep: (Long) -> Unit = {},
         clock: () -> Long,
     ): HookProcessor {
         val files = FileSystemHookFiles(fileSystem, clock)
@@ -58,6 +61,7 @@ object SessionHooks {
             workingDirectory = files.canonical(".".toPath().toString()),
             checks = checks,
             now = clock,
+            sleep = sleep,
         )
         return SessionHookProcessor(context, ports)
     }

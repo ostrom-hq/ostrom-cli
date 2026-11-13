@@ -72,6 +72,10 @@ alternative: a second private file for `ostrom wait`, which a command of the age
 - Only an allow-list is forwarded, everything else is 404 (never an open proxy): the hook routes
   (`POST /api/v1/sessions`, `/sessions/{id}/reopen|seen`, `/api/v1/gates`, `/api/v1/notifications`,
   `/api/v1/checks`, `GET /api/v1/gates/{id}` and `/gates/catalog`, as they are, 2 MiB, 15 s, 70 s for a gate wait;
+  `POST /api/v1/waits/wake`, a long poll of 70 s with the agent's token, for the hooks' capability only, never the
+  agent's: it is the `Stop` hook `ostrom hook wake`, which holds a stopped Claude session open (timeout 86400 s, the one
+  hook allowed to wait) until a wait is answered, and which the launch installs only when the server advertises
+  `waits.wake.v1`; Codex and the other agents get no wake, they stop as before;
   ending a session, its sign of life and the use of a yes are the launcher's and Ostrom's, never forwarded, S2-25 and
   S2-29; reading check runs is the console's, never forwarded). A check run's report is the hooks', which run the
   package's checks, and takes their capability, not the agent's. It is the developer's machine's word: the hooks'

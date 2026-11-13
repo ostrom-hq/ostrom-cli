@@ -34,6 +34,23 @@ class RelayTargetTest {
     }
 
     @Test
+    fun theStopHooksHoldIsItsOwnTargetAndOnlyAPostToTheRouteItself() {
+        assertEquals(RelayTarget.Wake, resolveTarget(HttpMethod.Post, "/api/v1/waits/wake", config))
+        val refused = listOf(
+            HttpMethod.Get to "/api/v1/waits/wake",
+            HttpMethod.Put to "/api/v1/waits/wake",
+            HttpMethod.Post to "/api/v1/waits/wake/",
+            HttpMethod.Post to "/api/v1/waits/wake/x",
+            HttpMethod.Post to "/api/v1/waits",
+            HttpMethod.Post to "/api/v1/waits/w-1/answer",
+            HttpMethod.Post to "/api/v1/waits/mcp",
+        )
+        for ((method, path) in refused) {
+            assertEquals(RelayTarget.NotFound, resolveTarget(method, path, config), "$method $path")
+        }
+    }
+
+    @Test
     fun anythingElseUnderTheApiIsNotFound() {
         val refused = listOf(
             HttpMethod.Post to "/api/v1/launches",
@@ -121,6 +138,8 @@ class RelayTargetTest {
             RelayTarget.Hook(longPoll = true) to (true to true),
             RelayTarget.Catalog("{}") to (true to false),
             RelayTarget.SignedCatalog to (true to false),
+            // the hold wakes the agent with an answer: the hooks' capability only, never the agent's
+            RelayTarget.Wake to (true to false),
             RelayTarget.Mcp("github") to (false to true),
             RelayTarget.McpMethodNotAllowed to (false to true),
             RelayTarget.Inference("/api/v1/inference/v1/models") to (false to true),

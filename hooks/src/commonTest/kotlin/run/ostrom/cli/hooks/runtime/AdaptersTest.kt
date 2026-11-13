@@ -288,6 +288,19 @@ class AdaptersTest {
     }
 
     @Test
+    fun theWakeHookHoldsThroughThePortsCallsAndSleep() {
+        val bad = CallResult.Failed("HTTP 502", status = 502)
+        val calls = FakeCalls().on("/api/v1/waits/wake", bad, ok("""{"open":false}"""))
+        val slept = mutableListOf<Long>()
+        val ports = HookPorts(calls, FakeFiles(), { _, _ -> "" }, { it }, "/w", sleep = { slept += it })
+        val processor = SessionHookProcessor(contextOf(), ports)
+        val stop = """{"hook_event_name":"Stop","session_id":"a1"}""".encodeToByteArray()
+        assertEquals(HookReply(), processor.process(HookKind.WAKE, stop, "claude"))
+        assertEquals(listOf(5_000L), slept)
+        assertEquals(2, calls.calls.size)
+    }
+
+    @Test
     fun aGateEventThatCouldNotBeReadIsRefused() {
         // S2-30: too large, late or broken used to read as an empty event, and the action ran
         val ports = HookPorts(FakeCalls(), FakeFiles(), { _, _ -> "" }, { it }, "/w")

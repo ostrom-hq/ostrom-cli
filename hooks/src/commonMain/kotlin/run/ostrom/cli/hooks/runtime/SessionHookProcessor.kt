@@ -17,6 +17,8 @@ import run.ostrom.cli.hooks.gate.GitRunner
  * @property workingDirectory Where the hook was started, for events that do not say.
  * @property checks The workflow package of the session.
  * @property now The current time in milliseconds since the epoch: a gate policy past its signed expiry is not trusted.
+ * @property sleep Waits the given milliseconds: the wake hook between two failed calls. The default never waits (a hook
+ * that is not the wake does not call it); `main` gives the real one.
  */
 data class HookPorts(
     val calls: OstromCalls,
@@ -26,11 +28,12 @@ data class HookPorts(
     val workingDirectory: String,
     val checks: WorkflowChecks = NoWorkflowChecks,
     val now: () -> Long = SessionHooks::epochMillis,
+    val sleep: (Long) -> Unit = {},
 )
 
 /**
- * The hooks of `ostrom <agent>`: the gate and the session hook. An event the gate cannot read (too large, late, not
- * JSON) is refused: the gate never lets through what it did not read (S2-30).
+ * The hooks of `ostrom <agent>`: the gate, the session hook and the wake hook. An event the gate cannot read (too
+ * large, late, not JSON) is refused: the gate never lets through what it did not read (S2-30).
  */
 class SessionHookProcessor(private val context: HookContext, private val ports: HookPorts) : HookProcessor {
     override fun process(kind: HookKind, input: ByteArray?, dialect: String): HookReply {
@@ -41,6 +44,7 @@ class SessionHookProcessor(private val context: HookContext, private val ports: 
         return when {
             kind == HookKind.SESSION ->
                 SessionHook(session, ports.calls, ids, ports.files, ports.checks, ports.workingDirectory).handle(event)
+            kind == HookKind.WAKE -> WakeHook(ports.calls, ids, ports.sleep, ports.now).handle(event)
             parsed.name.isEmpty() -> HookReplies(dialect).deny(GateTexts.UNREAD_EVENT)
             else -> GateHook(
                 session,

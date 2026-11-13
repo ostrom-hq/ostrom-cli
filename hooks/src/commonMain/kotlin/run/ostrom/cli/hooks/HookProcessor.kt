@@ -10,6 +10,12 @@ enum class HookKind(val command: String) {
 
     /** At the start and the end of a session. */
     SESSION("session"),
+
+    /**
+     * The `Stop` of Claude Code in a local session: holds the stop while a wait of the session is open and hands the
+     * agent its answer. The one hook allowed to wait (a timeout of a day).
+     */
+    WAKE("wake"),
     ;
 
     /** Lookup by command name. */
@@ -67,7 +73,7 @@ class HookProcessorImpl(private val gate: GateHandler) : HookProcessor {
             GateDecision.Allow -> HookReply()
             is GateDecision.Deny -> deny(decision.reason, dialect)
         }
-        HookKind.SESSION -> HookReply()
+        HookKind.SESSION, HookKind.WAKE -> HookReply()
     }
 
     /** A refusal in the agent's dialect ([HookReplies.deny]): exit 2, the reason on stderr. */

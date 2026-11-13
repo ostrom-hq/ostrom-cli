@@ -58,14 +58,20 @@ internal class HookForwarder(
     /** Forwards [call]; [longPoll] when it may wait for a gate. */
     suspend fun forward(call: ApplicationCall, longPoll: Boolean) {
         val body = call.receiveBounded(HOOK_BODY_LIMIT)
-        if (body == null) call.respondTooLarge() else relay(call, longPoll, body)
+        val waits = longPoll && call.request.queryParameters.contains(WAIT)
+        if (body == null) call.respondTooLarge() else relay(call, waits, body)
     }
 
-    private suspend fun relay(call: ApplicationCall, longPoll: Boolean, body: ByteArray) {
+    /** Forwards the Stop hook's [call] to Ostrom, which holds it until an answer arrives: always a long poll. */
+    suspend fun hold(call: ApplicationCall) {
+        val body = call.receiveBounded(HOOK_BODY_LIMIT)
+        if (body == null) call.respondTooLarge() else relay(call, true, body)
+    }
+
+    private suspend fun relay(call: ApplicationCall, waits: Boolean, body: ByteArray) {
         val method = call.request.httpMethod
         val query = call.request.queryString()
         val target = config.serverUrl + call.request.path() + (if (query.isEmpty()) "" else "?$query")
-        val waits = longPoll && call.request.queryParameters.contains(WAIT)
         exchange.run(call, client, if (waits) timeouts.longPoll else timeouts.hook, {
             this.method = method
             url(target)

@@ -36,8 +36,14 @@ class HookProcessorTest {
     }
 
     @Test
+    fun theWakeHookNeverAsksTheGate() {
+        assertEquals(HookReply(), HookProcessorImpl(refuse).process(HookKind.WAKE, event, "claude"))
+    }
+
+    @Test
     fun hookKindsAreReadByTheirCommandName() {
         assertEquals(HookKind.SESSION, HookKind.of("session"))
+        assertEquals(HookKind.WAKE, HookKind.of("wake"))
         assertEquals(null, HookKind.of("gates-refresh"), "the background refresh is gone (S2-20)")
         assertEquals(null, HookKind.of("Gate"))
     }

@@ -133,6 +133,7 @@ private class Relay(
     private suspend fun dispatch(call: ApplicationCall, target: RelayTarget) {
         when (target) {
             is RelayTarget.Hook -> hooks.forward(call, target.longPoll)
+            RelayTarget.Wake -> hooks.hold(call)
             is RelayTarget.Catalog -> call.respondText(target.catalog, ContentType.Application.Json)
             RelayTarget.SignedCatalog -> policy.forward(call)
             is RelayTarget.Mcp -> mcp.forward(call, target.server)

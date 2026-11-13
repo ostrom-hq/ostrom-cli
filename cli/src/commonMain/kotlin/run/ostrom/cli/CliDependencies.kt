@@ -264,7 +264,14 @@ class CliDependencies(
             environment: Environment,
             session: () -> HookProcessor = {
                 val clock = SessionHooks::epochMillis
-                SessionHooks.processor(environment, FileSystem.SYSTEM, ProcessCaptureImpl(), LoopbackHttpImpl(), clock)
+                SessionHooks.processor(
+                    environment,
+                    FileSystem.SYSTEM,
+                    ProcessCaptureImpl(),
+                    LoopbackHttpImpl(),
+                    ::pause,
+                    clock,
+                )
             },
         ): HookRunner = HookRunnerImpl(console, environment, LazyHookProcessor(session))
     }

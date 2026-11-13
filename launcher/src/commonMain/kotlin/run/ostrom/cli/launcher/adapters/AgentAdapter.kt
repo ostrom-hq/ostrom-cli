@@ -38,6 +38,8 @@ data class RelayView(val url: String, val token: String, val mcpServers: List<St
  * @property foldsCase Whether this machine's paths ignore case (macOS, Windows), as Gemini CLI compares them.
  * @property trustProject The developer asked the agent to read the repository's own settings too
  * (`--trust-project-settings`), which can run the repository's programs and turn Ostrom's gate off.
+ * @property waitsWake The server holds the Stop hook's call for a wait's answer (`waits.wake.v1`): Claude Code then
+ * installs `ostrom hook wake`. No other agent holds its stop, so none installs it.
  */
 data class SessionLayout(
     val temporary: String,
@@ -54,8 +56,9 @@ data class SessionLayout(
     val pathSeparator: Char = ':',
     val foldsCase: Boolean = false,
     val trustProject: Boolean = false,
+    val waitsWake: Boolean = false,
 ) {
-    /** `"<ostrom>" hook gate|session`, the command an agent's hook runs. */
+    /** `"<ostrom>" hook gate|session|wake`, the command an agent's hook runs. */
     fun hookCommand(kind: String): String = "${quoted(executable)} hook $kind"
 
     /** `ostrom mcp --session <file>`: the stdio MCP server of the session, for agents that start it themselves. */
