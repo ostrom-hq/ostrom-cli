@@ -195,6 +195,48 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
         "ostrom hooks approve guard --digest sha256:9f2c…" to "approve only that exact version",
     ),
     "hooks refuse" to guide("harness", "ostrom hooks refuse guard" to "never run this version"),
+    "workflows" to guide(
+        "workflows",
+        "ostrom workflows list" to "the organisation's workflows",
+        "ostrom workflows run deploy --input env=staging --wait" to "start a run and follow it to its end",
+        "ostrom workflows runs --status failed" to "the runs that failed",
+    ),
+    "workflows list" to guide(
+        "workflows",
+        "ostrom workflows list" to "id, name, version, status, size and age of each workflow",
+        "ostrom workflows list --json" to "for a script",
+    ),
+    "workflows show" to guide(
+        "workflows",
+        "ostrom workflows show deploy" to "a workflow: inputs, nodes and where each outcome leads",
+        "ostrom workflows show deploy --json > w.json" to "the definition, which update takes back",
+    ),
+    "workflows create" to guide(
+        "workflows",
+        "ostrom workflows create --file deploy.json" to "save a new workflow",
+        "cat deploy.json | ostrom workflows create --file -" to "the definition from standard input",
+    ),
+    "workflows update" to guide(
+        "workflows",
+        "ostrom workflows update deploy --file w.json --expected-version 3" to
+            "save a new version, refused if someone saved in between",
+    ),
+    "workflows delete" to guide("workflows", "ostrom workflows delete deploy" to "delete a workflow"),
+    "workflows run" to guide(
+        "workflows",
+        "ostrom workflows run deploy --input env=staging" to "start a run",
+        "ostrom workflows run deploy --wait --timeout 30" to "follow it up to 30 minutes",
+    ),
+    "workflows runs" to guide(
+        "workflows",
+        "ostrom workflows runs" to "your runs, newest first",
+        "ostrom workflows runs --workflow deploy --status done" to "the runs of a workflow that succeeded",
+    ),
+    "workflows run-show" to guide(
+        "workflows",
+        "ostrom workflows run-show 3f9c" to "a run: its step, what it waits for, its visits",
+    ),
+    "workflows cancel" to guide("workflows", "ostrom workflows cancel 3f9c" to "cancel a run"),
     "members" to guide("organizations", "ostrom members list" to "the members of your organisation"),
     "members list" to guide("organizations", "ostrom members list" to "the members of your organisation"),
     "members role" to guide("organizations", "ostrom members role lena admin" to "change someone's role"),

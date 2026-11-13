@@ -72,7 +72,11 @@ open class CliKit {
         }
 
         override var isInteractive = false
-        override fun readStandardInput(maxBytes: Int, timeoutMillis: Int): StandardInput = error("not used")
+
+        /** What standard input holds; none is an error: a test that reads it says what it holds. */
+        var standardInput: StandardInput? = null
+        override fun readStandardInput(maxBytes: Int, timeoutMillis: Int): StandardInput =
+            standardInput ?: error("not used")
     }
 
     protected class FakeEnvironment(

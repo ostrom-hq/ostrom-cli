@@ -111,15 +111,15 @@ started.
 | Code | Name | Meaning |
 |---:|---|---|
 | 0 | `OK` | Done. |
-| 1 | `FAILED` | The check asked for failed: verify found the receipt invalid, doctor found a problem. |
-| 2 | `INCOMPLETE` | Incomplete, cancelled, or a no. |
+| 1 | `FAILED` | The check asked for failed: verify found the receipt invalid, doctor found a problem, a followed run failed. |
+| 2 | `INCOMPLETE` | Incomplete, cancelled (a followed run too), or a no. |
 | 64 | `USAGE` | Bad usage: an unknown command, option or agent, an option not in this version, a question with no terminal. |
 | 65 | `SIGN_IN_REQUIRED` | Sign-in required: run ostrom login. |
 | 66 | `NOT_FOUND` | Not found: a receipt, a gate, a harness, or not a git repository. |
 | 69 | `UNREACHABLE` | The server is unreachable, does not serve this or speaks another API, or the secret store did not answer. |
 | 70 | `NOT_IMPLEMENTED` | The command is not implemented in this version yet. |
 | 73 | `CANNOT_WRITE` | A local file could not be written. |
-| 75 | `STILL_WAITING` | Still waiting: wait reached its deadline, or nobody confirmed a governance change in time. |
+| 75 | `STILL_WAITING` | Still waiting: wait reached its deadline, a followed run is unfinished at its timeout, or nobody confirmed a governance change in time. |
 | 77 | `REFUSED` | Refused: the policy, your role, a self-approval, another organisation. |
 | 78 | `SIGNATURE_REFUSED` | A signature or a package was refused. |
 | 127 | `AGENT_MISSING` | The agent is not installed. |
