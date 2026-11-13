@@ -109,6 +109,10 @@ class WaitsCommandsTest : SetupKit() {
         val bare = routes(show to (200 to wait), answerRoute to (200 to """{"id":"w1"}"""))
         assertEquals(0, run(bare, "waits", "answer", "w1"))
         assertEquals("Answered w1.\n", console.out.toString())
+        console.out.clear()
+        val unnamed = routes(show to (200 to wait), answerRoute to (200 to """{"answer":{}}"""))
+        assertEquals(0, run(unnamed, "waits", "answer", "w1"))
+        assertEquals("Answered w1.\n", console.out.toString())
     }
 
     @Test
@@ -163,6 +167,9 @@ class WaitsCommandsTest : SetupKit() {
         assertEquals("$cancelled\n", console.out.toString())
         console.out.clear()
         assertEquals(0, run(routes(cancelRoute to (200 to """{"id":"w1"}""")), "waits", "cancel", "w1"))
+        assertEquals("Cancelled w1.\n", console.out.toString())
+        console.out.clear()
+        assertEquals(0, run(routes(cancelRoute to (200 to """{"question":{}}""")), "waits", "cancel", "w1"))
         assertEquals("Cancelled w1.\n", console.out.toString())
         assertEquals(66, run(routes(), "waits", "cancel", "w1"))
         assertEquals(64, run(routes(), "waits", "cancel", "a/b"))
