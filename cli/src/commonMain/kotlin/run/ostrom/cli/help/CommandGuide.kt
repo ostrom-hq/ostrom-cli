@@ -136,6 +136,29 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
         "ostrom invite lena@acme.dev" to "invite a developer by e-mail",
         "ostrom invite lena@acme.dev --role admin" to "as an admin",
     ),
+    "waits" to guide(
+        "waits",
+        "ostrom waits" to "what waits for you",
+        "ostrom waits ask --title \"Which region?\" --assignee lena" to "ask a member for something",
+    ),
+    "waits list" to guide(
+        "waits",
+        "ostrom waits list" to "the open waits asked of you",
+        "ostrom waits list --all --session ses_41b2" to "every wait of one session",
+    ),
+    "waits show" to guide("waits", "ostrom waits show 7f3a" to "a wait: its text, fields, actions and answer"),
+    "waits answer" to guide(
+        "waits",
+        "ostrom waits answer 7f3a --action approve --set note=\"ship it\"" to "answer with an action and a value",
+        "ostrom waits answer 7f3a --set-json tags='[\"a\",\"b\"]'" to "a JSON value",
+    ),
+    "waits cancel" to guide("waits", "ostrom waits cancel 7f3a" to "withdraw a wait"),
+    "waits ask" to guide(
+        "waits",
+        "ostrom waits ask --title \"Deploy?\" --action yes:Yes --action no:No" to "ask for a decision",
+        "ostrom waits ask --title \"Region\" --field r:choice:Region:required --option r=eu --option r=us" to
+            "ask with a typed field",
+    ),
     "members" to guide("organizations", "ostrom members list" to "the members of your organisation"),
     "members list" to guide("organizations", "ostrom members list" to "the members of your organisation"),
     "members role" to guide("organizations", "ostrom members role lena admin" to "change someone's role"),

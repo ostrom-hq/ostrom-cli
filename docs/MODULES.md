@@ -139,6 +139,19 @@ without the session, 77 for a session the caller may not read (a gate it may not
   `ostrom inbox --json` and `ostrom receipts list --json` are an array of the server's items as they are (the
   `items` of their route in the API contract). `JsonOutputTest` and `ReceiptCommandsTest` hold these shapes.
 - **Errors**: say what happened and the command that gets you out (`ostrom login`, `ostrom doctor`, `--server`).
+- **Waits** (`ostrom waits list|show|answer|cancel|ask`, feature `waits.v1`, parity TC-WAI-6): the questions of agents
+  and the asks between members, as TeamCode's `teamcode waits` minus what the server lacks (no secret or file fields,
+  no time or event waits). `list` shows the waits asked of the caller, open ones by default (`--all`, `--status`,
+  `--assignee MEMBER|all` for administrators, `--session`, `--before`, `--limit` up to 500); `answer` reads the wait
+  and converts `--set FIELD=VALUE` by the type its field declares (`text`, `choice` with its options or `allowOther`,
+  a multiple choice repeating the option, `confirm`, `number`, `date` as `YYYY-MM-DD`, `info` takes none), takes
+  `--set-json` as given, and refuses an unknown field or action, a value that does not convert or a wait no longer
+  open before anything is sent (`--action` may be left out when there is one); `ask` sends a fresh `Idempotency-Key`
+  (`ServerRequest.idempotencyKey`). The credentials are the server's: the device token of `ostrom login` holds no
+  waits scope (`CLI_SCOPES`), so the commands need `OSTROM_TOKEN` made on the console with `waits:read` / `waits:ask`,
+  and answering takes a person signed in on the console or the app (`WriteAccess.PERSON`, no token answers, S2-52):
+  `answer` says so plainly on a 403 and where to answer, it never fakes it. Business rules are in
+  `cli/.../waits/*UseCase.kt`; `WaitsCommandsTest` and `cli/src/commonTest/.../waits` hold them.
 - **Governance writes** (`ostrom policy set`, the rule decisions and edits of `ostrom policy rules`, `ostrom harness
   enforce`, `update`, `remove`, `add --enforce`) never go with the device's token nor a console token (S2-52): they take the token of `ostrom login --admin`, which asks for
   `policy:write`, `harness:write` and `gates:policy` (`AdminTokens.SCOPES`), shown and approved in the browser by an

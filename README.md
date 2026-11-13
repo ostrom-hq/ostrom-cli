@@ -74,7 +74,7 @@ Ostrom is before its first public release.
 | Part | Status |
 | --- | --- |
 | `version`, `doctor`, `config`, the home screen | Available |
-| `init`, `invite`, `members`, `policy`, `harness` | Available; what the server does not serve yet is said, not failed |
+| `init`, `invite`, `members`, `policy`, `harness`, `waits` | Available; what the server does not serve yet is said, not failed |
 | The other commands of the spec | Declared with their help; they exit with 70 (`not implemented yet`) while they are built |
 | Released binaries | At the launch |
 

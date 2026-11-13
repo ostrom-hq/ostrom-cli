@@ -40,10 +40,14 @@ data class ServerRequest(
     val token: String? = null,
     val timeoutMillis: Long = REQUEST_TIMEOUT_MILLIS,
     val org: String? = null,
+    val idempotencyKey: String? = null,
 )
 
 /** The header naming the organisation a call acts in (`OstromOrg` parameter of the contract). */
 const val ORG_HEADER = "Ostrom-Org"
+
+/** The header of a call a replay must not repeat (`Idempotency-Key` of the contract). */
+const val IDEMPOTENCY_HEADER = "Idempotency-Key"
 
 /**
  * The refusal this response carries, the contract's `ApiError` body (`{"error":{"type","message"}}`), or null when the
@@ -121,6 +125,7 @@ class OstromApiImpl(
                 header(TRACEPARENT_HEADER, trace.traceparent())
                 if (request.token != null) header(HttpHeaders.Authorization, "Bearer ${request.token}")
                 if (request.org != null) header(ORG_HEADER, request.org)
+                if (request.idempotencyKey != null) header(IDEMPOTENCY_HEADER, request.idempotencyKey)
                 if (request.body != null) setBody(TextContent(request.body, ContentType.Application.Json))
                 timeout { requestTimeoutMillis = request.timeoutMillis }
             }

@@ -23,6 +23,14 @@ class ServerJsonTest {
     }
 
     @Test
+    fun aCallCanCarryAnIdempotencyKey() = runTest {
+        fake["POST /a"] = 201 to "{}"
+        server.call("POST", "/a", null, "t", 5, "key-1")
+        server.post("/a", objectOf("k" to 1), "t")
+        assertEquals(listOf("key-1", null), fake.sent("POST /a").map { it.idempotencyKey })
+    }
+
+    @Test
     fun anErrorIsReadAsTheContractsApiErrorOrThePrototypes() = runTest {
         fake["GET /closed"] = 409 to """{"error":{"type":"session_closed","message":"closed"}}"""
         fake["GET /old"] = 400 to """{"error":"bad thing"}"""
