@@ -523,7 +523,12 @@ class OstromCliTest : CliKit() {
 
     @Test
     fun onlyHelpIsWrittenAsTheClisOwnTextAnyOtherMessageIsCleaned() {
-        val asked = listOf(listOf("--help"), listOf("help"), listOf("help", "plumbing"), listOf("logs", "--help"))
+        val asked = listOf(
+            listOf("--help"),
+            listOf("help"),
+            listOf("help", "plumbing"),
+            listOf("sessions", "show", "--help"),
+        )
         for (arguments in asked) {
             console.help.clear()
             assertEquals(0, cli().run(arguments.toTypedArray()))

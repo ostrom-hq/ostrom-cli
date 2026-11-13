@@ -32,7 +32,8 @@ internal fun setupCommands(dependencies: CliDependencies): List<CliktCommand> = 
         GithubLinksCommand(dependencies),
         GithubUnlinkCommand(dependencies),
     ),
-    CloudCommand().subcommands(CloudGithubCommand(dependencies)),
+    // `cloud attach` as TeamCode has it, and `attach` at the top too, as TeamCode keeps it
+    CloudCommand().subcommands(CloudGithubCommand(dependencies), AttachCommand(dependencies)),
     HooksCommand(dependencies).subcommands(
         HooksListCommand(dependencies),
         HooksShowCommand(dependencies),

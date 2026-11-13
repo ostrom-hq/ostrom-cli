@@ -109,8 +109,8 @@ class TerminalTextTest {
 
     @Test
     fun theConsoleCleansWhatAPersonReadsWhereverItGoesAndAProgramsStreamOnlyAtATerminal() {
-        // L8: `ostrom logs | cat`, `| tee` or `> log` shows the text to a person later, through no terminal of ours;
-        // a stream for programs keeps its bytes in a pipe, and is a person's at a terminal (M2)
+        // L8: `ostrom sessions show | cat`, `| tee` or `> log` shows the text to a person later, through no terminal of
+        // ours; a stream for programs keeps its bytes in a pipe, and is a person's at a terminal (M2)
         val title = "{\"title\":\"$esc[2K\u202E\"}\n"
         for (terminal in listOf(true, false)) {
             val written = mutableListOf<Pair<Int, String>>()

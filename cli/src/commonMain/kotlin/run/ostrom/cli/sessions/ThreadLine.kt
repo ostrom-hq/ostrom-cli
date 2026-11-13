@@ -8,8 +8,9 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.intOrNull
 
-// The thread `ostrom logs` prints (CLI.md § 2.2): what a session did, in order of time, read from what the server
-// keeps of it — the session, the receipt it signed (its checks), and the gates it asked (its requests for a yes).
+// The thread `ostrom sessions show` prints (CLI.md § 2.2): what a session did, in order of time, read from what the
+// server keeps of it — the session, the receipt it signed (its checks), and the gates it asked (its requests for a
+// yes).
 
 /** The width of the time column: `14:02:11`. */
 private const val CLOCK = 8

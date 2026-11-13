@@ -6,7 +6,7 @@
     3.1 ostrom policy rules                                               3.2 and 4.1 ostrom harness
     5.2 ostrom run claude (a fake Claude Code plays the hooks)            5.3 the deployment it tries is held
     5.6 the asker's own yes refused, 5.4 the second person's yes          5.5 ostrom wait lets it through
-    5.7 the signed receipt, pulled and verified                         6.1 ostrom logs
+    5.7 the signed receipt, pulled and verified                         6.1 ostrom sessions show
     2.9 ostrom mcp: a server of the organisation, called through the session's relay
     4.3 ostrom mcp --server ostrom: the agent asks a person, the console answers, the agent reads the answer
     6.2 ostrom run claude --cloud and ostrom attach: a session in Ostrom's cloud, detached and attached again
@@ -555,7 +555,7 @@ class Journey:
             else:
                 self.check(status in (200, 204), f"the owner removes it ({status}): {error_of(body)[:200]}")
 
-        self.begin("6.1", "ostrom logs: the thread of the session that just ran")
+        self.begin("6.1", "ostrom sessions show: the thread of the session that just ran")
         # the session read is the one ostrom run claude just ran: the routes of 5.2 too
         if self.needs(*SESSION_ROUTES, ("GET", "/api/v1/sessions"), org=True):
             self.guarded(self.logs, maya, gated)
@@ -604,23 +604,23 @@ class Journey:
         return next((m.get("role") for m in items if m.get("login") == login), None)
 
     def logs(self, maya, gated):
-        last = self.ostrom(maya, "logs", "--json")
+        last = self.ostrom(maya, "sessions", "show", "--json")
         thread = read_json(last.stdout) or {}
         session = thread.get("session") or {}
         if not self.check(last.returncode == 0 and session.get("id"),
-                          f"ostrom logs --json reads the developer's last session ({last.returncode}): "
+                          f"ostrom sessions show --json reads the developer's last session ({last.returncode}): "
                           f"{(last.stderr or last.stdout).strip()[:300]}"):
             return
         gates = thread.get("gates") or []
         if gated:
             self.check(len(gates) > 0, f"with the request for a yes it asked ({len(gates)})")
         # first, as it depends on nothing below
-        gone = self.ostrom(maya, "logs", f"ses_none_{self.stamp}")
+        gone = self.ostrom(maya, "sessions", "show", f"ses_none_{self.stamp}")
         self.check(gone.returncode == 66, f"a session that does not exist is 66 ({gone.returncode})")
-        shown = self.ostrom(maya, "logs", session["id"])
+        shown = self.ostrom(maya, "sessions", "show", session["id"])
         lines = shown.stdout.splitlines()
         self.check(shown.returncode == 0 and lines[:1] and lines[0].startswith(f"Session {session['id']}"),
-                   f"ostrom logs {session['id']} heads its thread ({shown.returncode}): {shown.stderr.strip()[:300]}")
+                   f"ostrom sessions show {session['id']} heads its thread ({shown.returncode}): {shown.stderr.strip()[:300]}")
         self.check(any("session started" in line for line in lines), "from its start")
         if gated:
             self.check(any("asked for a yes" in line for line in lines), "through the request for a yes")
@@ -631,7 +631,7 @@ class Journey:
         if not self.check(session.get("endedAt") and any("session ended" in line for line in lines),
                           f"to its end ({session.get('endedAt')})"):
             return
-        followed = self.ostrom(maya, "logs", session["id"], "-f", timeout=60)
+        followed = self.ostrom(maya, "sessions", "show", session["id"], "-f", timeout=60)
         if followed.returncode is None:
             self.check(False, "-f on an ended session returns (it was still waiting after 60 s)")
             return

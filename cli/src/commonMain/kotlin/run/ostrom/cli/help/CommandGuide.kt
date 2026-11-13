@@ -36,6 +36,13 @@ private val AGENT_GUIDES = Agent.entries.flatMap { agent ->
     ),
 )
 
+/** `sessions show`, and the former `logs` kept hidden for one release. */
+private val sessionsShow = guide(
+    "agents",
+    "ostrom sessions show" to "the thread of your last session",
+    "ostrom sessions show ses_41b2 --follow" to "follow a session live",
+)
+
 private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
     "" to guide(
         "quickstart",
@@ -79,11 +86,18 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
         "agents",
         "ostrom attach ses_41b2" to "attach again to a cloud session that kept running",
     ),
-    "logs" to guide(
+    "sessions" to guide(
         "agents",
-        "ostrom logs" to "the thread of your last session",
-        "ostrom logs ses_41b2 --follow" to "follow a session live",
+        "ostrom sessions list" to "your sessions, newest first",
+        "ostrom sessions show" to "the thread of your last session",
     ),
+    "sessions list" to guide(
+        "agents",
+        "ostrom sessions list" to "your sessions, newest first",
+        "ostrom sessions list --all --open" to "everyone's sessions still running",
+    ),
+    "sessions show" to sessionsShow,
+    "logs" to sessionsShow,
     "harness" to guide(
         "harness",
         "ostrom harness list" to "the harnesses of this repository",
@@ -195,6 +209,10 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
         "ostrom github unlink --member mem_7d1a" to "remove a member's link (admin)",
     ),
     "cloud" to guide("cloud-sessions", "ostrom cloud github ses_41b2 --access shared" to "share your GitHub account"),
+    "cloud attach" to guide(
+        "cloud-sessions",
+        "ostrom cloud attach ses_41b2" to "attach again to a cloud session that kept running",
+    ),
     "cloud github" to guide(
         "cloud-sessions",
         "ostrom cloud github ses_41b2 --access shared" to "let anyone who may use the session instruct the agent",

@@ -173,11 +173,11 @@ def ostrom_on(binary, server, work, home, *arguments):
 
 
 def logs(binary, server, work, home):
-    """`ostrom logs`: the thread of the session the launch just ran, read back with the device's token."""
-    thread = ostrom_on(binary, server, work, home, "logs")
+    """`ostrom sessions show`: the thread of the session the launch just ran, read back with the device's token."""
+    thread = ostrom_on(binary, server, work, home, "sessions", "show")
     lines = thread.stdout.splitlines()
     check(thread.returncode == 0 and lines[:1] and lines[0].startswith("Session ") and "@maya" in lines[0],
-          f"ostrom logs heads the developer's last session (exit {thread.returncode}: {thread.stdout[:300]} "
+          f"ostrom sessions show heads the developer's last session (exit {thread.returncode}: {thread.stdout[:300]} "
           f"{thread.stderr[:300]})")
     said = "\n".join(lines)
     check("session started" in said and "check" in said and "Run the tests · passed" in said,
@@ -187,21 +187,21 @@ def logs(binary, server, work, home):
     ended = [line for line in lines if "session ended" in line]
     check(len(ended) == 1 and "exit 3" in ended[0], f"and the end, with the agent's code ({ended})")
     session = lines[0].split(" ")[1] if lines else ""
-    followed = ostrom_on(binary, server, work, home, "logs", session, "-f")
+    followed = ostrom_on(binary, server, work, home, "sessions", "show", session, "-f")
     check(followed.returncode == 0 and followed.stdout == thread.stdout,
           "-f on an ended session prints the thread once and returns")
-    kept = ostrom_on(binary, server, work, home, "logs", session, "--json")
+    kept = ostrom_on(binary, server, work, home, "sessions", "show", session, "--json")
     body = json.loads(kept.stdout) if kept.returncode == 0 else {}
     check(body.get("session", {}).get("id") == session and [g.get("id") for g in body.get("gates", [])] == ["G-e2e"],
           f"--json is the server's answer with the gate's request (exit {kept.returncode})")
-    missing = ostrom_on(binary, server, work, home, "logs", "no-such-session")
+    missing = ostrom_on(binary, server, work, home, "sessions", "show", "no-such-session")
     check(missing.returncode == 66 and "No session no-such-session" in missing.stderr,
           f"no such session is 66 (exit {missing.returncode}: {missing.stderr[:200]})")
 
 
 def logs_unserved(binary, work):
-    """`ostrom logs` on a server that does not serve the sessions' reads: said, 69."""
-    print("ostrom logs, on a server without the sessions' reads")
+    """`ostrom sessions show` on a server that does not serve the sessions' reads: said, 69."""
+    print("ostrom sessions show, on a server without the sessions' reads")
     log = os.path.join(work, "requests.jsonl")
     ready = os.path.join(work, "ready.txt")
     process = subprocess.Popen([sys.executable, os.path.join(HERE, "contract_server.py"), "--log", log,
@@ -216,7 +216,7 @@ def logs_unserved(binary, work):
         os.makedirs(home)
         with open(os.path.join(home, "credentials.json"), "w") as handle:
             json.dump({server: {"token": "ost_e2e_device", "login": "maya"}}, handle)
-        for arguments in (["logs"], ["logs", "seg-1", "-f"]):
+        for arguments in (["sessions", "show"], ["sessions", "show", "seg-1", "-f"]):
             done = ostrom_on(binary, server, work, home, *arguments)
             check(done.returncode == 69 and "does not serve the sessions' reads" in done.stderr,
                   f"ostrom {' '.join(arguments)} says the server does not serve them (exit {done.returncode}: "

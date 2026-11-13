@@ -22,7 +22,6 @@ import run.ostrom.cli.commands.HookCommand
 import run.ostrom.cli.commands.ImportTeamCodeCommand
 import run.ostrom.cli.commands.InboxCommand
 import run.ostrom.cli.commands.LoginCommand
-import run.ostrom.cli.commands.LogsCommand
 import run.ostrom.cli.commands.LogoutCommand
 import run.ostrom.cli.commands.McpCommand
 import run.ostrom.cli.commands.ReceiptsCommand
@@ -31,6 +30,9 @@ import run.ostrom.cli.commands.ReceiptsPullCommand
 import run.ostrom.cli.commands.ReceiptsShowCommand
 import run.ostrom.cli.commands.RootCommand
 import run.ostrom.cli.commands.RunCommand
+import run.ostrom.cli.commands.SessionsCommand
+import run.ostrom.cli.commands.SessionsListCommand
+import run.ostrom.cli.commands.SessionsShowCommand
 import run.ostrom.cli.commands.StatusCommand
 import run.ostrom.cli.commands.TelemetryCommand
 import run.ostrom.cli.commands.UpdateCommand
@@ -172,6 +174,7 @@ class OstromCli(private val dependencies: CliDependencies) {
         val run = RunCommand().subcommands(Agent.entries.map { AgentCommand(it, dependencies) })
         // the former `ostrom <agent>`, hidden, for one release (TeamCode's path is `run <agent>`)
         val formerAgents = Agent.entries.map { AgentCommand(it, dependencies, deprecated = true) }
+        val former = formerAgents + SessionsShowCommand(dependencies, deprecated = true)
         val implemented = listOf(
             InboxCommand(dependencies),
             ApproveCommand(dependencies),
@@ -182,7 +185,7 @@ class OstromCli(private val dependencies: CliDependencies) {
                 ReceiptsPullCommand(dependencies),
             ),
             VerifyCommand(dependencies),
-            LogsCommand(dependencies),
+            SessionsCommand().subcommands(SessionsListCommand(dependencies), SessionsShowCommand(dependencies)),
             StatusCommand(dependencies),
             AttachCommand(dependencies),
             LoginCommand(dependencies),
@@ -199,7 +202,7 @@ class OstromCli(private val dependencies: CliDependencies) {
         val help = HelpCommand(dependencies) { "${root.getFormattedHelp()}" }
         val completion = CompletionCommand(dependencies)
         val visible = listOf(run) + pendingCommands(implemented)
-        return root.subcommands(visible + plumbing + completion + help + formerAgents)
+        return root.subcommands(visible + plumbing + completion + help + former)
     }
 
     internal companion object {

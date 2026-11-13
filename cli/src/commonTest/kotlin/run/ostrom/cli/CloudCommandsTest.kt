@@ -42,5 +42,8 @@ class CloudCommandsTest : CliKit() {
         assertEquals(6, cli(environment = withServer, api = none).run(arrayOf("attach", "cs1")))
         assertEquals(listOf("cs1" to CloudSite("https://ostrom.example", "ost_1", "/work/acme")), attached)
         assertEquals(64, cli(environment = withServer).run(arrayOf("attach")), "the session is required")
+        // `cloud attach`, as TeamCode has it too
+        assertEquals(6, cli(environment = withServer, api = none).run(arrayOf("cloud", "attach", "cs2")))
+        assertEquals("cs2", attached.last().first)
     }
 }
