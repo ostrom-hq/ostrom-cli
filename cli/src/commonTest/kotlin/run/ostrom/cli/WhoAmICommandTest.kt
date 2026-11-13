@@ -20,6 +20,10 @@ class WhoAmICommandTest : SetupKit() {
         assertEquals(0, run(mapOf(bare, orgs()), "whoami"))
         assertEquals("maya\n", console.out.toString(), "the login kept at sign-in")
         assertErr("Not a member of an organisation on https://ostrom.example yet.\n")
+        console.out.clear()
+        val noLogin = "GET /api/v1/auth/me" to (200 to """{"dev":{},"capabilities":[]}""")
+        assertEquals(0, run(mapOf(noLogin, orgs()), "whoami"))
+        assertEquals("maya\n", console.out.toString(), "a dev without a login")
     }
 
     @Test

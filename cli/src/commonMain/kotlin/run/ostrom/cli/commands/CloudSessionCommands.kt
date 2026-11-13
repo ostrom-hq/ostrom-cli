@@ -48,7 +48,8 @@ internal fun JsonObject.cloudLine(now: Long): String = listOf(
 internal class CloudListCommand(private val dependencies: CliDependencies) : CliktCommand(name = "list") {
     override fun help(context: Context) = "List your cloud sessions, newest first: id, agent, status, repository, age"
 
-    private val status by option("--status", help = "Only the sessions in this status").choice(*STATUSES.toTypedArray())
+    private val status by option("--status", help = "Only the sessions in this status")
+        .choice(STATUSES.associateWith { it })
     private val before by option("--before", help = "The id the previous page ended with (printed when more exist)")
     private val org by orgOption()
     private val server by serverFlag()
