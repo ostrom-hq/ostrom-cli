@@ -49,8 +49,15 @@ import kotlin.time.Duration.Companion.seconds
  * @property pid The shell's pid, leader of its own session and process group.
  * @property master The PTY's master side.
  * @param grace How long [terminate] waits after SIGTERM before SIGKILL.
+ * @param endsWithShell Whether the output ends once the shell exited and the output is quiet, even if a process it
+ *   started in the background still holds it (a preparation command that starts a server).
  */
-class PtyTerminal private constructor(val pid: Int, private val master: Int, private val grace: Duration) : Terminal {
+class PtyTerminal private constructor(
+    val pid: Int,
+    private val master: Int,
+    private val grace: Duration,
+    private val endsWithShell: Boolean = false,
+) : Terminal {
     private val closed = AtomicInt(0)
     private val buffer = ByteArray(CHUNK)
     private val exit = AtomicInt(RUNNING)
@@ -59,7 +66,10 @@ class PtyTerminal private constructor(val pid: Int, private val master: Int, pri
 
     override suspend fun read(): ByteArray? = withContext(Dispatchers.IO) {
         // A short poll before the read: a blocked read() would ignore a cancellation until the PTY speaks.
-        while (!readable()) ensureActive()
+        while (!readable()) {
+            ensureActive()
+            if (endsWithShell && reap()) return@withContext null
+        }
         var count = readOnce()
         while (count < 0L && errno == EINTR) count = readOnce()
         if (count > 0L) {
@@ -133,6 +143,15 @@ class PtyTerminal private constructor(val pid: Int, private val master: Int, pri
             spawnPipe(listOf(SHELL, "-c", script), environment, directory, GRACE)
     }
 
+    /**
+     * Starts a preparation command: as [Pipes], but its output ends with its shell, so a server it left running in the
+     * background holds the preparation up no longer.
+     */
+    object Commands : TerminalStarter {
+        override suspend fun start(script: String, environment: Map<String, String>, directory: String): Terminal =
+            spawnPipe(listOf(SHELL, "-c", script), environment, directory, GRACE, endsWithShell = true)
+    }
+
     /** Constants and readers of the enclosing type. */
     companion object : TerminalStarter {
         private const val RUNNING = -1
@@ -193,6 +212,7 @@ class PtyTerminal private constructor(val pid: Int, private val master: Int, pri
          * @param environment Its environment.
          * @param directory Its working directory.
          * @param grace The SIGTERM grace of [terminate].
+         * @param endsWithShell Whether the output ends with the shell, whatever its background processes hold.
          *
          * @return The process, read through its pipe.
          *
@@ -203,6 +223,7 @@ class PtyTerminal private constructor(val pid: Int, private val master: Int, pri
             environment: Map<String, String>,
             directory: String,
             grace: Duration,
+            endsWithShell: Boolean = false,
         ): PtyTerminal = memScoped {
             val arguments = allocArray<CPointerVar<ByteVar>>(argv.size + 1)
             argv.forEachIndexed { index, value -> arguments[index] = value.cstr.ptr }
@@ -214,7 +235,7 @@ class PtyTerminal private constructor(val pid: Int, private val master: Int, pri
             val output = alloc<IntVar>()
             val pid = ostrom_pipe_spawn(argv.first(), arguments, envp, directory, output.ptr)
             check(pid > 0) { "Could not start the process: ${strerror(errno)?.toKString()}" }
-            PtyTerminal(pid, output.value, grace)
+            PtyTerminal(pid, output.value, grace, endsWithShell)
         }
 
         /** The exit code of a `waitpid` status: its code, or 128 + the signal that ended it. */

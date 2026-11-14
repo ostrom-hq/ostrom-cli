@@ -7,12 +7,14 @@ package run.ostrom.cli.runner
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.concurrent.Volatile
 import kotlin.time.Clock
 import kotlin.time.Duration
@@ -34,6 +36,7 @@ import kotlin.time.Instant
  * @param heartbeatInterval Between heartbeats.
  * @param reconnectDelay Before reopening a dropped terminal link.
  * @param outputBuffer Output chunks kept while the link is down.
+ * @param prepare Prepares the workspace before the agent starts; none on a runner without a recipe.
  */
 @Suppress("LongParameterList") // Six collaborators and three tunings with defaults, all named at the call sites.
 class Runner(
@@ -46,13 +49,14 @@ class Runner(
     private val heartbeatInterval: Duration = 15.seconds,
     private val reconnectDelay: Duration = 2.seconds,
     private val outputBuffer: Int = 1024,
+    private val prepare: Preparer? = null,
 ) {
     private val output = Channel<ByteArray>(outputBuffer, BufferOverflow.DROP_OLDEST)
 
     /** The terminal in use: the first one, then each shell started after it ended. */
-    private class Current(terminal: Terminal) {
+    private class Current(terminal: Terminal?) {
         @Volatile
-        var terminal: Terminal = terminal
+        var terminal: Terminal? = terminal
     }
 
     @Volatile
@@ -71,35 +75,79 @@ class Runner(
     }
 
     /**
-     * Runs until the server says stop or ends the execution.
+     * Runs until the server says stop or ends the execution: prepares the workspace first ([prepare], heartbeating
+     * unready meanwhile), then starts the agent and reports ready.
      *
      * @return The exit code: 0 after a stop, 1 when the execution ended under it.
      */
     suspend fun run(): Int {
-        val launch = try {
-            if (config.governed) openLaunch() else null
-        } catch (error: ExecutionEndedException) {
-            log("execution ended: ${error.message}")
-            return 1
-        }
-        val agentEnvironment =
-            SessionScript.environment(environment, config) - RunnerConfig.RUNNER_SOCKETS + launchVariables(launch)
-        val current = Current(terminals.start(SessionScript.FIRST, agentEnvironment, config.workspace))
+        val base = SessionScript.environment(environment, config) - RunnerConfig.RUNNER_SOCKETS
+        val current = Current(null)
         return try {
             coroutineScope {
-                val terminalJob = launch { superviseTerminal(current, agentEnvironment) }
                 val linkJob = launch { relay(current) }
-                val code = heartbeat(current)
+                val code = prepareThenRun(base, current)
                 linkJob.cancel()
-                terminalJob.cancel()
                 code
             }
         } finally {
-            current.terminal.close()
+            current.terminal?.close()
         }
     }
 
-    private fun lastOutput(): String? = lastOutputAt?.toString()
+    private suspend fun prepareThenRun(base: Map<String, String>, current: Current): Int = coroutineScope {
+        val preparing = async {
+            try {
+                // The commands never get the first message, which is the agent's.
+                if (prepare == null) {
+                    PreparationOutcome.Legacy
+                } else {
+                    prepare.prepare(base - "OSTROM_AGENT_PROMPT") { output.send(it) }
+                }
+            } catch (error: ExecutionEndedException) {
+                log("execution ended: ${error.message}")
+                PreparationOutcome.Ended
+            }
+        }
+        var outcome: PreparationOutcome? = null
+        while (outcome == null) {
+            outcome = withTimeoutOrNull(heartbeatInterval) { preparing.await() }
+            if (outcome == null) {
+                beat(current, ready = false)?.let {
+                    preparing.cancel()
+                    return@coroutineScope it
+                }
+            }
+        }
+        val directory = when (outcome) {
+            is PreparationOutcome.Prepared -> outcome.directory
+            PreparationOutcome.Failed -> {
+                // Unready heartbeats until the server stops the execution.
+                val path = PreparationLog.path(config.workspace, config.epoch)
+                val failed = "\r\nThe environment could not be prepared: the session stops. See $path.\r\n"
+                output.send(failed.encodeToByteArray())
+                return@coroutineScope heartbeat(current, ready = false)
+            }
+            PreparationOutcome.Ended -> return@coroutineScope 1
+            PreparationOutcome.Legacy, PreparationOutcome.NotPreparing -> config.workspace
+        }
+        // Prepared by the runner: the session script clones nothing itself.
+        val prepared = if (outcome == PreparationOutcome.Legacy) base else base - REPOSITORY_VARIABLES
+        val opened = try {
+            if (config.governed) openLaunch() else null
+        } catch (error: ExecutionEndedException) {
+            log("execution ended: ${error.message}")
+            return@coroutineScope 1
+        }
+        val agentEnvironment = prepared + launchVariables(opened)
+        val first = terminals.start(SessionScript.FIRST, agentEnvironment, directory)
+        current.terminal = first
+        val terminalJob = launch { superviseTerminal(current, first, agentEnvironment) }
+        val code = heartbeat(current)
+        terminalJob.cancel()
+        code
+    }
+
 
     /** Opens the agent's launch, a few times while the server cannot be reached; then the agent does not start. */
     private suspend fun openLaunch(): RunnerLaunch {
@@ -135,49 +183,60 @@ class Runner(
         is RunnerLaunch.Refused -> mapOf("OSTROM_LAUNCH_REFUSED" to launch.reason)
     }
 
-    private suspend fun heartbeat(current: Current): Int {
+    private suspend fun heartbeat(current: Current, ready: Boolean = true): Int {
         while (true) {
-            val instruction = try {
-                // Ready from the first beat: the terminal is started before the runner reports.
-                server.heartbeat(ready = true, stopped = false, lastModelRequestAt = lastOutput(), background)
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: ExecutionEndedException) {
-                log("execution ended: ${error.message}")
-                current.terminal.terminate()
-                return 1
-            } catch (error: Exception) {
-                log("heartbeat failed: ${error::class.simpleName}")
-                null
-            }
-            if (instruction == Instruction.STOP) {
-                log("stopping")
-                current.terminal.terminate()
-                try {
-                    server.heartbeat(ready = true, stopped = true, lastModelRequestAt = lastOutput())
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (error: Exception) {
-                    log("last heartbeat failed: ${error::class.simpleName}")
-                }
-                return 0
-            }
+            beat(current, ready)?.let { return it }
             delay(heartbeatInterval)
         }
     }
 
-    private suspend fun superviseTerminal(current: Current, agentEnvironment: Map<String, String>) {
+    /**
+     * One heartbeat.
+     *
+     * @return The exit code once the runner must end (0 after a stop, 1 when the execution ended), or null.
+     */
+    @Suppress("ReturnCount") // Ended, stopped, or going on.
+    private suspend fun beat(current: Current, ready: Boolean): Int? {
+        val instruction = try {
+            // Ready once the agent's terminal is started.
+            server.heartbeat(ready = ready, stopped = false, lastModelRequestAt = lastOutputAt?.toString(), background)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: ExecutionEndedException) {
+            log("execution ended: ${error.message}")
+            current.terminal?.terminate()
+            return 1
+        } catch (error: Exception) {
+            log("heartbeat failed: ${error::class.simpleName}")
+            null
+        }
+        if (instruction != Instruction.STOP) return null
+        log("stopping")
+        current.terminal?.terminate()
+        try {
+            server.heartbeat(ready = ready, stopped = true, lastModelRequestAt = lastOutputAt?.toString())
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            log("last heartbeat failed: ${error::class.simpleName}")
+        }
+        return 0
+    }
+
+    private suspend fun superviseTerminal(current: Current, first: Terminal, agentEnvironment: Map<String, String>) {
+        var terminal = first
         while (true) {
             while (true) {
-                val bytes = current.terminal.read() ?: break
+                val bytes = terminal.read() ?: break
                 lastOutputAt = clock.now()
                 output.send(bytes)
             }
-            current.terminal.close()
+            terminal.close()
             // The agent ended with its terminal: its background work too.
             background = false
             log("terminal ended, starting a shell")
-            current.terminal = terminals.start(SessionScript.AGAIN, agentEnvironment, config.workspace)
+            terminal = terminals.start(SessionScript.AGAIN, agentEnvironment, config.workspace)
+            current.terminal = terminal
         }
     }
 
@@ -198,8 +257,9 @@ class Runner(
                     val sender = launch { while (true) link.send(output.receive()) }
                     for (frame in link.incoming) {
                         when (frame) {
-                            is ServerFrame.Input -> current.terminal.write(frame.bytes)
-                            is ServerFrame.Resize -> current.terminal.resize(frame.columns, frame.rows)
+                            // Keystrokes before the agent's terminal (during the preparation) are dropped.
+                            is ServerFrame.Input -> current.terminal?.write(frame.bytes)
+                            is ServerFrame.Resize -> current.terminal?.resize(frame.columns, frame.rows)
                         }
                     }
                     sender.cancel()
@@ -215,6 +275,27 @@ class Runner(
         }
     }
 }
+
+/**
+ * Prepares the session's workspace ([EnvironmentPreparation]).
+ */
+fun interface Preparer {
+    /**
+     * Prepares the workspace.
+     *
+     * @param environment The agent's environment, which the commands run with.
+     * @param output Takes the commands' masked output, for the session's terminal.
+     *
+     * @return How it ended.
+     *
+     * @throws ExecutionEndedException When the server no longer knows this execution.
+     */
+    suspend fun prepare(environment: Map<String, String>, output: suspend (ByteArray) -> Unit): PreparationOutcome
+}
+
+/** The legacy clone's variables, left out once the runner prepared the workspace. */
+private val REPOSITORY_VARIABLES = setOf("OSTROM_REPOSITORY_URL", "OSTROM_REPOSITORY_REF")
+
 
 /** How many times the launch is asked for before the agent is left out. */
 private const val LAUNCH_ATTEMPTS = 10

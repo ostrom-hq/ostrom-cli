@@ -12,6 +12,8 @@ import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
+import okio.Path.Companion.toPath
+import okio.fakefilesystem.FakeFileSystem
 
 /** A terminal whose output the test writes; [terminate] ends it unless [stubborn]. */
 internal class ScriptedTerminal(private val stubborn: Boolean = false) : Terminal {
@@ -129,5 +131,97 @@ class AgentHostTest {
         assertEquals(1, terminal.terminated)
         assertTrue(terminal.closed)
         assertNull(terminal.output.tryReceive().getOrNull())
+    }
+
+    @Test
+    fun aPreparationCommandRunsWithoutATerminalAndItsMaskedOutputGoesToItsLog() = runTest {
+        val terminal = ScriptedTerminal()
+        val commands = RecordingStarter(terminal)
+        val terminals = RecordingStarter(ScriptedTerminal())
+        val files = FakeFileSystem()
+        val fromRunner = ByteChannel()
+        val toRunner = ByteChannel()
+        val host = AgentHost(terminals, commands = commands, files = files)
+        val served = launch { host.serve(fromRunner, toRunner) }
+        val log = PreparationLog("/workspace/.ostrom/logs/prepare-e2.log", listOf("s3cret"))
+        AgentFrames.write(fromRunner, start.copy(log = log))
+        terminal.output.send("cloning s3cret\nhalf".encodeToByteArray())
+        val first = assertIs<AgentFrame.Output>(AgentFrames.read(toRunner))
+        assertEquals("cloning [REDACTED]\r\n", first.bytes.decodeToString())
+        terminal.exitCode = 0
+        terminal.output.send(null)
+        assertEquals("half\r\n", assertIs<AgentFrame.Output>(AgentFrames.read(toRunner)).bytes.decodeToString())
+        assertEquals(AgentFrame.Exit(0), AgentFrames.read(toRunner))
+        fromRunner.flushAndClose()
+        served.join()
+        assertTrue(terminals.starts.isEmpty())
+        assertEquals("run", commands.starts.single().first)
+        assertEquals("cloning [REDACTED]\nhalf\n", files.read(log.path.toPath()) { readUtf8() })
+    }
+
+    @Test
+    fun aLogThatCannotBeWrittenIsGivenUpAndTheCommandGoesOn() = runTest {
+        val terminal = ScriptedTerminal()
+        val files = FakeFileSystem()
+        // The agent replaced the logs' directory by a file.
+        files.createDirectories("/workspace/.ostrom".toPath())
+        files.write("/workspace/.ostrom/logs".toPath()) { writeUtf8("x") }
+        val fromRunner = ByteChannel()
+        val toRunner = ByteChannel()
+        val host = AgentHost(RecordingStarter(ScriptedTerminal()), commands = RecordingStarter(terminal), files = files)
+        val served = launch { host.serve(fromRunner, toRunner) }
+        AgentFrames.write(fromRunner, start.copy(log = PreparationLog("/workspace/.ostrom/logs/prepare-e2.log")))
+        terminal.output.send("one\ntwo\n".encodeToByteArray())
+        assertEquals("one\r\n", assertIs<AgentFrame.Output>(AgentFrames.read(toRunner)).bytes.decodeToString())
+        assertEquals("two\r\n", assertIs<AgentFrame.Output>(AgentFrames.read(toRunner)).bytes.decodeToString())
+        terminal.exitCode = 3
+        terminal.output.send(null)
+        assertEquals(AgentFrame.Exit(3), AgentFrames.read(toRunner))
+        fromRunner.flushAndClose()
+        served.join()
+    }
+
+    @Test
+    fun aLogThatCannotBeTrimmedOnCloseDoesNotFailTheCommand() = runTest {
+        val terminal = ScriptedTerminal()
+        val files = FakeFileSystem()
+        val path = "/workspace/.ostrom/logs/prepare-e2.log"
+        // The agent left a directory where the trimmed log is written.
+        files.createDirectories("$path.tmp".toPath())
+        val fromRunner = ByteChannel()
+        val toRunner = ByteChannel()
+        val host = AgentHost(
+            RecordingStarter(ScriptedTerminal()),
+            commands = RecordingStarter(terminal),
+            files = files,
+            logBytes = 4,
+        )
+        val served = launch { host.serve(fromRunner, toRunner) }
+        AgentFrames.write(fromRunner, start.copy(log = PreparationLog(path)))
+        terminal.output.send("abcde\n".encodeToByteArray())
+        assertIs<AgentFrame.Output>(AgentFrames.read(toRunner))
+        terminal.exitCode = 0
+        terminal.output.send(null)
+        assertEquals(AgentFrame.Exit(0), AgentFrames.read(toRunner))
+        fromRunner.flushAndClose()
+        served.join()
+    }
+
+    @Test
+    fun theRunnerLeavingStopsAPreparationCommandAndClosesItsLog() = runTest {
+        val terminal = ScriptedTerminal(stubborn = true)
+        val files = FakeFileSystem()
+        val fromRunner = ByteChannel()
+        val toRunner = ByteChannel()
+        val host = AgentHost(RecordingStarter(ScriptedTerminal()), commands = RecordingStarter(terminal), files = files)
+        val served = launch { host.serve(fromRunner, toRunner) }
+        val path = "/workspace/.ostrom/logs/prepare-e2.log"
+        AgentFrames.write(fromRunner, start.copy(log = PreparationLog(path)))
+        terminal.output.send("partial\n".encodeToByteArray())
+        assertIs<AgentFrame.Output>(AgentFrames.read(toRunner))
+        fromRunner.flushAndClose()
+        served.join()
+        assertEquals(1, terminal.terminated)
+        assertEquals("partial\n", files.read(path.toPath()) { readUtf8() })
     }
 }

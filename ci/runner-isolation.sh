@@ -40,7 +40,7 @@ printf 'FROM %s\nUSER root\nRUN apt-get update && apt-get install -y --no-instal
 token="ostrom_runner_$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 session=$(cat /proc/sys/kernel/random/uuid)
 cleanup() {
-  docker rm -f iso-runner iso-agent iso-checks > /dev/null 2>&1 || true
+  docker rm -f iso-runner iso-agent iso-checks iso-server > /dev/null 2>&1 || true
   docker volume rm iso-workspace iso-socket iso-check iso-bin > /dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -66,9 +66,26 @@ docker run -d --name iso-checks --user 1001:1000 "${hardening[@]}" "${bin[@]}" \
   -v iso-workspace:/workspace -v iso-check:/run/ostrom-check -w /workspace \
   -e OSTROM_CHECK_HOST_SOCKET=/run/ostrom-check/check.sock -e HOME=/tmp \
   --entrypoint /opt/ostrom/ostrom "$image" cloud check-host > /dev/null
-docker run -d --name iso-runner --user 1000:1000 "${hardening[@]}" "${bin[@]}" \
+# A server that serves none of the runner's routes (404), so the runner prepares nothing and the session script starts
+# the agent as on a server without the recipe; it shares its network with the runner only, and keeps nothing.
+docker run -d --name iso-server --user 1001:1000 "${hardening[@]}" --entrypoint python3 "$image" -c '
+from http.server import BaseHTTPRequestHandler, HTTPServer
+class Missing(BaseHTTPRequestHandler):
+    def answer(self):
+        body = b"{\"error\":{\"type\":\"not_found\",\"message\":\"Not found.\"}}"
+        self.send_response(404)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+    do_GET = do_POST = answer
+    def log_message(self, *args):
+        pass
+HTTPServer(("127.0.0.1", 8080), Missing).serve_forever()
+' > /dev/null
+docker run -d --name iso-runner --user 1000:1000 "${hardening[@]}" "${bin[@]}" --network container:iso-server \
   -v iso-socket:/run/ostrom -v iso-check:/run/ostrom-check \
-  -e OSTROM_RUNNER_TOKEN="$token" -e OSTROM_SERVER_URL=http://127.0.0.1:9 -e OSTROM_SESSION_ID="$session" \
+  -e OSTROM_RUNNER_TOKEN="$token" -e OSTROM_SERVER_URL=http://127.0.0.1:8080 -e OSTROM_SESSION_ID="$session" \
   -e OSTROM_EPOCH=1 -e OSTROM_AGENT=shell -e OSTROM_AGENT_COMMAND=bash \
   -e OSTROM_AGENT_SOCKET=/run/ostrom/agent.sock -e OSTROM_RUNNER_CHECKS=/run/ostrom/checks.sock \
   -e OSTROM_CHECK_HOST_SOCKET=/run/ostrom-check/check.sock -e HOME=/workspace/.home -e TERM=xterm-256color \

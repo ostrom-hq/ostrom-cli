@@ -51,6 +51,28 @@ class RemoteTerminalStarter(
         return RemoteTerminal(connection, exitWait)
     }
 
+    /**
+     * Starts a preparation command in the agent's container: without a terminal, its output masked and written to
+     * [log] there, only the masked lines coming back.
+     *
+     * @param script The shell script.
+     * @param environment Its environment.
+     * @param directory Its working directory.
+     * @param log Its log.
+     *
+     * @return The command, as a terminal without input.
+     */
+    suspend fun command(
+        script: String,
+        environment: Map<String, String>,
+        directory: String,
+        log: PreparationLog,
+    ): Terminal {
+        val connection = connectWithRetries()
+        AgentFrames.write(connection.output, AgentFrame.Start(script, environment, directory, log))
+        return RemoteTerminal(connection, exitWait)
+    }
+
     private suspend fun connectWithRetries(): AgentConnection {
         repeat(attempts - 1) {
             try {

@@ -184,4 +184,27 @@ interface ServerApi {
      * @return Whether the server recorded it.
      */
     suspend fun reportCheck(check: RunnerCheck): Boolean
+
+    /**
+     * Reads what to prepare (`runners.cloud.environment.v1`): the recipe, the owner's Git identity and variables.
+     *
+     * @return The environment, or null on a server without the route (the session script clones as before).
+     *
+     * @throws PreparationRefusedException When the server refuses: the preparation stops.
+     * @throws ExecutionEndedException When the server no longer knows this execution.
+     */
+    suspend fun environment(): RunnerEnvironment? = null
+
+    /**
+     * Reports a preparation phase, or its failure.
+     *
+     * @param phase The phase starting, or the one that failed.
+     * @param failure The failed step, if any.
+     *
+     * @return What to do: stop after a failure.
+     *
+     * @throws PreparationRefusedException When the server refuses: the preparation stops.
+     * @throws ExecutionEndedException When the server no longer knows this execution.
+     */
+    suspend fun reportPreparation(phase: String, failure: PreparationFailure? = null): Instruction = Instruction.RUN
 }
