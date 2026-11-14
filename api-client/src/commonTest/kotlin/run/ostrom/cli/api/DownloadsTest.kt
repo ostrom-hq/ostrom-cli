@@ -78,4 +78,70 @@ class DownloadsTest {
         assertNull(api.pluginOrNull(HttpRedirect))
         api.close()
     }
+
+    private val release = """{"tag_name":"1.2.3","assets":[{"name":"latest.json","id":11},{"name":"latest.json.sig","id":12}]}"""
+
+    @Test
+    fun aGitHubReleaseAssetComesThroughTheRestEndpointNotThePublicRedirect() = runTest {
+        val asked = mutableListOf<String>()
+        val downloads = downloads(
+            MockEngine { request ->
+                asked += request.url.toString()
+                when (request.url.encodedPath) {
+                    "/repos/ostrom-hq/ostrom-cli/releases/tags/1.2.3" -> {
+                        assertEquals("application/vnd.github+json", request.headers[HttpHeaders.Accept])
+                        respond(release, HttpStatusCode.OK)
+                    }
+                    "/repos/ostrom-hq/ostrom-cli/releases/assets/11" -> {
+                        assertEquals("application/octet-stream", request.headers[HttpHeaders.Accept])
+                        respond(byteArrayOf(7), HttpStatusCode.OK)
+                    }
+                    "/repos/ostrom-hq/ostrom-cli/releases/assets/12" -> respond(byteArrayOf(8), HttpStatusCode.OK)
+                    else -> error("never the public address: ${request.url}")
+                }
+            },
+        )
+        val base = "https://github.com/ostrom-hq/ostrom-cli/releases/download/1.2.3"
+        assertContentEquals(byteArrayOf(7), assertIs<Download.Bytes>(downloads.fetch("$base/latest.json", 8)).bytes)
+        assertContentEquals(byteArrayOf(8), assertIs<Download.Bytes>(downloads.fetch("$base/latest.json.sig", 8)).bytes)
+        // one lookup of the release's JSON for the two assets
+        assertEquals(1, asked.count { it.endsWith("/releases/tags/1.2.3") })
+    }
+
+    @Test
+    fun theLatestReleaseIsLookedUpAsLatest() = runTest {
+        val downloads = downloads(
+            MockEngine { request ->
+                when (request.url.encodedPath) {
+                    "/repos/ostrom-hq/ostrom-cli/releases/latest" -> respond(release, HttpStatusCode.OK)
+                    "/repos/ostrom-hq/ostrom-cli/releases/assets/11" -> respond(byteArrayOf(7), HttpStatusCode.OK)
+                    else -> error(request.url.toString())
+                }
+            },
+        )
+        val latest = "https://github.com/ostrom-hq/ostrom-cli/releases/latest/download/latest.json"
+        assertIs<Download.Bytes>(downloads.fetch(latest, 8))
+    }
+
+    @Test
+    fun aReleaseThatCannotBeReadOrLacksTheAssetIsMissing() = runTest {
+        val url = "https://github.com/ostrom-hq/ostrom-cli/releases/download/1.2.3/latest.json"
+        assertEquals(Download.Missing(404), downloads(MockEngine { respond("no", HttpStatusCode.NotFound) }).fetch(url, 8))
+        assertEquals(Download.Missing(403), downloads(MockEngine { respond("rate", HttpStatusCode.Forbidden) }).fetch(url, 8))
+        assertEquals(Download.TooLarge(8), downloads(MockEngine { respond("x", HttpStatusCode.OK, headersOf(HttpHeaders.ContentLength, "4294967296")) }).fetch(url, 8))
+        assertEquals(Download.Missing(404), downloads(MockEngine { respond("""{"assets":[]}""", HttpStatusCode.OK) }).fetch(url, 8))
+        for (bad in listOf("nope", "[]", """{"assets":{}}""", """{"assets":[1]}""", """{"assets":[{"id":1}]}""", """{"assets":[{"name":"latest.json","id":"1"}]}""", """{"assets":[{"name":"latest.json","id":0}]}""")) {
+            assertEquals(Download.Missing(502), downloads(MockEngine { respond(bad, HttpStatusCode.OK) }).fetch(url, 8), bad)
+        }
+    }
+
+    @Test
+    fun otherHostsAreFetchedAsTheyAre() = runTest {
+        val asked = mutableListOf<String>()
+        val downloads = downloads(MockEngine { request -> asked += request.url.toString(); respond(byteArrayOf(1), HttpStatusCode.OK) })
+        for (url in listOf("https://git.acme.example/ostrom-hq/ostrom-cli/releases/download/1.2.3/latest.json", "https://github.com/ostrom-hq/ostrom-cli/releases/download/1.2.3/a/b")) {
+            assertIs<Download.Bytes>(downloads.fetch(url, 8))
+        }
+        assertEquals(listOf("https://git.acme.example/ostrom-hq/ostrom-cli/releases/download/1.2.3/latest.json", "https://github.com/ostrom-hq/ostrom-cli/releases/download/1.2.3/a/b"), asked)
+    }
 }

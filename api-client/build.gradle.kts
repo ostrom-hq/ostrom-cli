@@ -23,6 +23,7 @@ kotlin {
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.engine.defaults)
             implementation(libs.coroutines.core)
+            implementation(libs.serialization.json)
             api("run.ostrom:ostrom-api:$ostromCoreVersion")
         }
         commonTest.dependencies {

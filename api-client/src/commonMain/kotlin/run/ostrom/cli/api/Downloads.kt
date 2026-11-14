@@ -14,6 +14,11 @@ import io.ktor.http.isSuccess
 import io.ktor.utils.io.readRemaining
 import kotlinx.io.IOException
 import kotlinx.io.readByteArray
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlin.coroutines.cancellation.CancellationException
 
 /** A file fetched whole by [Downloads.fetch], or why it was not. */
@@ -68,13 +73,13 @@ class DownloadsImpl(
 ) : Downloads {
     private val client by lazy(factory)
 
+    /** Asset name to GitHub asset id, per release (`owner/repo/tag`, or `owner/repo/latest`): one lookup each. */
+    private val assetIds = mutableMapOf<String, Map<String, Long>>()
+
     override suspend fun fetch(url: String, maxBytes: Long): Download {
         try {
-            val request = client.prepareGet(url) {
-                header(HttpHeaders.UserAgent, userAgent)
-                timeout { requestTimeoutMillis = DOWNLOAD_TIMEOUT_MILLIS }
-            }
-            return request.execute { read(it, maxBytes) }
+            val asset = GitHubAsset.of(url) ?: return get(url, maxBytes, null)
+            return viaRest(asset, maxBytes)
         } catch (e: CancellationException) {
             throw e
         } catch (e: IOException) {
@@ -82,6 +87,50 @@ class DownloadsImpl(
         } catch (e: IllegalStateException) {
             // The Curl and WinHttp engines report a failed connection or TLS handshake as IllegalStateException.
             throw ServerUnreachableException(url, e)
+        }
+    }
+
+    private suspend fun get(url: String, maxBytes: Long, accept: String?): Download {
+        val request = client.prepareGet(url) {
+            header(HttpHeaders.UserAgent, userAgent)
+            if (accept != null) {
+                header(HttpHeaders.Accept, accept)
+                header(GITHUB_API_VERSION_HEADER, GITHUB_API_VERSION)
+            }
+            timeout { requestTimeoutMillis = DOWNLOAD_TIMEOUT_MILLIS }
+        }
+        return request.execute { read(it, maxBytes) }
+    }
+
+    /**
+     * A release asset of github.com through the REST asset endpoint, never `github.com/<repo>/releases/download/…`:
+     * GitHub's redirect there carries a Content-Security-Policy line of over 9 KB, and the Curl (Linux) and WinHttp
+     * (Windows) engines refuse any header line over 8 192 bytes (ktor-http-cio), so `ostrom update` failed outside
+     * macOS. The REST endpoint redirects to the same CDN with short headers. The id comes from the release's JSON; the
+     * bytes are still checked by the signed manifest and their SHA-256 (TeamCode 29adcf48).
+     */
+    private suspend fun viaRest(asset: GitHubAsset, maxBytes: Long): Download {
+        val ids = assetIds[asset.release] ?: when (val listed = get(asset.releaseUrl, MAX_RELEASE_JSON_BYTES, JSON)) {
+            is Download.Bytes -> (assetsOf(listed.bytes) ?: return Download.Missing(BAD_GATEWAY)).also { assetIds[asset.release] = it }
+            else -> return listed
+        }
+        val id = ids[asset.file] ?: return Download.Missing(NOT_FOUND)
+        return get("$GITHUB_API/repos/${asset.repository}/releases/assets/$id", maxBytes, OCTET_STREAM)
+    }
+
+    /** Asset names to ids, or null when the release JSON is not that. Only the name and the numeric id are read. */
+    private fun assetsOf(bytes: ByteArray): Map<String, Long>? {
+        val root = try {
+            Json.parseToJsonElement(bytes.decodeToString()) as? JsonObject
+        } catch (_: IllegalArgumentException) {
+            null
+        }
+        val list = root?.get("assets") as? JsonArray ?: return null
+        return list.associate { entry ->
+            val asset = entry as? JsonObject ?: return null
+            val name = (asset["name"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
+            val id = (asset["id"] as? JsonPrimitive)?.takeIf { !it.isString }?.longOrNull?.takeIf { it > 0 } ?: return null
+            name to id
         }
     }
 
@@ -96,5 +145,33 @@ class DownloadsImpl(
 
     private companion object {
         const val DOWNLOAD_TIMEOUT_MILLIS = 300_000L
+        const val MAX_RELEASE_JSON_BYTES = 1024L * 1024
+        const val GITHUB_API = "https://api.github.com"
+        const val GITHUB_API_VERSION_HEADER = "X-GitHub-Api-Version"
+        const val GITHUB_API_VERSION = "2026-03-10"
+        const val JSON = "application/vnd.github+json"
+        const val OCTET_STREAM = "application/octet-stream"
+        const val NOT_FOUND = 404
+        const val BAD_GATEWAY = 502
+    }
+}
+
+/**
+ * A file of a github.com release, from its public address (`/<owner>/<repo>/releases/download/<tag>/<file>` or
+ * `/releases/latest/download/<file>`).
+ */
+private class GitHubAsset(val repository: String, val tag: String?, val file: String) {
+    /** The cache key of the release. */
+    val release: String get() = "$repository/${tag ?: "latest"}"
+
+    /** The REST address of the release's JSON. */
+    val releaseUrl: String get() = "https://api.github.com/repos/$repository/releases/${if (tag == null) "latest" else "tags/$tag"}"
+
+    companion object {
+        private val PUBLIC = Regex("^https://github\\.com/([\\w.-]+/[\\w.-]+)/releases/(?:latest/download|download/([^/?#]+))/([^/?#]+)$")
+
+        /** The asset an address names, or null for any other address (an enterprise host, a mirror, a test server). */
+        fun of(url: String): GitHubAsset? =
+            PUBLIC.matchEntire(url)?.let { GitHubAsset(it.groupValues[1], it.groupValues[2].ifEmpty { null }, it.groupValues[3]) }
     }
 }
