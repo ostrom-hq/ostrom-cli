@@ -119,6 +119,7 @@ class WorkflowImportPlanTest {
             workflows = listOf(
                 workflow + ("definition" to "{bad"),
                 workflow + ("version" to "x") + ("name" to "Other"),
+                workflow - "version" + ("name" to "Unversioned"),
             ),
             settings = listOf(mapOf("editor_mode" to "members", "editor_ids" to "{}")),
             automations = listOf(
@@ -131,6 +132,7 @@ class WorkflowImportPlanTest {
             listOf(
                 "workflow Fix: its definition or its version cannot be read in TeamCode.",
                 "workflow Other: its definition or its version cannot be read in TeamCode.",
+                "workflow Unversioned: its definition or its version cannot be read in TeamCode.",
                 "automation Nightly: its variables or its sample payload cannot be read in TeamCode.",
                 "automation Sampled: its variables or its sample payload cannot be read in TeamCode.",
                 "workflow editors: the member list is not a list in TeamCode.",

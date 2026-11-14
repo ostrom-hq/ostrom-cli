@@ -10,6 +10,7 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
 
 // What TeamCode's workflows, their editing rule, its automations and the cloud profiles they name add to the body of
 // `POST /api/v1/import/teamcode` (ostrom-server#436): TeamCode's rows as they are, which the server maps. An
@@ -98,7 +99,8 @@ private fun profiles(rows: List<Row>, workflows: List<JsonObject>, automations: 
 }
 
 private fun nodeProfiles(workflow: JsonObject): List<String> =
-    workflow.child("definition")?.list("nodes").orEmpty().mapNotNull { (it as? JsonObject)?.text("profileId") }
+    // the definition of a workflow kept is always an object: [workflow] checked it
+    workflow.getValue("definition").jsonObject.list("nodes").mapNotNull { (it as? JsonObject)?.text("profileId") }
 
 private fun profile(row: Row): JsonObject {
     val environment = parseObject(row["spec"])?.child("environment")
