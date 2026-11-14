@@ -68,6 +68,10 @@ class VerifyReleaseCommandTest : CliKit() {
         assertEquals(1, cli().run(files))
         release("NO_VERSION")
         assertEquals(1, cli().run(files))
+        // a signature proves who signed, not that the content is valid: a version that does not parse is refused
+        release("BAD_VERSION")
+        assertEquals(1, cli().run(files))
+        assertTrue(console.err.contains("cannot be read"), console.err.toString())
         release("NO_SHA")
         put("/dl/a.tar.gz", ReleaseVectors.ARCHIVE)
         assertEquals(1, cli().run(files + arrayOf("--archive", "/dl/a.tar.gz", "--target", "linux-x64")))
