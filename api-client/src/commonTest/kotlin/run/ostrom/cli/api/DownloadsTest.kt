@@ -140,6 +140,7 @@ class DownloadsTest {
         assertEquals(Download.Missing(404), lacking.fetch(url, 8))
         val bad = listOf(
             "nope",
+            """{"assets":""",
             "[]",
             """{"assets":{}}""",
             """{"assets":[1]}""",

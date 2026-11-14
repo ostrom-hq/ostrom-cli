@@ -37,7 +37,8 @@ internal class GitHubAsset(val repository: String, val tag: String?, val file: S
         )
 
         /** The asset an address names, or null for any other address (an enterprise host, a mirror, a test server). */
-        fun of(url: String): GitHubAsset? = PUBLIC.matchEntire(url)?.destructured?.let { (repository, tag, file) ->
+        fun of(url: String): GitHubAsset? = PUBLIC.matchEntire(url)?.let { match ->
+            val (repository, tag, file) = match.destructured
             GitHubAsset(repository, tag.ifEmpty { null }, file)
         }
     }
@@ -56,5 +57,5 @@ internal fun assetIdsOf(bytes: ByteArray): Map<String, Long>? {
         val id = (asset?.get("id") as? JsonPrimitive)?.takeIf { !it.isString }?.longOrNull?.takeIf { it >= FIRST_ID }
         if (name == null || id == null) null else name to id
     }
-    return entries?.takeIf { null !in it }?.filterNotNull()?.toMap()
+    return entries?.takeIf { null !in it }?.let { list -> list.filterNotNull().toMap() }
 }
