@@ -3,6 +3,7 @@ package run.ostrom.cli
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /** `ostrom cloud list|show|pause|resume|delete`, as TeamCode's `teamcode cloud`. */
@@ -57,6 +58,32 @@ class CloudSessionCommandsTest : SetupKit() {
         assertEquals(0, run(routes("GET /api/v1/cloud/sessions/cs2" to (200 to failed)), "cloud", "show", "cs2"))
         assertTrue(console.out.contains("Ended        1970-01-10T23:59:00Z\n"), console.out.toString())
         assertTrue(console.out.contains("Failure      image_pull: no such image\n"), console.out.toString())
+        console.out.clear()
+        val pausedOne = """{"id":"cs3","status":"paused","pausedAt":"1970-01-10T23:00:00Z",""" +
+            """"expiresAt":"1970-02-09T23:00:00Z","workspaceDeletion":{"state":"none"}}"""
+        assertEquals(0, run(routes("GET /api/v1/cloud/sessions/cs3" to (200 to pausedOne)), "cloud", "show", "cs3"))
+        assertTrue(console.out.contains("Paused       1970-01-10T23:00:00Z\n"), console.out.toString())
+        assertTrue(console.out.contains("Expires      1970-02-09T23:00:00Z\n"), console.out.toString())
+        assertFalse(console.out.contains("Workspace"), "a kept workspace says nothing")
+        console.out.clear()
+        val expired = """{"id":"cs4","status":"terminated","terminatedReason":"expired",""" +
+            """"workspaceDeletion":{"state":"blocked","problem":{"code":"volume_retained","message":"m"}}}"""
+        assertEquals(0, run(routes("GET /api/v1/cloud/sessions/cs4" to (200 to expired)), "cloud", "show", "cs4"))
+        assertTrue(console.out.contains("Status       terminated · expired\n"), console.out.toString())
+        assertTrue(console.out.contains("Workspace    deletion blocked (volume_retained)\n"), console.out.toString())
+        console.out.clear()
+        val partial = """{"id":"cs5","status":"running","terminatedReason":"expired","workspaceDeletion":{}}"""
+        assertEquals(0, run(routes("GET /api/v1/cloud/sessions/cs5" to (200 to partial)), "cloud", "show", "cs5"))
+        assertTrue(console.out.contains("Status       running\n"), "a reason only beside terminated")
+        assertFalse(console.out.contains("Workspace"), "a deletion without a state says nothing")
+        console.out.clear()
+        val proven = """{"id":"cs6","status":"terminated","workspaceDeletion":{"state":"proven"}}"""
+        assertEquals(0, run(routes("GET /api/v1/cloud/sessions/cs6" to (200 to proven)), "cloud", "show", "cs6"))
+        assertTrue(console.out.contains("Workspace    deletion proven\n"), console.out.toString())
+        console.out.clear()
+        val stalled = """{"id":"cs7","status":"terminated","workspaceDeletion":{"state":"blocked","problem":{}}}"""
+        assertEquals(0, run(routes("GET /api/v1/cloud/sessions/cs7" to (200 to stalled)), "cloud", "show", "cs7"))
+        assertTrue(console.out.contains("Workspace    deletion blocked\n"), "a problem without a code adds nothing")
         console.out.clear()
         assertEquals(0, run(routes(show to (200 to session)), "cloud", "show", "cs1", "--json"))
         assertEquals("$session\n", console.out.toString())
