@@ -39,8 +39,10 @@ import kotlin.time.Instant
  * @param prepare Prepares the workspace before the agent starts; none on a runner without a recipe.
  * @param variables The owner's environment variables, given to each agent start, the runner's own winning; none on a
  *   runner that does not serve them.
+ * @param deliveries Installs the owner's skills and team hooks before the agent's first terminal; none when null.
  */
-@Suppress("LongParameterList") // Six collaborators and three tunings with defaults, all named at the call sites.
+// Six collaborators and three tunings with defaults, all named at the call sites; one function per phase of a start.
+@Suppress("LongParameterList", "TooManyFunctions")
 class Runner(
     private val config: RunnerConfig,
     private val server: ServerApi,
@@ -53,6 +55,7 @@ class Runner(
     private val outputBuffer: Int = 1024,
     private val prepare: Preparer? = null,
     private val variables: RunnerVariables? = null,
+    private val deliveries: AgentDeliveries? = null,
 ) {
     private val output = Channel<ByteArray>(outputBuffer, BufferOverflow.DROP_OLDEST)
 
@@ -142,7 +145,11 @@ class Runner(
             log("execution ended: ${error.message}")
             return@coroutineScope 1
         }
-        val agentEnvironment = prepared + launchVariables(opened) + claudeEnvironmentFile
+        val launched = prepared + launchVariables(opened) + claudeEnvironmentFile
+        // The owner's skills and team hooks.
+        val delivered = deliver(opened, launched, current)
+        delivered.code?.let { return@coroutineScope it }
+        val agentEnvironment = launched + delivered.variables
         val first = terminals.start(SessionScript.FIRST, withVariables(agentEnvironment), directory)
         current.terminal = first
         val terminalJob = launch { superviseTerminal(current, first, agentEnvironment) }
@@ -165,6 +172,32 @@ class Runner(
         } else {
             emptyMap()
         }
+
+    /** What [deliveries] installed, or the exit code when a heartbeat ended the runner meanwhile. */
+    private class Delivered(val variables: Map<String, String>, val code: Int? = null)
+
+    /**
+     * Installs what the owner receives, with unready heartbeats meanwhile, as during the preparation; nothing without
+     * [deliveries] or when the launch was refused (the agent then does not start).
+     */
+    private suspend fun deliver(
+        launch: RunnerLaunch?,
+        environment: Map<String, String>,
+        current: Current,
+    ): Delivered = coroutineScope {
+        val installer = deliveries.takeIf { launch !is RunnerLaunch.Refused }
+            ?: return@coroutineScope Delivered(emptyMap())
+        val installing = async { installer.install(environment) }
+        var delivered: Delivered? = null
+        while (delivered == null) {
+            delivered = withTimeoutOrNull(heartbeatInterval) { Delivered(installing.await()) }
+                ?: beat(current, ready = false)?.let { code ->
+                    installing.cancel()
+                    Delivered(emptyMap(), code)
+                }
+        }
+        delivered
+    }
 
     /** Opens the agent's launch, a few times while the server cannot be reached; then the agent does not start. */
     private suspend fun openLaunch(): RunnerLaunch {

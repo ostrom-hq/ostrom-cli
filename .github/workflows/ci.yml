@@ -147,12 +147,13 @@ jobs:
       # reached 620 ms). Budgets: 20 ms (perf pass), 30 ms, 300 ms and 25 MB, the runner's noise left.
       # Binary sizes: linuxX64 14.56 MB on main (run 43436474566), 15.07 MB with the session todo (run 43439881093),
       # 16.44 MB with the cloud runner (run 43472481863: a session's processes are this binary, as TeamCode's);
-      # budgets 17 MB, Windows 18.
+      # 16.88 MB on main with the agent's environment (run 43567556903), 17.01 MB with the owner's skills and team
+      # hooks (cli#169, run 43568170266); budgets 18 MB, Windows 18.
       - name: Start-up (15 ms median, 20 ms p95, 40 ms for a git push), first start, memory and binary sizes
         run: >-
           python3 scripts/measure.py --label linuxX64 --max-push-ms 40
           --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
-          --sizes cli/build/bin/*/releaseExecutable/ostrom.* --max-size-mb 17 --size-budget mingwX64=18
+          --sizes cli/build/bin/*/releaseExecutable/ostrom.* --max-size-mb 18 --size-budget mingwX64=18
           --max-hook-p95-ms 20 --max-version-p95-ms 30 --max-cold-ms 300 --max-hook-memory-mb 25
       - name: End to end, the real binary with fake Claude Code and Codex against the contract's server
         run: python3 e2e/run.py --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
@@ -165,7 +166,7 @@ jobs:
       - name: Hook cost in a session (median of 20)
         run: >-
           python3 e2e/perf.py --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe --label linuxX64
-          --max-hook-ms 20 --max-cold-version-ms 500 --max-cold-hook-ms 500 --max-size-mb 17
+          --max-hook-ms 20 --max-cold-version-ms 500 --max-cold-hook-ms 500 --max-size-mb 18
           --max-burst-requests 0.1 --max-spaced-requests 0.5 --max-spaced-ms 20 --max-installed-ms 20
       - name: End to end, init, invite, members, policy and harness against the contract's server
         run: python3 e2e/setup_e2e.py --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe

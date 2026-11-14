@@ -203,6 +203,26 @@ server without the route (404) is not asked again, and a fenced or refused execu
 shell, the loader, git, `gh` or the agent (TeamCode's list, with `OSTROM_`) never reach the agent, and no value is
 logged or put on a command line.
 
+## The owner's skills and team hooks (`runners.cloud.skills.v1`, `runners.cloud.hooks.v1`)
+
+At each start of Claude Code or Codex, once the launch is open, the runner reads what the session's owner receives
+(`POST /api/v1/cloud/runner/skills` and `/hooks`, then `…/artifact` for each version, with its runner token) and checks
+every file and digest itself (`sha256:` over `<path>\0<mode>\0<size>\0<sha256>\n`, sorted by path, after the hook's
+definition line for a hook), as TeamCode's `teamcode cloud install-skills|install-hooks`. It then starts the hidden
+`ostrom cloud install-skills` (and, for Claude Code only, `install-hooks`) on a terminal of the agent host, so the files
+are written in the agent's container, under its uid. The installer makes its terminal raw, says `hello`, and the two
+speak JSON lines: the manifest, what it needs (a missing or changed item; hooks are always written again, since the
+agent can change their folder), each item's files in chunks, then one result per item.
+
+- Skills go to `~/.claude/skills/<name>` (Codex: `$CODEX_HOME/skills/<name>`) with a `.ostrom-skill` marker; a folder
+  of the same name without a marker is the member's own and stays (a conflict). Team hooks go to
+  `~/.ostrom/hooks/<name>` with a `.ostrom-hook` marker. A marked folder no longer delivered is removed.
+- The installed team hooks join Claude Code's `--settings` (`OSTROM_AGENT_SETTINGS`), before the runner's own `Stop`
+  and `SessionEnd` hooks (`ostrom cloud agent-state`), which stay in every case. Codex runs no team hook.
+- A server without these routes (404), a failure, a refused artifact or an installer that does not answer is a line in
+  the pod's log, with counts only, and the agent starts with what is installed. Each kind takes 60 s at most; the
+  runner heartbeats (unready) meanwhile.
+
 ## The agent cannot read the runner token (S2-49)
 
 The agent and the runner never share a UID, a container, a process namespace or the token. They do share a group:
