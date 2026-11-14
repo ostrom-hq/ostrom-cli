@@ -14,6 +14,7 @@ import run.ostrom.cli.commands.AgentCommand
 import run.ostrom.cli.commands.ApproveCommand
 import run.ostrom.cli.commands.AttachCommand
 import run.ostrom.cli.commands.CompletionCommand
+import run.ostrom.cli.commands.ConfigureCommand
 import run.ostrom.cli.commands.ConfigCommand
 import run.ostrom.cli.commands.DenyCommand
 import run.ostrom.cli.commands.DoctorCommand
@@ -191,6 +192,7 @@ class OstromCli(private val dependencies: CliDependencies) {
             AttachCommand(dependencies),
             LoginCommand(dependencies),
             WhoAmICommand(dependencies),
+            ConfigureCommand(dependencies),
             UpdateCommand(dependencies),
             LogoutCommand(dependencies),
             ConfigCommand(dependencies),
