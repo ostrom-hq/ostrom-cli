@@ -146,6 +146,7 @@ class DownloadsTest {
             """{"assets":[{"id":1}]}""",
             """{"assets":[{"name":"latest.json","id":"1"}]}""",
             """{"assets":[{"name":"latest.json","id":0}]}""",
+            """{"assets":[{"name":"latest.json","id":1.5}]}""",
             "{}",
             """{"assets":[{"name":"latest.json"}]}""",
             """{"assets":[{"id":1,"name":7}]}""",
