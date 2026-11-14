@@ -115,7 +115,13 @@ class PtyTerminal private constructor(
         kill(-pid, SIGTERM)
         val deadline = grace.inWholeMilliseconds / POLL.inWholeMilliseconds
         repeat(deadline.toInt()) {
-            if (reap()) return
+            if (reap()) {
+                // The group can outlive its shell: a process the shell was forking as SIGTERM came (it missed the
+                // signal) or one that ignores it would hold the output open forever. The group's id stays taken
+                // while it has a member, so this reaches only what is left of it.
+                kill(-pid, SIGKILL)
+                return
+            }
             delay(POLL)
         }
         kill(-pid, SIGKILL)
