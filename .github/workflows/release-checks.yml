@@ -125,9 +125,28 @@ jobs:
           docker build -f docker/runner/Dockerfile --build-arg TARGETARCH=amd64 -t ostrom-runner:ci image-context
       - name: The CLI runs in the image
         run: docker run --rm ostrom-runner:ci version
-      - name: The agents run in the image
+      # The runner image only delivers `ostrom` (#155): the agents live in the session image. This is the server's
+      # Docker delivery: the binary's directory copied into an empty volume by the runner's uid, then run read-only
+      # from /opt/ostrom by the agent's.
+      - name: The image delivers ostrom as the server's delivery container runs it
         run: |
-          docker run --rm --entrypoint claude ostrom-runner:ci --version
-          docker run --rm --entrypoint codex ostrom-runner:ci --version
-          docker run --rm --entrypoint rg ostrom-runner:ci --version
-          test "$(docker run --rm --entrypoint id ostrom-runner:ci -u)" = 10001
+          docker volume create ostrom-check-bin > /dev/null
+          docker run --rm --user 1000:1000 --read-only --tmpfs /tmp -e HOME=/tmp --cap-drop ALL \
+            -v ostrom-check-bin:/usr/local/bin ostrom-runner:ci --version
+          docker run --rm --user 1001:1000 --read-only --tmpfs /tmp -e HOME=/tmp --cap-drop ALL \
+            -v ostrom-check-bin:/opt/ostrom:ro --entrypoint /opt/ostrom/ostrom ostrom-runner:ci --version
+          docker volume rm ostrom-check-bin > /dev/null
+          # `ostrom cloud machine` refuses a missing configuration.
+          set +e
+          docker run --rm ostrom-runner:ci cloud machine; machine=$?
+          set -e
+          test "$machine" = 2
+      # The session image template on that runner image: its own contract check runs at build time (ostrom as both
+      # uids, the agent CLIs as 1001); the agents then run from the default user.
+      - name: The session image template builds on it, and its agents run
+        run: |
+          docker build -f docker/cloud-session-image/Dockerfile --build-arg OSTROM_RUNNER_IMAGE=ostrom-runner:ci \
+            -t ostrom-session:ci docker/cloud-session-image
+          docker run --rm --entrypoint claude ostrom-session:ci --version
+          docker run --rm --entrypoint codex ostrom-session:ci --version
+          test "$(docker run --rm --entrypoint id ostrom-session:ci -u):$(docker run --rm --entrypoint id ostrom-session:ci -g)" = 1001:1000
