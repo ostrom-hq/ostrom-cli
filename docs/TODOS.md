@@ -81,6 +81,10 @@ A launch reads the server's capabilities; only when it announces `todos.v1` does
 | Codex | `-c mcp_servers.ostrom-todo={command,args}` | `-c hooks.Stop`, 150 s, trusted by its hash | no: its transcript is not read either |
 | Gemini CLI, Grok, Hermes, OpenCode, Pi | through `ostrom mcp --session … --server ostrom-todo` | no | no |
 
+In a cloud session ([runner/README.md](../runner/README.md)), Claude Code alone gets the same hooks, the binary's
+hidden `cloud todo-stop` (150 s, never held: no `--wake`) and `cloud todo-context`, added by the runner when
+`ostrom-todo` is connected; they reach the server with the launch's agent token instead of a relay.
+
 Without `todos.v1` (an older server, or one that cannot say) nothing of the todo is offered and no hook is installed.
 
 ## Tests

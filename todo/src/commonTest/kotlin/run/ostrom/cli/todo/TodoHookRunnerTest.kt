@@ -151,4 +151,34 @@ class TodoHookRunnerTest {
         assertEquals(0 to "", run(TodoHookRunner.CONTEXT, relay, Launch(launch, noInput)))
         assertEquals(setOf("todo-stop", "todo-context"), TodoHookRunner.KINDS)
     }
+
+    private fun direct(token: String?, kind: String, relay: Relay, event: String = "{}"): Pair<Int, String> {
+        val console = HookConsole(StandardInput.Read(event.encodeToByteArray()))
+        // no relay variable, no token file: only the agent token reaches the server
+        val capture = FakeCapture()
+        val variables = Variables(emptyMap())
+        val runner = TodoHookRunner(console, variables, files, relay, capture, Dispatchers.Unconfined) { token }
+        return runner.run(kind, null) to console.out.toString()
+    }
+
+    @Test
+    fun inACloudSessionTheHooksReachTheServerWithTheAgentTokenAndNoRelay() {
+        val relay = Relay { """{"action":"block","reason":"Finish fix."}""" }
+        val blocked = "{\"decision\":\"block\",\"reason\":\"Finish fix.\"}\n"
+        assertEquals(0 to blocked, direct(" agent-token\n", TodoHookRunner.STOP, relay))
+        val (_, request) = relay.sent.single()
+        assertEquals("/api/v1/todos/session/stop", request.path)
+        assertEquals("Bearer agent-token", request.headers["Authorization"])
+        val context = Relay { """{"text":"The list"}""" }
+        assertEquals(0, direct("agent-token", TodoHookRunner.CONTEXT, context, """{"source":"compact"}""").first)
+        assertEquals("/api/v1/todos/session/context", context.sent.single().second.path)
+    }
+
+    @Test
+    fun inACloudSessionWithoutATokenNothingIsAskedNorSaid() {
+        val relay = Relay { error("never asked") }
+        assertEquals(0 to "", direct(null, TodoHookRunner.STOP, relay))
+        val compacted = """{"source":"compact"}"""
+        assertEquals(0 to "", direct("  ", TodoHookRunner.CONTEXT, relay, compacted))
+    }
 }

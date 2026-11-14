@@ -44,6 +44,18 @@ object CloudProcess {
      */
     const val MCP = "mcp"
 
+    /**
+     * Claude Code's `Stop` hook of the session's todo, in the agent's container (`ostrom cloud todo-stop`): served by
+     * the CLI's composition like [MCP], as it holds the todo's logic, so it is no command of [of].
+     */
+    const val TODO_STOP = "todo-stop"
+
+    /** Claude Code's `SessionStart` hook (compact, resume) of the todo, served like [TODO_STOP]. */
+    const val TODO_CONTEXT = "todo-context"
+
+    /** Claude Code's `Stop` hook of a workflow step, served like [TODO_STOP]. */
+    const val WORKFLOW_STOP = "workflow-stop"
+
     private val COMMANDS = setOf(
         RUNNER, AGENT_SUPERVISOR, CHECK_HOST, CREDENTIAL, MACHINE, AGENT_STATE, ENVIRONMENT,
         INSTALL_SKILLS, INSTALL_HOOKS,

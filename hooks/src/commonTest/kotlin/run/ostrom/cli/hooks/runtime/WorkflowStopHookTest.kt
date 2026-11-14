@@ -238,4 +238,24 @@ class WorkflowStopHookTest {
         assertFalse('\n' in cleaned || '\u0007' in cleaned || '\u0085' in cleaned)
         assertTrue(cleaned.length < 800)
     }
+
+    @Test
+    fun inACloudSessionItAsksTheServerWithTheAgentTokenAndReadsNoRelayVariable() {
+        val relay = Relay(ok(pending))
+        val console = HookConsole(StandardInput.Read(event.encodeToByteArray()))
+        val hook = WorkflowStopHook(console, Variables(emptyMap()), relay, { error("no file") }, time) { " agent\n" }
+        val code = hook.run()
+        assertEquals(0, code)
+        assertEquals("block", blocked(console.out.toString())["decision"]?.jsonPrimitive?.content)
+        val (_, request, timeout) = relay.sent.single()
+        assertEquals("/api/v1/workflows/session/pending", request.path)
+        assertEquals("Bearer agent", request.headers["Authorization"])
+        assertEquals(2_000, timeout)
+        // without the token the hook asks nothing and says nothing
+        val silent = Relay(ok(pending))
+        val quiet = HookConsole(StandardInput.Read(event.encodeToByteArray()))
+        assertEquals(0, WorkflowStopHook(quiet, Variables(emptyMap()), silent, { null }, time) { null }.run())
+        assertEquals("", quiet.out.toString())
+        assertEquals(emptyList(), silent.sent)
+    }
 }
