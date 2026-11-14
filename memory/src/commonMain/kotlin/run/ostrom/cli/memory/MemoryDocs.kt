@@ -38,8 +38,8 @@ object MemoryDocs {
         a decision and its reason, a convention, a pitfall, how something is run. One subject per entry; a short title,
         a summary of one or two sentences, the details in content. Never write a secret, a token or a password: it is refused.
         Fix a wrong entry with memory_update (the version you read) rather than adding a contradicting one; remove one
-        that is no longer true with memory_forget. A team entry cannot be written by an agent yet: write it as personal
-        and tell the member, who can share it.
+        that is no longer true with memory_forget. A team entry you write is proposed to the member you work for, and
+        joins the team's memory only once they accept it; when it is refused, write it as personal and tell them.
     """.trimIndent()
 
     /** Said in place of the index when it could not be read. */

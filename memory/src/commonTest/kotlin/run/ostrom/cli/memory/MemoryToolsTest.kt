@@ -127,6 +127,15 @@ class MemoryToolsTest {
     }
 
     @Test
+    fun aTeamWriteFromAnAgentSaysItIsOnlyAProposal() {
+        api.entry = memoryEntry(status = "proposed")
+        val (text, error) = call("memory_write", """{"title":"T","summary":"S","content":"C","scope":"team"}""")
+        assertEquals(false, error)
+        assertTrue(text.startsWith("""{"id":"m-1","scope":"personal","version":1,"status":"proposed","note":"""), text)
+        assertTrue("not yet in the team's memory" in text, text)
+    }
+
+    @Test
     fun aWriteThatCannotBeSentSaysWhy() {
         val base = """"title":"T","summary":"S","content":"C""""
         assertEquals("scope is personal or team." to true, call("memory_write", """{$base,"scope":"org"}"""))
@@ -192,7 +201,9 @@ class MemoryToolsTest {
     @Test
     fun ostromsRefusalReachesTheAgentAsAToolErrorWithWhatToDo() {
         val hints = mapOf(
-            "memory_team_forbidden" to "write it as personal",
+            "memory_team_forbidden" to "cannot change or remove a team entry",
+            "memory_proposal_session" to "a proposal to the session's owner",
+            "memory_proposals_limit" to "Too many of your team proposals",
             "memory_secret" to "looks like a credential",
             "memory_conflict" to "read it again",
             "memory_limit" to "The memory is full",
