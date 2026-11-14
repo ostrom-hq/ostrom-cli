@@ -401,10 +401,10 @@ jobs:
           file: docker/runner/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: ${{ env.PUBLISH == 'true' }}
+          # No `latest` here: ostrom-server's runner-image.yml keeps it (same Docker Hub repository) until that
+          # workflow is removed (runner slice 4); two repositories pushing one `latest` would race.
           tags: |
             ${{ env.IMAGE }}:${{ env.VERSION }}
-            # `latest` stays with ostrom-server's runner-image.yml (same Docker Hub repository) until that
-            # workflow is removed (runner slice 4): two repositories pushing one `latest` would race.
           sbom: true
           provenance: mode=max
       - name: Sign the image by digest (key, no transparency log)
