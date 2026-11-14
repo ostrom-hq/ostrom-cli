@@ -63,39 +63,47 @@ class TodoTools(private val api: TodoApi, private val checks: TodoChecks) {
         when (name) {
             "todo_help" -> ToolAnswer(TodoDocs.HELP)
             "todo_create" -> create(arguments)
-            "todo_show" -> when (val list = api.read()) {
-                null -> ToolAnswer("This session has no todo yet. Call todo_create (todo_help shows the format).")
-                else -> ToolAnswer(TodoRender.show(list))
-            }
+            "todo_show" -> show()
             "todo_start" -> start(arguments)
             "todo_complete" -> complete(arguments)
             "todo_link" -> link(arguments)
             "todo_add" -> add(arguments)
-            "todo_note" -> {
-                val id = required(arguments, "id")
-                api.note(id, NoteTodoItemRequest(text = required(arguments, "text")))
-                ToolAnswer("Noted on $id.")
-            }
-            "todo_reset" -> {
-                api.reset()
-                ToolAnswer(
-                    "The todo is cleared: this session has none now. Call todo_create to start a new one, with its " +
-                        "own reference and items.",
-                )
-            }
-            else -> {
-                val id = required(arguments, "id")
-                api.drop(id, DropTodoItemRequest(reason = required(arguments, "reason")))
-                ToolAnswer(
-                    "The session's owner is asked whether to drop $id (a wait is open). The item stays until they " +
-                        "say yes. End your turn: the answer wakes you.",
-                )
-            }
+            "todo_note" -> note(arguments)
+            "todo_reset" -> reset()
+            else -> drop(arguments)
         }
     } catch (e: TodoApiException) {
         ToolAnswer(listOfNotNull("Ostrom refused: ${e.message} (${e.code}).", hint(e.code)).joinToString(" "), true)
     } catch (e: TodoUsageException) {
         ToolAnswer(e.message, true)
+    }
+
+    private fun show(): ToolAnswer = when (val list = api.read()) {
+        null -> ToolAnswer("This session has no todo yet. Call todo_create (todo_help shows the format).")
+        else -> ToolAnswer(TodoRender.show(list))
+    }
+
+    private fun note(arguments: JsonObject): ToolAnswer {
+        val id = required(arguments, "id")
+        api.note(id, NoteTodoItemRequest(text = required(arguments, "text")))
+        return ToolAnswer("Noted on $id.")
+    }
+
+    private fun reset(): ToolAnswer {
+        api.reset()
+        return ToolAnswer(
+            "The todo is cleared: this session has none now. Call todo_create to start a new one, with its own " +
+                "reference and items.",
+        )
+    }
+
+    private fun drop(arguments: JsonObject): ToolAnswer {
+        val id = required(arguments, "id")
+        api.drop(id, DropTodoItemRequest(reason = required(arguments, "reason")))
+        return ToolAnswer(
+            "The session's owner is asked whether to drop $id (a wait is open). The item stays until they " +
+                "say yes. End your turn: the answer wakes you.",
+        )
     }
 
     private fun create(arguments: JsonObject): ToolAnswer {
