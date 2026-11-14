@@ -130,6 +130,14 @@ class ConfirmationWaitTest : SetupKit() {
             assertEquals(77, selfApproval())
             assertErr("Confirmed, but not written: the server did not say why.")
         }
+        // confirmed, but the server stopped before the result: nobody knows whether it was written (server#503)
+        console.err.clear()
+        polls += answer(200, """{"status":"failed","answeredBy":{"memberId":"m2","login":"lena"},""" +
+            """"error":{"type":"result_lost","message":"The result of the write was lost."}}""")
+        assertEquals(77, selfApproval())
+        assertErr("Confirmed by @lena, but the result of the write is unknown")
+        assertErr("Check the current state before asking again.")
+        assertFalse(console.err.contains("not written"), console.err.toString())
         // a status this version does not know is not said to be a confirmation
         polls += answer(200, """{"status":"withdrawn"}""")
         assertEquals(1, selfApproval())

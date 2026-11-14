@@ -99,6 +99,10 @@ internal class ConfirmationWait(
                 "Nobody confirmed it in time: nothing was changed. Run the command again to ask again."
             status == PENDING -> ExitCode.STILL_WAITING to "No answer yet, and the CLI stops waiting. $where"
             // confirmed, but the write was refused (what it changes moved meanwhile, a version conflict)
+            // confirmed, but the server stopped before it told whether it wrote (server#503): nobody knows
+            status == FAILED && view.child("error")?.text("type") == RESULT_LOST -> ExitCode.REFUSED to
+                "Confirmed$by, but the result of the write is unknown: the server stopped before it said whether it " +
+                "was written. Check the current state before asking again."
             status == FAILED -> {
                 val why = view.child("error")?.text("message") ?: "the server did not say why."
                 ExitCode.REFUSED to "Confirmed$by, but not written: $why"
@@ -117,6 +121,9 @@ internal class ConfirmationWait(
         const val REFUSED = "refused"
         const val EXPIRED = "expired"
         const val FAILED = "failed"
+
+        /** The `error.type` of a confirmed write whose result the server lost. */
+        const val RESULT_LOST = "result_lost"
 
         /** The longest the server holds a wait. */
         const val WAIT_SECONDS = 30
