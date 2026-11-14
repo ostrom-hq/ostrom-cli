@@ -9,7 +9,7 @@ import run.ostrom.cli.CliDependencies
  * `init`, `harness`, `invite`, `members`, `accounts`, `policy`, and the `waits` of an organisation: setup and
  * day-to-day asks.
  */
-internal fun setupCommands(dependencies: CliDependencies): List<CliktCommand> = listOf(
+internal fun setupCommands(dependencies: CliDependencies): List<CliktCommand> = identityCommands(dependencies) + listOf(
     InitCommand(dependencies),
     HarnessCommand().subcommands(
         HarnessListCommand(dependencies),
@@ -39,17 +39,6 @@ internal fun setupCommands(dependencies: CliDependencies): List<CliktCommand> = 
         HooksShowCommand(dependencies),
         HooksApproveCommand(dependencies),
         HooksRefuseCommand(dependencies),
-    ),
-    KeysCommand(dependencies).subcommands(
-        KeysListCommand(dependencies),
-        KeysCreateCommand(dependencies),
-        KeysRevokeCommand(dependencies),
-    ),
-    AuthCommand().subcommands(
-        AuthSessionsCommand(dependencies).subcommands(
-            AuthSessionsListCommand(dependencies),
-            AuthSessionsRevokeCommand(dependencies),
-        ),
     ),
     InviteCommand(dependencies),
     MembersCommand(dependencies).subcommands(
@@ -82,4 +71,19 @@ private fun cloudCommand(dependencies: CliDependencies) = CloudCommand().subcomm
     CloudDeleteCommand(dependencies),
     CloudGithubCommand(dependencies),
     AttachCommand(dependencies),
+)
+
+/** `keys` and `auth`: what a person's own `ostrom login` manages, as TeamCode's. */
+private fun identityCommands(dependencies: CliDependencies) = listOf(
+    KeysCommand(dependencies).subcommands(
+        KeysListCommand(dependencies),
+        KeysCreateCommand(dependencies),
+        KeysRevokeCommand(dependencies),
+    ),
+    AuthCommand().subcommands(
+        AuthSessionsCommand(dependencies).subcommands(
+            AuthSessionsListCommand(dependencies),
+            AuthSessionsRevokeCommand(dependencies),
+        ),
+    ),
 )
