@@ -176,7 +176,8 @@ session's message and stops the execution, and the runner keeps heartbeating unr
 heartbeats unready during the whole preparation and reports ready once the agent's terminal is started.
 
 Every command runs on the agent host, in the agent's container and under its uid, never beside the runner token:
-without a terminal (stdin from `/dev/null`), its arguments in its environment, never in a script's text. Every `git`
+without a terminal (stdin from `/dev/null`), its arguments in its environment, never in a script's text. Its
+output ends with its shell: a server it starts in the background keeps running and holds nothing up. Every `git`
 runs with hooks and fsmonitor off, HTTPS only, no submodule, and no credential helper but the runner's own
 (`credential.helper=` resets them first). The owner's variables reach the commands through their environment, without
 the names that would steer them: an invalid name, `PATH`, `HOME`, `SHELL`, `IFS`, `ENV`, `BASH_ENV`,
