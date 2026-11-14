@@ -61,7 +61,7 @@ class ReleaseVerification(
     }
 
     private fun versionOf(body: JsonObject): String =
-        body.text("version")?.takeIf { SemVer.of(it) != null } ?: throw unreadableManifest()
+        body.text("version") ?: throw unreadableManifest()
 
     private fun checkArchive(path: Path, version: String, target: String, assets: JsonObject?) {
         val (sha256, size) = signedEntry(assets, version, target)
