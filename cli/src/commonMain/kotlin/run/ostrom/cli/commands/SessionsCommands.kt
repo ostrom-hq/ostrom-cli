@@ -7,13 +7,16 @@ import com.github.ajalt.clikt.core.UsageError
 import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.arguments.optional
 import com.github.ajalt.clikt.parameters.options.flag
+import com.github.ajalt.clikt.parameters.options.multiple
 import com.github.ajalt.clikt.parameters.options.option
 import run.ostrom.cli.CliDependencies
+import run.ostrom.cli.launcher.Labels
 import run.ostrom.cli.launcher.text
 import run.ostrom.cli.waits.age
 import run.ostrom.cli.sessions.heading
 import run.ostrom.cli.sessions.recordOnly
 import run.ostrom.cli.sessions.thread
+import run.ostrom.core.api.models.ServerFeatures
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -48,25 +51,41 @@ internal class SessionsListCommand(private val dependencies: CliDependencies) : 
     val repo by option("--repo", help = "Only the sessions of this repository (owner/name)")
     val open by option("--open", help = "Only the sessions still running").flag()
     val before by option("--before", help = "The id the previous page ended with (printed when more exist)")
+    val label by option("--label", help = "Only the sessions with this label, key=value (repeat it: all must match)")
+        .multiple()
     val json by option("--json", help = "Machine-readable output").flag()
     val server by option("--server", help = SERVER_HELP)
 
     override fun run() {
+        val labels = Labels.parseAll(label).getOrElse { throw UsageError("--label: ${it.message}") }
         val signed = dependencies.signedIn(server)
-        val query = SessionsQuery(if (all) null else signed.login, repo, open, before)
+        // a server that does not know labels would list every session: it is said instead
+        if (labels.isNotEmpty()) {
+            dependencies.requireFeature(signed.serverUrl, signed.token, ServerFeatures.SESSIONS_LABELS, NO_LABELS)
+        }
+        val query = SessionsQuery(
+            if (all) null else signed.login,
+            repo,
+            open,
+            before,
+            labels.map { (key, value) -> "$key=$value" },
+        )
         val page = runBlocking { listSessions(signed, query) }
         val console = dependencies.console
         if (json) {
             console.data(JsonArray(page.items).toString() + "\n")
         } else {
             page.items.forEach { console.out(it.sessionLine(dependencies.clock()) + "\n") }
-            val filtered = repo != null || open || before != null
+            val filtered = repo != null || open || before != null || labels.isNotEmpty()
             val none = if (filtered) "No sessions match." else "No sessions yet. Start one: ostrom run claude"
             if (page.items.isEmpty()) console.err("$none\n")
         }
         page.next?.let { console.err("More exist: ostrom sessions list --before $it\n") }
     }
 }
+
+/** What `ostrom sessions list --label` says to a server that keeps no labels. */
+internal const val NO_LABELS = "This Ostrom server keeps no session labels: ask your admin to update it."
 
 /**
  * `ostrom sessions show [<session>] [--follow] [--json]`: the thread of a session (CLI.md § 2.2), the developer's last
@@ -115,7 +134,11 @@ private fun JsonObject.sessionLine(now: Long): String {
         else -> "ended"
     }
     val fields = listOf(text("id") ?: "?", text("agent") ?: "-", text("repo") ?: "-", state)
-    return (fields + age(text("startedAt"), now)).joinToString("  ")
+    // the labels of the launch, in key order, after the age (sessions.labels.v1)
+    val labels = (this["labels"] as? JsonObject).orEmpty().entries
+        .sortedBy { it.key }
+        .map { "${it.key}=${(it.value as? JsonPrimitive)?.content.orEmpty()}" }
+    return (fields + age(text("startedAt"), now) + labels).joinToString("  ")
 }
 
 private suspend fun CliDependencies.logs(asked: String?, follow: Boolean, json: Boolean, server: String?) {

@@ -50,6 +50,12 @@ const val ARTIFACTS = "artifacts.v1"
 const val SESSIONS_ACTIVITY = "sessions.activity.v1"
 
 /**
+ * The feature key of the launch and session labels (`ServerFeatures.SESSIONS_LABELS` of ostrom-core). The CLI's tests
+ * check that the two are the same.
+ */
+const val SESSIONS_LABELS = "sessions.labels.v1"
+
+/**
  * The hooks a session runs besides Ostrom's own.
  *
  * @property waitsWake The server holds the Stop hook for a wait's answer ([WAITS_WAKE]), for Claude Code only.
@@ -158,8 +164,23 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
     }
 
     /** The launch and its agent token, or the launch stops. */
-    suspend fun createLaunch(repo: String, agent: Agent, model: String?, site: LaunchSite): Launch {
-        val body = objectOf("repo" to repo, "agent" to ostromName(agent), "model" to model)
+    suspend fun createLaunch(
+        repo: String,
+        agent: Agent,
+        model: String?,
+        site: LaunchSite,
+        labels: Map<String, String>,
+    ): Launch {
+        // labels a server cannot keep are never dropped without a word: the launch stops
+        if (labels.isNotEmpty() && SESSIONS_LABELS !in features(site)) {
+            stop(USAGE, "this Ostrom server does not keep labels (--label): update it, or start without --label")
+        }
+        val body = objectOf(
+            "repo" to repo,
+            "agent" to ostromName(agent),
+            "model" to model,
+            "labels" to labels.takeIf { it.isNotEmpty() },
+        )
         val answer = dependencies.server.post(Routes.LAUNCHES, body, site.credentials.token, LAUNCH_MILLIS)
         if (answer is ServerAnswer.Failed) {
             val (code, message) = when (answer.status) {
