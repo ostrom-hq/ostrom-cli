@@ -5,7 +5,10 @@ The team is the demo's fake one (ostrom-helm compose/demo/teamcode: TeamCode's o
 a fake key), read by the real binary with TeamCode's read-only user, its password in MYSQL_PWD. The owner makes a
 console token that may import (`import:write`, which the seeded token does not hold), then: the plan, which writes
 nothing; the import (`--yes`); what Ostrom now holds, read back by its API (the MCP servers, the secrets they name, the
-shared accounts), never only the exit code; and the same import again, which changes nothing. The token is revoked at
+shared accounts), never only the exit code. The accounts wait for their handover, as TeamCode's import leaves them
+(docs/capacity.md « Refresh ownership »: TeamCode may still renew their tokens): the same import again changes no
+server and refreshes those same two accounts, as TeamCode's repeated import does (docs/v1-review.md, step 4); the owner
+hands each over (`ostrom accounts handover <name> --confirm`), and a last import changes nothing. The token is revoked at
 the end; what was imported stays in the run's organisation, where no later step reads MCP servers, secrets or shared
 accounts. Without the team's options the step is skipped, even with --strict (a fixture, not a route): ostrom-server's
 cli-journey.yml gives them and fails a run without a passing 6.6.
@@ -15,9 +18,11 @@ import os
 import re
 
 ROUTES = (("POST", "/api/v1/tokens"), ("POST", "/api/v1/import/teamcode"), ("GET", "/api/v1/mcp/servers"),
-          ("GET", "/api/v1/secrets"), ("GET", "/api/v1/accounts"))
-# what the CLI's own calls need: the reads below go through the owner's browser session
-SCOPES = ["import:write", "profile:read"]
+          ("GET", "/api/v1/secrets"), ("GET", "/api/v1/accounts"),
+          ("POST", "/api/v1/accounts/00000000-0000-0000-0000-000000000000/handover"))
+# what the CLI's own calls need (the import, then the handover, which lists the accounts to find the one named): the
+# reads below go through the owner's browser session
+SCOPES = ["import:write", "accounts:read", "accounts:write", "profile:read"]
 
 # The demo team's MCP variants (compose/demo/teamcode/02-seed.sql), as Ostrom's console lists them once imported:
 # name -> (url, scope, credential header, whether an org secret holds a shared credential)
@@ -27,13 +32,18 @@ SERVERS = {
     "sentry": ("https://mcp.sentry.dev/mcp", "shared", "X-Sentry-Token", True),
     "docs": ("https://mcp.context7.com/mcp", "shared", None, False),
 }
-# Its shared accounts, label -> status: a-never never finished its enrolment and is left out
+# Its shared accounts, label -> status once handed over: a-never never finished its enrolment and is left out
 ACCOUNTS = {"Claude Max 1": "ready", "Claude Max 2 (paused)": "disabled"}
-# A second import finds at least these unchanged: the four servers and the two accounts
+# As the import leaves them: serving nothing until their handover (a turned-off one says so first)
+PENDING = {"Claude Max 1": "pending_handover", "Claude Max 2 (paused)": "disabled"}
+PENDING_SAID = "! 2 shared accounts serve nothing until they are handed over"
+HANDED_OVER = "✓ Ostrom renews the tokens of "
+# A last import, once they are handed over, finds at least these unchanged: the four servers and the two accounts
 UNCHANGED_AT_LEAST = len(SERVERS) + len(ACCOUNTS)
 COUNTS = re.compile(r"^(\d+) created, (\d+) updated, (\d+) unchanged, (\d+) skipped", re.M)
 LEFT_OUT = "! Left out: account Never finished"
-REPORT_LINE = re.compile(r"^  (\S+)  (\S+)  (.+)$")
+# `  planned  account  claude/Claude Max 1  [pending handover] (…)`: the name ends at its first double space
+REPORT_LINE = re.compile(r"^  (\S+)  (\S+)  (.+?)(?:  .*)?$")
 
 
 def missing_options(options):
@@ -75,9 +85,10 @@ class TeamCode:
             return
         token_id = self.console_token()
         try:
-            if self.token and self.planned():
-                self.imported()
+            if self.token and self.planned() and self.imported():
                 self.again()
+                if self.handed_over():
+                    self.settled()
         finally:
             if token_id:
                 session = j.recent_sign_in(self.maya["email"]) or self.session
@@ -150,27 +161,63 @@ class TeamCode:
             else:
                 j.check(named == [], f"with no shared credential ({named})")
         accounts = self.accounts()
-        j.check(accounts == ACCOUNTS, f"Ostrom shares the team's accounts, the paused one turned off ({accounts})")
+        j.check(accounts == PENDING, f"Ostrom shares the team's accounts, waiting for their handover, the paused one "
+                                     f"turned off ({accounts})")
+        return j.check(PENDING_SAID in out, f"and says they serve nothing until handed over: {out.strip()[-300:]}")
 
     def again(self):
-        """The same import again: nothing created, nothing updated, the servers and accounts as they were."""
+        """The same import again: no server changed, the two waiting accounts given TeamCode's current tokens."""
         j = self.journey
         before = self.servers() or {}
+        done, changed, counts = self.reimport()
+        accounts = sorted(name for action, kind, name in changed if (action, kind) == ("updated", "account"))
+        created, updated, unchanged = counts
+        # TeamCode still renews the waiting accounts' tokens: a repeated import refreshes the same identities
+        j.check(done.returncode == 0 and created == 0 and updated == len(ACCOUNTS) and unchanged >= len(SERVERS)
+                and accounts == sorted(f"claude/{label}" for label in ACCOUNTS) and len(changed) == len(ACCOUNTS),
+                f"the same import again changes no server and refreshes the two waiting accounts ({done.returncode}, "
+                f"{changed}, {counts})")
+        after = self.servers() or {}
+        j.check({n: after.get(n, {}).get("version") for n in SERVERS} == {n: before.get(n, {}).get("version")
+                                                                        for n in SERVERS},
+                "and the servers keep their version")
+        j.check(self.accounts() == PENDING, "and the accounts still wait for their handover")
+
+    def handed_over(self):
+        """Once TeamCode no longer renews them, the owner hands each account over: Ostrom renews its tokens."""
+        j = self.journey
+        machine = {**self.maya, "token": self.token}
+        ok = True
+        for label in ACCOUNTS:
+            done = j.ostrom(machine, "accounts", "handover", label, "--confirm", console=True)
+            ok = j.check(done.returncode == 0 and HANDED_OVER + label in done.stdout,
+                         f"ostrom accounts handover {label!r} --confirm ({done.returncode}): "
+                         f"{(done.stderr or done.stdout).strip()[-300:]}") and ok
+        accounts = self.accounts()
+        return j.check(accounts == ACCOUNTS, f"Ostrom serves the handed over account, the paused one still turned off "
+                                             f"({accounts})") and ok
+
+    def settled(self):
+        """The same import once the accounts are handed over: nothing created, nothing updated, as they were."""
+        j = self.journey
+        done, changed, counts = self.reimport()
+        created, updated, unchanged = counts
+        j.check(done.returncode == 0 and not changed and (created, updated) == (0, 0)
+                and unchanged >= UNCHANGED_AT_LEAST,
+                f"the same import once they are handed over changes nothing ({done.returncode}, {changed}, {counts})")
+        j.check(self.accounts() == ACCOUNTS, "and the accounts keep their status")
+
+    def reimport(self):
+        """`--yes` again: the run, the import's created or updated lines, and its counts (created, updated,
+        unchanged; None, None, 0 without a report)."""
         done = self.ostrom_import("--yes")
         # the import's own report, after its plan's
         _, said, imported = done.stdout.partition("Imported:")
         changed = [line for line in report_lines(imported) if line[0] in ("created", "updated")]
         counts = COUNTS.search(imported)
-        created, updated, unchanged = (int(n) for n in counts.groups()[:3]) if counts else (None, None, 0)
-        j.check(done.returncode == 0 and said and not changed and (created, updated) == (0, 0)
-                and unchanged >= UNCHANGED_AT_LEAST,
-                f"the same import again changes nothing ({done.returncode}, {changed}, "
-                f"{counts.group(0) if counts else 'no counts'}): {imported.strip()[-300:]}")
-        after = self.servers() or {}
-        j.check({n: after.get(n, {}).get("version") for n in SERVERS} == {n: before.get(n, {}).get("version")
-                                                                        for n in SERVERS},
-                "and the servers keep their version")
-        j.check(self.accounts() == ACCOUNTS, "and the accounts their status")
+        if not said or not counts:
+            return done, changed, (None, None, 0)
+        return done, changed, tuple(int(n) for n in counts.groups()[:3])
 
     def listed(self, path, what):
         """The items the console lists at [path] (the run's own org: one page); None when it cannot."""
