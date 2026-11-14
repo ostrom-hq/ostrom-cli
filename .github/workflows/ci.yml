@@ -113,7 +113,7 @@ jobs:
         run: python3 scripts/uncovered.py
       # On a private session bus with an unlocked GNOME Keyring, the linuxX64 tests use the real Secret Service. The
       # links run two at a time: several Kotlin/Native links at once exhaust the runner's memory (JOURNAL 06:52).
-      - name: linuxX64 tests; other targets linked when FULL
+      - name: linuxX64 tests and the mingwX64 release binary; other targets linked when FULL
         if: ${{ !cancelled() }}
         env:
           OSTROM_NETWORK_TESTS: '1'
@@ -123,10 +123,10 @@ jobs:
           # shellcheck disable=SC2016
           dbus-run-session -- bash -ec '
             printf ci-keyring | gnome-keyring-daemon --unlock --components=secrets > /dev/null
-            other=()
+            # the mingwX64 release binary on every run: the largest, its size budget is checked before a merge
+            other=(:cli:linkReleaseExecutableMingwX64)
             if [ "$FULL" = true ]; then
-              other=(linkDebugTestLinuxArm64 linkDebugTestMingwX64
-                :cli:linkReleaseExecutableLinuxArm64 :cli:linkReleaseExecutableMingwX64)
+              other+=(linkDebugTestLinuxArm64 linkDebugTestMingwX64 :cli:linkReleaseExecutableLinuxArm64)
             fi
             ./gradlew --continue --max-workers=2 \
               linuxX64Test :cli:linkReleaseExecutableLinuxX64 "${other[@]}"
@@ -147,11 +147,15 @@ jobs:
       # 16.44 MB with the cloud runner (run 43472481863: a session's processes are this binary, as TeamCode's);
       # 16.88 MB on main with the agent's environment (run 43567556903), 17.01 MB with the owner's skills and team
       # hooks (cli#169, run 43568170266); budgets 18 MB, Windows 18.
+      # Windows 20 MB from 14/11: ostrom.exe crossed 18 with parity features, measured only on main until then:
+      # 17.86 MB (d0551960), 18.47 with the workflows commands (#146), 18.70 with the memory server and the relay
+      # (#159, #161), 19.06 with the automations commands (#151), 19.25 with ostrom cloud mcp (#180, #182), 19.32 on
+      # main (run 43634928886). Since then it is linked and measured on every pull request.
       - name: Start-up (15 ms median, 20 ms p95, 40 ms for a git push), first start, memory and binary sizes
         run: >-
           python3 scripts/measure.py --label linuxX64 --max-push-ms 40
           --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
-          --sizes cli/build/bin/*/releaseExecutable/ostrom.* --max-size-mb 18 --size-budget mingwX64=18
+          --sizes cli/build/bin/*/releaseExecutable/ostrom.* --max-size-mb 18 --size-budget mingwX64=20
           --max-hook-p95-ms 20 --max-version-p95-ms 30 --max-cold-ms 300 --max-hook-memory-mb 25
       - name: End to end, the real binary with fake Claude Code and Codex against the contract's server
         run: python3 e2e/run.py --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
