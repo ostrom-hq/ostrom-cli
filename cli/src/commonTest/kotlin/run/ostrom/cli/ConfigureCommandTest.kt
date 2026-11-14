@@ -36,6 +36,16 @@ class ConfigureCommandTest : CliKit() {
     }
 
     @Test
+    fun anAnswerWithoutALoginKeepsAnUnknownOneToo() {
+        for (answer in listOf("{}", """{"dev":{}}""")) {
+            typed += "ost_key"
+            val bare = "GET /api/v1/auth/me" to (200 to answer)
+            assertEquals(0, run(mapOf(capabilities(), bare), "--server", "https://ostrom.example"))
+            assertTrue(fileSystem.read("$home/credentials.json".toPath()) { readUtf8() }.contains("unknown"))
+        }
+    }
+
+    @Test
     fun aTokenTheServerRefusesSavesNothing() {
         typed += "bad"
         val refused = "GET /api/v1/capabilities" to (401 to """{"error":{"type":"unauthorized","message":"no"}}""")
