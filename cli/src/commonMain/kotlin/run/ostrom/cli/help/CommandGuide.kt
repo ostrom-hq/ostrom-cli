@@ -331,7 +331,11 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
     "check" to guide("workflows", "ostrom check tests" to "run a workflow check (agents call it)"),
     "wait" to guide("approvals", "ostrom wait apr_3f9c --timeout 600" to "wait for a yes (agents call it)"),
     "hook" to guide("agents", "ostrom hook gate < event.json" to "answer an agent hook (agents call it)"),
-    "mcp" to guide("mcp-and-secrets", "ostrom mcp" to "the local MCP server, on stdio (agents call it)"),
+    "mcp" to guide(
+        "mcp-and-secrets",
+        "ostrom mcp" to "the local MCP server, on stdio (agents call it)",
+        "ostrom mcp list" to "the servers you reach, and the state of the hosted commands",
+    ),
     "help" to guide(
         "reference/cli",
         "ostrom help" to "every command",
