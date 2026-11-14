@@ -109,7 +109,7 @@ class MachineSessions(
         val kept = work.workspaces.map(Uuid::parse).toSet() + wanted.map { it.sessionId }
         for (volume in engine.volumes()) {
             // An execution's binary volume ends with it: the next one gets the binary of its own runner image.
-            val epoch = BINARY_VOLUME.matchEntire(volume.name)?.groupValues?.get(1)?.toLongOrNull()
+            val epoch = BINARY_VOLUME.matchEntire(volume.name)?.groupValues?.get(1)?.toLong()
             val ended = epoch != null && Execution(volume.sessionId, epoch) !in wanted
             if (volume.sessionId !in kept || ended) remove(volume)
         }

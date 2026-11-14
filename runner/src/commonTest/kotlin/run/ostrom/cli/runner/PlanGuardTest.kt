@@ -227,6 +227,9 @@ class PlanGuardTest {
         assertFailsWith<IllegalArgumentException>("a session's container that reads another execution's binary") {
             guard.check(swapped(second = agent.withBinds(listOf("ostrom-ws-$hex-e3-bin:/opt/ostrom:ro"))))
         }
+        assertFailsWith<IllegalArgumentException>("a delivery that mounts the workspace, alone in its plan") {
+            guard.check(sent.copy(containers = listOf(delivery.withBinds(listOf("ostrom-ws-$hex:/workspace")))))
+        }
         assertFailsWith<IllegalArgumentException>("a delivery after a container that mounts the binary") {
             guard.check(sent.copy(containers = sent.containers.drop(1) + delivery))
         }
