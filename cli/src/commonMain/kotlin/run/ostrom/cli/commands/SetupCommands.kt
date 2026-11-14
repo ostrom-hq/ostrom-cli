@@ -26,7 +26,7 @@ internal fun setupCommands(dependencies: CliDependencies): List<CliktCommand> = 
         WaitsCancelCommand(dependencies),
         WaitsAskCommand(dependencies),
     ),
-    workflowsCommand(dependencies),
+    workflowsCommand(dependencies), automationsCommand(dependencies),
     GithubCommand(dependencies).subcommands(
         GithubLinkCommand(dependencies),
         GithubStatusCommand(dependencies),
