@@ -157,9 +157,10 @@ data class RunnerConfig(
 object SessionScript {
     /**
      * The script of the first terminal: clone the repository once (never reset afterwards), enter it, run the
-     * agent (with its model and first message, if any; Claude Code with the settings of its background-work hooks), then leave a login shell so the member can start the
-     * agent again. Values come from the environment, never from the script's text. The clone and checkout run with
-     * [GIT_HARDENING] (no hook, no fsmonitor, HTTPS only, no submodule), so a repository's content runs nothing.
+     * agent (with its model and first message, if any; Claude Code with the settings of its background-work hooks),
+     * then leave a login shell so the member can start the agent again. Values come from the environment, never from
+     * the script's text. The clone and checkout run with [GIT_HARDENING] (no hook, no fsmonitor, HTTPS only, no
+     * submodule), so a repository's content runs nothing.
      */
     const val FIRST = """
 set -u

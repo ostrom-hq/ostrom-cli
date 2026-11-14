@@ -31,7 +31,7 @@ class AgentStateTest {
     }
 
     private suspend fun reports(line: String): List<Boolean> =
-        mutableListOf<Boolean>().also { seen -> AgentState.read(ByteReadChannel(line)) { seen += it } }
+        mutableListOf<Boolean>().also { seen -> AgentState.read(ByteReadChannel(line), { seen += it }) }
 
     @Test
     fun theRunnerTakesOneReportPerConnectionAndIgnoresTheRest() = runTest {
