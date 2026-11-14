@@ -22,9 +22,16 @@ sealed interface AgentFrame {
      * @property script The script.
      * @property environment Its environment.
      * @property directory Its working directory.
+     * @property log For a preparation command: the script runs without a terminal (stdin from `/dev/null`), and the
+     *   host writes its output, masked, to this log and sends back the masked lines only.
      */
     @Serializable
-    data class Start(val script: String, val environment: Map<String, String>, val directory: String) : AgentFrame
+    data class Start(
+        val script: String,
+        val environment: Map<String, String>,
+        val directory: String,
+        val log: PreparationLog? = null,
+    ) : AgentFrame
 
     /** Runner to host: keystrokes. */
     class Input(val bytes: ByteArray) : AgentFrame

@@ -62,7 +62,8 @@ actual fun runCloudProcess(command: String, args: List<String>): Nothing {
         CloudProcess.MACHINE -> machine(environment)
         CloudProcess.CREDENTIAL -> credential(args.firstOrNull(), environment)
         CloudProcess.AGENT_STATE -> agentState(environment)
-        CloudProcess.AGENT_SUPERVISOR -> host(socket, AgentHost(PtyTerminal))
+        // Terminals on a PTY; the preparation's commands on pipes, their log written as the agent's uid.
+        CloudProcess.AGENT_SUPERVISOR -> host(socket, AgentHost(PtyTerminal, commands = PtyTerminal.Pipes))
         CloudProcess.CHECK_HOST -> checkHost(
             environment["OSTROM_CHECK_HOST_SOCKET"]?.takeIf { it.isNotBlank() }
                 ?: RunnerConfig.DEFAULT_CHECK_HOST_SOCKET,
@@ -105,8 +106,10 @@ private fun runner(socket: String, environment: Map<String, String>): Nothing {
             val checksJob = launch {
                 ChecksSocket.serve(selector, config.checksSocket, checks::run, ::log) { chmod(it, OPEN_MODE.convert()) }
             }
-            val gitHubJob = gitHubAccess(selector, config, server)
-            val runner = Runner(config, server, terminals, environment, Clock.System, ::log)
+            val gitHub = GitHubCredentialSource(server::gitHubToken, Clock.System)
+            val gitHubJob = gitHubAccess(selector, config, gitHub)
+            val preparer = preparer(config, server, terminals, gitHub)
+            val runner = Runner(config, server, terminals, environment, Clock.System, ::log, prepare = preparer)
             // The agent's hooks report its background work there, as its uid: the agent socket's directory.
             val stateJob = launch {
                 AgentState.serve(selector, config.stateSocket, runner::agentState, ::log) {
@@ -131,6 +134,28 @@ private fun runner(socket: String, environment: Map<String, String>): Nothing {
 }
 
 /**
+ * The session's preparation: the recipe's commands run on the agent host, which writes their log; the masked lines
+ * reach the terminal, and the owner's GitHub token is masked too.
+ */
+private fun preparer(
+    config: RunnerConfig,
+    server: ServerApi,
+    terminals: RemoteTerminalStarter,
+    gitHub: GitHubCredentialSource,
+) = Preparer { agentEnvironment, output ->
+    val commands = AgentHostCommands(terminals::command, PreparationLog.path(config.workspace, config.epoch), output)
+    EnvironmentPreparation(
+        server,
+        commands,
+        agentEnvironment,
+        config.workspace,
+        "${config.binary} cloud credential",
+        token = { gitHub.token()?.token },
+        log = ::log,
+    ).run()
+}
+
+/**
  * git and `gh` reach GitHub with the owner's token, which only the runner holds and asks the server for: the
  * credential socket answers git's helper, and the `gh` configuration is written before the agent starts, then kept
  * current. Cancelling the job stops both and removes the configuration.
@@ -138,9 +163,8 @@ private fun runner(socket: String, environment: Map<String, String>): Nothing {
 private suspend fun CoroutineScope.gitHubAccess(
     selector: SelectorManager,
     config: RunnerConfig,
-    server: HttpServerApi,
+    gitHub: GitHubCredentialSource,
 ): Job {
-    val gitHub = GitHubCredentialSource(server::gitHubToken, Clock.System)
     val gh = GitHubCliRenewal(gitHub, GitHubCliConfig(config.gitHubConfigDirectory), Clock.System, ::log)
     // The agent starts once the configuration is written, or after a bounded wait: a slow server delays no session.
     val first = withTimeoutOrNull(GITHUB_FIRST_TIMEOUT) { gh.refresh() } ?: GitHubCredentialSource.RETRY

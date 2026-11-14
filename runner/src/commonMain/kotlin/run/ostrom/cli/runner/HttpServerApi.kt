@@ -7,6 +7,7 @@ import io.ktor.client.plugins.websocket.webSocketSession
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
@@ -28,7 +29,8 @@ import kotlin.time.Instant
 /**
  * [ServerApi] over HTTP, with the runner token: `POST /api/v1/cloud/runner/heartbeat`, `WS
  * /api/v1/cloud/runner/terminal`, `POST /api/v1/cloud/runner/launch`, `POST /api/v1/cloud/runner/checks` and `POST
- * /api/v1/cloud/runner/github`.
+ * /api/v1/cloud/runner/github`, and the preparation's `POST /api/v1/cloud/runner/environment` and `POST
+ * /api/v1/cloud/runner/preparation`.
  *
  * @param client An HTTP client with WebSockets installed.
  * @param config The runner's configuration.
@@ -62,7 +64,15 @@ class HttpServerApi(
     private data class ErrorBody(val error: ErrorDetail)
 
     @Serializable
-    private data class ErrorDetail(val message: String)
+    private data class ErrorDetail(val message: String, val type: String? = null)
+
+    @Serializable
+    private data class PreparationRequest(
+        val sessionId: String,
+        val epoch: Long,
+        val phase: String,
+        val failure: PreparationFailure? = null,
+    )
 
     @Serializable
     private data class CheckRequest(val sessionId: String, val epoch: Long, val check: RunnerCheck)
@@ -169,6 +179,45 @@ class HttpServerApi(
         }
     }
 
+    override suspend fun environment(): RunnerEnvironment? {
+        val response = client.post("${config.serverUrl}/api/v1/cloud/runner/environment") {
+            bearerAuth(config.token)
+            contentType(ContentType.Application.Json)
+            val request = ExecutionRequest(config.sessionId.toString(), config.epoch)
+            setBody(JSON.encodeToString(ExecutionRequest.serializer(), request))
+        }
+        if (response.status == HttpStatusCode.NotFound) return null
+        refuse(response)
+        return JSON.decodeFromString(RunnerEnvironment.serializer(), response.bodyAsText())
+    }
+
+    override suspend fun reportPreparation(phase: String, failure: PreparationFailure?): Instruction {
+        val response = client.post("${config.serverUrl}/api/v1/cloud/runner/preparation") {
+            bearerAuth(config.token)
+            contentType(ContentType.Application.Json)
+            val request = PreparationRequest(config.sessionId.toString(), config.epoch, phase, failure)
+            setBody(JSON.encodeToString(PreparationRequest.serializer(), request))
+        }
+        refuse(response)
+        val answer = JSON.decodeFromString(HeartbeatResponse.serializer(), response.bodyAsText())
+        return if (answer.instruction == "stop") Instruction.STOP else Instruction.RUN
+    }
+
+    /**
+     * Throws for a preparation call the server did not take: a refusal stops the preparation, anything else (a
+     * timeout, a rate limit, a race, a server error) is retried.
+     */
+    private suspend fun refuse(response: HttpResponse) {
+        val status = response.status
+        if (status.isSuccess()) return
+        if (status == HttpStatusCode.Unauthorized) {
+            throw ExecutionEndedException("The server ended this execution (${status.value}).")
+        }
+        val code = errorType(response.bodyAsText())
+        if (code in PREPARATION_STOPS || status.value in REFUSALS) throw PreparationRefusedException(code, status.value)
+        error("The preparation call answered ${status.value}.")
+    }
+
     override suspend fun openTerminal(): TerminalLink {
         val query = "sessionId=${config.sessionId}&epoch=${config.epoch}"
         val url = config.serverUrl.replaceFirst("http", "ws") + "/api/v1/cloud/runner/terminal?$query"
@@ -206,6 +255,25 @@ class HttpServerApi(
         private const val SERVER_ERRORS = 500
         private const val LINKED = "linked"
         private const val UNAVAILABLE = "unavailable"
+
+        /** The keys that end a preparation: another execution, a session no longer preparing, a failed one. */
+        private val PREPARATION_STOPS = setOf("execution_fenced", "not_preparing", "preparation_failed")
+
+        /** Statuses of a request the server will never take, as TeamCode's runner. */
+        private val REFUSALS = setOf(400, 403, 413, 422)
+
+        /**
+         * The stable key of an error body, if it is one.
+         *
+         * @param body The answer's body.
+         *
+         * @return The key, or null.
+         */
+        private fun errorType(body: String): String? = try {
+            JSON.decodeFromString(ErrorBody.serializer(), body).error.type
+        } catch (_: IllegalArgumentException) {
+            null
+        }
 
         /**
          * Why the server refused: the message of its error body, or the status when the body is not one.

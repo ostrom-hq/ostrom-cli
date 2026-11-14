@@ -47,6 +47,14 @@ class RemoteTerminalTest {
     }
 
     @Test
+    fun aPreparationCommandIsAskedForWithItsLog() = runTest {
+        val pipe = Pipe()
+        val log = PreparationLog("/workspace/.ostrom/logs/prepare-e1.log", listOf("secret"))
+        RemoteTerminalStarter({ pipe }).command("run", mapOf("A" to "b"), "/workspace", log)
+        assertEquals(AgentFrame.Start("run", mapOf("A" to "b"), "/workspace", log), AgentFrames.read(pipe.toHost))
+    }
+
+    @Test
     fun theStarterGivesUpAfterItsAttemptsAndNeverHidesACancellation() = runTest {
         var attempts = 0
         val failing = RemoteTerminalStarter({

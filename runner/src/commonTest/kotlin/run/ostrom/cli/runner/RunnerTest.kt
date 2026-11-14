@@ -285,6 +285,203 @@ class RunnerTest {
         assertFailsWith<CancellationException> { runner.run() }
     }
 
+    private val repository = mapOf(
+        "OSTROM_REPOSITORY_URL" to "https://github.com/acme/api",
+        "OSTROM_REPOSITORY_REF" to "v1",
+    )
+
+    @Test
+    fun thePreparationRunsBeforeTheAgentWhileTheRunnerHeartbeatsUnready() = runTest {
+        val server = FakeServer()
+        val link = FakeLink()
+        server.links.send(Result.success(link))
+        val starts = mutableListOf<Triple<String, Map<String, String>, String>>()
+        val proceed = CompletableDeferred<Unit>()
+        val seen = mutableListOf<Map<String, String>>()
+        val runner = Runner(
+            config.copy(prompt = "hello"),
+            server,
+            starter { script, environment, directory ->
+                starts += Triple(script, environment, directory)
+                FakeTerminal(script)
+            },
+            repository,
+            clock,
+            {},
+            prepare = { environment, output ->
+                seen += environment
+                output("Cloning…\r\n".encodeToByteArray())
+                proceed.await()
+                PreparationOutcome.Prepared("/workspace/api")
+            },
+        )
+        val done = CompletableDeferred<Int>()
+        backgroundScope.launchRunner(runner, done)
+
+        assertEquals("Cloning…\r\n", link.sent.receive())
+        // Keystrokes before the agent's terminal go nowhere.
+        link.frames.send(ServerFrame.Input("x".encodeToByteArray()))
+        link.frames.send(ServerFrame.Resize(80, 24))
+        server.instructions.send(Result.success(Instruction.RUN))
+        testScheduler.advanceTimeBy(16.seconds)
+        assertEquals(Triple(false, false, null), server.beats.single())
+        assertTrue(starts.isEmpty())
+        proceed.complete(Unit)
+        server.instructions.send(Result.success(Instruction.STOP))
+        assertEquals(0, done.await())
+
+        val (script, environment, directory) = starts.single()
+        assertEquals(SessionScript.FIRST, script)
+        assertEquals("/workspace/api", directory)
+        assertNull(environment["OSTROM_REPOSITORY_URL"])
+        assertNull(environment["OSTROM_REPOSITORY_REF"])
+        assertEquals("hello", environment["OSTROM_AGENT_PROMPT"])
+        assertNull(seen.single()["OSTROM_AGENT_PROMPT"])
+        assertEquals("https://github.com/acme/api", seen.single()["OSTROM_REPOSITORY_URL"])
+        assertEquals(Triple(true, false, null), server.beats[1])
+    }
+
+    @Test
+    fun aFailedPreparationNeverStartsTheAgentAndWaitsForTheServersStop() = runTest {
+        val server = FakeServer()
+        val link = FakeLink()
+        server.links.send(Result.success(link))
+        val runner = Runner(
+            config,
+            server,
+            starter { _, _, _ -> error("no terminal") },
+            emptyMap(),
+            clock,
+            {},
+            prepare = { _, _ -> PreparationOutcome.Failed },
+        )
+        server.instructions.send(Result.failure(IllegalStateException("blip")))
+        server.instructions.send(Result.success(Instruction.STOP))
+
+        assertEquals(0, runner.run())
+        assertTrue("could not be prepared" in link.sent.receive())
+        val unready = Triple<Boolean, Boolean, String?>(false, false, null)
+        assertEquals(listOf(unready, unready, Triple(false, true, null)), server.beats)
+    }
+
+    @Test
+    fun aStopDuringThePreparationCancelsIt() = runTest {
+        val server = FakeServer()
+        val cancelled = CompletableDeferred<Unit>()
+        val runner = Runner(
+            config,
+            server,
+            starter { _, _, _ -> error("no terminal") },
+            emptyMap(),
+            clock,
+            {},
+            prepare = { _, _ ->
+                try {
+                    CompletableDeferred<Unit>().await()
+                } finally {
+                    cancelled.complete(Unit)
+                }
+                PreparationOutcome.Failed
+            },
+        )
+        server.instructions.send(Result.success(Instruction.STOP))
+        assertEquals(0, runner.run())
+        assertTrue(cancelled.isCompleted)
+    }
+
+    @Test
+    fun anExecutionEndedDuringThePreparationEndsTheRunner() = runTest {
+        val logs = mutableListOf<String>()
+        val runner = Runner(
+            config,
+            FakeServer(),
+            starter { _, _, _ -> error("no terminal") },
+            emptyMap(),
+            clock,
+            { logs += it },
+            prepare = { _, _ -> throw ExecutionEndedException("replaced") },
+        )
+        assertEquals(1, runner.run())
+        assertEquals(listOf("execution ended: replaced"), logs)
+        val ended = Runner(
+            config,
+            FakeServer(),
+            starter { _, _, _ -> error("no terminal") },
+            emptyMap(),
+            clock,
+            {},
+            prepare = { _, _ -> PreparationOutcome.Ended },
+        )
+        assertEquals(1, ended.run())
+    }
+
+    @Test
+    fun aSessionNoLongerPreparingStartsTheAgentInTheWorkspaceWithoutTheLegacyClone() = runTest {
+        suspend fun first(outcome: PreparationOutcome): Pair<Map<String, String>, String> {
+            val server = FakeServer()
+            val starts = mutableListOf<Pair<Map<String, String>, String>>()
+            val runner = Runner(
+                config,
+                server,
+                starter { script, environment, directory ->
+                    starts += environment to directory
+                    FakeTerminal(script)
+                },
+                repository,
+                clock,
+                {},
+                prepare = { _, _ -> outcome },
+            )
+            server.instructions.send(Result.success(Instruction.STOP))
+            assertEquals(0, runner.run())
+            return starts.single()
+        }
+        val (notPreparing, directory) = first(PreparationOutcome.NotPreparing)
+        assertEquals("/workspace", directory)
+        assertNull(notPreparing["OSTROM_REPOSITORY_URL"])
+        // A server without the recipe: the session script clones, as before.
+        assertEquals("v1", first(PreparationOutcome.Legacy).first["OSTROM_REPOSITORY_REF"])
+    }
+
+    @Test
+    fun anExecutionEndedWhileThePreparationRunsEndsTheRunner() = runTest {
+        val server = FakeServer()
+        val runner = Runner(
+            config,
+            server,
+            starter { _, _, _ -> error("no terminal") },
+            emptyMap(),
+            clock,
+            {},
+            prepare = { _, _ ->
+                CompletableDeferred<Unit>().await()
+                PreparationOutcome.Failed
+            },
+        )
+        server.instructions.send(Result.failure(ExecutionEndedException("replaced")))
+        assertEquals(1, runner.run())
+    }
+
+    @Test
+    fun aCancelledRunnerClosesItsTerminal() = runTest {
+        val terminals = mutableListOf<FakeTerminal>()
+        val runner = Runner(config, FakeServer(), starter { script, _, _ ->
+            FakeTerminal(script).also { terminals += it }
+        }, emptyMap(), clock, {})
+        val job = backgroundScope.launch { runner.run() }
+        testScheduler.runCurrent()
+        job.cancel()
+        testScheduler.runCurrent()
+        assertTrue(terminals.single().closed)
+    }
+
+    @Test
+    fun aServerWithoutThePreparationRoutesNeitherServesNorTakesIt() = runTest {
+        val server = FakeServer()
+        assertNull(server.environment())
+        assertEquals(Instruction.RUN, server.reportPreparation("configuring_git"))
+    }
+
     private fun CoroutineScope.launchRunner(runner: Runner, done: CompletableDeferred<Int>) =
         launch { done.complete(runner.run()) }
 }

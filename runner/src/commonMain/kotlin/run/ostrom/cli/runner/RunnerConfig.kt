@@ -156,7 +156,8 @@ data class RunnerConfig(
 /** How the session's terminal starts: a shell script that prepares the workspace then runs the agent. */
 object SessionScript {
     /**
-     * The script of the first terminal: clone the repository once (never reset afterwards), enter it, run the
+     * The script of the first terminal: on a server without a recipe, clone the repository once (never reset
+     * afterwards), enter it, run the
      * agent (with its model and first message, if any; Claude Code with the settings of its background-work hooks),
      * then leave a login shell so the member can start the agent again. Values come from the environment, never from
      * the script's text. The clone and checkout run with [GIT_HARDENING] (no hook, no fsmonitor, HTTPS only, no
@@ -279,8 +280,7 @@ exec bash -l
     )
 
     /** The options of every git the runner's scripts start: no hook, no fsmonitor, HTTPS only, no submodule. */
-    const val GIT_HARDENING = "-c core.hooksPath=/dev/null -c core.fsmonitor=false -c protocol.allow=never " +
-        "-c protocol.https.allow=always -c fetch.recurseSubmodules=false -c submodule.recurse=false"
+    const val GIT_HARDENING = GitHardening.SCRIPT_OPTIONS
 }
 
 /**

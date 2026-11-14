@@ -154,8 +154,40 @@ before the agent starts, rewritten when the token is renewed, removed when the r
 holds only `OSTROM-GITHUB-NOT-LINKED.txt`, a notice without any token, and the server is asked again every five
 minutes. The volume of `/run/ostrom` is in memory on Kubernetes.
 
-The first terminal's clone and checkout run with hooks, fsmonitor and submodules off and HTTPS only
-(`OSTROM_GIT_HARDENING`), so a repository's content runs nothing before the agent does.
+## The session's preparation (`runners.cloud.environment.v1`)
+
+Before the agent starts, the runner prepares the workspace from the session's recipe, as TeamCode's
+`EnvironmentPreparation`: it reads `POST /api/v1/cloud/runner/environment` (the recipe, the owner's Git identity and
+variables), then
+
+1. writes the owner's Git identity (`git config --global`, on every execution);
+2. clones each repository on the first execution into `/workspace/.ostrom/clone-<n>`, checks out its `ref`, creates
+   its `branch`, then moves it in place (an existing empty directory is replaced, nothing else); on a later execution
+   it only runs `git fetch --prune origin`: work on the workspace is never reset or cloned again;
+3. checks the working directory;
+4. runs the `create` commands once per workspace (a marker per command, named by its SHA-256, under
+   `/workspace/.ostrom/setup`), then the `start` commands on every execution, with `/bin/sh -c` in the working
+   directory.
+
+Each phase is reported on `POST /api/v1/cloud/runner/preparation` (a report that fails never stops the preparation; a
+refusal, `execution_fenced`, `not_preparing` or `preparation_failed`, does). A failure is reported as
+`{step, index, exitCode}` only, retried with backoff while the server cannot be reached; the server writes the
+session's message and stops the execution, and the runner keeps heartbeating unready until it does. The runner
+heartbeats unready during the whole preparation and reports ready once the agent's terminal is started.
+
+Every command runs on the agent host, in the agent's container and under its uid, never beside the runner token:
+without a terminal (stdin from `/dev/null`), its arguments in its environment, never in a script's text. Every `git`
+runs with hooks and fsmonitor off, HTTPS only, no submodule, and no credential helper but the runner's own
+(`credential.helper=` resets them first). The owner's variables reach the commands through their environment, without
+the names that would steer them: an invalid name, `PATH`, `HOME`, `SHELL`, `IFS`, `ENV`, `BASH_ENV`,
+`XDG_CONFIG_HOME`, and the prefixes `LD_`, `DYLD_`, `GIT_`, `GH_`, `OSTROM_`, `TEAMCODE_`, `SSH_`. The agent host
+masks the owner's values and the GitHub token (4 characters or more) as `[REDACTED]` in each line of output, appends it
+to `/workspace/.ostrom/logs/prepare-e<epoch>.log` (its last 4 MiB are kept) as the agent's uid, so the runner never
+opens a file the agent could have replaced by a link, and sends the masked lines back to the session's terminal.
+
+A server without the route (404) leaves the clone to the first terminal's script, as before: it clones
+`OSTROM_REPOSITORY_URL` with hooks, fsmonitor and submodules off and HTTPS only (`OSTROM_GIT_HARDENING`), so a
+repository's content runs nothing before the agent does.
 
 ## The agent cannot read the runner token (S2-49)
 
