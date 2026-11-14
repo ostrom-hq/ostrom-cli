@@ -45,11 +45,11 @@ class RunLabelOptionTest : CliKit() {
         now = 0
         val asked = "GET /api/v1/sessions?dev=maya&label=team%3Dcore&label=env%3Dci"
         val items = """{"items":[{"id":"s1","agent":"claude","startedAt":"1970-01-01T00:00:00Z",""" +
-            """"labels":{"team":"core","env":"ci"}}]}"""
+            """"labels":{"team":"core","env":"ci"}},{"id":"s2","labels":{"odd":{}}}]}"""
         val routes = mapOf(asked to (200 to items), capabilities(ServerFeatures.SESSIONS_LABELS))
         val arguments = arrayOf("sessions", "list", "--label", "team=core", "--label", "env=ci")
         assertEquals(0, cli(environment = withServer, api = serverOf(routes)).run(arguments))
-        assertEquals("s1  claude  -  running  0s  env=ci  team=core\n", console.out.toString())
+        assertEquals("s1  claude  -  running  0s  env=ci  team=core\ns2  -  -  running  ?  odd=\n", console.out.toString())
     }
 
     @Test
