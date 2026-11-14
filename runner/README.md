@@ -48,7 +48,7 @@ runner's key once. On that machine, `ostrom cloud machine` signs of life with it
 docker run -d --name ostrom-machine \
   -e OSTROM_SERVER_URL=https://ostrom.example.com \
   -e OSTROM_RUNNER_ID=<id> -e OSTROM_RUNNER_KEY_FILE=/run/ostrom/key -v /etc/ostrom/key:/run/ostrom/key:ro \
-  ghcr.io/ostrom-hq/ostrom-runner cloud machine
+  docker.io/ostromhq/ostrom-runner cloud machine
 ```
 
 | Variable | |
@@ -99,7 +99,7 @@ docker run -d --name ostrom-machine --network host \
   -e OSTROM_SERVER_URL=https://ostrom.example.com \
   -e OSTROM_RUNNER_ID=<id> -e OSTROM_RUNNER_KEY_FILE=/run/ostrom/key -v /etc/ostrom/key:/run/ostrom/key:ro \
   -e OSTROM_DOCKER_API_URL=http://127.0.0.1:2375 \
-  ghcr.io/ostrom-hq/ostrom-runner cloud machine
+  docker.io/ostromhq/ostrom-runner cloud machine
 ```
 
 | Variable | |

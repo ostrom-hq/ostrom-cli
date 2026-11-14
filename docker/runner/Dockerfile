@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# The runner image of Ostrom cloud sessions (ghcr.io/ostrom-hq/ostrom-runner): the `ostrom` Linux binary at
+# The runner image of Ostrom cloud sessions (docker.io/ostromhq/ostrom-runner): the `ostrom` Linux binary at
 # /usr/local/bin/ostrom (mode 0755), and what `cp` and `ostrom cloud machine` need. A session's init container copies
 # the binary out of it into the pod (/opt/ostrom/ostrom); the session's containers run the team's own image
 # (docker/cloud-session-image). A registered machine runs it as `ostrom cloud machine`.

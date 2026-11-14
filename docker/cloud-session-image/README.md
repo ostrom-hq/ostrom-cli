@@ -5,7 +5,7 @@ A cloud session runs in containers built from two images:
 | Setting | What it is |
 | --- | --- |
 | Session image: the profile's `image`, or a session override its `allowedImageOverrides` allows | The image every container of the session runs: the agent, the runner and the check host. Your toolchain lives here. |
-| Runner image and runner binary: the dashboard's cloud runtime settings | An image holding the `ostrom` Linux binary (`ghcr.io/ostrom-hq/ostrom-runner`, binary `/usr/local/bin/ostrom`). An init container copies the binary out of it before the other containers start. |
+| Runner image and runner binary: the dashboard's cloud runtime settings | An image holding the `ostrom` Linux binary (`docker.io/ostromhq/ostrom-runner`, binary `/usr/local/bin/ostrom`). An init container copies the binary out of it before the other containers start. |
 
 Ostrom imposes no session image. [`Dockerfile`](Dockerfile) is a template: it installs what Ostrom needs and leaves one block for your tools. It also copies `ostrom` to `/usr/local/bin/ostrom`, so the same image can serve as the runner image.
 
@@ -55,7 +55,7 @@ RUN apt-get update \
 ## Building and using it
 
 ```sh
-docker build --build-arg OSTROM_RUNNER_IMAGE=ghcr.io/ostrom-hq/ostrom-runner:<version>@sha256:<digest> \
+docker build --build-arg OSTROM_RUNNER_IMAGE=docker.io/ostromhq/ostrom-runner:<version>@sha256:<digest> \
   -t registry.example.org/ostrom-session:2026-11-13 docker/cloud-session-image
 ```
 

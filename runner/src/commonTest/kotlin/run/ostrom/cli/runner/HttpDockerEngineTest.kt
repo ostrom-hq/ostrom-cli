@@ -86,7 +86,7 @@ class HttpDockerEngineTest {
     @Test
     fun aContainerIsCreatedPullingItsImageOnceThenStarted() = runTest {
         val name = "ostrom-s-$hex-e1"
-        val body = buildJsonObject { put("Image", "ghcr.io/ostrom-hq/ostrom-runner:1") }
+        val body = buildJsonObject { put("Image", "docker.io/ostromhq/ostrom-runner:1") }
         val container = PlannedObject(name, body)
 
         docker.startContainer(container)
@@ -117,7 +117,7 @@ class HttpDockerEngineTest {
         assertEquals(
             listOf(
                 "POST /containers/create name=$name",
-                "POST /images/create fromImage=ghcr.io/ostrom-hq/ostrom-runner&tag=1",
+                "POST /images/create fromImage=docker.io/ostromhq/ostrom-runner&tag=1",
                 "POST /containers/create name=$name",
                 "POST /containers/$name/start ",
             ),

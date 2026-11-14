@@ -18,11 +18,11 @@
 # container), an Ostrom token, a provider or GitHub credential, or a kubeconfig. The server gives the runner its token
 # at run time, in the runner's container only.
 #
-# Build: docker build --build-arg OSTROM_RUNNER_IMAGE=ghcr.io/ostrom-hq/ostrom-runner:<version> -t <image>:<tag> .
+# Build: docker build --build-arg OSTROM_RUNNER_IMAGE=docker.io/ostromhq/ostrom-runner:<version> -t <image>:<tag> .
 
 ARG BASE_IMAGE=debian:bookworm-slim
 # The runner image whose `ostrom` binary goes into this one: the version your server runs, pinned by digest.
-ARG OSTROM_RUNNER_IMAGE=ghcr.io/ostrom-hq/ostrom-runner:edge
+ARG OSTROM_RUNNER_IMAGE=docker.io/ostromhq/ostrom-runner:edge
 
 FROM ${OSTROM_RUNNER_IMAGE} AS ostrom
 
