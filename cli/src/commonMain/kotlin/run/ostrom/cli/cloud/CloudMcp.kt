@@ -6,21 +6,29 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import run.ostrom.cli.mcp.McpDispatcher
 import run.ostrom.cli.mcp.McpServerImpl
 import run.ostrom.cli.memory.MemoryTools
 import run.ostrom.cli.memory.RelayMemoryApi
 import run.ostrom.cli.platform.Console
 import run.ostrom.cli.platform.Environment
+import run.ostrom.cli.platform.ProcessCaptureImpl
 import run.ostrom.cli.runner.CloudMcpSession
 import run.ostrom.cli.runner.McpForwarder
 import run.ostrom.cli.runner.ServerHttp
+import run.ostrom.cli.todo.CommandCheck
+import run.ostrom.cli.todo.GitHub
+import run.ostrom.cli.todo.RelayTodoApi
+import run.ostrom.cli.todo.TodoChecks
+import run.ostrom.cli.todo.TodoTools
 
 /**
  * `ostrom cloud mcp --server <name>` (hidden): one of Ostrom's MCP servers for the agent of a cloud session, on stdio,
  * in the agent's container (TeamCode's `teamcode mcp …` in the pod), with the launch's agent token and the server's
  * URL the runner gave the agent (`OSTROM_AGENT_TOKEN`, `OSTROM_URL`). A server the server serves
- * ([CloudMcpSession.FORWARDED]) is forwarded to its route; the memory's is served here, as `ostrom run` serves it,
- * its calls made straight to the server ([ServerHttp]) instead of through a local relay.
+ * ([CloudMcpSession.FORWARDED]: artifacts, waits, workflow delivery) is forwarded to its route; the memory's and the
+ * todo's are served here, as `ostrom run` serves them, their calls made straight to the server ([ServerHttp]) instead
+ * of through a local relay. No session id is sent: the server binds a cloud launch's agent token to its cloud session.
  *
  * @param environment The process environment.
  * @param console Where the messages go (stdout) and the refusals (stderr).
@@ -52,21 +60,34 @@ class CloudMcp(
             .filter { it.second == null }.map { it.first }
         return client.use {
             when {
-                route == null && name != CloudMcpSession.MEMORY -> refuse("unknown server ${name ?: "(none)"}")
+                route == null && name !in CloudMcpSession.SERVED_HERE -> refuse("unknown server ${name ?: "(none)"}")
                 url == null || token == null -> refuse("${missing.joinToString(" and ")} not set")
                 route != null -> runBlocking {
                     val read: suspend () -> String? = { withContext(Dispatchers.IO) { readLine() } }
                     McpForwarder(client, url, route, token, read, console::data).serve()
                 }
-                // The memory, the one server served here.
-                else -> {
-                    val http = ServerHttp(client, url)
-                    val start = RelayMemoryApi(http, NO_PORT, token, RelayMemoryApi.START_MILLIS)
-                    val tools = MemoryTools(RelayMemoryApi(http, NO_PORT, token), start = start)
-                    McpServerImpl(tools.dispatcher(version), console, readLine).serve()
-                }
+                // The memory or the todo, served here.
+                else -> McpServerImpl(dispatcher(name, ServerHttp(client, url), token), console, readLine).serve()
             }
         }
+    }
+
+    /**
+     * The tools of a server served here: the todo, its checks run in the agent's container, or the memory.
+     *
+     * @throws IllegalStateException For another name: [serve] refuses it first.
+     */
+    internal fun dispatcher(name: String?, http: ServerHttp, token: String): McpDispatcher = when (name) {
+        CloudMcpSession.TODO -> {
+            val capture = ProcessCaptureImpl()
+            val checks = TodoChecks(GitHub(capture), CommandCheck(capture, environment.operatingSystem))
+            TodoTools(RelayTodoApi(http, NO_PORT, token), checks).dispatcher(version)
+        }
+        CloudMcpSession.MEMORY -> {
+            val start = RelayMemoryApi(http, NO_PORT, token, RelayMemoryApi.START_MILLIS)
+            MemoryTools(RelayMemoryApi(http, NO_PORT, token), start = start).dispatcher(version)
+        }
+        else -> error("$name is not served here")
     }
 
     private fun refuse(why: String): Int {

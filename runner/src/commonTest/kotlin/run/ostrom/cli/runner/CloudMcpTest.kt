@@ -228,12 +228,34 @@ class CloudMcpTest {
             mapOf(
                 "/api/v1/artifacts/policy" to ("""{"canPublish":true}""" to HttpStatusCode.OK),
                 "/api/v1/memory/index" to ("""{"items":[]}""" to HttpStatusCode.OK),
+                "/api/v1/capabilities" to (
+                    """{"features":["todos.v1","workflows.deliver.v1","memory.v1"]}""" to HttpStatusCode.OK
+                    ),
             ),
             exchange,
         ).available("agent-token")
-        assertEquals(setOf(CloudMcpSession.ARTIFACTS, CloudMcpSession.MEMORY), available)
+        val every = setOf(
+            CloudMcpSession.ARTIFACTS,
+            CloudMcpSession.MEMORY,
+            CloudMcpSession.WAITS,
+            CloudMcpSession.TODO,
+            CloudMcpSession.WORKFLOW,
+        )
+        assertEquals(every, available)
         assertTrue(exchange.requests.all { it.headers[HttpHeaders.Authorization] == "Bearer agent-token" })
         assertEquals("1", exchange.requests.single { it.url.encodedPath.endsWith("index") }.url.parameters["limit"])
+    }
+
+    @Test
+    fun theWaitsComeWithAnyAnswerOfTheCapabilitiesAndTheOthersWithTheirFeature() = runTest {
+        val capabilities = { body: String -> mapOf("/api/v1/capabilities" to (body to HttpStatusCode.OK)) }
+        assertEquals(
+            setOf(CloudMcpSession.WAITS, CloudMcpSession.TODO),
+            servers(capabilities("""{"features":["todos.v1", 1, {}]}""")).available("t"),
+        )
+        assertEquals(setOf(CloudMcpSession.WAITS), servers(capabilities("""{"features":[]}""")).available("t"))
+        // No feature list: an answer that cannot say, nothing from it.
+        assertTrue(servers(capabilities("""{"version":"1"}""")).available("t").isEmpty())
     }
 
     @Test
@@ -316,6 +338,18 @@ class CloudMcpTest {
             val arguments = CloudMcpSession.variables(agent, "/opt/a\nb", both)
             assertEquals(count, arguments.getValue(CloudMcpSession.ARGUMENTS_VARIABLE).lines().size, agent)
         }
+    }
+
+    @Test
+    fun theServersWithoutAnInstructionAddNone() {
+        val claude = lines("claude", setOf(CloudMcpSession.WAITS, CloudMcpSession.TODO))
+        assertEquals(1, claude.size, claude.toString())
+        assertTrue(""""ostrom":{"type":"stdio"""" in claude[0], claude[0])
+        assertTrue(""""ostrom-todo":{""" in claude[0], claude[0])
+        val codex = lines("codex", setOf(CloudMcpSession.WAITS))
+        assertEquals(2, codex.size, codex.toString())
+        val workflow = lines("claude", setOf(CloudMcpSession.WORKFLOW, CloudMcpSession.TODO))
+        assertTrue(workflow.last().startsWith("--append-system-prompt=When you are working on a workflow step"))
     }
 
     @Test
