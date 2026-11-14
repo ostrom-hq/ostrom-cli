@@ -52,7 +52,7 @@ class WorkflowStopHook(
         val start = clock.markNow()
         try {
             val event = console.readStandardInput(MAX_INPUT, READ_MILLIS)
-            val input = (event as? StandardInput.Read)?.bytes?.decodeToString()
+            val input = if (event is StandardInput.Read) event.bytes.decodeToString() else null
             val answer = input?.let { answer(it, start) }
             if (answer != null) console.data("$answer\n")
         } catch (ignored: Throwable) { // not coroutine-reachable: the hook process's blocking entry, its own guard
@@ -83,8 +83,9 @@ class WorkflowStopHook(
     /** What the relay answers to the pending question within what is left of the two seconds; null when it fails. */
     private fun ask(start: TimeMark): JsonObject? {
         val left = TIMEOUT_MILLIS - start.elapsedNow().inWholeMilliseconds
-        val token = environment[TOKEN_FILE]?.let(read)?.trim()?.ifEmpty { null }
-        val calls = token?.takeIf { left > 0 }?.let { RelayCalls(environment[RELAY_URL], it, http) }
+        val file = environment[TOKEN_FILE]
+        val token = (if (file == null) null else read(file))?.trim().orEmpty()
+        val calls = if (left > 0 && token.isNotEmpty()) RelayCalls(environment[RELAY_URL], token, http) else null
         return (calls?.call(PENDING, null, left.toInt()) as? CallResult.Ok)?.body
     }
 
@@ -111,26 +112,28 @@ class WorkflowStopHook(
          * deliverable's domain are the team's own words, cleaned to one bounded line.
          */
         fun reason(pending: JsonObject): String {
-            val title = (pending["nodeTitle"] as? JsonPrimitive)?.contentOrNull?.let(::clean)?.ifEmpty { null }
-            val step = if (title == null) "a workflow step" else "the workflow step \"$title\""
+            val title = textOf(pending, "nodeTitle")
+            val step = if (title.isEmpty()) "a workflow step" else "the workflow step \"$title\""
             return "You are working on $step and your turn is ending without having delivered or asked a person. " +
                 "Call `deliver` of the `ostrom-workflow` MCP server with the result (${expected(pending)}), " +
                 "or, if you need a person's answer, call `ask_human` of the `ostrom` MCP server. Then end your turn."
         }
 
         private fun expected(pending: JsonObject): String {
-            val deliverable = pending["deliverable"] as? JsonObject
-            return when ((deliverable?.get("type") as? JsonPrimitive)?.contentOrNull) {
+            val deliverable = pending["deliverable"] as? JsonObject ?: JsonObject(emptyMap())
+            val domain = textOf(deliverable, "domain")
+            return when (textOf(deliverable, "type")) {
                 "artifact" -> "expected: the id of an artifact"
-                "url" -> "expected: an https address" + (domain(deliverable)?.let { " on $it" } ?: "")
+                "url" -> "expected: an https address" + if (domain.isEmpty()) "" else " on $domain"
                 "text" -> "expected: the text"
                 "json" -> "expected: a JSON value, as the step's instruction describes"
                 else -> "exactly what the step's instruction asked for"
             }
         }
 
-        private fun domain(deliverable: JsonObject): String? =
-            (deliverable["domain"] as? JsonPrimitive)?.contentOrNull?.let(::clean)?.ifEmpty { null }
+        /** The string [key] of [source], cleaned: empty when it is absent, not a string or only control characters. */
+        private fun textOf(source: JsonObject, key: String): String =
+            clean((source[key] as? JsonPrimitive)?.contentOrNull.orEmpty())
 
         /** One line, no control character, bounded. */
         private fun clean(text: String) =

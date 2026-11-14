@@ -2,6 +2,7 @@
 package run.ostrom.cli.hooks.runtime
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
@@ -226,6 +227,13 @@ class WorkflowStopHookTest {
         assertTrue("working on the workflow step \"Ship\" and" in reason("text"))
         assertTrue("working on a workflow step and" in reason("text", title = null))
         assertTrue("working on a workflow step and" in reason("text", title = "\u0007 "), "nothing printable is none")
+        assertTrue("step \"Caf\u00e9\"" in reason("text", title = "Caf\u00e9"), "accents are kept")
+        for (title in listOf(JsonNull, JsonObject(emptyMap()))) {
+            val odd = WorkflowStopHook.reason(JsonObject(mapOf("nodeTitle" to title)))
+            assertTrue("working on a workflow step and" in odd, odd)
+        }
+        val untyped = JsonObject(mapOf("deliverable" to JsonPrimitive("x")))
+        assertTrue("exactly what the step's instruction" in WorkflowStopHook.reason(untyped))
         val cleaned = reason("text", title = "Line\nBreak\u0007\u0085" + "x".repeat(500))
         assertFalse('\n' in cleaned || '\u0007' in cleaned || '\u0085' in cleaned)
         assertTrue(cleaned.length < 800)

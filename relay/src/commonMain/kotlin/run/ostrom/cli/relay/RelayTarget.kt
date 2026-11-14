@@ -184,8 +184,8 @@ private fun inferenceTarget(method: HttpMethod, path: String): RelayTarget {
  * take the agent's (security audit S2-25). The agent's opens one hook route, reading where a gate stands
  * (`GET /api/v1/gates/{id}`, which `ostrom wait` calls from the agent's shell): it neither asks, consumes nor closes
  * anything. The agent's opens the todo routes its `ostrom-todo` server calls, never the Stop hook's (a stop, a hook
- * error) nor the reminder block, nor the workflow step's question (`WorkflowPending`). The memory routes are the agent's
- * tools' only: no hook reads or writes the memory. Off the allow-list, either gets its 404.
+ * error) nor the reminder block, nor the workflow step's question (`WorkflowPending`). The memory routes are the
+ * agent's tools' only: no hook reads or writes the memory. Off the allow-list, either gets its 404.
  */
 internal fun opens(target: RelayTarget, hooks: Boolean, client: Boolean): Boolean = when (target) {
     is RelayTarget.Hook -> hooks || client && target.longPoll
