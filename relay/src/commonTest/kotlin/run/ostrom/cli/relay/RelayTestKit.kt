@@ -9,6 +9,9 @@ import io.ktor.client.request.HttpResponseData
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
 import kotlinx.coroutines.awaitCancellation
+import kotlin.concurrent.atomics.AtomicReference
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
+import kotlin.concurrent.atomics.update
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
@@ -36,12 +39,17 @@ fun relayConfig(
 )
 
 /** Ostrom as the relay sees it: a mock engine that records every request it gets and answers with [answer]. */
+@OptIn(ExperimentalAtomicApi::class)
 class FakeOstrom(private val answer: suspend MockRequestHandleScope.(HttpRequestData) -> HttpResponseData) {
-    /** Every request the relay sent, in order. */
-    val requests = mutableListOf<HttpRequestData>()
+    // The relay answers on its own threads while the test reads: a plain list threw ConcurrentModificationException
+    // (linuxX64) and lost requests, so the log is an immutable list swapped atomically.
+    private val log = AtomicReference<List<HttpRequestData>>(emptyList())
+
+    /** Every request the relay sent, in order: a snapshot, safe to read while the relay goes on. */
+    val requests: List<HttpRequestData> get() = log.load()
 
     private val engine = MockEngine { request ->
-        requests.add(request)
+        log.update { it + request }
         answer(request)
     }
 
