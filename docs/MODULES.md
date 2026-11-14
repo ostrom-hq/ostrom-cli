@@ -190,7 +190,8 @@ without the session, 77 for a session the caller may not read (a gate it may not
   `GET /api/v1/confirmations/{id}?wait=30` with the token that asked; a pending answer that came at once is asked again
   after 5 seconds, an outage (no answer, a 5xx) is tried 3 times in a row. The server says when it has expired; the CLI
   stops waiting a minute past the 15 minutes by its own clock. Confirmed, the command goes on with `result`, what the
-  write returned (exit 0); refused, or confirmed but not written (`failed`, the server's reason said; `result_lost`, server#503, says the result is unknown and to check the current state), exit 77;
+  write returned (exit 0); refused, or confirmed but not written (`failed`, the server's reason said), exit 77; for `result_lost` (server#503) it says the
+  result is unknown, to check the current state, and exits 77 too: a script must not retry on 77 alone;
   expired, or still pending when the CLI stops waiting, exit 75; a status it does not know, exit 1. Every stop while
   the request may still stand says where it can be confirmed; a 401 to the admin token forgets it.
 
