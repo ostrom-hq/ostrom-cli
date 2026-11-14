@@ -72,8 +72,11 @@ it holds and gets back what it must hold:
 - an execution handed over comes with its plan, once: the volumes and the three containers (agent host, check host,
   runner) that the server's Docker driver would create, with the execution's runner token. The machine checks the plan
   before creating anything: the session's own named volumes only, never a host path, a privilege, a capability, a host
-  network or another image than `OSTROM_RUNNER_SESSION_IMAGE` when set, and as a non-root user. A refused plan is
-  logged and the execution reported missing, so the server moves the session on;
+  network or another image than `OSTROM_RUNNER_SESSION_IMAGE` when set, and as a non-root user. The `ostrom` binary
+  arrives as in the pod's init container: the execution's delivery container (`<execution>-bin`, from the runner image,
+  `OSTROM_RUNNER_DELIVERY_IMAGE` when set) mounts only the execution's binary volume over the image's binary
+  directory, so the engine copies the binary into it, and the other containers mount that volume read-only. A refused
+  plan is logged and the execution reported missing, so the server moves the session on;
 - an execution being created (an image pull may take minutes) is reported `pending`, without holding up the
   heartbeats; its runner's container then makes it `running`, and its end `ended`;
 - every object the machine creates carries the label `ostrom.run/runner=<id>`. The machine stops and deletes its own
@@ -104,6 +107,7 @@ docker run -d --name ostrom-machine --network host \
 | `OSTROM_DOCKER_API_URL` | the Docker Engine API, `http(s)://`; for the local socket, a socket proxy on the loopback that allows containers, volumes and images |
 | `OSTROM_DOCKER_NETWORK` | the network the sessions join (the engine's default when unset); their containers reach the server through `host.docker.internal` |
 | `OSTROM_RUNNER_SESSION_IMAGE` | the only image a session may run; the server's choice when unset |
+| `OSTROM_RUNNER_DELIVERY_IMAGE` | the only image a session's `ostrom` binary may come from (the runner image); the server's choice when unset |
 | `OSTROM_RUNNER_MAX_SESSIONS` | the sessions the machine runs at once at most, 0 to 256 (0 drains it); the server never hands it more, and a session with no room anywhere waits. When unset, what the machine holds, read from the engine's `/info`: 2 processors and 4.5 GiB a session, one at least. A socket proxy with `INFO=0` hides it: then no limit is declared, so set this variable |
 
 ## Checks run by the runner (`isolated_runner`)

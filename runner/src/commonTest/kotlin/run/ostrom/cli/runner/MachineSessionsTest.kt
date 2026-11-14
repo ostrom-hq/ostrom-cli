@@ -149,6 +149,29 @@ class MachineSessionsTest {
     }
 
     @Test
+    fun anExecutionsBinaryVolumeEndsWithItAndTheWorkspaceStays() = runTest {
+        val first = AssignedExecution(a.toString(), 1, deliveryPlan(a, 1))
+        sessions.receive(work(first))
+        sessions.apply(work(first))
+        assertEquals(4, engine.containers.size)
+        assertTrue(engine.volumes.any { it.name == "ostrom-ws-${a.toHexString()}-e1-bin" })
+
+        // The next execution: the first one's binary goes, its successor's and the workspace stay.
+        val second = AssignedExecution(a.toString(), 2, deliveryPlan(a, 2))
+        sessions.receive(work(second))
+        sessions.apply(work(second))
+        val names = engine.volumes.map { it.name }.toSet()
+        assertTrue("ostrom-ws-${a.toHexString()}-e1-bin" !in names)
+        assertTrue("ostrom-ws-${a.toHexString()}-e2-bin" in names)
+        assertTrue("ostrom-ws-${a.toHexString()}" in names)
+
+        // Paused: no execution, so no binary either.
+        sessions.apply(work(workspaces = listOf(a)))
+        assertEquals(setOf("ostrom-ws-${a.toHexString()}", "ostrom-ws-${a.toHexString()}-socket",
+            "ostrom-ws-${a.toHexString()}-checks"), engine.volumes.map { it.name }.toSet())
+    }
+
+    @Test
     fun aPlanTheServerTakesBackBeforeItIsCreatedIsForgotten() = runTest {
         sessions.receive(work(handed(a, 1)))
         sessions.receive(work())

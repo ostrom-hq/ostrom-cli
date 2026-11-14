@@ -6,6 +6,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -35,6 +36,43 @@ internal fun plan(session: Uuid, epoch: Long, token: String = "ostrom_runner_xyz
         PlannedObject(name, container(hex, epoch, user, token.takeIf { name == execution }))
     }
     return ExecutionPlan(volumes, containers)
+}
+
+/**
+ * A plan with the delivery of the `ostrom` binary, as the server computes it once Docker delivers it like the pod's
+ * init container: the execution's binary volume, filled by the delivery container, read-only in the other three.
+ */
+internal fun deliveryPlan(session: Uuid, epoch: Long, runnerImage: String = "ghcr.io/ostrom-hq/ostrom-runner:1"):
+    ExecutionPlan {
+    val hex = session.toHexString()
+    val execution = "ostrom-s-$hex-e$epoch"
+    val binary = "ostrom-ws-$hex-e$epoch-bin"
+    val sent = plan(session, epoch)
+    val volume = PlannedObject(
+        binary,
+        buildJsonObject {
+            put("Name", binary)
+            putJsonObject("Labels") { put("ostrom.run/session", hex) }
+        },
+    )
+    val sessionContainers = sent.containers.map { planned ->
+        planned.withBinds(planned.binds() + "$binary:/opt/ostrom:ro")
+    }
+    val delivery = PlannedObject(
+        "$execution-bin",
+        JsonObject(
+            sent.containers.last().body + ("Image" to JsonPrimitive(runnerImage)) + ("Env" to JsonArray(emptyList())),
+        ),
+    ).withBinds(listOf("$binary:/usr/local/bin"))
+    return ExecutionPlan(sent.volumes + volume, listOf(delivery) + sessionContainers)
+}
+
+internal fun PlannedObject.binds(): List<String> =
+    body["HostConfig"]!!.jsonObject["Binds"]!!.jsonArray.map { it.jsonPrimitive.content }
+
+internal fun PlannedObject.withBinds(binds: List<String>): PlannedObject {
+    val host = JsonObject(body["HostConfig"]!!.jsonObject + ("Binds" to JsonArray(binds.map(::JsonPrimitive))))
+    return PlannedObject(name, JsonObject(body + ("HostConfig" to host)))
 }
 
 private fun container(hex: String, epoch: Long, user: String, token: String?) = buildJsonObject {
@@ -136,6 +174,56 @@ class PlanGuardTest {
             PlanGuard(runner, null, "ghcr.io/ostrom-hq/ostrom-runner:2").check(sent)
         }
         assertEquals("ostrom-ws-$hex", guard.check(sent).volumes.first().name)
+    }
+
+    @Test
+    fun theBinaryIsDeliveredFromTheRunnerImageAndMountedReadOnly() {
+        val sent = deliveryPlan(session, 2)
+        val checked = guard.check(sent)
+        assertEquals(sent.containers.map { it.name }, checked.containers.map { it.name })
+        assertEquals(sent.volumes.map { it.name }, checked.volumes.map { it.name })
+        // The machine may pin both images.
+        val pinned = PlanGuard(runner, null, "ghcr.io/ostrom-hq/ostrom-runner:1", "ghcr.io/ostrom-hq/ostrom-runner:1")
+        assertEquals(4, pinned.check(sent).containers.size)
+        assertFailsWith<IllegalArgumentException>("another delivery image than the machine's") {
+            PlanGuard(runner, null, null, "ghcr.io/ostrom-hq/ostrom-runner:2").check(sent)
+        }
+        // The team's session image and the runner image, each pinned on its own.
+        val team = sent.copy(
+            containers = listOf(sent.containers.first()) + sent.containers.drop(1).map {
+                PlannedObject(it.name, JsonObject(it.body + ("Image" to JsonPrimitive("team:1"))))
+            },
+        )
+        val split = PlanGuard(runner, null, "team:1", "ghcr.io/ostrom-hq/ostrom-runner:1")
+        assertEquals(4, split.check(team).containers.size)
+        assertFailsWith<IllegalArgumentException>("the session image pin applies to the delivery's peers only") {
+            PlanGuard(runner, null, "team:1", null).check(sent)
+        }
+    }
+
+    @Test
+    fun aDeliveryThatCouldReachTheSessionIsRefused() {
+        val hex = session.toHexString()
+        val sent = deliveryPlan(session, 2)
+        val delivery = sent.containers.first()
+        val agent = sent.containers[1]
+        fun swapped(first: PlannedObject = delivery, second: PlannedObject = agent) =
+            sent.copy(containers = listOf(first, second) + sent.containers.drop(2))
+        val refused = mapOf(
+            "a delivery that mounts the workspace" to
+                swapped(delivery.withBinds(delivery.binds() + "ostrom-ws-$hex:/workspace")),
+            "a delivery that mounts another execution's binary" to
+                swapped(delivery.withBinds(listOf("ostrom-ws-$hex-e3-bin:/usr/local/bin"))),
+            "a delivery that mounts nothing" to swapped(delivery.withBinds(emptyList())),
+            "a delivery that mounts the workspace only" to
+                swapped(delivery.withBinds(listOf("ostrom-ws-$hex:/workspace"))),
+            "a delivery mounting its volume read-only" to
+                swapped(delivery.withBinds(listOf("ostrom-ws-$hex-e2-bin:/usr/local/bin:ro"))),
+            "a session's container that may write the binary" to swapped(
+                second = agent.withBinds(listOf("ostrom-ws-$hex:/workspace", "ostrom-ws-$hex-e2-bin:/opt/ostrom")),
+            ),
+        )
+        for ((why, bad) in refused) assertFailsWith<IllegalArgumentException>(why) { guard.check(bad) }
     }
 
     @Test

@@ -10,6 +10,9 @@ import kotlinx.coroutines.sync.withLock
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.uuid.Uuid
 
+/** An execution's binary volume ([PlanGuard]), its epoch captured. */
+private val BINARY_VOLUME = Regex("ostrom-ws-[0-9a-f]{32}-e([0-9]+)${PlanGuard.DELIVERY_SUFFIX}")
+
 /**
  * The cloud sessions a registered runner runs on its machine's Docker Engine.
  *
@@ -105,7 +108,10 @@ class MachineSessions(
         }
         val kept = work.workspaces.map(Uuid::parse).toSet() + wanted.map { it.sessionId }
         for (volume in engine.volumes()) {
-            if (volume.sessionId !in kept) engine.removeVolume(volume.name)
+            // An execution's binary volume ends with it: the next one gets the binary of its own runner image.
+            val epoch = BINARY_VOLUME.matchEntire(volume.name)?.groupValues?.get(1)?.toLongOrNull()
+            val ended = epoch != null && Execution(volume.sessionId, epoch) !in wanted
+            if (volume.sessionId !in kept || ended) engine.removeVolume(volume.name)
         }
     }
 
