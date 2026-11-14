@@ -8,6 +8,7 @@ import run.ostrom.cli.hooks.runtime.GateTexts
 import run.ostrom.cli.hooks.runtime.WorkflowStopHook
 import run.ostrom.cli.launcher.FileAccess
 import run.ostrom.cli.launcher.LaunchFiles
+import run.ostrom.cli.launcher.SESSIONS_ACTIVITY
 import run.ostrom.cli.launcher.WAITS_WAKE
 import run.ostrom.cli.launcher.WORKFLOWS_DELIVER
 import run.ostrom.cli.launcher.team.TEAM_SKILLS
@@ -58,8 +59,16 @@ class HookWiringTest {
     }
 
     @Test
+    fun theActivityHookIsWiredAndNeverStopsTheAgent() {
+        val console = EventConsole("""{"hook_event_name":"Stop","last_assistant_message":"done"}""")
+        assertEquals(0, CliDependencies.hookRunner(console, NoEnvironment()).run(listOf("activity")))
+        assertEquals("", console.err.toString())
+    }
+
+    @Test
     fun theLaunchersFeatureKeyIsTheContractsKey() {
         assertEquals(ServerFeatures.WAITS_WAKE, WAITS_WAKE)
+        assertEquals(ServerFeatures.SESSIONS_ACTIVITY, SESSIONS_ACTIVITY)
         assertEquals(ServerFeatures.SKILLS, TEAM_SKILLS)
     }
 

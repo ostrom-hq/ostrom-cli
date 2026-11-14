@@ -48,7 +48,7 @@ class HookRunnerImpl(
         val start = TimeSource.Monotonic.markNow()
         val kind = arguments.singleOrNull()?.let { HookKind.of(it) }
         if (kind == null) {
-            console.err("usage: ostrom hook gate|session|wake (stdin: the hook event)\n")
+            console.err("usage: ostrom hook gate|session|wake|activity (stdin: the hook event)\n")
             return USAGE
         }
         val reply = replyOf(kind)

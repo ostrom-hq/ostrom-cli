@@ -16,6 +16,12 @@ enum class HookKind(val command: String) {
      * agent its answer. The one hook allowed to wait (a timeout of a day).
      */
     WAKE("wake"),
+
+    /**
+     * Codex's `Stop` and `UserPromptSubmit` in a local session: tells the relay the event's name only, which reports
+     * whether the agent works or waits for a person (`sessions.activity.v1`). Never refuses nor holds anything.
+     */
+    ACTIVITY("activity"),
     ;
 
     /** Lookup by command name. */
@@ -73,7 +79,7 @@ class HookProcessorImpl(private val gate: GateHandler) : HookProcessor {
             GateDecision.Allow -> HookReply()
             is GateDecision.Deny -> deny(decision.reason, dialect)
         }
-        HookKind.SESSION, HookKind.WAKE -> HookReply()
+        HookKind.SESSION, HookKind.WAKE, HookKind.ACTIVITY -> HookReply()
     }
 
     /** A refusal in the agent's dialect ([HookReplies.deny]): exit 2, the reason on stderr. */

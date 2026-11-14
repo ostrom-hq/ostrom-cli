@@ -17,6 +17,7 @@ import io.ktor.server.response.respond
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
@@ -77,7 +78,7 @@ internal fun Application.relayModule(
     val upstreamConfig = config.copy(serverUrl = config.serverUrl.trimEnd('/'))
     val capabilities = Capabilities(token, clientToken)
     val memory = PolicyMemory(policyFreshFor, clock)
-    val relay = Relay(upstreamConfig, capabilities, shared, upstream, notices, timeouts, memory)
+    val relay = Relay(upstreamConfig, capabilities, shared, upstream, notices, timeouts, memory, this)
     val refresher = PolicyRefresher(upstreamConfig, shared, UpstreamExchange(notices), POLICY_REFRESH_TIMEOUT, memory,
         POLICY_ACTIVE_FOR)
     launch { policyRefresh.run(refresher::refresh) }
@@ -103,6 +104,7 @@ private class Relay(
     notices: FailureNotices,
     timeouts: RelayTimeouts,
     memory: PolicyMemory,
+    scope: CoroutineScope,
 ) {
     private val exchange = UpstreamExchange(notices)
     private val session = AgentSession()
@@ -112,6 +114,7 @@ private class Relay(
     private val mcp = McpForwarder(config, upstream, exchange, session)
     private val inference = InferenceForwarder(config, upstream, exchange, notices)
     private val policy = SignedCatalogForwarder(config, shared, exchange, timeouts.hook, memory)
+    private val activity = ActivityForwarder(config, shared, session, scope)
 
     suspend fun handle(call: ApplicationCall) {
         val headers = call.request.headers
@@ -138,6 +141,7 @@ private class Relay(
             RelayTarget.Wake -> hooks.hold(call)
             is RelayTarget.Todo, RelayTarget.WorkflowPending -> todo.forward(call)
             RelayTarget.Memory -> memoryCalls.forward(call)
+            RelayTarget.Activity -> activity.forward(call)
             is RelayTarget.Catalog -> call.respondText(target.catalog, ContentType.Application.Json)
             RelayTarget.SignedCatalog -> policy.forward(call)
             is RelayTarget.Mcp -> mcp.forward(call, target.server)

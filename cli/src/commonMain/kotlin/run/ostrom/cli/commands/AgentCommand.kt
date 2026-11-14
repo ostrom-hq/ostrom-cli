@@ -63,6 +63,10 @@ internal class AgentCommand(
         "--no-variables",
         help = "Do not give the agent the environment variables assigned to you for this launch",
     ).flag()
+    val noActivity by option(
+        "--no-activity",
+        help = "Do not report to your team whether the agent works or waits for you (Claude Code, Codex)",
+    ).flag()
     val workload by option(
         "--workload",
         help = "Scheduling class of the agent's model calls: background ones wait behind the team's " +
@@ -120,6 +124,7 @@ internal class AgentCommand(
             !noTeamHooks,
             background = workload == BACKGROUND,
             variables = !noVariables,
+            activity = !noActivity,
         )
         throw ProgramResult(runBlocking { dependencies.agents.run(request, site) })
     }
@@ -133,6 +138,10 @@ internal class AgentCommand(
         // a cloud session's runner gives the variables itself, from the owner's assignments
         if (cloud && noVariables) {
             throw UsageError("--no-variables is for a launch on this machine: it does not go with --cloud")
+        }
+        // a cloud session's runner sees the agent's turns itself: its hooks report no activity (TeamCode's)
+        if (cloud && noActivity) {
+            throw UsageError("--no-activity is for a launch on this machine: it does not go with --cloud")
         }
         // the agents that read a repository's own configuration only when the developer asks
         val trusting = agent == Agent.CLAUDE || agent == Agent.GEMINI

@@ -45,6 +45,7 @@ class SessionHookProcessor(private val context: HookContext, private val ports: 
             kind == HookKind.SESSION ->
                 SessionHook(session, ports.calls, ids, ports.files, ports.checks, ports.workingDirectory).handle(event)
             kind == HookKind.WAKE -> WakeHook(ports.calls, ids, ports.sleep, ports.now).handle(event)
+            kind == HookKind.ACTIVITY -> ActivityHook(ports.calls).handle(parsed.name)
             parsed.name.isEmpty() -> HookReplies(dialect).deny(GateTexts.UNREAD_EVENT)
             else -> GateHook(
                 session,

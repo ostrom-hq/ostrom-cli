@@ -43,6 +43,13 @@ const val WORKFLOWS_DELIVER = "workflows.deliver.v1"
 const val ARTIFACTS = "artifacts.v1"
 
 /**
+ * The feature key of the session activity (`ServerFeatures.SESSIONS_ACTIVITY` of ostrom-core): the hooks report
+ * whether the agent works or waits for a person. The launcher depends on no other module, so the CLI's tests check
+ * that the two are the same.
+ */
+const val SESSIONS_ACTIVITY = "sessions.activity.v1"
+
+/**
  * The hooks a session runs besides Ostrom's own.
  *
  * @property waitsWake The server holds the Stop hook for a wait's answer ([WAITS_WAKE]), for Claude Code only.
@@ -53,7 +60,10 @@ const val ARTIFACTS = "artifacts.v1"
  * @property memory The server serves the agent memory ([MEMORY]): the `ostrom-memory` MCP server is connected.
  * @property artifacts The server serves the artifacts ([ARTIFACTS]) and its policy lets the agent publish now: the
  * `ostrom-artifacts` MCP server is connected and the agent's own artifact tools are turned off.
+ * @property activity The hooks report whether the agent works or waits for a person ([SESSIONS_ACTIVITY], not
+ * `--no-activity`), for Claude Code and Codex.
  */
+@Suppress("LongParameterList") // one flag per hook family the server serves
 internal class LaunchHooks(
     val waitsWake: Boolean,
     val todos: Boolean,
@@ -61,6 +71,7 @@ internal class LaunchHooks(
     val team: List<TeamHook> = emptyList(),
     val memory: Boolean,
     val artifacts: Boolean = false,
+    val activity: Boolean = false,
 )
 
 /**
@@ -264,6 +275,8 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
                 team = teamHooks,
                 memory = MEMORY in served,
                 artifacts = publishes,
+                // Claude Code's and Codex's adapters install the hooks; the other agents have none to report with
+                activity = request.activity && SESSIONS_ACTIVITY in served,
             )
             LaunchReads(pack, read, servers, inference.await(), launchHooks, given.variables)
         }

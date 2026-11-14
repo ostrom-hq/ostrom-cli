@@ -35,6 +35,7 @@ import okio.IOException
  * @property background `--workload background` (TeamCode's): the agent's model calls wait behind the org's interactive
  *   ones in the admission queue; its quotas and permissions are the same.
  * @property variables False for `--no-variables`: the agent gets none of the member's environment variables.
+ * @property activity False for `--no-activity`: the hooks report nothing of whether the agent works or waits.
  */
 data class LaunchRequest(
     val agent: Agent,
@@ -46,6 +47,7 @@ data class LaunchRequest(
     val teamHooks: Boolean = true,
     val background: Boolean = false,
     val variables: Boolean = true,
+    val activity: Boolean = true,
 )
 
 /**
@@ -199,6 +201,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         val workflowDelivery = reads.hooks.workflowDelivery
         val artifacts = reads.hooks.artifacts
         val teamHooks = reads.hooks.team
+        val activity = reads.hooks.activity
         val variables = reads.variables
         val plugin = join(temporary, "plugin")
         val relayTokenFile = join(temporary, "relay-token")
@@ -303,6 +306,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
             workflowDelivery = run.workflowDelivery,
             artifacts = run.artifacts,
             teamHooks = run.teamHooks,
+            activity = run.activity,
         )
         return try {
             run.adapter.prepare(layout, dependencies.files)
