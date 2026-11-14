@@ -31,16 +31,16 @@ internal class ArtifactsPolicy(private val server: ServerJson) {
             else -> false to null
         }
     }
-
-    private companion object {
-        const val VARIABLE = "OSTROM_ARTIFACTS"
-        const val MILLIS = 5_000L
-        val OFF = setOf("off", "0", "false")
-        val REFUSALS = mapOf(
-            "artifact_storage_missing" to "your organisation has no artifact storage",
-            "artifact_storage_unverified" to "your organisation's artifact storage is not tested yet",
-            "artifacts_disabled" to "your organisation turned artifacts off",
-            "artifact_publish_forbidden" to "only administrators publish artifacts in your organisation",
-        )
-    }
 }
+
+private const val VARIABLE = "OSTROM_ARTIFACTS"
+private const val MILLIS = 5_000L
+private val OFF = setOf("off", "0", "false")
+
+/** The refusals the member can act on, said when the agent starts without the server. */
+private val REFUSALS = mapOf(
+    "artifact_storage_missing" to "your organisation has no artifact storage",
+    "artifact_storage_unverified" to "your organisation's artifact storage is not tested yet",
+    "artifacts_disabled" to "your organisation turned artifacts off",
+    "artifact_publish_forbidden" to "only administrators publish artifacts in your organisation",
+)
