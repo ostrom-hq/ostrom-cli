@@ -173,6 +173,8 @@ object SessionScript {
      */
     const val FIRST = """
 set -u
+conversation_new="${'$'}{OSTROM_AGENT_NEW_CONVERSATION:-}"
+unset OSTROM_AGENT_NEW_CONVERSATION
 mkdir -p "${'$'}HOME"
 if [ -n "${'$'}{OSTROM_REPOSITORY_URL:-}" ]; then
   dir="${'$'}OSTROM_WORKSPACE/${'$'}(basename "${'$'}OSTROM_REPOSITORY_URL" .git)"
@@ -198,8 +200,6 @@ if [ -n "${'$'}{OSTROM_LAUNCH_REFUSED:-}" ]; then
   exec bash -l
 fi
 set --
-conversation_new="${'$'}{OSTROM_AGENT_NEW_CONVERSATION:-}"
-unset OSTROM_AGENT_NEW_CONVERSATION
 conversation_kind="${'$'}{OSTROM_AGENT:-${'$'}OSTROM_AGENT_COMMAND}"
 conversation_state="${'$'}HOME/.ostrom/cloud-agent.json"
 conversation=""
@@ -209,7 +209,7 @@ fi
 case "${'$'}OSTROM_AGENT_COMMAND" in
   claude)
     projects="${'$'}{CLAUDE_CONFIG_DIR:-${'$'}HOME/.claude}/projects/${'$'}(pwd -P | sed 's/[^A-Za-z0-9]/-/g')"
-    if [ -n "${'$'}conversation" ] && [ -f "${'$'}projects/${'$'}conversation.jsonl" ]; then
+    if [ -n "${'$'}conversation" ] && [ -s "${'$'}projects/${'$'}conversation.jsonl" ]; then
       echo "Resuming the agent's conversation ${'$'}conversation."
       set -- --resume "${'$'}conversation"
     else
@@ -231,7 +231,7 @@ if [ -n "${'$'}conversation" ]; then
   (umask 077 && printf '{"kind":"%s","conversationId":"%s"}\n' "${'$'}conversation_kind" "${'$'}conversation" > "${'$'}conversation_state.tmp" && mv "${'$'}conversation_state.tmp" "${'$'}conversation_state")
 fi
 if [ "${'$'}OSTROM_AGENT_COMMAND" = claude ] && [ -n "${'$'}{OSTROM_AGENT_SETTINGS:-}" ]; then
-  set -- --settings "${'$'}OSTROM_AGENT_SETTINGS"
+  set -- "${'$'}@" --settings "${'$'}OSTROM_AGENT_SETTINGS"
 fi
 if [ -n "${'$'}{OSTROM_AGENT_ARGUMENTS:-}" ]; then
   while IFS= read -r argument; do

@@ -291,13 +291,14 @@ pod:
   (`OSTROM_AGENT_NEW_CONVERSATION`, which the script takes out of the agent's environment), and the script records it
   in `$HOME/.ostrom/cloud-agent.json` (`{"kind":…,"conversationId":…}`, TeamCode's `AgentState`). The next execution
   starts `claude --resume <id>` when the recorded kind is the session's agent and the transcript is still there
-  (`~/.claude/projects/<directory>/<id>.jsonl`); otherwise a new conversation starts, recorded in its place.
-- Codex starts `codex resume <id>` with its newest rollout (`$CODEX_HOME/sessions/**/rollout-*-<id>.jsonl`), recorded
-  in the same file; a first start, without any, starts a new conversation.
+  (`~/.claude/projects/<directory>/<id>.jsonl`, not empty); otherwise a new conversation starts, recorded in its place.
+- Codex starts `codex resume <id>` with its newest rollout (`$CODEX_HOME/sessions/**/rollout-*-<id>.jsonl`), whichever
+  started it (Codex cannot be given an id), recorded in the same file; a first start, without any, starts a new
+  conversation.
 
 The model, the MCP servers and the first message follow as for a new conversation: the first message (the answers to
-the waits) is the resumed conversation's next message. A conversation continued by hand in the shell left after the
-agent exits (`claude --resume`) is the member's; the next execution resumes the recorded one. OpenCode and Gemini CLI
+the waits) is the resumed conversation's next message. For Claude Code, a conversation started by hand in the shell
+left after the agent exits is the member's; the next execution resumes the recorded one. OpenCode and Gemini CLI
 start a new conversation, as before. The agent's version is not compared, unlike TeamCode's headless host: a terminal
 agent reads an older transcript of its own.
 
