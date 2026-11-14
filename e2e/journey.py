@@ -1091,7 +1091,9 @@ def main():
     parser.add_argument("--fake-mcp-key", help="2.9: its private key (PEM)")
     # 6.2: the server runs cloud sessions (a runtime driver, as the Docker of the CI's machine); skipped without
     parser.add_argument("--cloud-sessions", action="store_true", help="6.2: the server runs cloud sessions")
-    parser.add_argument("--cloud-machine-image", help="6.2 on a registered runner: the machine's ostrom-runner image")
+    parser.add_argument("--cloud-machine-image", help="6.2 on a registered runner: the image with ostrom at "
+                                                      "/usr/local/bin the machine runs, its only session and "
+                                                      "delivery image")
     # 6.6: a TeamCode team to import (ostrom-helm compose/demo/teamcode); skipped without, even with --strict
     parser.add_argument("--teamcode-db", help="6.6: mysql://user@host[:port]/database of a TeamCode team (its "
                                               "password in OSTROM_E2E_TEAMCODE_PASSWORD)")
