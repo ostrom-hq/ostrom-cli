@@ -92,7 +92,9 @@ class RelayMemoryApi(
 
     /** An entry's route; an id that is no plain id would reach another route of the relay, so it is refused here. */
     private fun entry(id: String): String {
-        if (!ENTRY_ID.matches(id)) throw MemoryApiException(MEMORY_NOT_FOUND, null, "No memory entry '$id'.")
+        if (!ENTRY_ID.matches(id) || id in RESERVED) {
+            throw MemoryApiException(MEMORY_NOT_FOUND, null, "No memory entry '$id'.")
+        }
         return "$MEMORY_ROOT/$id"
     }
 
@@ -103,6 +105,12 @@ class RelayMemoryApi(
         /** One call to Ostrom, as the todo's. */
         const val CALL_MILLIS = 20_000
 
+        /**
+         * The index read when the agent initializes the server: a slow Ostrom must not hold the agent's start (an MCP
+         * client gives a server about ten seconds), which then goes on without the index.
+         */
+        const val START_MILLIS = 3_000
+
         /** The key of a call that did not reach Ostrom. */
         const val UNREACHABLE = "unreachable"
 
@@ -111,6 +119,9 @@ class RelayMemoryApi(
 
         /** An entry's id as the relay lets it through (a UUID is one). */
         private val ENTRY_ID = Regex("[A-Za-z0-9_-]{1,128}")
+
+        /** The names of the routes beside an entry's, which the relay never takes for an id. */
+        private val RESERVED = setOf("index", "search", "proposals", "curation", "reviews", "superseded")
     }
 }
 

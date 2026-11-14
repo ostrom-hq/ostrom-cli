@@ -6,8 +6,11 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import run.ostrom.core.api.models.MemoryIndexPage
+import run.ostrom.core.api.models.UpdateMemoryRequest
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -48,6 +51,19 @@ class MemoryToolsTest {
         api.refusal = null
         api.page = MemoryIndexPage(listOf(indexEntry("m-1")), next = "c")
         assertTrue(tools.instructions().endsWith(MemoryDocs.INDEX_MORE))
+    }
+
+    @Test
+    fun theIndexAtTheStartIsReadWithItsOwnBoundAndAnyFailureLeavesTheTools() {
+        val start = FakeMemoryApi()
+        val tools = MemoryTools(api, start)
+        tools.instructions()
+        assertEquals(listOf("index null [] null 50"), start.calls)
+        assertEquals(emptyList(), api.calls, "the tools' calls keep their longer bound")
+        start.failure = IllegalStateException("unexpected")
+        assertTrue(tools.instructions().endsWith(MemoryDocs.INDEX_UNREADABLE))
+        start.failure = CancellationException("stopped")
+        assertFailsWith<CancellationException> { tools.instructions() }
     }
 
     @Test
@@ -143,6 +159,22 @@ class MemoryToolsTest {
             call("memory_update", """{"id":"m-1","expectedVersion":3,"title":"T","summary":"S"}"""),
         )
     }
+
+    @Test
+    fun anUpdateKeepsTheTagsReferencesAndExpiryTheAgentLeavesOut() {
+        val whole = """"id":"m-1","expectedVersion":1,"title":"T","summary":"S","content":"C""""
+        api.entry = memoryEntry().copy(tags = listOf("build"), refs = listOf("r"), expiresAt = "2099-01-01T00:00:00Z")
+        call("memory_update", """{$whole,"tags":["new"]}""")
+        assertEquals(listOf("read m-1", "update m-1"), api.calls.takeLast(2), "what is kept is read first")
+        assertEquals(Triple(listOf("new"), listOf("r"), "2099-01-01T00:00:00Z"), api.updated?.kept())
+        call("memory_update", """{$whole,"refs":[],"expiresAt":null}""")
+        assertEquals(Triple(listOf("build"), emptyList(), null), api.updated?.kept(), "sent empty, it is cleared")
+        api.calls.clear()
+        call("memory_update", """{$whole,"tags":[],"refs":[],"expiresAt":null}""")
+        assertEquals(listOf("update m-1"), api.calls, "everything sent: nothing to read")
+    }
+
+    private fun UpdateMemoryRequest.kept() = Triple(tags, refs, expiresAt)
 
     @Test
     fun anEntryIsForgotten() {

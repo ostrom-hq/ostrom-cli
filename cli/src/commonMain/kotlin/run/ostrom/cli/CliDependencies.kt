@@ -243,7 +243,9 @@ class CliDependencies(
                 }
                 MemoryDocs.LABEL -> {
                     val api = RelayMemoryApi(LoopbackHttpImpl(), target.port, target.token)
-                    McpServerImpl(MemoryTools(api).dispatcher(BuildInfo.VERSION), console)
+                    val start =
+                        RelayMemoryApi(LoopbackHttpImpl(), target.port, target.token, RelayMemoryApi.START_MILLIS)
+                    McpServerImpl(MemoryTools(api, start).dispatcher(BuildInfo.VERSION), console)
                 }
                 else -> McpBridge(target, LoopbackHttpImpl(), console)
             }

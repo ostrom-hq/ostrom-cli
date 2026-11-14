@@ -116,7 +116,7 @@ private val INFERENCE_ROUTES = mapOf(
 
 /** Resolves a request of the agent against the allow-list of [config]. */
 internal fun resolveTarget(method: HttpMethod, path: String, config: RelayConfig): RelayTarget = when {
-    path.startsWith(MEMORY_ROOT) -> memoryTarget(method, path)
+    path == MEMORY_ROOT || path.startsWith("$MEMORY_ROOT/") -> memoryTarget(method, path)
     path.startsWith(API_PREFIX) -> hookTarget(method, path, config.gateCatalog)
     path.startsWith(MCP_PREFIX) -> mcpTarget(method, path.removePrefix(MCP_PREFIX), config.mcpServers)
     config.inference -> inferenceTarget(method, path)
