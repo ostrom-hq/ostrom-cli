@@ -63,6 +63,7 @@ actual fun runCloudProcess(command: String, args: List<String>): Nothing {
         CloudProcess.CREDENTIAL -> credential(args.firstOrNull(), environment)
         CloudProcess.AGENT_STATE -> agentState(environment)
         CloudProcess.ENVIRONMENT -> environmentScript(args)
+        CloudProcess.INSTALL_SKILLS, CloudProcess.INSTALL_HOOKS -> install(command, args, environment)
         // Terminals on a PTY; the preparation's commands on pipes, their log written as the agent's uid.
         CloudProcess.AGENT_SUPERVISOR -> host(socket, AgentHost(PtyTerminal, commands = PtyTerminal.Commands))
         CloudProcess.CHECK_HOST -> checkHost(
@@ -111,8 +112,11 @@ private fun runner(socket: String, environment: Map<String, String>): Nothing {
             val gitHubJob = gitHubAccess(selector, config, gitHub)
             val preparer = preparer(config, server, terminals, gitHub)
             val (variables, variablesJob) = environmentAccess(selector, config, server)
+            // The owner's skills and team hooks, installed by `ostrom cloud install-*` in the agent's container.
+            val deliveries = PodDeliveries(HttpDeliveryApi(client, config), terminals, config, ::log)
             val runner = Runner(
                 config, server, terminals, environment, Clock.System, ::log, prepare = preparer, variables = variables,
+                deliveries = deliveries,
             )
             // The agent's hooks report its background work there, as its uid: the agent socket's directory.
             val stateJob = launch {

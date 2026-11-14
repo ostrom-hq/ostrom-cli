@@ -31,7 +31,15 @@ object CloudProcess {
      */
     const val ENVIRONMENT = "environment"
 
-    private val COMMANDS = setOf(RUNNER, AGENT_SUPERVISOR, CHECK_HOST, CREDENTIAL, MACHINE, AGENT_STATE, ENVIRONMENT)
+    /** Installs the owner's skills for the runner, in the agent's container ([CloudInstall]). */
+    const val INSTALL_SKILLS = "install-skills"
+
+    /** Installs the owner's team hooks for the runner, in the agent's container ([CloudInstall]). */
+    const val INSTALL_HOOKS = "install-hooks"
+
+    private val COMMANDS = setOf(
+        RUNNER, AGENT_SUPERVISOR, CHECK_HOST, CREDENTIAL, MACHINE, AGENT_STATE, ENVIRONMENT, INSTALL_SKILLS, INSTALL_HOOKS,
+    )
 
     /**
      * The value of `--socket PATH` (or `--socket=PATH`) in [args].
