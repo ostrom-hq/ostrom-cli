@@ -11,9 +11,10 @@ as 42), which only the session's shell can have done. It detaches the same way. 
 Every state is read back from the server.
 
 With --cloud-machine-image, the session runs on a machine of the organisation instead (the server's `registered`
-driver): the owner registers a runner (`POST /api/v1/runners`), `ostrom-runner machine` starts on this machine's Docker
+driver): the owner registers a runner (`POST /api/v1/runners`), `ostrom cloud machine` starts on this machine's Docker
 with its key, and once it is online the session must be placed on it, read from the API (`runnerId` of the session),
-never from the screen.
+never from the screen. The image holds `ostrom` at /usr/local/bin and is TeamCode's template image: the machine runs
+it, and pins it as the only session image and the only image the session's `ostrom` is delivered from.
 
 The server must run cloud sessions somewhere: ostrom-server's cli-journey.yml gives it a runtime driver (the Docker of
 the CI's machine, as its console-journey.yml) and says so with --cloud-sessions; without it, the step is skipped and
@@ -33,6 +34,8 @@ ROUTES = (("POST", "/api/v1/cloud/sessions"), ("GET", "/api/v1/cloud/sessions"),
 RUNNER_ROUTES = (("POST", "/api/v1/runners"), ("GET", "/api/v1/runners"))
 # the Engine API the machine creates the session's containers through (the workflow's socket proxy, on loopback)
 DOCKER_API_URL = "http://127.0.0.1:2375"
+# the machine's `ostrom` in the image, whatever the image's own entrypoint
+MACHINE_BINARY = "/usr/local/bin/ostrom"
 ONLINE_S = 60
 STARTED = re.compile(r"in Ostrom's cloud \(session (\S+)\)")
 DETACH = b"\x1d"
@@ -157,7 +160,7 @@ class Cloud:
                 self.machine_removed()
 
     def machine_online(self, image):
-        """The owner registers a runner and `ostrom-runner machine` starts with its key: True once it is online."""
+        """The owner registers a runner and `ostrom cloud machine` starts with its key: True once it is online."""
         j = self.journey
         renew = getattr(j, "recent_sign_in", None) or j.sign_in
         console = renew(self.maya["email"])
@@ -174,9 +177,10 @@ class Cloud:
             ["docker", "run", "-d", "--name", self.machine["container"], "--network", "host",
              "-e", f"OSTROM_SERVER_URL={j.server}", "-e", f"OSTROM_RUNNER_ID={body['id']}", "-e", "OSTROM_RUNNER_KEY",
              "-e", "OSTROM_RUNNER_INTERVAL_SECONDS=5", "-e", f"OSTROM_DOCKER_API_URL={DOCKER_API_URL}",
-             "-e", f"OSTROM_RUNNER_SESSION_IMAGE={image}", image, "machine"],
+             "-e", f"OSTROM_RUNNER_SESSION_IMAGE={image}", "-e", f"OSTROM_RUNNER_DELIVERY_IMAGE={image}",
+             "--entrypoint", MACHINE_BINARY, image, "cloud", "machine"],
             env={**os.environ, "OSTROM_RUNNER_KEY": body["token"]}, capture_output=True, text=True, check=False)
-        if not j.check(started.returncode == 0, f"ostrom-runner machine starts with its key ({started.returncode}): "
+        if not j.check(started.returncode == 0, f"ostrom cloud machine starts with its key ({started.returncode}): "
                                                 f"{started.stderr.strip()[-200:]}"):
             return False
         deadline = time.monotonic() + ONLINE_S
