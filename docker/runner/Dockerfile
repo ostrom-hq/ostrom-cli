@@ -21,9 +21,10 @@ RUN apt-get update \
 
 COPY --chmod=0755 ${TARGETARCH}/ostrom /usr/local/bin/ostrom
 
-# Non-root, and none of a session's UIDs (1000, 1001): the init container copies the binary into /opt/ostrom, which a
-# Docker volume mounted there inherits on first use, and every other container mounts read-only. `ostrom cloud machine`
-# needs no privilege either.
-RUN mkdir -p /opt/ostrom && chown 65532:65532 /opt/ostrom
+# The init container runs as the runner's UID (1000, group 1000: TeamCode's image contract) and copies the binary into
+# /opt/ostrom, which a Docker volume mounted there inherits on first use (owner 1000, mode 0755), and every other
+# container mounts read-only. The agent (1001, group 1000) can neither write the directory nor the copy (0755, no group
+# write). `ostrom cloud machine` runs as none of a session's UIDs and needs no privilege.
+RUN mkdir -p /opt/ostrom && chown 1000:1000 /opt/ostrom && chmod 0755 /opt/ostrom
 USER 65532:65532
 ENTRYPOINT ["/usr/local/bin/ostrom"]

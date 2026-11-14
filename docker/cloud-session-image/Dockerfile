@@ -9,8 +9,9 @@
 #     zlib, /bin/sh, bash, coreutils, git 2.31 or later);
 #   - the agent CLIs the runner starts by name (`claude`, `codex`, `opencode`, `gemini`), installed system-wide, since
 #     HOME is on the workspace volume in a session;
-#   - the session's users: the agent and the check host as UID 1000, the runner as UID 1001, sharing group 2000, with
-#     /workspace for UID 1000 and the socket directories /run/ostrom and /run/ostrom-check;
+#   - named accounts for the session's fixed UIDs, TeamCode's (runner 1000, agent 1001, group 1000), so an image built
+#     for TeamCode runs on Ostrom; the check host runs as the agent's UID; /workspace and the socket directories
+#     /run/ostrom and /run/ostrom-check belong to the agent's UID and the group;
 #   - the `ostrom` binary at /usr/local/bin/ostrom (optional), so this image can also be the runner image.
 #
 # What the image must NOT contain: an entrypoint a session relies on (the server sets the command of every
@@ -67,22 +68,23 @@ RUN if [ -z "${CLAUDE_CODE_VERSION}${CODEX_VERSION}${OPENCODE_VERSION}${GEMINI_C
     && npm cache clean --force \
     && rm -rf /root/.npm /tmp/*
 
-# The session's users: `agent` (1000, the agent and the check host) and `runner` (1001), both in group `ostrom` (2000).
-# The server sets the UIDs itself; the names keep tools that look up the current user working. A base image's own user
-# 1000 or 1001 is removed first. The socket directories belong to the agent's UID and the shared group, setgid, so the
-# volumes mounted on them start with these modes.
+# Accounts for the session's fixed UIDs, TeamCode's: `runner` (1000) and `agent` (1001, the agent and the check host),
+# both in group `ostrom` (1000). The server sets the UIDs itself; the names keep tools that look up the current user
+# working. A base image's own UID or GID 1000 or UID 1001 (the `ubuntu` user of ubuntu:24.04) is removed first.
+# /workspace and the socket directories belong to the agent's UID and the group, setgid, so the volumes mounted on them
+# start with these modes (Docker; on Kubernetes the pod's fsGroup 1000 does the same).
 RUN for uid in 1000 1001; do \
         user="$(getent passwd "${uid}" | cut -d: -f1)"; \
         if [ -n "${user}" ]; then userdel "${user}"; fi; \
     done \
-    && group="$(getent group 2000 | cut -d: -f1)" \
+    && group="$(getent group 1000 | cut -d: -f1)" \
     && if [ -n "${group}" ]; then groupdel "${group}"; fi \
-    && groupadd --gid 2000 ostrom \
-    && useradd --uid 1000 --gid 2000 --no-create-home --home-dir /workspace/.home --shell /bin/bash agent \
-    && useradd --uid 1001 --gid 2000 --no-create-home --home-dir /workspace/.home --shell /bin/bash runner \
+    && groupadd --gid 1000 ostrom \
+    && useradd --uid 1000 --gid 1000 --no-create-home --home-dir /workspace/.home --shell /bin/bash runner \
+    && useradd --uid 1001 --gid 1000 --no-create-home --home-dir /workspace/.home --shell /bin/bash agent \
     && mkdir -p /workspace /run/ostrom /run/ostrom-check /opt/ostrom \
-    && chown 1000:1000 /workspace \
-    && chown 1000:2000 /run/ostrom /run/ostrom-check && chmod 2770 /run/ostrom /run/ostrom-check
+    && chown 1001:1000 /workspace \
+    && chown 1001:1000 /run/ostrom /run/ostrom-check && chmod 2770 /run/ostrom /run/ostrom-check
 
 # The ostrom binary, so this image can also be the runner image (the session runs the copy the init container makes).
 COPY --from=ostrom --chmod=0755 /usr/local/bin/ostrom /usr/local/bin/ostrom
@@ -105,19 +107,19 @@ SHELL ["/bin/sh", "-eu", "-c"]
 
 # Fails the build when the image no longer gives Ostrom what it needs, for example when a tools setup removed git or a
 # library the binary loads, and runs the binary as both session UIDs.
-RUN as() { setpriv --reuid="$1" --regid=2000 --clear-groups env HOME=/tmp "$2" "$3" >/dev/null; }; \
+RUN as() { setpriv --reuid="$1" --regid=1000 --clear-groups env HOME=/tmp "$2" "$3" >/dev/null; }; \
     for command in sh bash mkdir rm mv basename cat git; do \
         command -v "${command}" >/dev/null || { echo "Missing ${command}" >&2; exit 1; }; \
     done \
     && git_version="$(git --version | sed 's/^git version //')" \
     && if ! printf '2.31.0\n%s\n' "${git_version}" | sort -C -V; then echo "git ${git_version} is older than 2.31" >&2; exit 1; fi \
-    && [ "$(id -u agent):$(id -g agent):$(id -u runner):$(id -g runner)" = "1000:2000:1001:2000" ] \
+    && [ "$(id -u runner):$(id -g runner):$(id -u agent):$(id -g agent)" = "1000:1000:1001:1000" ] \
     && if ldd /usr/local/bin/ostrom | grep 'not found'; then echo "ostrom is missing a library" >&2; exit 1; fi \
     && as 1000 /usr/local/bin/ostrom version \
     && as 1001 /usr/local/bin/ostrom version \
-    && if [ -n "${CLAUDE_CODE_VERSION}" ]; then as 1000 claude --version; fi \
-    && if [ -n "${CODEX_VERSION}" ]; then as 1000 codex --version; fi \
+    && if [ -n "${CLAUDE_CODE_VERSION}" ]; then as 1001 claude --version; fi \
+    && if [ -n "${CODEX_VERSION}" ]; then as 1001 codex --version; fi \
     && rm -rf /tmp/* /tmp/.[!.]*
 
 WORKDIR /workspace
-USER 1000:2000
+USER 1001:1000

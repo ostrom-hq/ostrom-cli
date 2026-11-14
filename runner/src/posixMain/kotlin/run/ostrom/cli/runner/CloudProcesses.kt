@@ -259,7 +259,7 @@ private fun host(socket: String, host: AgentHost): Nothing {
     signal(SIGTERM, staticCFunction<Int, Unit> { _exit(0) })
     runBlocking {
         val selector = SelectorManager(Dispatchers.IO)
-        // The runner, another uid, connects through the group both containers share (the pod's fsGroup).
+        // The runner, another uid, connects through the group every container of the session is in (1000, the fsGroup).
         AgentSocket.serve(selector, socket, host, ::log) { chmod(it, SOCKET_MODE.convert()) }
     }
     exitProcess(0)
@@ -297,7 +297,7 @@ internal const val CONNECT_TIMEOUT_MILLIS = 10_000L
 /** The longest the first GitHub token may take before the agent starts without it. */
 private val GITHUB_FIRST_TIMEOUT = 10.seconds
 
-/** rw for the host's uid and the shared group, nothing for others (0660). */
+/** rw for the host's uid and the session's group (the runner's too), nothing for others (0660). */
 private const val SOCKET_MODE = 0x1B0
 
 /** rw for all (0666): the checks' socket, in a directory only the agent's and the runner's containers mount. */
