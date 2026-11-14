@@ -88,6 +88,10 @@ class MemberVariablesImplTest {
         val failed = MemberVariablesImpl(server, files).read(site, features)
         assertEquals(emptyMap(), failed.variables, "Claude Code still gets them at the next refresh")
         assertEquals(listOf(UNREADABLE), failed.notes)
+        val broken = ServerJson { throw IllegalStateException("the transport broke") }
+        assertEquals(listOf(UNREADABLE), MemberVariablesImpl(broken, files).read(site, features).notes)
+        val cancelled = ServerJson { throw CancellationException("stop") }
+        assertFailsWith<CancellationException> { MemberVariablesImpl(cancelled, files).read(site, features) }
         reply = ServerReply(200, """{"unavailable":[]}""")
         val none = MemberVariablesImpl(server, files).read(site, features)
         assertEquals(emptyMap(), none.variables)

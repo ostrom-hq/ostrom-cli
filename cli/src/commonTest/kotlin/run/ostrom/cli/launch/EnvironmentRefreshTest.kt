@@ -60,9 +60,36 @@ class EnvironmentRefreshTest {
     }
 
     @Test
+    fun aFileThatCannotBeRewrittenKeepsTheLastValuesAndIsSaidOnce() = runTest {
+        var full = true
+        val refresh = EnvironmentRefresh(
+            { answer() },
+            { if (full) throw IOException("disk full") else written += it },
+            mapOf("A" to "1"),
+            sleep = {},
+            log = { logged += it },
+        )
+        answer = { mapOf("B" to "2") }
+        assertFalse(refresh.refresh())
+        assertFalse(refresh.refresh())
+        assertEquals(listOf(UNWRITABLE), logged)
+        full = false
+        assertTrue(refresh.refresh(), "the next read writes it")
+        assertTrue("unset A" in written.single())
+        full = true
+        answer = { mapOf("C" to "3") }
+        assertFalse(refresh.refresh())
+        assertEquals(UNWRITABLE, logged.last(), "said again after a write that worked")
+    }
+
+    @Test
     fun aCancellationGoesThrough() = runTest {
         answer = { throw CancellationException("stop") }
         assertFailsWith<CancellationException> { refresh().refresh() }
         assertEquals(60_000L, EnvironmentRefresh.INTERVAL_MILLIS)
+    }
+
+    private companion object {
+        const val UNWRITABLE = "ostrom: the environment file could not be rewritten; the agent keeps the last values"
     }
 }

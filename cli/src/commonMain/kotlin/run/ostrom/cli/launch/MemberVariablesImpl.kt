@@ -1,4 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
+// A read that fails in any way starts the agent without the variables; cancellation is rethrown first
+// (scripts/check-conventions.py).
+@file:Suppress("TooGenericExceptionCaught")
+
 package run.ostrom.cli.launch
 
 import run.ostrom.cli.launcher.Agent
@@ -15,6 +19,7 @@ import run.ostrom.cli.launcher.join
 import run.ostrom.cli.launcher.list
 import run.ostrom.cli.runner.AgentEnvironment
 import run.ostrom.core.api.models.ServerFeatures
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -43,7 +48,15 @@ internal class MemberVariablesImpl(
     override suspend fun read(site: LaunchSite, features: Set<String>): VariablesRead {
         if (ServerFeatures.ENVIRONMENT !in features) return VariablesRead(null)
         val notes = mutableListOf<String>()
-        val values = when (val answer = server.get(ROUTE, site.credentials.token, READ_MILLIS)) {
+        val read = try {
+            server.get(ROUTE, site.credentials.token, READ_MILLIS)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            // never blocks the launch, as TeamCode's: the agent starts without them
+            ServerAnswer.Failed(null, null, "unreadable")
+        }
+        val values = when (val answer = read) {
             is ServerAnswer.Failed -> return if (answer.status == FORBIDDEN) {
                 VariablesRead(null, listOf(INTERACTIVE_ONLY))
             } else {

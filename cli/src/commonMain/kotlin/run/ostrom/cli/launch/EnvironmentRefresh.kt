@@ -7,6 +7,7 @@ package run.ostrom.cli.launch
 
 import run.ostrom.cli.runner.AgentEnvironment
 import kotlinx.coroutines.CancellationException
+import okio.IOException
 
 /**
  * Keeps a local launch's values file current, as TeamCode's `EnvironmentRefresh`: asks the server every
@@ -34,6 +35,7 @@ internal class EnvironmentRefresh(
     private var current = AgentEnvironment.accepted(initial)
     private val known = given.toMutableSet()
     private var failing = false
+    private var unwritable = false
 
     /** Writes the file once, with what the agent starts with. */
     fun start() = write(AgentEnvironment.script(current))
@@ -58,9 +60,17 @@ internal class EnvironmentRefresh(
         failing = false
         val next = AgentEnvironment.accepted(variables)
         if (next == current) return false
+        try {
+            write(AgentEnvironment.script(next, (known + current.keys) - next.keys))
+        } catch (_: IOException) {
+            // the file keeps the last values; the next read writes it again
+            if (!unwritable) log("ostrom: the environment file could not be rewritten; the agent keeps the last values")
+            unwritable = true
+            return false
+        }
+        unwritable = false
         known += current.keys
         current = next
-        write(AgentEnvironment.script(next, known - next.keys))
         val names = next.keys.joinToString(", ").ifEmpty { "none" }
         log("ostrom: environment variables updated for the agent's next commands: $names")
         return true

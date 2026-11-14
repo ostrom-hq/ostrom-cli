@@ -249,10 +249,6 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
             // what the delivery said before the agent starts is said now; the rest waits until it has exited
             held.forEach(dependencies.say)
             held.clear()
-            val environment = run.variables.orEmpty() + launcherEnvironment + prepared.environment +
-                delivery.environment
-            val settingsFile = join(run.temporary, SessionLayout.SESSION_SETTINGS)
-            files.write(settingsFile, sessionSettings(environment).toString(), FileAccess.PRIVATE)
             val lifeline = SessionLifeline(
                 dependencies.server,
                 files,
@@ -261,8 +257,13 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
                 run.sessionFile,
                 dependencies.say,
             )
-            val every = run.site.variable(ALIVE_VARIABLE).orEmpty().toLongOrNull() ?: ALIVE_MILLIS
+            // from here on the delivery's files, which hold values, are removed however the launch ends
             val code = try {
+                val environment = run.variables.orEmpty() + launcherEnvironment + prepared.environment +
+                    delivery.environment
+                val settingsFile = join(run.temporary, SessionLayout.SESSION_SETTINGS)
+                files.write(settingsFile, sessionSettings(environment).toString(), FileAccess.PRIVATE)
+                val every = run.site.variable(ALIVE_VARIABLE).orEmpty().toLongOrNull() ?: ALIVE_MILLIS
                 runAgent(listOf(run.executable) + prepared.arguments, environment, lifeline, every, delivery)
             } finally {
                 delivery.close()
