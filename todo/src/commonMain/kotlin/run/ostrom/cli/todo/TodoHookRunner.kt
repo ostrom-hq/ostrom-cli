@@ -19,7 +19,13 @@ import run.ostrom.cli.platform.StandardInputFailure
  * (`OSTROM_RELAY_TOKEN_FILE`, never from the agent's environment). They print their answer, if any, and always exit 0:
  * a failure of Ostrom never keeps the agent from stopping or starting.
  *
+ * In a cloud session's container there is no relay: [direct] gives the launch's agent token and [http] reaches the
+ * server itself (`ostrom cloud todo-stop|todo-context`), which binds that token to its cloud session. The hooks fail
+ * open the same way, and the Stop hook is never held there (`then` null): an answer arrives as a queued message.
+ *
  * @param io Where the blocking calls of the Stop hook run.
+ * @param direct The agent token, read from the environment, when the hooks reach the server themselves; null under the
+ * launch's relay, whose address and capability are read instead.
  */
 @Suppress("LongParameterList") // the hooks' ports, each faked in its tests
 class TodoHookRunner(
@@ -29,6 +35,7 @@ class TodoHookRunner(
     private val http: LoopbackHttp,
     private val capture: ProcessCapture,
     private val io: CoroutineDispatcher,
+    private val direct: (() -> String?)? = null,
 ) {
     /**
      * Runs the hook [kind] ([STOP] or [CONTEXT]) on the event on stdin; its exit code, 0 unless [then] says otherwise.
@@ -56,8 +63,8 @@ class TodoHookRunner(
     }
 
     private fun answer(kind: String, input: String): String? {
-        val port = environment["OSTROM_RELAY_URL"]?.let { RELAY_URL.matchEntire(it) }?.let { it.groupValues[1].toInt() }
-        val token = environment["OSTROM_RELAY_TOKEN_FILE"]?.let(::token)
+        val port = if (direct != null) NO_PORT else relayPort()
+        val token = if (direct != null) direct.invoke().orEmpty().trim().ifEmpty { null } else relayToken()
         if (port == null || token == null) return null
         val hooks = RelayTodoHooks(http, port, token)
         return if (kind == CONTEXT) todoContext(input, hooks::context) else stopped(input, hooks, port, token)
@@ -69,6 +76,11 @@ class TodoHookRunner(
         val stop = TodoStop(api, hooks, checks, Transcripts(files)::pullRequestsOf, io)
         return runBlocking { stop.decide(input) }
     }
+
+    private fun relayPort() =
+        environment["OSTROM_RELAY_URL"]?.let { RELAY_URL.matchEntire(it) }?.let { it.groupValues[1].toInt() }
+
+    private fun relayToken() = environment["OSTROM_RELAY_TOKEN_FILE"]?.let(::token)
 
     private fun token(file: String): String? = try {
         files.read(file.toPath()) { readUtf8() }.trim().ifEmpty { null }
@@ -90,6 +102,8 @@ class TodoHookRunner(
         /** `todo-stop --wake`: once the todo lets the stop pass, the hold for a wait's answer runs ([run]'s `then`). */
         const val WAKE = "--wake"
 
+        /** The relay's port, which a direct call to the server does not use. */
+        private const val NO_PORT = 0
         private const val MAX_INPUT = 8 shl 20
         private const val READ_MILLIS = 5_000
         private val RELAY_URL = Regex("http://127\\.0\\.0\\.1:(\\d{1,5})/?")

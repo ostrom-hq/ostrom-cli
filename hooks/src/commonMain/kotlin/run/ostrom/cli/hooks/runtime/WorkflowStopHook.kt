@@ -34,6 +34,9 @@ import kotlin.time.TimeSource
  * @param http The relay's loopback.
  * @param read Reads the file that holds the relay's capability for the hooks.
  * @param clock Measures the hook's time.
+ * @param direct The agent token, when the hook runs in a cloud session's container (`ostrom cloud workflow-stop`,
+ * TeamCode's `teamcode cloud workflow-stop`): [http] then reaches the server itself, which binds that token to its
+ * cloud session, and no relay variable is read. Null under the launch's relay.
  */
 class WorkflowStopHook(
     private val console: Console,
@@ -41,6 +44,7 @@ class WorkflowStopHook(
     private val http: LoopbackHttp,
     private val read: (String) -> String?,
     private val clock: TimeSource = TimeSource.Monotonic,
+    private val direct: (() -> String?)? = null,
 ) {
     /**
      * Runs the hook on the event on stdin.
@@ -84,8 +88,10 @@ class WorkflowStopHook(
     private fun ask(start: TimeMark): JsonObject? {
         val left = TIMEOUT_MILLIS - start.elapsedNow().inWholeMilliseconds
         val file = environment[TOKEN_FILE]
-        val token = (if (file == null) null else read(file))?.trim().orEmpty()
-        val calls = if (left > 0 && token.isNotEmpty()) RelayCalls(environment[RELAY_URL], token, http) else null
+        val token = (if (direct != null) direct.invoke() else if (file == null) null else read(file))?.trim().orEmpty()
+        // Straight to the server, the port of the address is not used (the cloud session's http ignores it).
+        val relay = if (direct != null) DIRECT_URL else environment[RELAY_URL]
+        val calls = if (left > 0 && token.isNotEmpty()) RelayCalls(relay, token, http) else null
         return (calls?.call(PENDING, null, left.toInt()) as? CallResult.Ok)?.body
     }
 
@@ -100,6 +106,7 @@ class WorkflowStopHook(
         /** `GET`: whether the session's agent step still waits for its delivery (`pendingWorkflowSession`). */
         const val PENDING = "/api/v1/workflows/session/pending"
 
+        private const val DIRECT_URL = "http://127.0.0.1:0"
         private const val STOP = "Stop"
         private const val MAX_INPUT = 8 shl 20
         private const val READ_MILLIS = 1_000

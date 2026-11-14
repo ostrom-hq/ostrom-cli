@@ -196,9 +196,10 @@ class Runner(
         }
 
     /**
-     * Asks which of Ostrom's MCP servers the agent gets ([serverVariables]), then installs what the owner receives,
-     * with unready heartbeats meanwhile, as during the preparation; nothing installed without [deliveries] or when the
-     * launch was refused (the agent then does not start).
+     * Asks which of Ostrom's MCP servers the agent gets ([connected]), then installs what the owner receives, with
+     * unready heartbeats meanwhile, as during the preparation; nothing installed without [deliveries] or when the
+     * launch was refused (the agent then does not start). Claude Code's settings then get the todo's and the workflow's
+     * hooks for the servers connected ([CloudHookSettings]), over the team's.
      */
     @Suppress("ReturnCount") // Ended while asking, nothing to install, or installed.
     private suspend fun deliver(
@@ -206,11 +207,20 @@ class Runner(
         environment: Map<String, String>,
         current: Current,
     ): Delivered {
-        val connected = beating(current) { serverVariables(launch) }
-        if (connected.code != null) return connected
-        val installer = deliveries.takeIf { launch !is RunnerLaunch.Refused } ?: return connected
-        val installed = beating(current) { installer.install(environment) }
-        return Delivered(connected.variables + installed.variables, installed.code)
+        var names = emptySet<String>()
+        val asked = beating(current) { connected(launch).also { names = it.first }.second }
+        if (asked.code != null) return asked
+        val installer = deliveries.takeIf { launch !is RunnerLaunch.Refused }
+        val installed = if (installer == null) null else beating(current) { installer.install(environment) }
+        val variables = asked.variables + installed?.variables.orEmpty()
+        val settings = variables[RunnerConfig.SETTINGS_VARIABLE] ?: environment[RunnerConfig.SETTINGS_VARIABLE]
+        return Delivered(variables + hookSettings(settings, names), installed?.code)
+    }
+
+    /** The settings with the cloud hooks of the connected servers, for Claude Code only; none to change otherwise. */
+    private fun hookSettings(settings: String?, names: Set<String>): Map<String, String> {
+        val hooked = CloudHookSettings.claude(settings, config.binary, names).takeIf { config.agentCommand == CLAUDE }
+        return if (hooked == null || hooked == settings) emptyMap() else mapOf(RunnerConfig.SETTINGS_VARIABLE to hooked)
     }
 
     /** Opens the agent's launch, a few times while the server cannot be reached; then the agent does not start. */
@@ -236,16 +246,16 @@ class Runner(
     }
 
     /**
-     * Ostrom's MCP servers for the agent of an opened launch, those the server answers for; otherwise the script's
-     * variable set empty, so that an owner's variable of the same name never connects anything.
+     * Ostrom's MCP servers for the agent of an opened launch, those the server answers for, with the script's
+     * variable (set empty when none, so that an owner's variable of the same name never connects anything).
      */
-    private suspend fun serverVariables(launch: RunnerLaunch?): Map<String, String> {
+    private suspend fun connected(launch: RunnerLaunch?): Pair<Set<String>, Map<String, String>> {
         val asked = launch is RunnerLaunch.Opened && servers != null && CloudMcpSession.connects(config.agentCommand)
         val answered = if (asked) servers.available((launch as RunnerLaunch.Opened).agentToken) else emptySet()
         val names = answered.filterTo(mutableSetOf()) { it in CloudMcpSession.SERVERS }
         val variables = CloudMcpSession.variables(config.agentCommand, config.binary, names)
         if (variables != CloudMcpSession.NONE) log("mcp servers ${names.sorted()}")
-        return variables
+        return names to variables
     }
 
     /** What the agent learns of its launch: its id, its token and where its hooks ask for checks, or the refusal. */

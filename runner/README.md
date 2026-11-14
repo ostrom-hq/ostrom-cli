@@ -255,6 +255,18 @@ connects nothing):
   "OSTROM_AGENT_TOKEN"]}` per server (Codex passes a stdio server only the variables it lists) and
   `-c developer_instructions=…`.
 
+### The todo's and the workflow's hooks (Claude Code)
+
+As TeamCode's runner adds `teamcode cloud todo-stop`, `todo-context` and `workflow-stop` to Claude Code's `--settings`,
+the runner adds, to `OSTROM_AGENT_SETTINGS`, only for the servers actually connected (Codex gets none): with
+`ostrom-todo`, a `Stop` hook `ostrom cloud todo-stop` (150 s) and a `SessionStart` hook `ostrom cloud todo-context`
+(matcher `compact|resume`, 25 s); with `ostrom-workflow`, a `Stop` hook `ostrom cloud workflow-stop` (5 s). They join
+each event's entries, after the team hooks and next to the runner's own `Stop` and `SessionEnd` (`agent-state`). They
+are the hooks of `ostrom hook` (the same decisions, [TODOS.md](../docs/TODOS.md), [WORKFLOW-DELIVERY.md](../docs/WORKFLOW-DELIVERY.md)),
+reaching the server with `$OSTROM_URL` and `$OSTROM_AGENT_TOKEN`, which binds the token to its cloud session: no relay,
+no session id. They fail open as the local hooks do, and the todo's Stop is never held for a wait's answer (no
+`--wake`): in a pod the answer arrives as a queued message.
+
 A refusal, an error or no answer in time leaves the server out, and the agent keeps its own tools. The token is
 revoked when the launch ends. The server takes the owner (and the origin) of what the agent publishes or writes from
 the token, never from the call.

@@ -1,12 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.IO
+import okio.FileSystem
+import run.ostrom.cli.cloud.CloudHooks
 import run.ostrom.cli.cloud.CloudMcp
 import run.ostrom.cli.hooks.HookKind
 import run.ostrom.cli.hooks.runtime.GateTexts
 import run.ostrom.cli.hooks.runtime.HookReplies
 import run.ostrom.cli.platform.ConsoleImpl
 import run.ostrom.cli.platform.EnvironmentImpl
+import run.ostrom.cli.platform.ProcessCaptureImpl
 import run.ostrom.cli.platform.exitOnCrash
 import run.ostrom.cli.runner.CloudProcess
 import run.ostrom.cli.runner.cloudMcpClient
@@ -36,6 +41,15 @@ fun main(args: Array<String>) {
     // Ostrom's MCP servers for a cloud session's agent (hidden), which need the CLI's memory tools
     if (args.firstOrNull() == "cloud" && args.getOrNull(1) == CloudProcess.MCP) {
         exitProcess(CloudMcp(EnvironmentImpl(), ConsoleImpl(), cloudMcpClient(), BuildInfo.VERSION).serve(args.drop(2)))
+    }
+    // the todo's and the workflow's hooks of Claude Code in a cloud session's container (hidden)
+    if (args.firstOrNull() == "cloud" && args.getOrNull(1) in CloudHooks.COMMANDS) {
+        exitProcess(
+            CloudHooks(
+                EnvironmentImpl(), ConsoleImpl(), cloudMcpClient(), FileSystem.SYSTEM, ProcessCaptureImpl(),
+                Dispatchers.IO,
+            ).run(args[1]),
+        )
     }
     // the processes of a cloud session's containers (hidden): git's credential helper among them, started per request
     CloudProcess.of(args.asList())?.let { runCloudProcess(it, args.drop(2)) }
