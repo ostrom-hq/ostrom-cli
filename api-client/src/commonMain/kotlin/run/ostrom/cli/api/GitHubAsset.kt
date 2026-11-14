@@ -9,6 +9,7 @@ import kotlinx.serialization.json.longOrNull
 
 internal const val GITHUB_API = "https://api.github.com"
 internal const val MAX_RELEASE_JSON_BYTES = 1024L * 1024
+private const val FIRST_ID = 1L
 
 /**
  * A file of a github.com release, from its public address (`/<owner>/<repo>/releases/download/<tag>/<file>` or
@@ -52,7 +53,7 @@ internal fun assetIdsOf(bytes: ByteArray): Map<String, Long>? {
     val entries = (root?.get("assets") as? JsonArray)?.map { entry ->
         val asset = entry as? JsonObject
         val name = (asset?.get("name") as? JsonPrimitive)?.takeIf { it.isString }?.content
-        val id = (asset?.get("id") as? JsonPrimitive)?.takeIf { !it.isString }?.longOrNull?.takeIf { it > 0 }
+        val id = (asset?.get("id") as? JsonPrimitive)?.takeIf { !it.isString }?.longOrNull?.takeIf { it >= FIRST_ID }
         if (name == null || id == null) null else name to id
     }
     return entries?.takeIf { null !in it }?.filterNotNull()?.toMap()

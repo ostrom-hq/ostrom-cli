@@ -146,6 +146,11 @@ class DownloadsTest {
             """{"assets":[{"id":1}]}""",
             """{"assets":[{"name":"latest.json","id":"1"}]}""",
             """{"assets":[{"name":"latest.json","id":0}]}""",
+            "{}",
+            """{"assets":[{"name":"latest.json"}]}""",
+            """{"assets":[{"id":1,"name":7}]}""",
+            """{"assets":[{"id":{},"name":"latest.json"}]}""",
+            """{"assets":[{"id":1,"name":{}}]}""",
         )
         for (json in bad) {
             val unreadable = downloads(MockEngine { respond(json, HttpStatusCode.OK) })
