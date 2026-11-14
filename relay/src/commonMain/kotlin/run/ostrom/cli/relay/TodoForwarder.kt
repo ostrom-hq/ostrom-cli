@@ -26,7 +26,8 @@ private const val SESSION_FIELD = "sessionId"
  * The session todo's calls (`ostrom-todo`, the Stop and SessionStart hooks): the path as it came, the session the
  * relay knows ([AgentSession], the segment Ostrom answered to the start hook) in place of any the caller names, in the
  * query of a read and the body of a write, and the answer back as it is. The agent never chooses the session; before
- * the session starts the call names none, and Ostrom confines the launch's token to its own session anyway.
+ * the session starts the call names none, and Ostrom confines the launch's token to its own session anyway. The
+ * workflow step's Stop hook asks its one read (`pendingWorkflowSession`) the same way.
  */
 internal class TodoForwarder(
     private val config: RelayConfig,

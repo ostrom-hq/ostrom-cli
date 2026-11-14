@@ -5,9 +5,11 @@ import run.ostrom.cli.hooks.HookKind
 import run.ostrom.cli.hooks.HookProcessor
 import run.ostrom.cli.hooks.HookReply
 import run.ostrom.cli.hooks.runtime.GateTexts
+import run.ostrom.cli.hooks.runtime.WorkflowStopHook
 import run.ostrom.cli.launcher.FileAccess
 import run.ostrom.cli.launcher.LaunchFiles
 import run.ostrom.cli.launcher.WAITS_WAKE
+import run.ostrom.cli.launcher.WORKFLOWS_DELIVER
 import run.ostrom.cli.launcher.team.TEAM_SKILLS
 import run.ostrom.cli.launcher.adapters.ClaudeAdapter
 import run.ostrom.cli.launcher.adapters.RelayView
@@ -102,8 +104,21 @@ class HookWiringTest {
         assertEquals(2, held.size, "held again: $installed")
     }
 
+    @Test
+    fun theWorkflowStepsStopHookHasItsOwnRunnerWhichFailsOpenAndIsTheOneTheLauncherInstalls() {
+        // no relay in this environment: nothing is asked, nothing is said, and the agent stops
+        val console = EventConsole("""{"hook_event_name":"Stop","stop_hook_active":false}""")
+        assertEquals(0, CliDependencies.hookRunner(console, NoEnvironment()).run(listOf(WorkflowStopHook.COMMAND)))
+        assertEquals("", console.err.toString())
+        val extra = listOf(WorkflowStopHook.COMMAND, "--x")
+        assertEquals(64, CliDependencies.hookRunner(console, NoEnvironment()).run(extra), "usage")
+        val installed = Regex("hook (workflow-stop)\"").find(claudesStopHook(delivery = true))?.groupValues?.get(1)
+        assertEquals(WorkflowStopHook.COMMAND, installed)
+        assertEquals(WORKFLOWS_DELIVER, ServerFeatures.WORKFLOWS_DELIVER)
+    }
+
     /** The Stop hook's command Claude Code gets with both the todo and the wait's hold. */
-    private fun claudesStopHook(): String {
+    private fun claudesStopHook(delivery: Boolean = false): String {
         val texts = mutableMapOf<String, String>()
         val files = object : LaunchFiles {
             override fun read(path: String): String? = texts[path]
@@ -130,6 +145,7 @@ class HookWiringTest {
             relay = RelayView("http://127.0.0.1:4100", "relay-token", emptyList(), false),
             waitsWake = true,
             todo = true,
+            workflowDelivery = delivery,
         )
         ClaudeAdapter().prepare(layout, files)
         val hooks = texts.entries.single { it.key.endsWith("hooks.json") }.value

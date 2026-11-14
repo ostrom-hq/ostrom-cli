@@ -186,7 +186,11 @@ class ClaudeAdapter : AgentAdapter {
             todo -> entry(TODO_STOP, TODO_STOP_SECONDS, null)
             else -> emptyList()
         }
-        val ours = if (stop.isEmpty()) events else events + ("Stop" to stop)
+        // the workflow step's: one more entry, beside the others and replacing none, only where the delivery tool is
+        // connected (workflows.deliver.v1); Claude Code runs the entries of an event side by side
+        val steps = if (layout.workflowDelivery) entry(WORKFLOW_STOP, WORKFLOW_STOP_SECONDS, null) else emptyList()
+        val stops = stop + steps
+        val ours = if (stops.isEmpty()) events else events + ("Stop" to stops)
         // the team hooks the member approved run after Ostrom's on each event, by the absolute path of their command
         val team = layout.teamHooks.flatMap { hook ->
             val handler = mapOf("type" to "command", "command" to quoted(hook.command), "timeout" to hook.seconds)
@@ -234,6 +238,10 @@ class ClaudeAdapter : AgentAdapter {
 
         /** The Stop hook's timeout: it holds the agent for a wait's answer, a day at most. */
         private const val WAKE_SECONDS = 86_400L
+
+        /** The workflow step's Stop hook: its own question is bounded at 2 s, the agent's limit leaves it room. */
+        private const val WORKFLOW_STOP = "workflow-stop"
+        private const val WORKFLOW_STOP_SECONDS = 5L
 
         private const val TODO_STOP = "todo-stop"
         private const val TODO_WAKE = "--wake"
