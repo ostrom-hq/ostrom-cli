@@ -4,6 +4,7 @@
 package run.ostrom.cli.runner
 
 import kotlinx.cinterop.ExperimentalForeignApi
+import run.ostrom.cli.runner.pty.ostrom_exited
 import run.ostrom.cli.runner.pty.ostrom_pipe_spawn
 import run.ostrom.cli.runner.pty.ostrom_pty_resize
 import run.ostrom.cli.runner.pty.ostrom_pty_spawn
@@ -115,11 +116,12 @@ class PtyTerminal private constructor(
         kill(-pid, SIGTERM)
         val deadline = grace.inWholeMilliseconds / POLL.inWholeMilliseconds
         repeat(deadline.toInt()) {
-            if (reap()) {
+            if (exited()) {
                 // The group can outlive its shell: a process the shell was forking as SIGTERM came (it missed the
-                // signal) or one that ignores it would hold the output open forever. The group's id stays taken
-                // while it has a member, so this reaches only what is left of it.
+                // signal) or one that ignores it would hold the output open forever. The shell is not reaped yet, so
+                // its pid, the group's id, cannot have gone to another process.
                 kill(-pid, SIGKILL)
+                reap()
                 return
             }
             delay(POLL)
@@ -131,6 +133,9 @@ class PtyTerminal private constructor(
     override fun close() {
         if (closed.compareAndSet(0, 1)) platform.posix.close(master)
     }
+
+    /** Whether the shell ended, without collecting its exit: its pid stays its own until [reap]. */
+    private fun exited(): Boolean = ostrom_exited(pid) != 0
 
     /** Collects the shell's exit if it ended, and its code; true once it has. */
     private fun reap(): Boolean = memScoped {
