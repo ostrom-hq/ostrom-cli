@@ -115,6 +115,20 @@ class PtyTerminalTest {
     }
 
     @Test
+    fun whatTheShellLeavesBehindEndsWithIt() = runBlocking {
+        withTimeout(20.seconds) {
+            // A child that ignores SIGTERM, as one forked while the signal came: the shell ends, the child would not.
+            val argv = listOf("/bin/sh", "-c", "(trap '' TERM; sleep 100) & echo up; wait")
+            val terminal = PtyTerminal.spawnPipe(argv, environment, "/", 2.seconds)
+            terminal.readUntil("up")
+            terminal.terminate()
+            while (terminal.read() != null) Unit
+            assertEquals(143, terminal.exitCode)
+            terminal.close()
+        }
+    }
+
+    @Test
     fun aRefusedLaunchLeavesAShellInsteadOfTheAgent() = runBlocking {
         withTimeout(20.seconds) {
             val agent = environment + mapOf(
