@@ -429,7 +429,7 @@ jobs:
             ${{ env.IMAGE }}:edge
             ${{ env.IMAGE }}:sha-${{ github.sha }}
 
-  # The default session image from main, docker.io/ostromhq/ostrom-session:edge (and :sha-<commit>): TeamCode's
+  # The default session image from main, docker.io/ostromhq/ostrom-session:edge, :latest (and :sha-<commit>): TeamCode's
   # template image (docker/cloud-session-image: the agents, the runner 1000 and agent 1001 users, group 1000) on the
   # runner image this run just pushed, pinned by digest. Its contract check runs in the build, on both architectures.
   session-image:
@@ -461,8 +461,11 @@ jobs:
           build-args: OSTROM_RUNNER_IMAGE=${{ env.RUNNER }}
           platforms: linux/amd64,linux/arm64
           push: true
+          # :latest is the server's default session image (its cloud runtime's `sessionImage`): from main while the
+          # CLI has no release, as ostrom-server's own :latest.
           tags: |
             ${{ env.IMAGE }}:edge
+            ${{ env.IMAGE }}:latest
             ${{ env.IMAGE }}:sha-${{ github.sha }}
 
   # Waits for the binaries ci cross-compiles, not for its tests to pass: a test that fails only on Windows must show
