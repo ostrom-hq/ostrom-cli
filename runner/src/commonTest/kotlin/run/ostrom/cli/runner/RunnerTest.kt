@@ -359,7 +359,8 @@ class RunnerTest {
         server.instructions.send(Result.success(Instruction.STOP))
 
         assertEquals(0, runner.run())
-        assertTrue("could not be prepared" in link.sent.receive())
+        val shown = link.sent.receive()
+        assertTrue("could not be prepared" in shown && "/workspace/.ostrom/logs/prepare-e1.log" in shown, shown)
         val unready = Triple<Boolean, Boolean, String?>(false, false, null)
         assertEquals(listOf(unready, unready, Triple(false, true, null)), server.beats)
     }

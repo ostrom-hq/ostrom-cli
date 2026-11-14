@@ -123,7 +123,9 @@ class Runner(
             is PreparationOutcome.Prepared -> outcome.directory
             PreparationOutcome.Failed -> {
                 // Unready heartbeats until the server stops the execution.
-                output.send(FAILED.encodeToByteArray())
+                val path = PreparationLog.path(config.workspace, config.epoch)
+                val failed = "\r\nThe environment could not be prepared: the session stops. See $path.\r\n"
+                output.send(failed.encodeToByteArray())
                 return@coroutineScope heartbeat(current, ready = false)
             }
             PreparationOutcome.Ended -> return@coroutineScope 1
@@ -294,9 +296,6 @@ fun interface Preparer {
 /** The legacy clone's variables, left out once the runner prepared the workspace. */
 private val REPOSITORY_VARIABLES = setOf("OSTROM_REPOSITORY_URL", "OSTROM_REPOSITORY_REF")
 
-/** What the terminal shows after a failed preparation. */
-private const val FAILED = "\r\nThe environment could not be prepared: the session stops. " +
-    "The log is in /workspace/.ostrom/logs.\r\n"
 
 /** How many times the launch is asked for before the agent is left out. */
 private const val LAUNCH_ATTEMPTS = 10

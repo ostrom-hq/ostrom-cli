@@ -40,7 +40,7 @@ class PreparationProcessTest {
 
     /** The agent host's side, in memory: each command gets a connection the host serves, as over its socket. */
     private fun CoroutineScope.commands(): AgentHostCommands {
-        val host = AgentHost(PtyTerminal, commands = PtyTerminal.Pipes)
+        val host = AgentHost(PtyTerminal, commands = PtyTerminal.Commands)
         val starter = RemoteTerminalStarter({
             val toHost = ByteChannel()
             val fromHost = ByteChannel()
@@ -90,6 +90,20 @@ class PreparationProcessTest {
             val code = commands().run(arguments, root, environment, emptySet())
             assertEquals(1, code)
             assertEquals("[it's][a  b][\$HOME][-n][]0\r\n", output.toString())
+        }
+    }
+
+    @Test
+    fun aCommandThatLeavesAServerRunningEndsWithItsShellAndLeavesTheServer() = runBlocking {
+        withTimeout(20.seconds) {
+            files.createDirectories(root.toPath())
+            val pidFile = "$root/server.pid"
+            val arguments = listOf("/bin/sh", "-c", "sleep 30 & echo \$! > \"\$1\"; echo started", "sh", pidFile)
+            assertEquals(0, commands().run(arguments, root, environment, emptySet()))
+            assertEquals("started\r\n", output.toString())
+            // The server outlives its command, and is stopped here.
+            val pid = files.read(pidFile.toPath()) { readUtf8() }.trim()
+            assertEquals(0, shell("kill -0 $pid && kill $pid"))
         }
     }
 

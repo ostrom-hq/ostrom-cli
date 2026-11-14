@@ -3,6 +3,8 @@ package run.ostrom.cli.runner
 
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.ByteWriteChannel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.IO
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -67,7 +69,8 @@ class AgentHost(
             }
         } finally {
             withContext(NonCancellable) {
-                terminal.terminate()
+                // A preparation command that ended leaves what it started in the background (a server) running.
+                if (log == null || terminal.exitCode == null) terminal.terminate()
                 terminal.close()
             }
         }
@@ -82,9 +85,9 @@ class AgentHost(
         var writable = true
         val lines = mutableListOf<String>()
         val splitter = MaskedLines(log.secrets, { lines += it })
-        suspend fun drain() {
+        suspend fun forward() {
             for (line in lines) {
-                if (writable) writable = appended(file, line)
+                if (writable) writable = withContext(Dispatchers.IO) { appended(file, line) }
                 AgentFrames.write(output, AgentFrame.Output("$line\r\n".encodeToByteArray()))
             }
             lines.clear()
@@ -93,12 +96,12 @@ class AgentHost(
             while (true) {
                 val bytes = terminal.read() ?: break
                 splitter.write(bytes)
-                drain()
+                forward()
             }
             splitter.close()
-            drain()
+            forward()
         } finally {
-            closed(file)
+            withContext(NonCancellable + Dispatchers.IO) { closed(file) }
         }
     }
 

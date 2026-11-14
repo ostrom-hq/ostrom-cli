@@ -61,6 +61,14 @@ class HttpServerApiPreparationTest {
     }
 
     @Test
+    fun anAnswerOutsideTheContractFailsThePreparation() = runTest {
+        val exchange = Exchange().apply { answer = """{"environment":{}}""" }
+        val refused = assertFailsWith<PreparationRefusedException> { api(exchange).environment() }
+        assertEquals(PreparationRefusedException.UNREADABLE, refused.code)
+        assertFalse(refused.ends)
+    }
+
+    @Test
     fun aServerWithoutTheRouteServesNoEnvironment() = runTest {
         val exchange = Exchange().apply { status = HttpStatusCode.NotFound }
         assertNull(api(exchange).environment())

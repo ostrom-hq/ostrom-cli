@@ -156,19 +156,20 @@ class EnvironmentPreparation(
             log("ignored variables that would change how preparation runs: ${ignored.sorted().joinToString(", ")}")
         }
         val variables = prepared.variables - ignored.toSet()
-        val secrets = (variables.values + listOfNotNull(knownToken())).filter { it.length >= PreparationLog.MIN_MASKED }
-            .toSet()
+        // The token is asked again for each command: the one renewed during a long preparation is masked too.
+        suspend fun secrets() =
+            (variables.values + listOfNotNull(knownToken())).filter { it.length >= PreparationLog.MIN_MASKED }.toSet()
         // Owner values first; the runner's own always win.
         val environment = variables + this.environment
         val git = GitHardening.git(helper, protocols)
         val state = "$workspace/${PreparationLog.STATE_DIRECTORY}"
 
         suspend fun run(step: String, index: Int?, directory: String, arguments: List<String>) {
-            val code = commands.run(arguments, directory, environment, secrets)
+            val code = commands.run(arguments, directory, environment, secrets())
             if (code != 0) throw Failed(PreparationFailure(step, index, code?.coerceIn(0, MAX_EXIT)))
         }
         suspend fun succeeds(vararg arguments: String) =
-            commands.run(arguments.toList(), workspace, environment, secrets) == 0
+            commands.run(arguments.toList(), workspace, environment, secrets()) == 0
 
         phase("configuring_git")
         run("git_identity", null, workspace, listOf("/bin/sh", "-c", MAKE_DIRECTORIES, "sh", "$state/setup"))
@@ -219,7 +220,10 @@ class EnvironmentPreparation(
         null
     }
 
-    /** Progress is informational: a failed report never stops the preparation, but a refusal or a stop does. */
+    /**
+     * Progress is informational: a failed report never stops the preparation, but the session's end of it (a fenced
+     * execution, a session no longer preparing, a failed preparation) or a stop does.
+     */
     @Suppress("ThrowsCount") // Cancellation and the end of the execution are rethrown, as everywhere.
     private suspend fun phase(phase: String) {
         if (reported == phase) return
@@ -231,8 +235,10 @@ class EnvironmentPreparation(
             throw error
         } catch (error: ExecutionEndedException) {
             throw error
-        } catch (_: PreparationRefusedException) {
-            throw Stopped()
+        } catch (refused: PreparationRefusedException) {
+            if (refused.ends) throw Stopped()
+            log("the server refused the preparation's progress (${refused.status})")
+            null
         } catch (error: Exception) {
             log("could not report the preparation's progress: ${error::class.simpleName}")
             null

@@ -30,7 +30,8 @@ data class PreparationLog(val path: String, val secrets: List<String> = emptyLis
         const val MASK = "[REDACTED]"
 
         /**
-         * Masks [secrets] in [line], the longest first (a secret holding another is masked whole).
+         * Masks [secrets] in [line], the longest first (a secret holding another is masked whole). Output is masked
+         * line by line, so each line of a multi-line secret (a key, a certificate) is masked on its own.
          *
          * @param line A line of output.
          * @param secrets The values to mask.
@@ -38,6 +39,7 @@ data class PreparationLog(val path: String, val secrets: List<String> = emptyLis
          * @return The line.
          */
         fun mask(line: String, secrets: Collection<String>): String = secrets
+            .flatMap { secret -> secret.split('\n').map { it.removeSuffix("\r") } }
             .filter { it.length >= MIN_MASKED }
             .sortedByDescending { it.length }
             .fold(line) { current, secret -> current.replace(secret, MASK) }

@@ -188,7 +188,12 @@ class HttpServerApi(
         }
         if (response.status == HttpStatusCode.NotFound) return null
         refuse(response)
-        return JSON.decodeFromString(RunnerEnvironment.serializer(), response.bodyAsText())
+        return try {
+            JSON.decodeFromString(RunnerEnvironment.serializer(), response.bodyAsText())
+        } catch (_: IllegalArgumentException) {
+            // An answer outside the contract is never taken again: the preparation fails at once.
+            throw PreparationRefusedException(PreparationRefusedException.UNREADABLE, response.status.value)
+        }
     }
 
     override suspend fun reportPreparation(phase: String, failure: PreparationFailure?): Instruction {
@@ -214,7 +219,9 @@ class HttpServerApi(
             throw ExecutionEndedException("The server ended this execution (${status.value}).")
         }
         val code = errorType(response.bodyAsText())
-        if (code in PREPARATION_STOPS || status.value in REFUSALS) throw PreparationRefusedException(code, status.value)
+        if (code in PreparationRefusedException.ENDS || status.value in REFUSALS) {
+            throw PreparationRefusedException(code, status.value)
+        }
         error("The preparation call answered ${status.value}.")
     }
 
@@ -255,9 +262,6 @@ class HttpServerApi(
         private const val SERVER_ERRORS = 500
         private const val LINKED = "linked"
         private const val UNAVAILABLE = "unavailable"
-
-        /** The keys that end a preparation: another execution, a session no longer preparing, a failed one. */
-        private val PREPARATION_STOPS = setOf("execution_fenced", "not_preparing", "preparation_failed")
 
         /** Statuses of a request the server will never take, as TeamCode's runner. */
         private val REFUSALS = setOf(400, 403, 413, 422)

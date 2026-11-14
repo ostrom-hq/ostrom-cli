@@ -63,7 +63,7 @@ actual fun runCloudProcess(command: String, args: List<String>): Nothing {
         CloudProcess.CREDENTIAL -> credential(args.firstOrNull(), environment)
         CloudProcess.AGENT_STATE -> agentState(environment)
         // Terminals on a PTY; the preparation's commands on pipes, their log written as the agent's uid.
-        CloudProcess.AGENT_SUPERVISOR -> host(socket, AgentHost(PtyTerminal, commands = PtyTerminal.Pipes))
+        CloudProcess.AGENT_SUPERVISOR -> host(socket, AgentHost(PtyTerminal, commands = PtyTerminal.Commands))
         CloudProcess.CHECK_HOST -> checkHost(
             environment["OSTROM_CHECK_HOST_SOCKET"]?.takeIf { it.isNotBlank() }
                 ?: RunnerConfig.DEFAULT_CHECK_HOST_SOCKET,

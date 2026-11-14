@@ -95,4 +95,16 @@ data class PreparationFailure(val step: String, val index: Int? = null, val exit
  * @property status The HTTP status.
  */
 class PreparationRefusedException(val code: String?, val status: Int) :
-    Exception("The server refused the preparation (${code ?: "HTTP $status"}).")
+    Exception("The server refused the preparation (${code ?: "HTTP $status"}).") {
+    /** Whether the session's preparation is over: another execution, no longer preparing, or failed. */
+    val ends: Boolean get() = code in ENDS
+
+    /** Constants of the enclosing type. */
+    companion object {
+        /** The keys that end a preparation. */
+        val ENDS = setOf("execution_fenced", "not_preparing", "preparation_failed")
+
+        /** The key of an answer the runner cannot read. */
+        const val UNREADABLE = "unreadable_answer"
+    }
+}

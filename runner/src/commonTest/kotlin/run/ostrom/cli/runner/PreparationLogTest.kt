@@ -16,6 +16,9 @@ class PreparationLogTest {
         val secrets = listOf("abc", "token", "token-and-more")
         assertEquals("a [REDACTED] b [REDACTED] abc", PreparationLog.mask("a token-and-more b token abc", secrets))
         assertFalse("token" in PreparationLog("/l", listOf("token")).toString())
+        // Each line of a multi-line secret is masked on its own.
+        val key = "-----BEGIN KEY-----\r\nMIIabcdef\n-----END KEY-----"
+        assertEquals("x [REDACTED] y", PreparationLog.mask("x MIIabcdef y", listOf(key)))
         assertEquals("/workspace/.ostrom/logs/prepare-e3.log", PreparationLog.path("/workspace", 3))
     }
 

@@ -325,6 +325,14 @@ class EnvironmentPreparationTest {
         // Stopped: no failure is reported on top.
         assertEquals(listOf<Pair<String, PreparationFailure?>>("configuring_git" to null), fenced.reports)
 
+        // Any other refusal of a report is only logged.
+        val forbidden = FakeServer(mutableListOf({ environment() })) { _, _ ->
+            throw PreparationRefusedException(null, 403)
+        }
+        val going = preparation(forbidden, FakeCommands(mutableSetOf("/workspace/api")), logs).run()
+        assertEquals(PreparationOutcome.Prepared("/workspace/api"), going)
+        assertTrue(logs.any { it == "the server refused the preparation's progress (403)" })
+
         val stopped = FakeServer(mutableListOf({ environment() })) { _, _ -> Instruction.STOP }
         assertEquals(PreparationOutcome.Failed, preparation(stopped, FakeCommands()).run())
     }
