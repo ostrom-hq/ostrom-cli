@@ -227,16 +227,21 @@ agent can change their folder), each item's files in chunks, then one result per
   the pod's log, with counts only, and the agent starts with what is installed. Each kind takes 60 s at most; the
   runner heartbeats (unready) meanwhile.
 
-## Ostrom's MCP servers (`ostrom-artifacts`, `ostrom-memory`)
+## Ostrom's MCP servers (`ostrom`, `ostrom-todo`, `ostrom-memory`, `ostrom-workflow`, `ostrom-artifacts`)
 
 Once the launch is open, the runner asks the server, with the launch's agent token and 20 s at most, which of Ostrom's
 MCP servers the agent gets, as TeamCode's runner asks with `tcex_`: `ostrom-artifacts` when the publication policy
 answers `canPublish` (`GET /api/v1/artifacts/policy`), `ostrom-memory` when the memory answers the token
-(`GET /api/v1/memory/index?limit=1`). It heartbeats (unready) meanwhile. Claude Code and Codex get each one as
+(`GET /api/v1/memory/index?limit=1`), and from the features the server announces (`GET /api/v1/capabilities`), as
+`ostrom run` reads them: the waits (`ostrom`) whenever it answers, `ostrom-todo` with `todos.v1`, `ostrom-workflow`
+with `workflows.deliver.v1`. It heartbeats (unready) meanwhile. Claude Code and Codex get each one as
 `ostrom cloud mcp --server <name>`, a stdio server of the binary in the agent's container that reaches
 `$OSTROM_URL` with `$OSTROM_AGENT_TOKEN` (already in the agent's environment) directly, so it works under the
-Kubernetes and the Docker drivers alike: `ostrom-artifacts` is forwarded to `/api/v1/artifacts/mcp`, `ostrom-memory` is
-the memory's tools of `ostrom run`, their calls made to the server instead of a local relay.
+Kubernetes and the Docker drivers alike: `ostrom-artifacts`, `ostrom` and `ostrom-workflow` are forwarded to
+`/api/v1/artifacts/mcp`, `/api/v1/waits/mcp` and `/api/v1/workflows/mcp`; `ostrom-memory` and `ostrom-todo` are the
+memory's and the todo's tools of `ostrom run`, their calls made to the server instead of a local relay (the todo's
+checks run in the agent's container). No session id is sent: the server binds a cloud launch's agent token to its
+cloud session (ostrom-server#539), as TeamCode binds its `tcex_`.
 
 The runner sets `OSTROM_AGENT_ARGUMENTS`, one argument per line, which the session script appends after `--settings`
 (names and paths only, never the token; set empty when nothing is connected, so an owner's variable of that name
@@ -244,7 +249,7 @@ connects nothing):
 
 - Claude Code: `--disallowedTools=Artifact,ArtifactComments,ArtifactData,ArtifactCheck` while `ostrom-artifacts` is
   connected (its own artifact tools publish to claude.ai), one `--mcp-config=<json>`, and `--append-system-prompt=` with
-  TeamCode's instruction for each server, in their `=` forms so a variadic option never swallows the first message.
+  TeamCode's instruction for the servers that have one (artifacts, memory, workflow delivery), in their `=` forms so a variadic option never swallows the first message.
 - Codex: `-c mcp_servers.<name>={command=…,args=["cloud","mcp","--server","<name>"],env_vars=["OSTROM_URL",
   "OSTROM_AGENT_TOKEN"]}` per server (Codex passes a stdio server only the variables it lists) and
   `-c developer_instructions=…`.

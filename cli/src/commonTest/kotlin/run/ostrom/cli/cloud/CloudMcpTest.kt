@@ -65,6 +65,33 @@ class CloudMcpTest : CliKit() {
     }
 
     @Test
+    fun theWaitsAndTheWorkflowAreForwardedWithoutASession() {
+        mapOf("ostrom" to "/api/v1/waits/mcp", "ostrom-workflow" to "/api/v1/workflows/mcp").forEach { (name, route) ->
+            sent.clear()
+            val line = """{"jsonrpc":"2.0","id":1,"method":"tools/list"}"""
+            assertEquals(0, serve(agent, listOf("--server", name), line, answer = """{"jsonrpc":"2.0","id":1}"""))
+            assertEquals("https://ostrom.example$route", sent.single().url.toString())
+        }
+    }
+
+    @Test
+    fun theTodoIsServedHereItsCallsMadeToTheServerWithoutASession() {
+        val code = serve(
+            agent,
+            listOf("--server", "ostrom-todo"),
+            """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}""",
+            """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"todo_show","arguments":{}}}""",
+            answer = """{"todo":null}""",
+        )
+        assertEquals(0, code)
+        assertTrue("\"ostrom-todo\"" in console.out, console.out.toString())
+        val read = sent.single()
+        assertEquals("/api/v1/todos/session", read.url.encodedPath)
+        assertEquals("", read.url.encodedQuery)
+        assertEquals("Bearer agent-token", read.headers[HttpHeaders.Authorization])
+    }
+
+    @Test
     fun anUnknownServerOrAMissingVariableIsRefused() {
         assertEquals(2, serve(agent, listOf("--server", "ostrom-nope")))
         assertEquals(2, serve(agent, emptyList()))
