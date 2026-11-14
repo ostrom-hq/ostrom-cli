@@ -61,8 +61,8 @@ internal class AgentCommand(
     ).flag()
     val workload by option(
         "--workload",
-        help = "Scheduling class of the agent's model calls: background ones wait behind the team's interactive ones; " +
-            "quotas and permissions still apply",
+        help = "Scheduling class of the agent's model calls: background ones wait behind the team's " +
+            "interactive ones; quotas and permissions still apply",
     ).choice(INTERACTIVE, BACKGROUND).default(INTERACTIVE)
     val agentArguments by argument("agent-args", help = "After --: passed to the agent as they are").multiple()
 

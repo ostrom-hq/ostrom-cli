@@ -24,6 +24,7 @@ import io.ktor.server.response.respondBytes
 import io.ktor.server.response.respondText
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlin.time.Duration
@@ -230,7 +231,8 @@ internal class InferenceForwarder(
         notices.refused(response.status.value, code) { refusalMessage(bytes) }
         for (name in INFERENCE_RESPONSE_HEADERS) response.headers[name]?.let { call.response.header(name, it) }
         call.response.header(HttpHeaders.CacheControl, "no-store")
-        call.respondBytes(bytes, response.contentType() ?: ContentType.Application.Json, response.status)
+        // Ostrom's own refusal is JSON, in the agent's protocol.
+        call.respondBytes(bytes, ContentType.Application.Json, response.status)
     }
 }
 
@@ -242,11 +244,14 @@ internal fun refusalMessage(body: ByteArray): String? {
     val root = try {
         Json.parseToJsonElement(body.decodeToString())
     } catch (_: SerializationException) {
-        return null
+        JsonNull
     }
-    val error = (root as? JsonObject)?.get("error") as? JsonObject
-    val message = (error?.get("message") as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
-    return message.map { if (it.isISOControl()) ' ' else it }.joinToString("").trim().take(MAX_MESSAGE)
+    val message = ((root as? JsonObject)?.get("error") as? JsonObject)?.get("message") as? JsonPrimitive
+    return if (message == null || !message.isString) {
+        null
+    } else {
+        message.content.map { if (it.isISOControl()) ' ' else it }.joinToString("").trim().take(MAX_MESSAGE)
+    }
 }
 
 private const val MAX_MESSAGE = 600
