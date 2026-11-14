@@ -91,10 +91,13 @@ internal class CloudShowCommand(private val dependencies: CliDependencies) : Cli
         }
         val failure = shown.child("failure")?.let { listOfNotNull(it.text("code"), it.text("message")) }
         // TeamCode's `cloud show`: a deletion is shown once it starts, with its problem's code when it is blocked.
-        val deletion = shown.child("workspaceDeletion")?.let { proof ->
-            proof.text("state")?.takeIf { it != "none" }?.let { state ->
-                "deletion $state" + (proof.child("problem")?.text("code")?.let { " ($it)" } ?: "")
-            }
+        val proof = shown.child("workspaceDeletion")
+        val state = proof?.text("state")
+        val code = proof?.child("problem")?.text("code")
+        val deletion = when {
+            state == null || state == "none" -> null
+            code == null -> "deletion $state"
+            else -> "deletion $state ($code)"
         }
         val reason = shown.text("terminatedReason")?.takeIf { shown.text("status") == "terminated" }
         val rows = listOf(
