@@ -37,6 +37,7 @@ import run.ostrom.cli.commands.StatusCommand
 import run.ostrom.cli.commands.TelemetryCommand
 import run.ostrom.cli.commands.UpdateCommand
 import run.ostrom.cli.commands.VerifyCommand
+import run.ostrom.cli.commands.VerifyReleaseCommand
 import run.ostrom.cli.commands.VersionCommand
 import run.ostrom.cli.commands.WaitCommand
 import run.ostrom.cli.commands.WhoAmICommand
@@ -112,7 +113,7 @@ class OstromCli(private val dependencies: CliDependencies) {
      */
     private fun noticeAllowed(): Boolean {
         val environment = dependencies.environment
-        val off = listOf("CI", "OSTROM_LAUNCH_ID").any { !environment[it].isNullOrEmpty() }
+        val off = listOf("CI", "OSTROM_LAUNCH_ID", "OSTROM_DISABLE_AUTOUPDATE").any { !environment[it].isNullOrEmpty() }
         return dependencies.stderrIsTerminal() && dependencies.console.isInteractive && !off
     }
 
@@ -192,6 +193,7 @@ class OstromCli(private val dependencies: CliDependencies) {
             LoginCommand(dependencies),
             WhoAmICommand(dependencies),
             UpdateCommand(dependencies),
+            VerifyReleaseCommand(dependencies),
             LogoutCommand(dependencies),
             ConfigCommand(dependencies),
             DoctorCommand(dependencies),

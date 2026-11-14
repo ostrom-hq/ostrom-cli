@@ -33,6 +33,7 @@ import run.ostrom.cli.platform.StandardInput
 import run.ostrom.cli.platform.terminalSafe
 import run.ostrom.cli.update.AgentSessionsImpl
 import run.ostrom.cli.update.ReleaseTrust
+import run.ostrom.cli.update.ReleaseVerification
 import run.ostrom.cli.update.ReleaseVectors
 import run.ostrom.cli.update.SelfUpdate
 import run.ostrom.cli.update.UpdateNotice
@@ -208,6 +209,7 @@ open class CliKit {
                 probe = { binary, version, api -> true.also { probes += Triple(binary, version, api) } },
                 trust = ReleaseTrust(ReleaseVectors.KEY_PEM),
             ),
+            releaseVerification = ReleaseVerification(fileSystem, ReleaseTrust(ReleaseVectors.KEY_PEM)),
             updateNotice = UpdateNotice(FileStoreImpl(fileSystem), NOTICE, "1.0.0", { now }, { noticeAdvice() }) {
                 true.also { refreshes++ }
             }.takeIf { noticeKept },

@@ -5,8 +5,48 @@ import org.jetbrains.kotlin.gradle.plugin.mpp.DisableCacheInKotlinVersion
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 import org.jetbrains.kotlin.konan.target.Family
 
+import java.security.MessageDigest
+import java.util.Base64
+
 plugins {
     id("ostrom.kmp")
+}
+
+// The roots that sign `latest.json` (security audit S2-39, TeamCode's `release/trust`): every `*.pem` of `release/trust`
+// is compiled into the binary, at most eight, each an Ed25519 public key. Rotating the key ships the next root in a
+// release signed by the current one (docs/RELEASES.md "Rotating the release key"); a fork replaces the files and
+// rebuilds. Never a root read from a manifest or from the server.
+val releasePublicKeys = rootProject.fileTree("release/trust") { include("*.pem") }
+val generatedReleaseTrust = layout.buildDirectory.dir("generated/release-trust")
+val generateReleaseTrust by tasks.registering {
+    inputs.files(releasePublicKeys)
+    outputs.dir(generatedReleaseTrust)
+    doLast {
+        val spkiPrefix = byteArrayOf(0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00)
+        val identities = mutableSetOf<String>()
+        val keys = releasePublicKeys.files.sortedBy { it.name }.map { file ->
+            val text = file.readText()
+            require(text.startsWith("-----BEGIN PUBLIC KEY-----") && text.trimEnd().endsWith("-----END PUBLIC KEY-----")) {
+                "${file.name} is not a PEM public key."
+            }
+            val body = text.removePrefix("-----BEGIN PUBLIC KEY-----").substringBefore("-----END PUBLIC KEY-----")
+            val spki = Base64.getMimeDecoder().decode(body)
+            require(spki.size == spkiPrefix.size + 32 && spki.copyOf(spkiPrefix.size).contentEquals(spkiPrefix)) {
+                "${file.name} is not a canonical Ed25519 SubjectPublicKeyInfo."
+            }
+            val id = MessageDigest.getInstance("SHA-256").digest(spki).joinToString("") { "%02x".format(it) }
+            require(identities.add(id)) { "Release trust roots must be distinct." }
+            "        \"-----BEGIN PUBLIC KEY-----\\n${Base64.getEncoder().encodeToString(spki)}\\n-----END PUBLIC KEY-----\\n\", // $id"
+        }
+        require(keys.size in 1..8) { "Ship between one and eight pinned release roots." }
+        val output = generatedReleaseTrust.get().file("run/ostrom/cli/update/ShippedReleaseKeys.kt").asFile
+        output.parentFile.mkdirs()
+        output.writeText(
+            "package run.ostrom.cli.update\n\n" +
+                "/** The roots of `release/trust`, compiled in by Gradle. */\n" +
+                "internal object ShippedReleaseKeys {\n    val pems: List<String> = listOf(\n${keys.joinToString("\n")}\n    )\n}\n",
+        )
+    }
 }
 
 // The API contract this build speaks: ostrom-core's, from the checkout next to this one that CI and local builds use
@@ -107,6 +147,7 @@ kotlin {
     sourceSets {
         commonMain {
             kotlin.srcDir(generateBuildInfo)
+            kotlin.srcDir(generateReleaseTrust)
             dependencies {
                 implementation(projects.platform)
                 implementation(projects.hooks)

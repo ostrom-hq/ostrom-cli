@@ -280,11 +280,15 @@ jobs:
           if [ "$PUBLISH" = true ]; then
             printf '%s\n' '-----BEGIN PUBLIC KEY-----' 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENbn5GmwW348HxCtTPQbNfcvHmSZG' \
               'G+IBNKubzv51TIua776a3875eoe5isQYKYmVwe5yTUU0v2k8Pu7WXQWoBg==' '-----END PUBLIC KEY-----' > "$keys/cosign.pub"
-            printf '%s\n' '-----BEGIN PUBLIC KEY-----' 'MCowBQYDK2VwAyEAgWVuEFjR9qPX6DfIJ6Bhs+jT7j00KiwFY6bNwP0fexA=' \
-              '-----END PUBLIC KEY-----' > "$keys/release.pub"
+            # the Ed25519 roots the binaries of this very release trust (release/trust): the manifest must verify with
+            # one of them, or no release is published (a key no binary trusts would strand every client)
+            mkdir -p "$keys/roots"
+            cp release/trust/*.pem "$keys/roots/"
           else
             ( umask 077; openssl genpkey -algorithm ed25519 -out "$keys/release.key" )
             openssl pkey -in "$keys/release.key" -pubout -out "$keys/release.pub"
+            mkdir -p "$keys/roots"
+            cp "$keys/release.pub" "$keys/roots/dry-run.pem"
             ( cd "$keys" && COSIGN_PASSWORD='' cosign generate-key-pair >/dev/null )
           fi
       - name: Update manifest, signed with Ed25519
@@ -325,9 +329,8 @@ jobs:
           tr -d ' \r\n' < SHA256SUMS.sig | openssl base64 -d -A -out "$RUNNER_TEMP/sums.der"
           openssl dgst -sha256 -verify "$keys/cosign.pub" -signature "$RUNNER_TEMP/sums.der" SHA256SUMS
           sha256sum -c SHA256SUMS
-          # Ed25519 manifest
-          base64 -d < latest.json.sig > "$RUNNER_TEMP/latest.sig"
-          openssl pkeyutl -verify -pubin -inkey "$keys/release.pub" -rawin -in latest.json -sigfile "$RUNNER_TEMP/latest.sig"
+          # Ed25519 manifest, against the roots the CLI trusts (rotation: several), naming the one that signed
+          sh "$GITHUB_WORKSPACE/scripts/release/verify-manifest.sh" latest.json latest.json.sig "$keys"/roots/*.pem
           rm -f "$keys/release.key" "$keys/cosign.key"
       - name: Package-manager manifests and installers
         env:
