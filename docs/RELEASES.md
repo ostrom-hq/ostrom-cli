@@ -150,6 +150,50 @@ base64 -d < latest.json.sig > latest.sig       # base64 -D on macOS
 openssl pkeyutl -verify -pubin -inkey release.pub -rawin -in latest.json -sigfile latest.sig
 ```
 
+## Trust roots, `ostrom verify-release` and rotating the key
+
+The Ed25519 roots that may sign `latest.json` are the `*.pem` files of `release/trust/` (one to eight, each an Ed25519
+SubjectPublicKeyInfo): the build compiles them into the binary (`ShippedReleaseKeys`), and `ostrom update` accepts a
+manifest signed by any of them. A root is told by its **key id**, the SHA-256 of its SubjectPublicKeyInfo (the same id
+as TeamCode's `release/trust` keys); `ostrom update --check`, `ostrom update --check --json` and `ostrom verify-release`
+name the root that signed. A manifest cannot bring a root, and neither can the server: a fork replaces the files and
+rebuilds (and signs with its own key).
+
+`ostrom verify-release` checks a release downloaded by hand, offline: no login, no server, nothing executed.
+
+```sh
+ostrom verify-release --manifest latest.json --signature latest.json.sig
+ostrom verify-release --manifest latest.json --signature latest.json.sig \
+  --archive ostrom-1.0.0-linux-x64.tar.gz --target linux-x64
+```
+
+It checks the signature over the exact bytes before reading the manifest, then (with `--archive`) the archive's size
+and SHA-256 against the signed entry of that target. Exit codes: 0 verified, 1 a manifest that does not read, 64 bad
+usage, 66 a file or a target that is not there, 78 a signature or a checksum that does not match.
+
+**Rotating the key.** A binary only knows the roots it was built with, so the next key is shipped before it is used:
+
+1. **Bridge release N**: add the new key's `.pem` to `release/trust/` and cut a release signed with the *current* key.
+   Its binaries trust both. The release job refuses to publish when the manifest verifies with none of the roots.
+2. Wait until the clients you care about have moved to N or later (`ostrom update`, or the installers: they pin the
+   cosign key apart, see below). A client older than N cannot verify anything signed with the new key: it must update
+   to N first, or reinstall.
+3. **Release N+1**: change the organisation secret `RELEASE_SIGNING_KEY` to the new key, cut the release signed with
+   it. Binaries of N and N+1 verify it.
+4. **Retire the old root** in a later release (delete its `.pem`): a manifest signed with the old key is then refused.
+
+A compromised key still needs an independently authenticated recovery channel (a reinstall from a source you trust):
+no remote revocation of a root already installed is claimed, as in TeamCode. The cosign key that signs the archives and
+`SHA256SUMS` (pinned in the installers) rotates the same way: the installers of the bridge release pin the new key.
+
+## Update notices and their opt-out
+
+`ostrom update` is manual; there is a once-a-day notice on stderr after a command (`! ostrom X is available`), refreshed
+by a detached background lookup. Turn it off for this device with `ostrom update --notifications off`
+(`on`, `status`), or in one process, a CI or a locked environment, with any non-empty `OSTROM_DISABLE_AUTOUPDATE`. The
+explicit `ostrom update --check` still works. `ostrom update --check --json` prints one line, from the signed manifest
+only: `{"currentVersion":"1.0.0","latestVersion":"1.1.0","updateAvailable":true,"keyId":"<id>"}`.
+
 ## Installing
 
 ```sh

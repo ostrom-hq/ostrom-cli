@@ -36,7 +36,8 @@ class UpdateNotice(
     /**
      * After a command: says the notice when it is due, and starts a refresh when the last one is a day old. Both are
      * stamped in the file first, under its lock: a folder that cannot be written says nothing and starts nothing, or
-     * it would say the notice after every command and start a refresh each time.
+     * it would say the notice after every command and start a refresh each time. Nothing is said or started while the
+     * notifications are turned off ([setNotifications]).
      */
     fun after(say: (String) -> Unit) {
         val due = stamped() ?: return
@@ -54,11 +55,12 @@ class UpdateNotice(
     /** What is due at [time], stamped in the file; null when nothing is. @throws FileWriteException */
     private fun stamp(time: Long): Due? {
         val state = parseObject(files.read(path)) ?: JsonObject(emptyMap())
+        val on = state[NOTIFICATIONS] != JsonPrimitive(false)
         val latest = state.text(LATEST)
-        val fresh = latest != null && newer(latest, current) && due(state.millis(NOTIFIED), time)
+        val fresh = on && latest != null && newer(latest, current) && due(state.millis(NOTIFIED), time)
         // asked only when there is something to say: it may look for a running session
         val notice = if (fresh) advice()?.let { "! ostrom $latest is available. $it\n" } else null
-        val check = due(state.millis(CHECKED), time)
+        val check = on && due(state.millis(CHECKED), time)
         if (notice == null && !check) return null
         val stamps = listOfNotNull(NOTIFIED.takeIf { notice != null }, CHECKED.takeIf { check })
         files.write(path, JsonObject(state + stamps.associateWith { JsonPrimitive(time) }).toString())
@@ -82,6 +84,17 @@ class UpdateNotice(
         }
     }
 
+    /** True unless the person turned the notifications off with `ostrom update --notifications off`. */
+    fun notificationsEnabled(): Boolean = (parseObject(files.read(path))?.get(NOTIFICATIONS)) != JsonPrimitive(false)
+
+    /** Turns the notices and their daily refresh on or off, for this device; the other keys of the file are kept. */
+    fun setNotifications(enabled: Boolean) {
+        files.exclusive(path) {
+            val state = parseObject(files.read(path)) ?: JsonObject(emptyMap())
+            files.write(path, JsonObject(state + (NOTIFICATIONS to JsonPrimitive(enabled))).toString())
+        }
+    }
+
     private fun JsonObject.millis(key: String): Long? = (this[key] as? JsonPrimitive)?.longOrNull
 
     private fun due(last: Long?, time: Long) = last == null || time - last !in 0 until DAY_MILLIS
@@ -96,6 +109,9 @@ class UpdateNotice(
 
         /** When the notice was last said. */
         const val NOTIFIED = "notifiedAt"
+
+        /** Whether the notices are on (absent: on). */
+        const val NOTIFICATIONS = "notifications"
 
         /** A day. */
         const val DAY_MILLIS = 86_400_000L

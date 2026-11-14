@@ -67,6 +67,7 @@ import run.ostrom.cli.update.AgentSessions
 import run.ostrom.cli.update.AgentSessionsImpl
 import run.ostrom.cli.update.InstallationProbeImpl
 import run.ostrom.cli.update.ReleaseTrust
+import run.ostrom.cli.update.ReleaseVerification
 import run.ostrom.cli.update.SelfUpdate
 import run.ostrom.cli.update.TarUnpacker
 import run.ostrom.cli.update.UpdateNotice
@@ -101,6 +102,7 @@ import kotlin.time.TimeSource
  * @property openUrl Opens a page in the developer's browser; false when it could not.
  * @property cloud Runs `ostrom run <agent> --cloud` and `ostrom attach`.
  * @property selfUpdate `ostrom update`.
+ * @property releaseVerification `ostrom verify-release`.
  * @property updateNotice The once-a-day update notice, kept in the CLI folder; null when there is none.
  * @property stderrIsTerminal Whether stderr is a terminal, where the update notice is said.
  * @property secrets Opens the secret store of this device (system store, or encrypted file). Each call chooses and
@@ -133,6 +135,8 @@ class CliDependencies(
     val cloud: CloudRunner,
     val selfUpdate: SelfUpdate,
     val updateNotice: UpdateNotice? = null,
+    val releaseVerification: ReleaseVerification =
+        ReleaseVerification(FileSystem.SYSTEM, ReleaseTrust(floor = BuildInfo.FLOOR)),
     val stderrIsTerminal: () -> Boolean,
     val postHogKey: String,
     val sendStatistics: suspend (url: String, body: String) -> Unit,

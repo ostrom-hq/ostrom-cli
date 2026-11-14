@@ -157,6 +157,12 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
         "ostrom update" to "install the latest signed version",
         "ostrom update --check" to "only say whether one is out",
         "ostrom update --rollback" to "back to the version before",
+        "ostrom update --notifications off" to "no more daily notice on this device",
+    ),
+    "verify-release" to guide(
+        "install",
+        "ostrom verify-release --manifest latest.json --signature latest.json.sig" to "check a release by hand",
+        "ostrom verify-release --manifest m --signature s --archive a.tar.gz --target linux-x64" to "and its archive",
     ),
     "version" to guide("install", "ostrom version" to "this version, its platform and build"),
     "invite" to guide(

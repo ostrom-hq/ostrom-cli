@@ -7,6 +7,7 @@ import com.github.ajalt.clikt.core.ProgramResult
 import com.github.ajalt.clikt.core.UsageError
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.clikt.parameters.types.choice
 import run.ostrom.cli.BuildInfo
 import run.ostrom.cli.CliDependencies
 import run.ostrom.cli.ExitCode
@@ -23,11 +24,24 @@ internal class UpdateCommand(private val dependencies: CliDependencies) : CliktC
     val check by option("--check", help = "Only say whether an update exists").flag()
     val rollback by option("--rollback", help = "Go back to the previous version").flag()
     val version by option("--version", help = "Install this version")
+    val json by option("--json", help = "With --check: one JSON line (current and latest version, update available)")
+        .flag()
+    val notifications by option(
+        "--notifications",
+        help = "Turn the daily update notice on or off for this device, or show it",
+    ).choice("on", "off", "status")
 
     // plumbing of the update notice, started detached once a day at most: records the latest release, says nothing
     val recordLatest by option("--record-latest", hidden = true).flag()
 
     override fun run() {
+        if (notifications != null) {
+            if (listOf(rollback, check, json, recordLatest, version != null).any { it }) {
+                throw UsageError("--notifications takes no other option")
+            }
+            return notificationsSetting()
+        }
+        if (json && !check) throw UsageError("--json only applies to --check")
         if (recordLatest && listOf(rollback, check, version != null).any { it }) {
             throw UsageError("--record-latest is the update notice's own refresh: it takes no other option")
         }
@@ -43,6 +57,7 @@ internal class UpdateCommand(private val dependencies: CliDependencies) : CliktC
             releases = releasesUrl(environment),
             version = version,
             checkOnly = check,
+            json = json,
         )
         if (recordLatest) {
             // without a CLI folder there is nothing to record: the release is not even asked for
@@ -54,6 +69,21 @@ internal class UpdateCommand(private val dependencies: CliDependencies) : CliktC
             if (rollback) updates.rollback(request, ::serverApiVersion) else updates.update(request, ::serverApiVersion)
         }
         throw ProgramResult(code)
+    }
+
+    /** `--notifications on|off|status`: the daily notice (it also stops for any OSTROM_DISABLE_AUTOUPDATE). */
+    private fun notificationsSetting() {
+        val notice = dependencies.updateNotice
+        if (notice == null) {
+            dependencies.console.err("ostrom: there is no CLI folder here to keep the setting in.\n")
+            throw ProgramResult(ExitCode.CANNOT_WRITE.code)
+        }
+        if (notifications != STATUS) notice.setNotifications(notifications == ON)
+        val console = dependencies.console
+        console.out("Update notifications: ${if (notice.notificationsEnabled()) "on" else "off"}.\n")
+        if (!dependencies.environment["OSTROM_DISABLE_AUTOUPDATE"].isNullOrEmpty()) {
+            console.out("Environment override: OSTROM_DISABLE_AUTOUPDATE turns the notice off in this process.\n")
+        }
     }
 
     /** The API version of the server this device is signed in to, which the binary to put in place must speak. */
@@ -84,3 +114,6 @@ internal fun releaseTarget(environment: Environment): String {
  */
 internal fun releasesUrl(environment: Environment): String = environment["OSTROM_RELEASES_URL"]
     ?: "${(environment["OSTROM_GITHUB_WEB_URL"] ?: "https://github.com").trimEnd('/')}/ostrom-hq/ostrom-cli/releases"
+
+private const val ON = "on"
+private const val STATUS = "status"

@@ -60,8 +60,12 @@ class SelfUpdateTest {
         trust = ReleaseTrust(ReleaseVectors.KEY_PEM),
     )
 
-    private fun request(current: String = "1.0.0", version: String? = null, checkOnly: Boolean = false) =
-        UpdateRequest(current, "linux-x64", binary, "https://releases.example/", version, checkOnly)
+    private fun request(
+        current: String = "1.0.0",
+        version: String? = null,
+        checkOnly: Boolean = false,
+        json: Boolean = false,
+    ) = UpdateRequest(current, "linux-x64", binary, "https://releases.example/", version, checkOnly, json)
 
     private fun text(path: String) = fake.read(path.toPath()) { readUtf8() }
 
@@ -197,14 +201,39 @@ class SelfUpdateTest {
     }
 
     @Test
+    fun aCheckInJsonSaysOneLineOfSignedFacts() = runTest {
+        assertEquals(0, updater().update(request(checkOnly = true, json = true)))
+        assertEquals(
+            "{\"currentVersion\":\"1.0.0\",\"latestVersion\":\"9.9.9\",\"updateAvailable\":true," +
+                "\"keyId\":\"${RotationVectors.OLD_ID}\"}",
+            said.single(),
+        )
+        said.clear()
+        assertEquals(0, updater().update(request(current = "9.9.9", checkOnly = true, json = true)))
+        assertTrue("\"updateAvailable\":false" in said.single(), "nothing newer")
+        said.clear()
+        // no release published yet: data, not an error; a version asked for that is not there stays an error
+        routes.remove(latest)
+        assertEquals(0, updater().update(request(checkOnly = true, json = true)))
+        assertEquals(
+            "{\"currentVersion\":\"1.0.0\",\"latestVersion\":null,\"updateAvailable\":false,\"keyId\":null}",
+            said.single(),
+        )
+        said.clear()
+        assertEquals(66, updater().update(request(version = "3.0.0", checkOnly = true, json = true)))
+        assertTrue("No release at" in said.single())
+    }
+
+    @Test
     fun nothingNewerIsUpToDateAndACheckOnlySays() = runTest {
         assertEquals(0, updater().update(request(current = "9.9.9")))
         assertEquals("✓ ostrom 9.9.9 is up to date.", said.last())
         assertEquals(0, updater().update(request(checkOnly = true)))
-        assertEquals("! ostrom 9.9.9 is available. Run ostrom update.", said.last())
+        assertEquals("! ostrom 9.9.9 is available. Run ostrom update.", said[said.size - 2])
+        assertEquals("  Release key: ${RotationVectors.OLD_ID}", said.last(), "the root that signed it is named")
         serve("https://releases.example/download/0.9.0/latest.json", "OLDER")
         assertEquals(0, updater().update(request(version = "v0.9.0", checkOnly = true)))
-        assertEquals("! ostrom 0.9.0 is available. Run ostrom update --version 0.9.0.", said.last())
+        assertEquals("! ostrom 0.9.0 is available. Run ostrom update --version 0.9.0.", said[said.size - 2])
         serve(latest, "OLDER")
         assertEquals(0, updater().update(request()))
         assertEquals("✓ ostrom 1.0.0 is up to date.", said.last())

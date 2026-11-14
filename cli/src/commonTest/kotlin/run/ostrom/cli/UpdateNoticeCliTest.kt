@@ -18,7 +18,7 @@ class UpdateNoticeCliTest : CliKit() {
         assertEquals(0, cli().run(arrayOf("version")))
         assertTrue(console.err.isEmpty(), "not in a pipe")
         console.isInteractive = true
-        for (quiet in listOf("CI", "OSTROM_LAUNCH_ID")) {
+        for (quiet in listOf("CI", "OSTROM_LAUNCH_ID", "OSTROM_DISABLE_AUTOUPDATE")) {
             assertEquals(0, cli(environment = mapOf("HOME" to "/home/maya", quiet to "1")).run(arrayOf("version")))
         }
         stderrTerminal = false
@@ -92,5 +92,51 @@ class UpdateNoticeCliTest : CliKit() {
         assertTrue(console.err.isEmpty(), console.err.toString())
         assertTrue(!fileSystem.exists(NOTICE.toPath()))
         assertTrue(releaseUrls.isEmpty(), "nothing to record: the release is not asked for")
+    }
+
+    @Test
+    fun theNoticeAndItsRefreshCanBeTurnedOffForThisDevice() {
+        fileSystem.createDirectories("/home/maya/.config/ostrom".toPath())
+        fileSystem.write(NOTICE.toPath()) { writeUtf8("""{"latest":"1.2.0","checkedAt":$now}""") }
+        assertEquals(0, cli().run(arrayOf("update", "--notifications", "status")))
+        assertOut("Update notifications: on.\n")
+        assertEquals(0, cli().run(arrayOf("update", "--notifications", "off")))
+        assertOut("Update notifications: off.\n")
+        val kept = fileSystem.read(NOTICE.toPath()) { readUtf8() }
+        assertTrue("\"latest\":\"1.2.0\"" in kept && "\"notifications\":false" in kept, "the other keys stay: $kept")
+        console.isInteractive = true
+        stderrTerminal = null
+        assertEquals(0, cli().run(arrayOf("version")))
+        assertTrue(console.err.isEmpty(), "nothing is said while they are off")
+        assertEquals(0, refreshes, "and nothing is refreshed")
+        console.out.clear()
+        val locked = mapOf("HOME" to "/home/maya", "OSTROM_DISABLE_AUTOUPDATE" to "1")
+        assertEquals(0, cli(environment = locked).run(arrayOf("update", "--notifications", "status")))
+        assertOut("Update notifications: off.\n")
+        assertOut("Environment override: OSTROM_DISABLE_AUTOUPDATE")
+        assertEquals(0, cli().run(arrayOf("update", "--notifications", "on")))
+        assertOut("Update notifications: on.\n")
+        assertEquals(0, cli().run(arrayOf("version")))
+        assertTrue(console.err.contains("! ostrom 1.2.0 is available"), "back on: said again")
+    }
+
+    @Test
+    fun theNotificationsSettingNeedsNoFileYet() {
+        assertEquals(0, cli().run(arrayOf("update", "--notifications", "status")))
+        assertOut("Update notifications: on.\n")
+        assertEquals(0, cli().run(arrayOf("update", "--notifications", "off")))
+        assertOut("Update notifications: off.\n")
+        fileSystem.write(NOTICE.toPath()) { writeUtf8("not json") }
+        assertEquals(0, cli().run(arrayOf("update", "--notifications", "off")))
+    }
+
+    @Test
+    fun theNotificationsSettingTakesNoOtherOptionAndNeedsAFolder() {
+        for (other in listOf("--check", "--rollback", "--json", "--version=1.0.0", "--record-latest")) {
+            assertEquals(64, cli().run(arrayOf("update", "--notifications", "off", other)), other)
+        }
+        noticeKept = false
+        assertEquals(73, cli().run(arrayOf("update", "--notifications", "off")))
+        assertTrue(console.err.contains("no CLI folder"), console.err.toString())
     }
 }

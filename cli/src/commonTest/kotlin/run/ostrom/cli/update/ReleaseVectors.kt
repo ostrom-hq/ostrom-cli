@@ -48,6 +48,12 @@ internal object ReleaseVectors {
             "0c449c72547b77ddfa22e96ad5ee677ef6c05c7b31ce43e3798bb5a3\",\"size\":27}}}" to
                 "ctBlNNu8X/CEzurWWGnngpTKgo11G9pTvMa+1pyRzWOWqlR+dBlPH5MYZSREYqNyOFQxshNgf28RwHymIHoCBw==\n"
         ),
+        "BAD_VERSION" to (
+            "{\"version\":\"not-a-version\",\"date\":\"2026-10-30T10:00:00Z\",\"assets\":{\"linux-x64\":{\"url\":" +
+            "\"https://releases.example/download/9.9.9/ostrom-9.9.9-linux-x64.tar.gz\",\"sha256\":" +
+            "\"9a1f0d880c449c72547b77ddfa22e96ad5ee677ef6c05c7b31ce43e3798bb5a3\",\"size\":27}}}" to
+                "RDIR8yu+fUDySDX3ei4XknSO2OfaesvkPkNtX0HelRt/0KLzCRvNE+/SjDjpiUkfAvJCJ49SIfwAxK7/nURvDg==\n"
+        ),
         "NOT_JSON" to (
             "not json" to
                 "l1NoR1C9K61yttpIMS3/SLAO+F1mcgFdfUP4UJ+4vsz+hIPxT3ZU6p7jzUuZk51/LRkArJzPfOlZQrk/NczvDA==\n"

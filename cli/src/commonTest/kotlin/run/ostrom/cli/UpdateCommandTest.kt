@@ -25,6 +25,13 @@ class UpdateCommandTest : CliKit() {
     }
 
     @Test
+    fun jsonIsAFormOfCheck() {
+        assertEquals(64, cli().run(arrayOf("update", "--json")))
+        assertEquals(0, cli().run(arrayOf("update", "--check", "--json")))
+        assertOut("\"latestVersion\":null")
+    }
+
+    @Test
     fun updateRollbackNeedsAKeptBinary() {
         assertEquals(66, cli().run(arrayOf("update", "--rollback")))
         assertOut("No previous version of ostrom is kept on this device.\n")

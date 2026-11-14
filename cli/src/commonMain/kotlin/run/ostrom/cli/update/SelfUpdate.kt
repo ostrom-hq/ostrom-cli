@@ -6,7 +6,6 @@ import run.ostrom.cli.api.Download
 import run.ostrom.cli.api.Downloads
 import run.ostrom.cli.api.ServerUnreachableException
 import run.ostrom.cli.launcher.child
-import run.ostrom.cli.launcher.ed25519Verify
 import run.ostrom.cli.launcher.parseObject
 import run.ostrom.cli.launcher.sha256Hex
 import run.ostrom.cli.launcher.text
@@ -18,16 +17,6 @@ import okio.FileSystem
 import okio.IOException
 import okio.Path
 import okio.Path.Companion.toPath
-import kotlin.io.encoding.Base64
-import kotlin.io.encoding.ExperimentalEncodingApi
-
-/**
- * The Ed25519 key that signs `latest.json` (ostrom-cli `docs/RELEASES.md`; the private half is the organisation secret
- * `RELEASE_SIGNING_KEY`).
- */
-internal const val RELEASE_KEY_PEM = "-----BEGIN PUBLIC KEY-----\n" +
-    "MCowBQYDK2VwAyEAgWVuEFjR9qPX6DfIJ6Bhs+jT7j00KiwFY6bNwP0fexA=\n" +
-    "-----END PUBLIC KEY-----\n"
 
 /**
  * What `ostrom update` was asked.
@@ -38,6 +27,7 @@ internal const val RELEASE_KEY_PEM = "-----BEGIN PUBLIC KEY-----\n" +
  * @property releases The releases' base URL (`…/ostrom-hq/ostrom-cli/releases`).
  * @property version The version asked for, or null for the latest.
  * @property checkOnly True to only say whether an update exists.
+ * @property json With [checkOnly]: says it as one JSON line (what a desktop banner reads) instead of text.
  */
 data class UpdateRequest(
     val current: String,
@@ -46,10 +36,14 @@ data class UpdateRequest(
     val releases: String,
     val version: String? = null,
     val checkOnly: Boolean = false,
+    val json: Boolean = false,
 )
 
 /** A step of [SelfUpdate] that stops it: the exit code and what is said. */
-private class Stop(val code: ExitCode, val text: String) : Exception(text)
+private open class Stop(val code: ExitCode, val text: String) : Exception(text)
+
+/** No release is published at an address asked for (HTTP 404), told apart from a release without this target. */
+private class NoRelease(text: String) : Stop(ExitCode.NOT_FOUND, text)
 
 /** Stops [SelfUpdate] with [code], saying [text]. */
 private fun stop(code: ExitCode, text: String): Nothing = throw Stop(code, text)
@@ -75,8 +69,18 @@ private fun FileSystem.textOf(path: Path): String? = try {
     null
 }
 
-/** The signed release manifest's entry for one target, and the version floor the manifest publishes, if any. */
-private class Asset(val version: String, val url: String, val sha256: String, val size: Long, val floor: String?)
+/**
+ * The signed release manifest's entry for one target, the version floor the manifest publishes, if any, and the id of
+ * the root that signed it ([ReleaseTrust]).
+ */
+private class Asset(
+    val version: String,
+    val url: String,
+    val sha256: String,
+    val size: Long,
+    val floor: String?,
+    val keyId: String,
+)
 
 /**
  * `ostrom update`: the signed self-update. The manifest's Ed25519 signature is checked over its exact bytes before
@@ -101,7 +105,7 @@ private class Asset(val version: String, val url: String, val sha256: String, va
  * @param probe Runs a binary with [INSTALLATION_PROBE].
  * @param trust The release key and the floor this binary was built with.
  */
-@Suppress("LongParameterList") // One parameter per collaborator, each replaced in tests.
+@Suppress("LongParameterList", "TooManyFunctions") // One parameter per collaborator, each replaced in tests.
 class SelfUpdate(
     private val downloads: Downloads,
     private val fileSystem: FileSystem,
@@ -126,21 +130,43 @@ class SelfUpdate(
             stop(ExitCode.USAGE, "ostrom update: ${request.version} is not a version (1.2.3 or v1.2.3).")
         }
         if (!request.checkOnly) refuseIn(sessions)
-        val asset = manifest(request)
-        when {
-            request.version == null && !newer(asset.version, request.current) ->
-                ExitCode.OK.code.also { say("✓ ostrom ${request.current} is up to date.") }
-            asset.version == request.current ->
-                ExitCode.OK.code.also { say("✓ ostrom ${request.current} is already installed.") }
-            request.checkOnly -> ExitCode.OK.code.also {
-                val run = if (request.version == null) "ostrom update" else "ostrom update --version ${asset.version}"
-                say("! ostrom ${asset.version} is available. Run $run.")
-            }
-            else -> install(request, asset, apiVersion)
+        val asset = manifestOrNone(request)
+        if (asset == null) {
+            say(checkJson(request.current, null, null))
+            ExitCode.OK.code
+        } else {
+            answer(request, asset, apiVersion)
         }
     } catch (stopped: Stop) {
         say(stopped.text)
         stopped.code.code
+    }
+
+    /**
+     * The signed manifest, or null for `--check --json` of a repository with no release yet: nothing newer, said as
+     * data (never an error). A version asked for that is not there stays an error.
+     */
+    private suspend fun manifestOrNone(request: UpdateRequest): Asset? = try {
+        manifest(request)
+    } catch (none: NoRelease) {
+        if (request.checkOnly && request.json && request.version == null) null else throw none
+    }
+
+    /** What to do with the signed [asset]: say it, or install it. */
+    private suspend fun answer(request: UpdateRequest, asset: Asset, apiVersion: suspend () -> Int): Int = when {
+        request.checkOnly && request.json -> ExitCode.OK.code.also {
+            say(checkJson(request.current, asset.version, asset.keyId))
+        }
+        request.version == null && !newer(asset.version, request.current) ->
+            ExitCode.OK.code.also { say("✓ ostrom ${request.current} is up to date.") }
+        asset.version == request.current ->
+            ExitCode.OK.code.also { say("✓ ostrom ${request.current} is already installed.") }
+        request.checkOnly -> ExitCode.OK.code.also {
+            val run = if (request.version == null) "ostrom update" else "ostrom update --version ${asset.version}"
+            say("! ostrom ${asset.version} is available. Run $run.")
+            say("  Release key: ${asset.keyId}")
+        }
+        else -> install(request, asset, apiVersion)
     }
 
     /**
@@ -220,9 +246,8 @@ class SelfUpdate(
         val url = "${request.releases.trimEnd('/')}/$folder/latest.json"
         val manifest = fetch(url, MAX_MANIFEST_BYTES, request)
         val signature = fetch("$url.sig", MAX_SIGNATURE_BYTES, request)
-        if (!ed25519Verify(trust.keyPem, manifest, decoded(signature.decodeToString().trim()))) {
-            stop(ExitCode.SIGNATURE_REFUSED, "✗ The release signature does not match. Nothing was changed.")
-        }
+        val keyId = trust.verify(manifest, signature.decodeToString())
+            ?: stop(ExitCode.SIGNATURE_REFUSED, "✗ The release signature does not match. Nothing was changed.")
         val body = parseObject(manifest.decodeToString()) ?: unreadable()
         val version = body.text("version") ?: unreadable()
         // a signed manifest of another release, served where this one was asked, is a replay
@@ -234,15 +259,15 @@ class SelfUpdate(
         }
         val entry = body.child("assets")?.child(request.target)
             ?: stop(ExitCode.NOT_FOUND, "No ostrom $version is built for ${request.target}.")
-        return assetOf(version, entry, body.text("floor"))
+        return assetOf(version, entry, body.text("floor"), keyId)
     }
 
-    private fun assetOf(version: String, entry: JsonObject, floor: String?): Asset {
+    private fun assetOf(version: String, entry: JsonObject, floor: String?, keyId: String): Asset {
         val url = entry.text("url")
         val sha256 = entry.text("sha256")
         val size = (entry["size"] as? JsonPrimitive)?.longOrNull
         if (url == null || sha256 == null || size == null) unreadable()
-        return Asset(version, url, sha256, size, floor)
+        return Asset(version, url, sha256, size, floor, keyId)
     }
 
     /** Installs [asset] when the latest release's floor allows it (S2-39), and the binary speaks the server's API. */
@@ -314,10 +339,11 @@ class SelfUpdate(
         }
         return when (answer) {
             is Download.Bytes -> answer.bytes
-            is Download.Missing -> stop(
-                if (answer.status == NOT_FOUND) ExitCode.NOT_FOUND else ExitCode.UNREACHABLE,
-                "No release at $url (HTTP ${answer.status}).",
-            )
+            is Download.Missing -> if (answer.status == NOT_FOUND) {
+                throw NoRelease("No release at $url (HTTP ${answer.status}).")
+            } else {
+                stop(ExitCode.UNREACHABLE, "No release at $url (HTTP ${answer.status}).")
+            }
             is Download.TooLarge -> stop(ExitCode.FAILED, "✗ $url is larger than ${answer.limit} bytes.")
         }
     }
@@ -332,16 +358,21 @@ class SelfUpdate(
     }
 }
 
+/**
+ * `ostrom update --check --json`: one line, from the signed manifest only. [latest] and [keyId] are null when no
+ * release is published.
+ */
+internal fun checkJson(current: String, latest: String?, keyId: String?): String = JsonObject(
+    mapOf(
+        "currentVersion" to JsonPrimitive(current),
+        "latestVersion" to JsonPrimitive(latest),
+        "updateAvailable" to JsonPrimitive(latest != null && newer(latest, current)),
+        "keyId" to JsonPrimitive(keyId),
+    ),
+).toString()
+
 /** Where the version of the binary kept for `--rollback` is recorded. */
 internal fun keptVersionOf(binary: Path): Path = "$binary.previous.version".toPath()
-
-/**
- * What a release is checked against.
- *
- * @param keyPem The key the manifest must be signed with.
- * @param floor The floor of the release this binary was built for (`release-floor.txt`), or null for none.
- */
-data class ReleaseTrust(val keyPem: String = RELEASE_KEY_PEM, val floor: String? = null)
 
 /**
  * Why [target] may not be installed over [current] given the latest release's signed [floor] and the floor this binary
@@ -378,14 +409,6 @@ internal fun managerOf(binary: Path): String? {
         "/scoop/apps/" in path -> "Scoop: run scoop update ostrom"
         else -> null
     }
-}
-
-/** [text] decoded from base64, or no bytes when it is not base64 (the signature check then fails). */
-@OptIn(ExperimentalEncodingApi::class)
-internal fun decoded(text: String): ByteArray = try {
-    Base64.decode(text)
-} catch (_: IllegalArgumentException) {
-    ByteArray(0)
 }
 
 /**
