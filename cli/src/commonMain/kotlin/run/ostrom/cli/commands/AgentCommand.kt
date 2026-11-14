@@ -10,12 +10,14 @@ import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.arguments.multiple
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
+import com.github.ajalt.clikt.parameters.options.multiple
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.types.choice
 import run.ostrom.cli.CliDependencies
 import run.ostrom.cli.ExitCode
 import run.ostrom.cli.cloud.CloudSite
 import run.ostrom.cli.launcher.Agent
+import run.ostrom.cli.launcher.Labels
 import run.ostrom.cli.launcher.LaunchRequest
 import run.ostrom.cli.launcher.LaunchSite
 import run.ostrom.cli.launcher.cloud.CloudStart
@@ -67,6 +69,10 @@ internal class AgentCommand(
         "--no-activity",
         help = "Do not report to your team whether the agent works or waits for you (Claude Code, Codex)",
     ).flag()
+    val label by option(
+        "--label",
+        help = "key=value kept on this launch and on its sessions, to filter them (repeat it, at most 16)",
+    ).multiple()
     val workload by option(
         "--workload",
         help = "Scheduling class of the agent's model calls: background ones wait behind the team's " +
@@ -79,6 +85,7 @@ internal class AgentCommand(
             dependencies.console.err(deprecation(agent.command, "${runPath(agent)} [options] -- <its arguments>"))
         }
         refuseOptionsTogether()
+        val labels = Labels.parseAll(label).getOrElse { throw UsageError("--label: ${it.message}") }
         // a usage error before the server or the sign-in is looked at: 64, never 65 for a developer signed out
         if (cloud && agentArguments.isNotEmpty()) {
             throw stop(
@@ -125,6 +132,7 @@ internal class AgentCommand(
             background = workload == BACKGROUND,
             variables = !noVariables,
             activity = !noActivity,
+            labels = labels,
         )
         throw ProgramResult(runBlocking { dependencies.agents.run(request, site) })
     }
@@ -134,6 +142,9 @@ internal class AgentCommand(
     /** Options that do not go together, a usage error before anything is read. */
     @Suppress("ThrowsCount") // One usage error per pair of options.
     private fun refuseOptionsTogether() {
+        if (cloud && label.isNotEmpty()) {
+            throw UsageError("--label is for a launch on this machine: it does not go with --cloud")
+        }
         if (cloud && dryRun) throw UsageError("--dry-run checks a launch on this machine: it does not go with --cloud")
         // a cloud session's runner gives the variables itself, from the owner's assignments
         if (cloud && noVariables) {

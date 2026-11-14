@@ -36,6 +36,7 @@ import okio.IOException
  *   ones in the admission queue; its quotas and permissions are the same.
  * @property variables False for `--no-variables`: the agent gets none of the member's environment variables.
  * @property activity False for `--no-activity`: the hooks report nothing of whether the agent works or waits.
+ * @property labels `--label key=value` (TeamCode's): kept on the launch and copied to its sessions, to filter them.
  */
 data class LaunchRequest(
     val agent: Agent,
@@ -48,6 +49,7 @@ data class LaunchRequest(
     val background: Boolean = false,
     val variables: Boolean = true,
     val activity: Boolean = true,
+    val labels: Map<String, String> = emptyMap(),
 )
 
 /**
@@ -155,7 +157,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         if (request.dryRun) return calls.dryRun(agent, repo, model, site)
         // a launch that goes on to its session: what the CLI's first calls left (the organisation, the policy)
         dependencies.reclaim()
-        val launch = calls.createLaunch(repo, agent, model, site)
+        val launch = calls.createLaunch(repo, agent, model, site, request.labels)
         // From here on, however the launch ends (the agent's exit, a stop before it starts, a cancellation), its agent
         // token is revoked at once (AUDIT-SECU-RUNNER-2 R2b).
         return try {

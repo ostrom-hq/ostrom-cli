@@ -78,9 +78,15 @@ private fun mine(signed: SignedIn) = "$SESSIONS?dev=${Routes.encode(signed.login
 
 /**
  * What `ostrom sessions list` asks for: the sessions of [dev] (everyone's when null), of [repo], only those still
- * running when [open], the page after [before].
+ * running when [open], the page after [before], those carrying all of [labels] (`key=value` each).
  */
-internal data class SessionsQuery(val dev: String?, val repo: String?, val open: Boolean, val before: String?) {
+internal data class SessionsQuery(
+    val dev: String?,
+    val repo: String?,
+    val open: Boolean,
+    val before: String?,
+    val labels: List<String> = emptyList(),
+) {
     /** The route with its query, only the parameters given. */
     fun path(): String {
         val parameters = listOfNotNull(
@@ -88,7 +94,7 @@ internal data class SessionsQuery(val dev: String?, val repo: String?, val open:
             repo?.let { "repo=${Routes.encode(it)}" },
             "open=true".takeIf { open },
             before?.let { "before=${Routes.encode(it)}" },
-        )
+        ) + labels.map { "label=${Routes.encode(it)}" }
         return if (parameters.isEmpty()) SESSIONS else "$SESSIONS?" + parameters.joinToString("&")
     }
 }
