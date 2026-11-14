@@ -7,6 +7,7 @@ import run.ostrom.cli.api.ServerResponse
 import run.ostrom.cli.api.ServerUnreachableException
 import run.ostrom.cli.sessions.ThreadLine
 import run.ostrom.cli.sessions.heading
+import run.ostrom.cli.sessions.recordOnly
 import run.ostrom.cli.sessions.thread
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -298,6 +299,26 @@ class SessionsCommandsTest : CliKit() {
         assertEquals(said, console.out.toString())
         val notYours = mapOf("GET /api/v1/sessions/s0" to (403 to "{}"))
         assertEquals(77, serving(notYours).run(show("s0")), "a session the caller may not read")
+    }
+
+    @Test
+    fun anotherMembersSessionReadAsItsRecordSaysWhatItDoesNotShow() {
+        // TeamCode #238: an owner or an administrator reads another member's record, without its gates or receipt.
+        signIn("/home/maya/.config/ostrom")
+        val record = """{"session":{$started,"endedAt":"2026-10-30T14:09:00Z","receiptId":"rcp_1"}}"""
+        assertEquals(0, serving(mapOf("GET $session" to (200 to record))).run(show("ses_41b2")))
+        assertEquals(
+            """
+            |Session ses_41b2 · claude · acme/api · @maya-k · 2026-10-30 UTC
+            |You read this session's record only: its requests, their answers and its receipt are @maya-k's, and its approvers'.
+            |14:02:11  session started    claude · claude-sonnet-4 · harness 2026.10.30-3
+            |14:09:00  session ended
+            |
+            """.trimMargin(),
+            console.out.toString(),
+        )
+        assertEquals(null, recordOnly(json("""{"dev":"maya-k","gates":[]}""")), "read whole, no request")
+        assertEquals(null, recordOnly(json("""{"id":"s0"}""")), "no person named")
     }
 
     @Test
