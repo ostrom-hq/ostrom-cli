@@ -190,7 +190,7 @@ class ClaudeAdapter : AgentAdapter {
         // connected (workflows.deliver.v1); Claude Code runs the entries of an event side by side
         val steps = if (layout.workflowDelivery) entry(WORKFLOW_STOP, WORKFLOW_STOP_SECONDS, null) else emptyList()
         val stops = stop + steps
-        val ours = if (stops.isEmpty()) events else events + ("Stop" to stops)
+        val ours = activity(layout, if (stops.isEmpty()) events else events + ("Stop" to stops))
         // the team hooks the member approved run after Ostrom's on each event, by the absolute path of their command
         val team = layout.teamHooks.flatMap { hook ->
             val handler = mapOf("type" to "command", "command" to quoted(hook.command), "timeout" to hook.seconds)
@@ -199,6 +199,30 @@ class ClaudeAdapter : AgentAdapter {
         }.groupBy({ it.first }, { it.second })
         val all = (ours.keys + team.keys).associateWith { ours[it].orEmpty() + team[it].orEmpty() }
         files.write(join(layout.plugin, "hooks", "hooks.json"), pretty(objectOf("hooks" to all)))
+    }
+
+    /**
+     * [hooks] with the activity's: on each of [ACTIVITY_EVENTS], an HTTP hook to the relay that says whether the agent
+     * works or waits for a person, as TeamCode's session plugin, with the agent's own relay capability read from its
+     * environment (`allowedEnvVars`). It costs no process, and Ostrom's hooks on the event stay first.
+     */
+    private fun activity(
+        layout: SessionLayout,
+        hooks: Map<String, List<Map<String, Any?>>>,
+    ): Map<String, List<Map<String, Any?>>> {
+        if (!layout.activity) return hooks
+        val token = LaunchVariables.RELAY_TOKEN
+        val handler = mapOf(
+            "type" to "http",
+            "url" to "${layout.relay.url}/activity",
+            "timeout" to ACTIVITY_SECONDS,
+            "headers" to mapOf("Authorization" to "Bearer \${$token}"),
+            "allowedEnvVars" to listOf(token),
+        )
+        val group = mapOf("hooks" to listOf(handler))
+        return (hooks.keys + ACTIVITY_EVENTS).associateWith { event ->
+            hooks[event].orEmpty() + if (event in ACTIVITY_EVENTS) listOf(group) else emptyList()
+        }
     }
 
     /** The relayed MCP servers, or null when there is none. */
@@ -235,6 +259,13 @@ class ClaudeAdapter : AgentAdapter {
         private const val AFTER_SECONDS = 10L
         private const val START_SECONDS = 20L
         private const val END_SECONDS = 30L
+
+        /** The events whose state the activity reports (TeamCode's `CLAUDE_ACTIVITY_EVENTS` and `UserPromptSubmit`). */
+        private val ACTIVITY_EVENTS =
+            listOf("Stop", "Notification", "UserPromptSubmit", "PostToolUse", "PostToolUseFailure")
+
+        /** The relay answers at once; TeamCode's HTTP hooks have 4 s. */
+        private const val ACTIVITY_SECONDS = 4L
 
         /** The Stop hook's timeout: it holds the agent for a wait's answer, a day at most. */
         private const val WAKE_SECONDS = 86_400L
