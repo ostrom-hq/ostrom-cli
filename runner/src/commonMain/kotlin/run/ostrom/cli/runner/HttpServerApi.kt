@@ -225,6 +225,33 @@ class HttpServerApi(
         error("The preparation call answered ${status.value}.")
     }
 
+    /**
+     * Asks for the owner's environment variables (`runners.cloud.variables.v1`), never cached by the server's answer.
+     *
+     * @return The variables, or null on a server without the route.
+     *
+     * @throws VariablesRefusedException When another execution holds the session, or the token is refused.
+     * @throws IllegalStateException When the server cannot serve them now: asked again later.
+     */
+    suspend fun variables(): EnvironmentValues? {
+        val response = client.post("${config.serverUrl}/api/v1/cloud/runner/variables") {
+            bearerAuth(config.token)
+            contentType(ContentType.Application.Json)
+            val request = ExecutionRequest(config.sessionId.toString(), config.epoch)
+            setBody(JSON.encodeToString(ExecutionRequest.serializer(), request))
+        }
+        val status = response.status
+        return when {
+            status == HttpStatusCode.OK -> JSON.decodeFromString(EnvironmentValues.serializer(), response.bodyAsText())
+            status == HttpStatusCode.NotFound -> null
+            status == HttpStatusCode.Unauthorized || status == HttpStatusCode.Forbidden ->
+                throw VariablesRefusedException()
+            status == HttpStatusCode.Conflict && errorType(response.bodyAsText()) == FENCED ->
+                throw VariablesRefusedException()
+            else -> error("The variables answered ${status.value}.")
+        }
+    }
+
     override suspend fun openTerminal(): TerminalLink {
         val query = "sessionId=${config.sessionId}&epoch=${config.epoch}"
         val url = config.serverUrl.replaceFirst("http", "ws") + "/api/v1/cloud/runner/terminal?$query"
@@ -262,6 +289,7 @@ class HttpServerApi(
         private const val SERVER_ERRORS = 500
         private const val LINKED = "linked"
         private const val UNAVAILABLE = "unavailable"
+        private const val FENCED = "execution_fenced"
 
         /** Statuses of a request the server will never take, as TeamCode's runner. */
         private val REFUSALS = setOf(400, 403, 413, 422)

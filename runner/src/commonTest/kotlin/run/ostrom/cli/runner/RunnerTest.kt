@@ -483,6 +483,61 @@ class RunnerTest {
         assertEquals(Instruction.RUN, server.reportPreparation("configuring_git"))
     }
 
+    @Test
+    fun eachAgentStartGetsTheOwnersVariablesUnderTheRunnersOwnAndClaudeAsksForThemBeforeEachCommand() = runTest {
+        var asked = 0
+        val owner = RunnerVariables({
+            asked++
+            EnvironmentValues(mapOf("API_KEY" to "v$asked", "OSTROM_SESSION_ID" to "forged", "SHARED" to "owner"))
+        }, clock, {})
+        val server = FakeServer()
+        val terminals = mutableListOf<FakeTerminal>()
+        val environments = mutableListOf<Map<String, String>>()
+        val runner = Runner(
+            config,
+            server,
+            starter { script, environment, _ ->
+                environments += environment
+                FakeTerminal(script).also { terminals += it }
+            },
+            mapOf("SHARED" to "runner"),
+            clock,
+            {},
+            variables = owner,
+        )
+        val done = CompletableDeferred<Int>()
+        backgroundScope.launchRunner(runner, done)
+        server.instructions.send(Result.success(Instruction.RUN))
+        testScheduler.runCurrent()
+        terminals.first().output.send(null)
+        testScheduler.runCurrent()
+        server.instructions.send(Result.success(Instruction.STOP))
+        testScheduler.advanceTimeBy(16.seconds)
+        assertEquals(0, done.await())
+
+        val (first, again) = environments
+        assertEquals("v1", first["API_KEY"])
+        assertEquals("v2", again["API_KEY"])
+        assertEquals("runner", first["SHARED"])
+        assertTrue(first["OSTROM_SESSION_ID"] != "forged")
+        assertEquals("/run/ostrom/agent-env.sh", first[AgentEnvironment.CLAUDE_ENV_FILE])
+
+        // Another agent has no such file.
+        val codex = mutableListOf<Map<String, String>>()
+        val other = Runner(
+            config.copy(agentCommand = "codex"),
+            FakeServer().also { it.instructions.send(Result.success(Instruction.STOP)) },
+            starter { script, environment, _ -> FakeTerminal(script).also { codex += environment } },
+            emptyMap(),
+            clock,
+            {},
+            variables = owner,
+        )
+        assertEquals(0, other.run())
+        assertEquals("v3", codex.single()["API_KEY"])
+        assertNull(codex.single()[AgentEnvironment.CLAUDE_ENV_FILE])
+    }
+
     private fun CoroutineScope.launchRunner(runner: Runner, done: CompletableDeferred<Int>) =
         launch { done.complete(runner.run()) }
 }
