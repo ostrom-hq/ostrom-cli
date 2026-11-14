@@ -76,6 +76,16 @@ class ConfigureCommandTest : CliKit() {
     @Test
     fun aFolderThatCannotBeWrittenIsExit73() {
         typed += "ost_key"
-        assertEquals(73, run(mapOf(capabilities()), "--server", "https://ostrom.example", env = emptyMap()))
+        assertEquals(73, run(mapOf(capabilities()), "--server", "https://ostrom.example", env = emptyMap()), "no folder")
+        // config.toml is a folder with something in it: the token is kept, the server cannot be
+        fileSystem.createDirectories("$home/config.toml/x".toPath())
+        typed += "ost_key"
+        assertEquals(73, run(mapOf(capabilities()), "--server", "https://ostrom.example"))
+        assertTrue(console.err.endsWith("ostrom: could not write $home/config.toml\n"), console.err.toString())
+        // credentials.json is a folder too: the login cannot be kept
+        fileSystem.createDirectories("$home/credentials.json/x".toPath())
+        typed += "ost_key"
+        assertEquals(73, run(mapOf(capabilities()), "--server", "https://ostrom.example"))
+        assertTrue(console.err.contains("ostrom: could not write $home ("), console.err.toString())
     }
 }
