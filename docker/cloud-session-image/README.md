@@ -54,6 +54,10 @@ RUN apt-get update \
 
 ## Building and using it
 
+Ostrom publishes this template, built as is, as the default session image: `docker.io/ostromhq/ostrom-session:<version>`
+for each release (signed by digest, as the runner image), and `:edge` and `:sha-<commit>` from main. Each is built on
+the runner image of the same build. Build your own when your sessions need more than the agents:
+
 ```sh
 docker build --build-arg OSTROM_RUNNER_IMAGE=docker.io/ostromhq/ostrom-runner:<version>@sha256:<digest> \
   -t registry.example.org/ostrom-session:2026-11-13 docker/cloud-session-image

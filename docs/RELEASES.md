@@ -45,8 +45,10 @@ at once and the Homebrew tap and Scoop bucket are updated (`taps` job). The imag
 | `install.sh`, `install.ps1` | the installers (the site serves `install.sh` at `https://ostrom.run/install.sh`) |
 | `winget-manifests-<version>.tar.gz` | the three winget manifest files, to submit to `microsoft/winget-pkgs` after the go |
 
-Also published: the image `docker.io/ostromhq/ostrom-runner:<version>` and `:latest` (linux/amd64 and linux/arm64,
-signed by digest, with an SBOM and max-mode provenance attached by buildx), the Homebrew formula
+Also published: the images `docker.io/ostromhq/ostrom-runner:<version>` and
+`docker.io/ostromhq/ostrom-session:<version>` (linux/amd64 and linux/arm64, signed by digest, with an SBOM and
+max-mode provenance attached by buildx; `:latest` moves to them when ostrom-server stops publishing its own runner
+image), the Homebrew formula
 (`ostrom-hq/homebrew-tap`, `Formula/ostrom.rb`) and the Scoop manifest (`ostrom-hq/scoop-bucket`, `bucket/ostrom.json`).
 The `taps` job pushes them over SSH trusting only GitHub's published host keys, pinned in
 `scripts/release/github_known_hosts` (no first-use trust, no system `known_hosts`); it takes its ssh options from
