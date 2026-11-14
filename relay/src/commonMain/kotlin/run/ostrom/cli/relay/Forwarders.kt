@@ -48,6 +48,14 @@ private const val WAITS_MCP = "/api/v1/waits/mcp"
  */
 internal const val WORKFLOW_SERVER = "ostrom-workflow"
 private const val WORKFLOWS_MCP = "/api/v1/workflows/mcp"
+
+/**
+ * The artifacts server (`artifacts.v1`): Ostrom's `ostrom-artifacts`, served at [ARTIFACTS_MCP] for the launch's agent
+ * token, which publishes as the member who launched it. Its tools never make an artifact public nor delete one, and
+ * the relay opens no other artifacts route to the agent.
+ */
+internal const val ARTIFACTS_SERVER = "ostrom-artifacts"
+private const val ARTIFACTS_MCP = "/api/v1/artifacts/mcp"
 private const val SESSION_PARAMETER = "session"
 private val MCP_REQUEST_HEADERS = listOf("MCP-Protocol-Version", MCP_SESSION_HEADER, HttpHeaders.Accept)
 private val MCP_RESPONSE_HEADERS = listOf(MCP_SESSION_HEADER)
@@ -145,12 +153,15 @@ internal class McpForwarder(
 
     /**
      * Where [server]'s messages go: its gateway, or for Ostrom's own servers (the waits server, the workflow step's
-     * delivery) their route, with the session the relay knows, never one the agent names (4.3).
+     * delivery) their route, with the session the relay knows, never one the agent names (4.3); the artifacts
+     * server's route, which names no session.
      */
     private fun HttpRequestBuilder.target(server: String) {
         val own = when (server) {
             OSTROM_SERVER -> WAITS_MCP
             WORKFLOW_SERVER -> WORKFLOWS_MCP
+            // no session: an artifact belongs to the member, the server takes its origin from the agent token
+            ARTIFACTS_SERVER -> return url("${config.serverUrl}$ARTIFACTS_MCP")
             else -> return url("${config.serverUrl}/api/v1/mcp/$server")
         }
         url("${config.serverUrl}$own")

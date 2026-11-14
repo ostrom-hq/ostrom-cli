@@ -133,6 +133,7 @@ object LaunchVariables {
         "OSTROM_BIN",
         "OSTROM_KEEP_PLUGIN",
         "OSTROM_INFERENCE",
+        "OSTROM_ARTIFACTS",
         "OSTROM_ALIVE_MS",
     )
 }

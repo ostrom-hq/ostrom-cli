@@ -36,6 +36,13 @@ const val MEMORY = "memory.v1"
 const val WORKFLOWS_DELIVER = "workflows.deliver.v1"
 
 /**
+ * The feature key of the artifacts (`ServerFeatures.ARTIFACTS` of ostrom-core): the `ostrom-artifacts` MCP server,
+ * connected when the publication policy lets the launch's agent publish. The launcher depends on no other module, so
+ * the CLI's tests check that the two are the same.
+ */
+const val ARTIFACTS = "artifacts.v1"
+
+/**
  * The hooks a session runs besides Ostrom's own.
  *
  * @property waitsWake The server holds the Stop hook for a wait's answer ([WAITS_WAKE]), for Claude Code only.
@@ -44,6 +51,8 @@ const val WORKFLOWS_DELIVER = "workflows.deliver.v1"
  * MCP server is connected.
  * @property team The team hooks the member approved, installed, that the session runs.
  * @property memory The server serves the agent memory ([MEMORY]): the `ostrom-memory` MCP server is connected.
+ * @property artifacts The server serves the artifacts ([ARTIFACTS]) and its policy lets the agent publish now: the
+ * `ostrom-artifacts` MCP server is connected and the agent's own artifact tools are turned off.
  */
 internal class LaunchHooks(
     val waitsWake: Boolean,
@@ -51,6 +60,7 @@ internal class LaunchHooks(
     val workflowDelivery: Boolean,
     val team: List<TeamHook> = emptyList(),
     val memory: Boolean,
+    val artifacts: Boolean = false,
 )
 
 /** What a launch read of Ostrom before its agent starts ([AgentLaunchUseCase]). */
@@ -215,6 +225,7 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
             val mcp = async { mutableListOf<String>().let { notes -> mcpServers(site) { notes += it } to notes } }
             val inference = async { inferenceRelayed(request, site, launch) }
             val features = async { features(site) }
+            val artifacts = async { ArtifactsPolicy(dependencies.server).ask(features.await(), site, launch) }
             val skills = async {
                 mutableListOf<String>().also { team.syncSkills(request.agent, site, features.await(), it::add) }
             }
@@ -232,8 +243,16 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
             val served = features.await()
             // the Stop hook that holds the agent for a wait's answer: Claude Code only
             val wake = request.agent == Agent.CLAUDE && WAITS_WAKE in served
-            val launchHooks =
-                LaunchHooks(wake, TODOS in served, WORKFLOWS_DELIVER in served, teamHooks, MEMORY in served)
+            val (publishes, publishNote) = artifacts.await()
+            publishNote?.let(dependencies.say)
+            val launchHooks = LaunchHooks(
+                waitsWake = wake,
+                todos = TODOS in served,
+                workflowDelivery = WORKFLOWS_DELIVER in served,
+                team = teamHooks,
+                memory = MEMORY in served,
+                artifacts = publishes,
+            )
             LaunchReads(pack, read, servers, inference.await(), launchHooks)
         }
 

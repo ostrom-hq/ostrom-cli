@@ -49,6 +49,8 @@ data class RelayView(val url: String, val token: String, val mcpServers: List<St
  * `ostrom-workflow` MCP server (one of [RelayView.mcpServers]), the rules say when to call it, and Claude Code gets
  * the Stop hook that sends a step's agent back to work once.
  * @property teamHooks The team hooks the member approved, installed: run next to Ostrom's own, on their events.
+ * @property artifacts The agent may publish artifacts now: it gets the `ostrom-artifacts` MCP server (one of
+ * [RelayView.mcpServers]), the rules point it there, and Claude Code's own artifact tools are turned off.
  */
 data class SessionLayout(
     val temporary: String,
@@ -70,6 +72,7 @@ data class SessionLayout(
     val memory: Boolean = false,
     val workflowDelivery: Boolean = false,
     val teamHooks: List<TeamHook> = emptyList(),
+    val artifacts: Boolean = false,
 ) {
     /** `"<ostrom>" hook gate|session|wake`, the command an agent's hook runs. */
     fun hookCommand(kind: String): String = "${quoted(executable)} hook $kind"
@@ -124,6 +127,18 @@ data class SessionLayout(
             "When you are working on a workflow step (the message that gave you the task ends by telling you to " +
                 "deliver), finish by calling `deliver` of the `ostrom-workflow` MCP server once, with exactly what " +
                 "the step asked for, then end your turn. Do not call it for an ordinary session."
+
+        /** The artifacts server, relayed (`ostrom mcp --session … --server ostrom-artifacts`). */
+        const val ARTIFACTS_SERVER = "ostrom-artifacts"
+
+        /**
+         * Told to the agent with the rules while the artifacts server is connected (TeamCode's instruction): every page
+         * for people goes through it, never another artifact system.
+         */
+        const val ARTIFACTS_INSTRUCTIONS =
+            "Publish every page meant for people (an HTML page, a document, a report, a plan, a dashboard) with the " +
+                "`publish` tool of the `ostrom-artifacts` MCP server, never with another artifact system, and give " +
+                "the link it returns."
         private const val CHECK_MARGIN_SECONDS = 20L
         private const val MIN_SECONDS = 10L
     }
