@@ -92,7 +92,7 @@ internal class CloudShowCommand(private val dependencies: CliDependencies) : Cli
         val failure = shown.child("failure")?.let { listOfNotNull(it.text("code"), it.text("message")) }
         // TeamCode's `cloud show`: a deletion is shown once it starts, with its problem's code when it is blocked.
         val deletion = shown.child("workspaceDeletion")?.let { proof ->
-            proof.text("state")?.takeIf { it.isNotBlank() && it != "none" }?.let { state ->
+            proof.text("state")?.takeIf { it != "none" }?.let { state ->
                 "deletion $state" + (proof.child("problem")?.text("code")?.let { " ($it)" } ?: "")
             }
         }

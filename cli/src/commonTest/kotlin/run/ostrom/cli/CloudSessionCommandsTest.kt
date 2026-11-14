@@ -77,6 +77,10 @@ class CloudSessionCommandsTest : SetupKit() {
         assertTrue(console.out.contains("Status       running\n"), "a reason only beside terminated")
         assertFalse(console.out.contains("Workspace"), "a deletion without a state says nothing")
         console.out.clear()
+        val proven = """{"id":"cs6","status":"terminated","workspaceDeletion":{"state":"proven"}}"""
+        assertEquals(0, run(routes("GET /api/v1/cloud/sessions/cs6" to (200 to proven)), "cloud", "show", "cs6"))
+        assertTrue(console.out.contains("Workspace    deletion proven\n"), console.out.toString())
+        console.out.clear()
         assertEquals(0, run(routes(show to (200 to session)), "cloud", "show", "cs1", "--json"))
         assertEquals("$session\n", console.out.toString())
         assertEquals(66, run(routes(), "cloud", "show", "cs9"), "no such session")
