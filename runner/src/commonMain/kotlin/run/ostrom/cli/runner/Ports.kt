@@ -145,12 +145,18 @@ interface ServerApi {
      * @param ready Whether the terminal runs.
      * @param stopped Whether the runner stopped the agent.
      * @param lastModelRequestAt The agent's last sign of work (ISO 8601), if any.
+     * @param background Whether the agent has background work ([AgentState]).
      *
      * @return What to do.
      *
      * @throws ExecutionEndedException When the server no longer knows this execution.
      */
-    suspend fun heartbeat(ready: Boolean, stopped: Boolean, lastModelRequestAt: String?): Instruction
+    suspend fun heartbeat(
+        ready: Boolean,
+        stopped: Boolean,
+        lastModelRequestAt: String?,
+        background: Boolean = false,
+    ): Instruction
 
     /**
      * Opens the terminal WebSocket.

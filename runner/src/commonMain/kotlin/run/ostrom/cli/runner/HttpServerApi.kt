@@ -46,6 +46,7 @@ class HttpServerApi(
         val ready: Boolean,
         val stopped: Boolean,
         val lastModelRequestAt: String?,
+        val background: Boolean,
     )
 
     @Serializable
@@ -81,7 +82,12 @@ class HttpServerApi(
         data class Resize(val columns: Int, val rows: Int) : Control
     }
 
-    override suspend fun heartbeat(ready: Boolean, stopped: Boolean, lastModelRequestAt: String?): Instruction {
+    override suspend fun heartbeat(
+        ready: Boolean,
+        stopped: Boolean,
+        lastModelRequestAt: String?,
+        background: Boolean,
+    ): Instruction {
         val response = client.post("${config.serverUrl}/api/v1/cloud/runner/heartbeat") {
             bearerAuth(config.token)
             contentType(ContentType.Application.Json)
@@ -91,6 +97,7 @@ class HttpServerApi(
                 ready,
                 stopped,
                 lastModelRequestAt,
+                background,
             )
             setBody(JSON.encodeToString(HeartbeatRequest.serializer(), request))
         }

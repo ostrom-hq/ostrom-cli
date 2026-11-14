@@ -103,9 +103,11 @@ class RunnerConfigTest {
         val defaults = config.credentialSocket to config.gitHubConfigDirectory
         assertEquals("/run/ostrom/credential.sock" to "/run/ostrom/gh", defaults)
         val github = RunnerConfig.from(
-            base + ("OSTROM_CREDENTIAL_SOCKET" to "/s/k.sock") + ("OSTROM_GH_CONFIG_DIR" to "/s/gh"),
+            base + ("OSTROM_CREDENTIAL_SOCKET" to "/s/k.sock") + ("OSTROM_GH_CONFIG_DIR" to "/s/gh") +
+                ("OSTROM_AGENT_STATE_SOCKET" to "/s/state.sock"),
         ) { "t" }
         assertEquals("/s/k.sock" to "/s/gh", github.credentialSocket to github.gitHubConfigDirectory)
+        assertEquals("/run/ostrom/state.sock" to "/s/state.sock", config.stateSocket to github.stateSocket)
     }
 
     @Test
@@ -133,6 +135,10 @@ class RunnerConfigTest {
         assertFalse(environment.keys.any { it in RunnerConfig.PRIVATE_VARIABLES })
         assertEquals("/workspace/.home", environment["HOME"])
         assertEquals("/workspace", environment["OSTROM_WORKSPACE"])
+        // Claude Code's background-work hooks, and where they report.
+        assertEquals("/run/ostrom/state.sock", environment[RunnerConfig.STATE_VARIABLE])
+        assertEquals(AgentState.claudeSettings(RunnerConfig.BINARY), environment[RunnerConfig.SETTINGS_VARIABLE])
+        assertTrue("--settings \"\$OSTROM_AGENT_SETTINGS\"" in SessionScript.FIRST)
         assertEquals("xterm-256color", environment["TERM"])
         assertEquals("C.UTF-8", environment["LANG"])
         assertEquals("/opt/ostrom:/usr/bin", environment["PATH"])
@@ -182,10 +188,15 @@ class RunnerConfigTest {
 
         assertEquals(
             Instruction.RUN,
-            api.heartbeat(ready = true, stopped = false, lastModelRequestAt = "2026-10-30T10:00:00Z"),
+            api.heartbeat(
+                ready = true,
+                stopped = false,
+                lastModelRequestAt = "2026-10-30T10:00:00Z",
+                background = true,
+            ),
         )
         val heartbeat = """{"sessionId":"$id","epoch":3,"ready":true,"stopped":false,""" +
-            """"lastModelRequestAt":"2026-10-30T10:00:00Z"}"""
+            """"lastModelRequestAt":"2026-10-30T10:00:00Z","background":true}"""
         assertEquals(heartbeat, bodies.single())
         answer = """{"instruction":"stop","state":"pausing","extra":1}"""
         assertEquals(Instruction.STOP, api.heartbeat(ready = true, stopped = false, lastModelRequestAt = null))

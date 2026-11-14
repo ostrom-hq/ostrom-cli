@@ -22,7 +22,10 @@ object CloudProcess {
     /** A registered runner on a machine of the organization. */
     const val MACHINE = "machine"
 
-    private val COMMANDS = setOf(RUNNER, AGENT_SUPERVISOR, CHECK_HOST, CREDENTIAL, MACHINE)
+    /** Claude Code's `Stop` and `SessionEnd` hook, in the agent's container: tells the runner of background work. */
+    const val AGENT_STATE = "agent-state"
+
+    private val COMMANDS = setOf(RUNNER, AGENT_SUPERVISOR, CHECK_HOST, CREDENTIAL, MACHINE, AGENT_STATE)
 
     /**
      * The hidden command [args] name, if any.

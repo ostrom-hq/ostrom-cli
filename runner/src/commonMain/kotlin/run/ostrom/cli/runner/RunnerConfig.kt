@@ -23,6 +23,8 @@ import kotlin.uuid.Uuid
  *   container does not mount.
  * @property credentialSocket Where the runner serves git's credentials (`OSTROM_CREDENTIAL_SOCKET`), in the socket
  *   directory the agent's container mounts.
+ * @property stateSocket Where the runner hears of the agent's background work (`OSTROM_AGENT_STATE_SOCKET`,
+ *   [AgentState]), in the socket directory the agent's container mounts.
  * @property gitHubConfigDirectory The agent's `gh` configuration (`GH_CONFIG_DIR`), which the runner writes, in the
  *   same directory.
  * @property binary The `ostrom` binary every container of the session runs (the init container copied it there): git's
@@ -43,6 +45,7 @@ data class RunnerConfig(
     val checksSocket: String = DEFAULT_CHECKS_SOCKET,
     val checkHostSocket: String = DEFAULT_CHECK_HOST_SOCKET,
     val credentialSocket: String = DEFAULT_CREDENTIAL_SOCKET,
+    val stateSocket: String = DEFAULT_STATE_SOCKET,
     val gitHubConfigDirectory: String = DEFAULT_GITHUB_CONFIG_DIRECTORY,
     val binary: String = BINARY,
 ) {
@@ -102,6 +105,7 @@ data class RunnerConfig(
                 checksSocket = optional(CHECKS_VARIABLE) ?: DEFAULT_CHECKS_SOCKET,
                 checkHostSocket = optional("OSTROM_CHECK_HOST_SOCKET") ?: DEFAULT_CHECK_HOST_SOCKET,
                 credentialSocket = optional(CREDENTIAL_VARIABLE) ?: DEFAULT_CREDENTIAL_SOCKET,
+                stateSocket = optional(STATE_VARIABLE) ?: DEFAULT_STATE_SOCKET,
                 gitHubConfigDirectory = optional("OSTROM_GH_CONFIG_DIR") ?: DEFAULT_GITHUB_CONFIG_DIRECTORY,
             )
         }
@@ -129,6 +133,15 @@ data class RunnerConfig(
         /** Where the runner serves git's credentials: the agent socket's directory. */
         const val DEFAULT_CREDENTIAL_SOCKET = "/run/ostrom/credential.sock"
 
+        /** The variable that tells the agent's `Stop` hook where to report its background work. */
+        const val STATE_VARIABLE = "OSTROM_AGENT_STATE_SOCKET"
+
+        /** Where the runner hears of the agent's background work: the agent socket's directory. */
+        const val DEFAULT_STATE_SOCKET = "/run/ostrom/state.sock"
+
+        /** The variable that holds Claude Code's `--settings` in a cloud session ([AgentState.claudeSettings]). */
+        const val SETTINGS_VARIABLE = "OSTROM_AGENT_SETTINGS"
+
         /** The agent's `gh` configuration: the agent socket's directory, which no workspace file reaches. */
         const val DEFAULT_GITHUB_CONFIG_DIRECTORY = "/run/ostrom/gh"
 
@@ -144,9 +157,10 @@ data class RunnerConfig(
 object SessionScript {
     /**
      * The script of the first terminal: clone the repository once (never reset afterwards), enter it, run the
-     * agent (with its model and first message, if any), then leave a login shell so the member can start the
-     * agent again. Values come from the environment, never from the script's text. The clone and checkout run with
-     * [GIT_HARDENING] (no hook, no fsmonitor, HTTPS only, no submodule), so a repository's content runs nothing.
+     * agent (with its model and first message, if any; Claude Code with the settings of its background-work hooks),
+     * then leave a login shell so the member can start the agent again. Values come from the environment, never from
+     * the script's text. The clone and checkout run with [GIT_HARDENING] (no hook, no fsmonitor, HTTPS only, no
+     * submodule), so a repository's content runs nothing.
      */
     const val FIRST = """
 set -u
@@ -175,11 +189,14 @@ if [ -n "${'$'}{OSTROM_LAUNCH_REFUSED:-}" ]; then
   exec bash -l
 fi
 set --
+if [ "${'$'}OSTROM_AGENT_COMMAND" = claude ] && [ -n "${'$'}{OSTROM_AGENT_SETTINGS:-}" ]; then
+  set -- --settings "${'$'}OSTROM_AGENT_SETTINGS"
+fi
 if [ -n "${'$'}{OSTROM_AGENT_MODEL:-}" ]; then
   case "${'$'}OSTROM_AGENT_COMMAND" in
     bash) ;;
-    gemini) set -- -m "${'$'}OSTROM_AGENT_MODEL" ;;
-    *) set -- --model "${'$'}OSTROM_AGENT_MODEL" ;;
+    gemini) set -- "${'$'}@" -m "${'$'}OSTROM_AGENT_MODEL" ;;
+    *) set -- "${'$'}@" --model "${'$'}OSTROM_AGENT_MODEL" ;;
   esac
 fi
 if [ -n "${'$'}{OSTROM_AGENT_PROMPT:-}" ]; then
@@ -218,6 +235,8 @@ exec bash -l
             "TERM" to "xterm-256color",
             "LANG" to (environment["LANG"] ?: "C.UTF-8"),
             "PATH" to path(environment["PATH"], config.binary),
+            RunnerConfig.STATE_VARIABLE to config.stateSocket,
+            RunnerConfig.SETTINGS_VARIABLE to AgentState.claudeSettings(config.binary),
         ) + gitHub(config)
 
     /**

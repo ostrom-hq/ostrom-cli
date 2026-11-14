@@ -20,7 +20,12 @@ class RunnerChecksTest {
         val checks = mutableListOf<RunnerCheck>()
         var answer: suspend () -> Boolean = { true }
 
-        override suspend fun heartbeat(ready: Boolean, stopped: Boolean, lastModelRequestAt: String?): Instruction =
+        override suspend fun heartbeat(
+            ready: Boolean,
+            stopped: Boolean,
+            lastModelRequestAt: String?,
+            background: Boolean,
+        ): Instruction =
             error("no heartbeat")
 
         override suspend fun openTerminal(): TerminalLink = error("no terminal")
