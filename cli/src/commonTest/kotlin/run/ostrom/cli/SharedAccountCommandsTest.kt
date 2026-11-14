@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli
 
+import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -34,6 +35,20 @@ class SharedAccountCommandsTest : SetupKit() {
         val nameless = mapOf(handing, list, "POST /api/v1/accounts/a5/handover" to (200 to "{}"))
         assertEquals(0, run(nameless, "accounts", "handover", "a5", "--confirm"))
         assertOut("✓ Ostrom renews the tokens of a5 from now on.\n")
+    }
+
+    @Test
+    fun theAdminTokenListsAndHandsOverAsTeamCodesAdministrator() {
+        // a token of ostrom login --admin, kept for an hour
+        val home = "/home/maya/.config/ostrom"
+        val server = "https://ostrom.example"
+        fileSystem.createDirectories(home.toPath())
+        fileSystem.write("$home/admin.json".toPath()) { writeUtf8("""{"$server":${now + 60 * 60 * 1_000L}}""") }
+        secretsKept["$server#admin"] = "ost_adm"
+        val done = handover to (200 to """{"id":"a1","label":"Team Max","status":"ready"}""")
+        assertEquals(0, run(mapOf(handing, list, done), "accounts", "handover", "Team Max", "--confirm"))
+        assertEquals("ost_adm", requests.last { it.second.path == "/api/v1/accounts" }.second.token, "read with it")
+        assertEquals("ost_adm", requests.last { it.second.method == "POST" }.second.token, "handed over with it")
     }
 
     @Test
