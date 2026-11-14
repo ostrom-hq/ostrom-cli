@@ -229,7 +229,7 @@ class CloudMcpTest {
                 "/api/v1/artifacts/policy" to ("""{"canPublish":true}""" to HttpStatusCode.OK),
                 "/api/v1/memory/index" to ("""{"items":[]}""" to HttpStatusCode.OK),
                 "/api/v1/capabilities" to (
-                    """{"features":["todos.v1","workflows.deliver.v1","memory.v1"]}""" to HttpStatusCode.OK
+                    """{"features":["runners.cloud.agent.v1","todos.v1","workflows.deliver.v1"]}""" to HttpStatusCode.OK
                     ),
             ),
             exchange,
@@ -247,15 +247,25 @@ class CloudMcpTest {
     }
 
     @Test
-    fun theWaitsComeWithAnyAnswerOfTheCapabilitiesAndTheOthersWithTheirFeature() = runTest {
+    fun theWaitsComeWithTheBoundAgentSessionAndTheOthersWithTheirFeatureToo() = runTest {
         val capabilities = { body: String -> mapOf("/api/v1/capabilities" to (body to HttpStatusCode.OK)) }
         assertEquals(
             setOf(CloudMcpSession.WAITS, CloudMcpSession.TODO),
-            servers(capabilities("""{"features":["todos.v1", 1, {}]}""")).available("t"),
+            servers(capabilities("""{"features":["runners.cloud.agent.v1","todos.v1", 1, {}]}""")).available("t"),
         )
-        assertEquals(setOf(CloudMcpSession.WAITS), servers(capabilities("""{"features":[]}""")).available("t"))
+        val bound = """{"features":["runners.cloud.agent.v1"]}"""
+        assertEquals(setOf(CloudMcpSession.WAITS), servers(capabilities(bound)).available("t"))
         // No feature list: an answer that cannot say, nothing from it.
         assertTrue(servers(capabilities("""{"version":"1"}""")).available("t").isEmpty())
+    }
+
+    @Test
+    fun aServerThatDoesNotBindTheAgentTokenToItsCloudSessionGetsNoWaitsTodoOrDelivery() = runTest {
+        val older = """{"features":["waits.v1","todos.v1","workflows.deliver.v1","memory.v1"]}"""
+        val available = servers(mapOf("/api/v1/capabilities" to (older to HttpStatusCode.OK))).available("t")
+        assertTrue(available.isEmpty(), "$available")
+        val none = mapOf("/api/v1/capabilities" to ("""{"features":[]}""" to HttpStatusCode.OK))
+        assertTrue(servers(none).available("t").isEmpty())
     }
 
     @Test
