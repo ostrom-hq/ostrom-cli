@@ -44,6 +44,8 @@ class ReleaseVerificationTest {
         put("/dl/latest.json", manifest)
         put("/dl/latest.json.sig", signature)
         assertEquals(ExitCode.NOT_FOUND, assertFailsWith<ReleaseRefused> { verify("/dl/latest.json.sig") }.code)
+        fake.createDirectories("/dl/folder".toPath())
+        assertEquals(ExitCode.NOT_FOUND, assertFailsWith<ReleaseRefused> { verify("/dl/folder") }.code)
         put("/dl/broken", "x")
         assertEquals(ExitCode.NOT_FOUND, assertFailsWith<ReleaseRefused> { verify("/dl/broken") }.code)
     }

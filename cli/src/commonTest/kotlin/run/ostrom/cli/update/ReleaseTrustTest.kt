@@ -21,6 +21,9 @@ class ReleaseTrustTest {
         assertEquals(RotationVectors.NEXT_ID, releaseKeyId(next))
         assertNull(releaseKeyId("not a key"))
         assertNull(releaseKeyId("-----BEGIN PUBLIC KEY-----\n%%%\n-----END PUBLIC KEY-----\n"))
+        assertNull(releaseKeyId("-----BEGIN PUBLIC KEY-----\nAAAA\nnot the footer"), "no footer")
+        assertNull(releaseKeyId("a\nb\nc"), "no header")
+        assertNull(releaseKeyId("-----BEGIN PUBLIC KEY-----\n-----END PUBLIC KEY-----"), "no body")
     }
 
     @Test

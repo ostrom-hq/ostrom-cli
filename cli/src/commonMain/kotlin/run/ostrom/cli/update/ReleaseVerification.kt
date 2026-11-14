@@ -14,6 +14,7 @@ import okio.HashingSource
 import okio.IOException
 import okio.Path
 import okio.Path.Companion.toPath
+import okio.use
 
 /** What `ostrom verify-release` checked: the release [version], the id of the root that signed it, the target. */
 class VerifiedRelease(val version: String, val keyId: String, val verifiedTarget: String?)
@@ -47,7 +48,9 @@ class ReleaseVerification(
             ?: throw ReleaseRefused(ExitCode.SIGNATURE_REFUSED, "✗ The signature matches none of the trusted roots.")
         val body = parseObject(bytes.decodeToString()) ?: throw unreadableManifest()
         val version = versionOf(body)
-        if (archive != null && target != null) checkArchive(archive.toPath(), version, target, body.child("assets"))
+        // requireTogether: an archive comes with its target, so the target is there
+        @Suppress("UnsafeCallOnNullableType")
+        archive?.let { checkArchive(it.toPath(), version, target!!, body.child("assets")) }
         return VerifiedRelease(version, keyId, target)
     }
 
@@ -126,7 +129,9 @@ class ReleaseVerification(
             null
         }
         if (metadata == null || !metadata.isRegularFile || metadata.symlinkTarget != null) throw unreadable(path)
-        return metadata.size ?: 0
+        // a regular file has a size
+        @Suppress("UnsafeCallOnNullableType")
+        return metadata.size!!
     }
 
     private fun unreadable(path: Path) = ReleaseRefused(ExitCode.NOT_FOUND, "✗ $path is not a readable file.")
