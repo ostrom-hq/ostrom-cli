@@ -11,7 +11,7 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlin.uuid.Uuid
 
 /** An execution's binary volume ([PlanGuard]), its epoch captured. */
-private val BINARY_VOLUME = Regex("ostrom-ws-[0-9a-f]{32}-e([0-9]+)${PlanGuard.DELIVERY_SUFFIX}")
+private val BINARY_VOLUME = Regex("ostrom-ws-[0-9a-f]{32}-e([0-9]{1,18})${PlanGuard.DELIVERY_SUFFIX}")
 
 /**
  * The cloud sessions a registered runner runs on its machine's Docker Engine.
@@ -111,7 +111,18 @@ class MachineSessions(
             // An execution's binary volume ends with it: the next one gets the binary of its own runner image.
             val epoch = BINARY_VOLUME.matchEntire(volume.name)?.groupValues?.get(1)?.toLongOrNull()
             val ended = epoch != null && Execution(volume.sessionId, epoch) !in wanted
-            if (volume.sessionId !in kept || ended) engine.removeVolume(volume.name)
+            if (volume.sessionId !in kept || ended) remove(volume)
+        }
+    }
+
+    /** Deletes a volume; one still held (its container not gone yet) is retried at the next heartbeat. */
+    private suspend fun remove(volume: HeldVolume) {
+        try {
+            engine.removeVolume(volume.name)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            log("could not delete ${volume.name}: ${error::class.simpleName}: ${error.message}")
         }
     }
 

@@ -224,6 +224,15 @@ class PlanGuardTest {
             ),
         )
         for ((why, bad) in refused) assertFailsWith<IllegalArgumentException>(why) { guard.check(bad) }
+        assertFailsWith<IllegalArgumentException>("a session's container that reads another execution's binary") {
+            guard.check(swapped(second = agent.withBinds(listOf("ostrom-ws-$hex-e3-bin:/opt/ostrom:ro"))))
+        }
+        assertFailsWith<IllegalArgumentException>("a delivery after a container that mounts the binary") {
+            guard.check(sent.copy(containers = sent.containers.drop(1) + delivery))
+        }
+        assertFailsWith<IllegalArgumentException>("a pinned session image without a pinned delivery image") {
+            PlanGuard(runner, null, "ghcr.io/ostrom-hq/ostrom-runner:1", null).check(sent)
+        }
     }
 
     @Test

@@ -20,6 +20,7 @@ internal class FakeDockerEngine : DockerEngine {
     val created = mutableListOf<PlannedObject>()
     var failStart: Exception? = null
     var failRemove: Exception? = null
+    var failVolumeRemove: Exception? = null
     var onStart: suspend (PlannedObject) -> Unit = {}
 
     var info: EngineInfo? = EngineInfo(cpus = 2, memoryBytes = 8L shl 30)
@@ -51,6 +52,7 @@ internal class FakeDockerEngine : DockerEngine {
     }
 
     override suspend fun removeVolume(name: String) {
+        failVolumeRemove?.let { throw it }
         volumes.removeAll { it.name == name }
     }
 
@@ -164,6 +166,14 @@ class MachineSessionsTest {
         assertTrue("ostrom-ws-${a.toHexString()}-e1-bin" !in names)
         assertTrue("ostrom-ws-${a.toHexString()}-e2-bin" in names)
         assertTrue("ostrom-ws-${a.toHexString()}" in names)
+
+        // A volume still held is retried at the next heartbeat, the others go on.
+        engine.failVolumeRemove = DockerApiException("delete a volume", HttpStatusCode.Conflict)
+        sessions.apply(work(workspaces = listOf(a)))
+        assertTrue(lines.any { it.startsWith("could not delete ostrom-ws-${a.toHexString()}-e2-bin") })
+        engine.failVolumeRemove = CancellationException("stopped")
+        assertFailsWith<CancellationException> { sessions.apply(work(workspaces = listOf(a))) }
+        engine.failVolumeRemove = null
 
         // Paused: no execution, so no binary either.
         sessions.apply(work(workspaces = listOf(a)))

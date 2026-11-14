@@ -40,10 +40,19 @@ class PlanGuard(
      *
      * @throws IllegalArgumentException When the plan asks for anything else than a session.
      */
-    fun check(plan: ExecutionPlan): ExecutionPlan = ExecutionPlan(
-        plan.volumes.map { volume(it) },
-        plan.containers.map { container(it) },
-    )
+    fun check(plan: ExecutionPlan): ExecutionPlan {
+        // The engine fills the binary volume from the first container that mounts it: the delivery must come first.
+        val first = plan.containers.indexOfFirst { mountsBinary(it) }
+        require(first < 0 || plan.containers[first].name.endsWith(DELIVERY_SUFFIX)) {
+            "The delivery container must be the first to mount the binary."
+        }
+        return ExecutionPlan(plan.volumes.map { volume(it) }, plan.containers.map { container(it) })
+    }
+
+    private fun mountsBinary(planned: PlannedObject): Boolean {
+        val host = planned.body["HostConfig"] as? JsonObject ?: return false
+        return texts(host["Binds"]).any { it != null && BINARY_BIND.matches(it) }
+    }
 
     private fun volume(planned: PlannedObject): PlannedObject {
         require(VOLUME.matches(planned.name)) { "A volume must be a session's, not ${planned.name}." }
@@ -57,6 +66,10 @@ class PlanGuard(
         require(CONTAINER.matches(planned.name)) { "A container must be an execution's, not ${planned.name}." }
         require(body.keys.all { it in CONTAINER_KEYS }) { "A container asks for more than a session's container." }
         val delivery = planned.name.endsWith(DELIVERY_SUFFIX)
+        // A machine that pins the session image pins the delivery's too: a `-bin` name never escapes the pin.
+        require(!delivery || image == null || runnerImage != null) {
+            "A machine that pins the session image must pin the delivery image (OSTROM_RUNNER_DELIVERY_IMAGE)."
+        }
         val allowed = if (delivery) runnerImage else image
         val requested = text(body["Image"])
         require(requested != null && (allowed == null || requested == allowed)) { "A container's image is refused." }
@@ -66,9 +79,12 @@ class PlanGuard(
         val binds = texts(host["Binds"])
         require(binds.all { it != null && BIND.matches(it) }) { "A container may mount the session's volumes only." }
         val binaries = binds.filterNotNull().filter { BINARY_BIND.matches(it) }
+        // The execution's own binary volume, whatever the container of the execution.
+        val execution = planned.name.removePrefix(CONTAINER_PREFIX).split('-').take(2).joinToString("-")
+        val own = "$VOLUME_PREFIX$execution$DELIVERY_SUFFIX:"
+        require(binaries.all { it.startsWith(own) }) { "A container mounts its own execution's binary only." }
         if (delivery) {
-            val own = "${VOLUME_PREFIX}${planned.name.removePrefix(CONTAINER_PREFIX).removeSuffix(DELIVERY_SUFFIX)}"
-            require(binds.size == 1 && binaries.size == 1 && binaries[0].startsWith("$own$DELIVERY_SUFFIX:")) {
+            require(binds.size == 1 && binaries.size == 1) {
                 "A delivery container mounts its execution's binary volume only."
             }
             require(!binaries[0].endsWith(READ_ONLY)) { "A delivery container fills its binary volume." }
@@ -103,10 +119,10 @@ class PlanGuard(
         private const val VOLUME_PREFIX = "ostrom-ws-"
         private const val CONTAINER_PREFIX = "ostrom-s-"
         private const val READ_ONLY = ":ro"
-        private val VOLUME = Regex("ostrom-ws-[0-9a-f]{32}(-socket|-checks|-e[0-9]+-bin)?")
-        private val CONTAINER = Regex("ostrom-s-[0-9a-f]{32}-e[0-9]+(-agent|-checks|-bin)?")
-        private val BIND = Regex("ostrom-ws-[0-9a-f]{32}(-socket|-checks|-e[0-9]+-bin)?:/[A-Za-z0-9._/-]+(:ro)?")
-        private val BINARY_BIND = Regex("ostrom-ws-[0-9a-f]{32}-e[0-9]+-bin:.*")
+        private val VOLUME = Regex("ostrom-ws-[0-9a-f]{32}(-socket|-checks|-e[0-9]{1,18}-bin)?")
+        private val CONTAINER = Regex("ostrom-s-[0-9a-f]{32}-e[0-9]{1,18}(-agent|-checks|-bin)?")
+        private val BIND = Regex("ostrom-ws-[0-9a-f]{32}(-socket|-checks|-e[0-9]{1,18}-bin)?:/[A-Za-z0-9._/-]+(:ro)?")
+        private val BINARY_BIND = Regex("ostrom-ws-[0-9a-f]{32}-e[0-9]{1,18}-bin:.*")
         private val USER = Regex("[1-9][0-9]*:[1-9][0-9]*")
         private val VOLUME_KEYS = setOf("Name", "Labels")
         private val CONTAINER_KEYS = setOf("Image", "User", "Entrypoint", "WorkingDir", "Env", "Labels", "HostConfig")
