@@ -8,11 +8,11 @@ nothing; the import (`--yes`); what Ostrom now holds, read back by its API (the 
 shared accounts), never only the exit code. The accounts wait for their handover, as TeamCode's import leaves them
 (docs/capacity.md « Refresh ownership »: TeamCode may still renew their tokens): the same import again changes no
 server and refreshes those same two accounts, as TeamCode's repeated import does (docs/v1-review.md, step 4); the owner
-hands each over from the console (the server takes that write from a browser session only, so not with `ostrom
-accounts handover`), and a last import changes nothing. The token is revoked at
-the end; what was imported stays in the run's organisation, where no later step reads MCP servers, secrets or shared
-accounts. Without the team's options the step is skipped, even with --strict (a fixture, not a route): ostrom-server's
-cli-journey.yml gives them and fails a run without a passing 6.6.
+hands one over with `ostrom accounts handover <name> --confirm` (the token of `ostrom login --admin`, as TeamCode's
+`accounts handover ID --confirm`) and the other from the console, and a last import changes nothing. The token is
+revoked at the end; what was imported stays in the run's organisation, where no later step reads MCP servers, secrets
+or shared accounts. Without the team's options the step is skipped, even with --strict (a fixture, not a route):
+ostrom-server's cli-journey.yml gives them and fails a run without a passing 6.6.
 """
 import json
 import os
@@ -21,7 +21,8 @@ import re
 ROUTES = (("POST", "/api/v1/tokens"), ("POST", "/api/v1/import/teamcode"), ("GET", "/api/v1/mcp/servers"),
           ("GET", "/api/v1/secrets"), ("GET", "/api/v1/accounts"),
           ("POST", "/api/v1/accounts/00000000-0000-0000-0000-000000000000/handover"))
-# what the CLI's own calls need: the reads below and the handover go through the owner's browser session
+# what the CLI's own calls need: the reads below and one handover go through the owner's browser session, the other
+# handover through the token of ostrom login --admin
 SCOPES = ["import:write", "profile:read"]
 
 # The demo team's MCP variants (compose/demo/teamcode/02-seed.sql), as Ostrom's console lists them once imported:
@@ -37,6 +38,8 @@ ACCOUNTS = {"Claude Max 1": "ready", "Claude Max 2 (paused)": "disabled"}
 # As the import leaves them: serving nothing until their handover (a turned-off one says so first)
 PENDING = {"Claude Max 1": "pending_handover", "Claude Max 2 (paused)": "disabled"}
 PENDING_SAID = "! 2 shared accounts serve nothing until they are handed over"
+# What ostrom accounts handover says once it is done
+HANDED_OVER = "✓ Ostrom renews the tokens of "
 # A last import, once they are handed over, finds at least these unchanged: the four servers and the two accounts
 UNCHANGED_AT_LEAST = len(SERVERS) + len(ACCOUNTS)
 COUNTS = re.compile(r"^(\d+) created, (\d+) updated, (\d+) unchanged, (\d+) skipped", re.M)
@@ -183,18 +186,23 @@ class TeamCode:
         j.check(self.accounts() == PENDING, "and the accounts still wait for their handover")
 
     def handed_over(self):
-        """Once TeamCode no longer renews them, the owner hands each account over from the console: Ostrom renews its
-        tokens. The server takes this write from a browser session only (the admin token holds no accounts scope, a
-        personal token makes no console write, S2-52), so `ostrom accounts handover` is not the way here."""
+        """Once TeamCode no longer renews them, the owner hands each account over, as TeamCode's administrator does:
+        the first from the CLI (`ostrom accounts handover <name> --confirm`, signed in with `ostrom login --admin`,
+        written at once), the paused one from the console. Ostrom renews their tokens from then on."""
         j = self.journey
+        by_cli, by_console = list(ACCOUNTS)
+        ok = j.check(bool(j.admin_signed_in(self.maya)), "the owner signs in as an admin (ostrom login --admin)")
+        if ok:
+            done = j.governed(self.maya, "accounts", "handover", by_cli, "--confirm", must_hold=False)
+            ok = j.check(done == 0 and not j.last_held and HANDED_OVER + by_cli in (j.last_out or ""),
+                         f"ostrom accounts handover {by_cli!r} --confirm ({done}, held: {j.last_held}): "
+                         f"{(j.last_said or j.last_out or '').strip()[-300:]}")
         listed = self.listed("/api/v1/accounts", "the shared accounts") or []
-        ids = {item.get("label"): item.get("id") for item in listed}
-        ok = True
-        for label in ACCOUNTS:
-            status, body, _ = j.call("POST", f"/api/v1/accounts/{ids.get(label)}/handover", {}, session=self.session,
-                                     org=j.org_id)
-            ok = j.check(status == 200, f"the owner hands {label!r} over from the console ({status}): "
-                                        f"{'' if status == 200 else str(body)[:300]}") and ok
+        account = next((item.get("id") for item in listed if item.get("label") == by_console), None)
+        status, body, _ = j.call("POST", f"/api/v1/accounts/{account}/handover", {}, session=self.session,
+                                 org=j.org_id)
+        ok = j.check(status == 200, f"the owner hands {by_console!r} over from the console ({status}): "
+                                    f"{'' if status == 200 else str(body)[:300]}") and ok
         accounts = self.accounts()
         return j.check(accounts == ACCOUNTS, f"Ostrom serves the handed over account, the paused one still turned off "
                                              f"({accounts})") and ok
