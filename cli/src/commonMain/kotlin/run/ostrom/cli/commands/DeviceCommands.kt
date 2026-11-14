@@ -13,8 +13,8 @@ import run.ostrom.cli.launcher.objectOf
 import run.ostrom.cli.launcher.text
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
 private const val DEVICES = "/api/v1/devices"
 private const val WRITE_MILLIS = 15_000L
@@ -47,7 +47,7 @@ private fun CliDependencies.listDevices(server: String?, json: Boolean) {
         return
     }
     answer.list("items").filterIsInstance<JsonObject>().forEach { device ->
-        val active = (device["activeSessions"] as? JsonPrimitive)?.intOrNull ?: 0
+        val active = device["activeSessions"]?.jsonPrimitive?.intOrNull ?: 0
         val current = if (device.flag("current") == true) "\tcurrent" else ""
         console.out("${device.text("id")}\t${device.text("name")}\t$active active sessions$current\n")
     }
