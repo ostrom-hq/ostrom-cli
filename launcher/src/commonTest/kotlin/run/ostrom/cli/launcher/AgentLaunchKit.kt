@@ -44,6 +44,9 @@ open class AgentLaunchKit {
     protected val reclaims = mutableListOf<Triple<List<String>, Boolean, Boolean>>()
     protected var adapters: List<AgentAdapter> = listOf(ClaudeAdapter(), CodexAdapter())
 
+    /** The member's environment variables, as the CLI serves them: none by default. */
+    protected var memberVariables: MemberVariables = NoMemberVariables
+
     /** The test's clock, and when the agent was started on it. */
     protected var now: () -> Long = { 0L }
     protected var agentStartedAt: Long? = null
@@ -106,6 +109,7 @@ open class AgentLaunchKit {
         dryRun: Boolean = false,
         teamHooks: Boolean = true,
         background: Boolean = false,
+        giveVariables: Boolean = true,
     ): Int {
         val dependencies = LaunchDependencies(
             server = ServerJson(server),
@@ -125,6 +129,7 @@ open class AgentLaunchKit {
             },
             skillFiles = skillFiles,
             restrict = { _, _ -> },
+            variables = memberVariables,
         )
         val site = LaunchSite(
             serverUrl = "https://ostrom.example",
@@ -138,7 +143,16 @@ open class AgentLaunchKit {
             variable = { variables[it] },
         )
         val request =
-            LaunchRequest(agent, arguments, repo, model, dryRun, teamHooks = teamHooks, background = background)
+            LaunchRequest(
+                agent,
+                arguments,
+                repo,
+                model,
+                dryRun,
+                teamHooks = teamHooks,
+                background = background,
+                variables = giveVariables,
+            )
         return AgentLaunchUseCase(dependencies, adapters).launch(request, site)
     }
 
