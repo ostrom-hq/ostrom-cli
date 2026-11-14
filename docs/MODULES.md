@@ -373,7 +373,12 @@ nonce, ciphertext and tag, bound to `variant:<team>:<id>[:<member>]` or `<team>:
 Ostrom's by e-mail then login (a server that does not list its members matches no one, and every
 assignment is skipped), names an account's provider as Ostrom does (TeamCode's `anthropic` and `openai` are `claude`
 and `codex`), and sends the plan to `POST /api/v1/import/teamcode?dryRun=true` (ostrom-server#28).
-An MCP server's tool mode is named as Ostrom does too (TeamCode's `ALLOWLIST` and `DENYLIST`
+It also reads TeamCode's `workflows`, `workflow_settings`, `automations` and the current `cloud_profiles` versions
+they name (all read-only; a TeamCode without those tables adds nothing) and sends them as `workflows`,
+`workflowEditors`, `automations` and `profiles` (ostrom-server#436): TeamCode's rows as they are, which the server maps
+(workflows `tc-<id>`, automations paused until the cutover, a profile reduced to its repositories as `OWNER/NAME`).
+An automation's webhook secret, a profile's credentials and setup commands are never read or sent; a row that cannot be
+read is said and left out. An MCP server's tool mode is named as Ostrom does too (TeamCode's `ALLOWLIST` and `DENYLIST`
 are `allow` and `deny`); a server with any other mode is said and left out. It imports only with `--yes`, and prints
 no secret. A normal pass refreshes no token: a shared account TeamCode still
 uses is reported `revive_at_cutover`, and the CLI says how many wait. `--cutover` is the owner's final pass once

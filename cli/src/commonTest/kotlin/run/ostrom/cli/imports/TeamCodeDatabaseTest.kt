@@ -10,6 +10,8 @@ import kotlin.test.assertTrue
 
 class TeamCodeDatabaseTest {
     private val url = "mysql://teamcode_ro@db.acme.example:3307/teamcode"
+    private val accountColumns =
+        listOf("id", "provider", "provider_account_id", "display_name", "credential_envelope", "team_id")
 
     private fun fails(mysql: FakeMysql, url: String = this.url, team: String = "default"): String =
         assertFailsWith<TeamCodeReadException> { TeamCodeDatabase(mysql).read(url, team) }.message.orEmpty()
@@ -36,6 +38,71 @@ class TeamCodeDatabaseTest {
         assertTrue("password_hash" !in script, "only the columns the import needs")
         assertTrue("WHERE team_id = 'default' AND kind = 'MCP';" in script, script)
         assertTrue(mysql.commands.flatten().none { it.startsWith("--password") || it.startsWith("-p") })
+    }
+
+    @Test
+    fun theWorkflowsAutomationsAndProfilesAreReadWithoutAnySecretColumn() {
+        val schema = columns(
+            "members" to listOf("id", "username", "team_id"),
+            "variants" to listOf("id", "target", "name", "binding", "config", "team_id", "kind"),
+            "variant_assignments" to listOf("member_id", "variant_id", "team_id", "kind"),
+            "mcp_tool_policies" to listOf("variant_id", "mode", "tools", "team_id"),
+            "accounts" to accountColumns,
+            "workflows" to listOf("id", "name", "version", "definition", "created_at", "team_id"),
+            "workflow_settings" to listOf("editor_mode", "editor_ids", "team_id"),
+            "automations" to listOf(
+                "id", "owner_id", "name", "trigger_kind", "cron", "timezone", "catchup", "catchup_grace_minutes",
+                "action_kind", "profile_id", "model", "effort", "max_runtime_minutes", "prompt", "variables",
+                "sample_payload", "overlap", "max_runs_per_day", "enabled", "version", "secret", "previous_secret",
+                "team_id",
+            ),
+            "cloud_profiles" to listOf("id", "name", "team_id", "current_version"),
+            "cloud_profile_versions" to listOf("profile_id", "version", "spec", "created_by"),
+        )
+        val workflowHeader = listOf("id", "name", "version", "definition", "created_at")
+        val rows = batch("workflows", workflowHeader, listOf("w1", "Fix", "4", "{}", "1")) +
+            batch("workflow_settings", listOf("editor_mode", "editor_ids"), listOf("members", "[]")) +
+            batch("automations", listOf("id", "name"), listOf("a1", "Nightly")) +
+            batch("cloud_profiles", listOf("id", "name", "spec"), listOf("p1", "API", "{}"))
+        val mysql = FakeMysql(schema, CaptureResult.Exited(0, rows))
+        val tables = TeamCodeDatabase(mysql).read(url, "default")
+        assertEquals("Fix", tables.workflows.single()["name"])
+        assertEquals("members", tables.workflowSettings.single()["editor_mode"])
+        assertEquals("Nightly", tables.automations.single()["name"])
+        assertEquals("p1", tables.profiles.single()["id"])
+        val script = mysql.commands.last().last()
+        assertTrue("`created_at`" in script && "`updated_at`" !in script, script)
+        assertTrue("FROM `workflows` WHERE team_id = 'default';" in script, script)
+        assertTrue("FROM `automations` WHERE team_id = 'default';" in script, script)
+        assertTrue("`secret`" !in script && "previous_secret" !in script, script)
+        assertTrue("p.`team_id` = 'default'" in script && "p.`current_version`" in script, script)
+    }
+
+    @Test
+    fun profilesAreLeftOutWhenTheirTablesLackWhatIsRead() {
+        val base = arrayOf(
+            "members" to listOf("id", "username", "team_id"),
+            "variants" to listOf("id", "target", "name", "binding", "config", "team_id", "kind"),
+            "variant_assignments" to listOf("member_id", "variant_id", "team_id", "kind"),
+            "mcp_tool_policies" to listOf("variant_id", "mode", "tools", "team_id"),
+            "accounts" to accountColumns,
+        )
+        val noVersions = columns(*base, "cloud_profiles" to listOf("id", "name", "team_id", "current_version"))
+        val noSpec = columns(
+            *base,
+            "cloud_profiles" to listOf("id", "name", "team_id", "current_version"),
+            "cloud_profile_versions" to listOf("profile_id", "version"),
+        )
+        val noProfileColumns = columns(
+            *base,
+            "cloud_profiles" to listOf("id"),
+            "cloud_profile_versions" to listOf("profile_id", "version", "spec"),
+        )
+        for (schema in listOf(noVersions, noSpec, noProfileColumns)) {
+            val mysql = FakeMysql(schema, CaptureResult.Exited(0, ""))
+            TeamCodeDatabase(mysql).read(url, "default")
+            assertTrue("cloud_profiles" !in mysql.commands.last().last().substringAfter("--execute=START"), "$schema")
+        }
     }
 
     @Test

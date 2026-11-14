@@ -25,14 +25,16 @@ internal class ImportCommand :
 
 /**
  * `ostrom import teamcode --db URL --key-file FILE [--team T] [--yes] [--access-only | --cutover [--confirm cutover]]`:
- * TeamCode's MCP servers, secrets, tool policies and shared accounts into this organisation (ostrom-server#28). Shows
+ * TeamCode's MCP servers, secrets, tool policies, shared accounts, workflows, automations (paused, without their
+ * webhook secrets) and who edits the workflows into this organisation (ostrom-server#28, #436). Shows
  * Ostrom's plan; imports with `--yes`. `--access-only` is TeamCode's trial: the accounts serve their access tokens and
  * are never renewed by Ostrom. `--cutover` is the owner's final pass once TeamCode is stopped (ostrom-server#86): its
  * plan, then, only once `cutover` is typed (or given to `--confirm`), the shared accounts handed over, their tokens
  * rotated and the accounts revived.
  */
 internal class ImportTeamCodeCommand(private val dependencies: CliDependencies) : CliktCommand(name = "teamcode") {
-    override fun help(context: Context) = "Import a TeamCode team: MCP servers, secrets, tool policies, accounts"
+    override fun help(context: Context) =
+        "Import a TeamCode team: MCP servers, secrets, tool policies, accounts, workflows, automations"
 
     private val db by option("--db", help = "TeamCode's MySQL: mysql://user@host[:port]/database (password: MYSQL_PWD)")
         .required()
