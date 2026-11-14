@@ -85,8 +85,9 @@ internal object MemorySchemas {
         ),
         tool(
             "memory_update",
-            "Replace an entry whole (title, summary, content, tags, refs) when it is wrong or out of date, with the " +
-                "version you read. Prefer this to adding a contradicting entry.",
+            "Replace an entry's title, summary and content when it is wrong or out of date, with the version you " +
+                "read; its tags, refs and expiry are kept unless you send them (an empty list or null clears them). " +
+                "Prefer this to adding a contradicting entry.",
             listOf("id", "expectedVersion", "title", "summary", "content"),
             text("id", "The entry id."),
             number("expectedVersion", "The version you read; a different one is refused."),

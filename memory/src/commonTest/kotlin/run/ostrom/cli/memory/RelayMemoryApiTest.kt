@@ -72,7 +72,7 @@ class RelayMemoryApiTest {
     fun anIdThatIsNoPlainIdNeverLeavesThisProcess() {
         val relay = FakeRelay { ok(entry) }
         val api = RelayMemoryApi(relay, 1, "cap")
-        for (id in listOf("../index", "a?b", "", "x".repeat(129), "a b")) {
+        for (id in listOf("../index", "a?b", "", "x".repeat(129), "a b", "index", "search", "proposals")) {
             val error = assertFailsWith<MemoryApiException> { api.read(id) }
             assertEquals(MEMORY_NOT_FOUND, error.code)
         }

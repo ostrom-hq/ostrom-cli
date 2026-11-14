@@ -40,6 +40,9 @@ class FakeMemoryApi : MemoryApi {
     var found = MemorySearchResult(listOf(indexEntry("m-2")))
     var entry = memoryEntry()
     var refusal: MemoryApiException? = null
+
+    /** Anything else the index read throws, as a broken transport would. */
+    var failure: Throwable? = null
     var created: CreateMemoryRequest? = null
     var updated: UpdateMemoryRequest? = null
 
@@ -50,6 +53,7 @@ class FakeMemoryApi : MemoryApi {
 
     override fun index(scope: String?, tags: List<String>, after: String?, limit: Int): MemoryIndexPage {
         record("index $scope $tags $after $limit")
+        failure?.let { throw it }
         return page
     }
 

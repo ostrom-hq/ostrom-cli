@@ -22,7 +22,7 @@ relay, with the agent's relay capability.
 | `memory_search` | The entries whose title, summary or tags hold every word of `query` (`tags`, `limit` 1 to 20). |
 | `memory_read` | One entry whole: content, tags, references, version, origin. |
 | `memory_write` | A new entry, `personal` by default; `team` is refused to an agent for now (`memory_team_forbidden`). |
-| `memory_update` | Replaces an entry whole at the version read (`expectedVersion`; `memory_conflict` otherwise). |
+| `memory_update` | Replaces an entry's title, summary and content at the version read (`expectedVersion`; `memory_conflict` otherwise); its tags, references and expiry are kept unless sent (empty or null clears them). |
 | `memory_forget` | Removes an entry for good. |
 
 At `initialize`, the server's instructions carry TeamCode's text and the caller's index: the first 50 entries, newest

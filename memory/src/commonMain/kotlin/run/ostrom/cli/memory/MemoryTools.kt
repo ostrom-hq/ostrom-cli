@@ -15,6 +15,7 @@ import run.ostrom.core.api.models.CreateMemoryRequest
 import run.ostrom.core.api.models.MemoryEntry
 import run.ostrom.core.api.models.MemoryIndexEntry
 import run.ostrom.core.api.models.UpdateMemoryRequest
+import kotlin.coroutines.cancellation.CancellationException
 
 /** The agent's arguments cannot be used as they are: said to the agent, who fixes them. */
 class MemoryUsageException(override val message: String) : Exception(message)
@@ -24,8 +25,11 @@ class MemoryUsageException(override val message: String) : Exception(message)
  * its team's memory through the launch's local relay. The server instructions carry the index, read when the agent
  * initializes the server; an entry's content is read on demand. What a caller may see or write is Ostrom's decision,
  * not this side's: a personal entry is its owner's alone, and an agent writes personal entries only for now.
+ *
+ * @param api The memory routes, through the relay.
+ * @param start The same, with the short bound of the index read at the agent's start ([RelayMemoryApi.START_MILLIS]).
  */
-class MemoryTools(private val api: MemoryApi) {
+class MemoryTools(private val api: MemoryApi, private val start: MemoryApi = api) {
     /** The MCP server: its tools, its name, and its instructions with the index. */
     fun dispatcher(version: String): McpDispatcher =
         McpDispatcher(version, tools(), MemoryDocs.LABEL, instructionsAtStart = ::instructions)
@@ -34,9 +38,11 @@ class MemoryTools(private val api: MemoryApi) {
     fun instructions(): String {
         // best effort: a server that cannot answer must not keep the agent from starting
         val index = try {
-            val page = api.index(scope = null, tags = emptyList(), after = null, limit = INDEX_ENTRIES)
+            val page = start.index(scope = null, tags = emptyList(), after = null, limit = INDEX_ENTRIES)
             MemoryDocs.indexText(page.entries, more = page.next != null)
-        } catch (_: MemoryApiException) {
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
             MemoryDocs.INDEX_UNREADABLE
         }
         return MemoryDocs.INSTRUCTIONS + "\n\n" + index
@@ -114,14 +120,24 @@ class MemoryTools(private val api: MemoryApi) {
         val id = arguments.required("id")
         val version = arguments.number("expectedVersion")
             ?: throw MemoryUsageException("expectedVersion is required: the version you read.")
+        val title = arguments.required("title", WHOLE)
+        val summary = arguments.required("summary", WHOLE)
+        val content = arguments.required("content", WHOLE)
+        val expiresAt = arguments["expiresAt"]
+        if (expiresAt != null && expiresAt != JsonNull && arguments.text("expiresAt") == null) {
+            throw MemoryUsageException("expiresAt is an ISO 8601 time, or null for never.")
+        }
+        // The route replaces the entry whole: what the agent leaves out is read and sent back as it is, never erased.
+        // A newer version than the one read is refused by Ostrom (memory_conflict), so nothing unseen is sent back.
+        val kept by lazy { api.read(id) }
         val request = UpdateMemoryRequest(
             expectedVersion = version,
-            title = arguments.required("title", WHOLE),
-            summary = arguments.required("summary", WHOLE),
-            content = arguments.required("content", WHOLE),
-            tags = strings(arguments, "tags"),
-            refs = strings(arguments, "refs"),
-            expiresAt = arguments.text("expiresAt"),
+            title = title,
+            summary = summary,
+            content = content,
+            tags = if ("tags" in arguments) strings(arguments, "tags") else kept.tags,
+            refs = if ("refs" in arguments) strings(arguments, "refs") else kept.refs,
+            expiresAt = if (expiresAt == null) kept.expiresAt else arguments.text("expiresAt"),
         )
         val entry = api.update(id, request)
         return JsonObject(mapOf("id" to JsonPrimitive(entry.id), "version" to JsonPrimitive(entry.version))).toString()
