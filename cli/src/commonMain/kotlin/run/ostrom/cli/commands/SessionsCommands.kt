@@ -12,6 +12,7 @@ import run.ostrom.cli.CliDependencies
 import run.ostrom.cli.launcher.text
 import run.ostrom.cli.waits.age
 import run.ostrom.cli.sessions.heading
+import run.ostrom.cli.sessions.recordOnly
 import run.ostrom.cli.sessions.thread
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonArray
@@ -133,6 +134,7 @@ private suspend fun CliDependencies.tail(signed: SignedIn, id: String, follow: B
     var read = readSession(signed, id, kept)
     var running: Boolean
     console.out(heading(read.session) + "\n")
+    recordOnly(read.session)?.let { console.out(it + "\n") }
     while (true) {
         thread(read.response, read.gates).filter { shown.add(it.event) }.forEach { console.out(it.render() + "\n") }
         running = read.session.text("endedAt") == null

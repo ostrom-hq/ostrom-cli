@@ -55,6 +55,17 @@ internal fun heading(session: JsonObject): String {
 }
 
 /**
+ * What the caller reads of another member's session as its record only (an owner or an administrator, TeamCode
+ * #238): the server answers a single read without `gates`. Null for a session read whole, or an answer that names no
+ * person.
+ */
+internal fun recordOnly(session: JsonObject): String? {
+    val dev = session.text("dev")?.takeIf { "gates" !in session } ?: return null
+    return "You read this session's record only: its requests, their answers and its receipt are @$dev's, " +
+        "and its approvers'."
+}
+
+/**
  * The thread of a session: [response] is the server's `SessionResponse` (the session and its receipt), [gates] the
  * `GateRequest` of each gate it asked, in the order of the session's `gates` (one without an `at` sorts last). The
  * start comes first, then the nodes of the receipt, which carry no time (its gate nodes are left out: the gates' own
