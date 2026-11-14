@@ -21,7 +21,7 @@ class AutomationRenderTest {
         "nextRunAt":"2026-11-14T03:00:00Z",
         "trigger":{"kind":"cron","cron":"0 3 * * *","timezone":"Europe/Paris"},
         "action":{"prompt":"Triage\nnow","agent":"claude","model":"opus","effort":"high","maxRuntimeMinutes":45,
-        "repository":"acme/web"},"overlap":"allow","maxRunsPerDay":10}""",
+        "repository":"acme/web","profileId":"p-1"},"overlap":"allow","maxRunsPerDay":10}""",
     )
 
     private val webhook = json(
@@ -49,6 +49,7 @@ class AutomationRenderTest {
                 "Runs: cron \"0 3 * * *\" Europe/Paris; next 2026-11-14T03:00:00Z",
                 "Starts: claude opus",
                 "Repository: acme/web",
+                "Profile: p-1",
                 "Prompt: Triage now",
                 "Effort: high",
                 "Runs for at most 45 minutes",

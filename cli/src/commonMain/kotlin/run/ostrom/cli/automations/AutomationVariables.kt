@@ -18,6 +18,12 @@ internal fun requireRepository(value: String): String {
     return value
 }
 
+/** [value] when it names a cloud profile (not blank), else a refusal. */
+internal fun requireProfile(value: String): String {
+    if (value.isBlank()) refuse("--profile needs a cloud profile's id.")
+    return value
+}
+
 private val VARIABLE_NAME = Regex("[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+)*")
 private val TYPES = setOf("string", "int", "number", "boolean")
 private const val MAX_VARIABLES = 32

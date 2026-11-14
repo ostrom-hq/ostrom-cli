@@ -153,11 +153,12 @@ class AutomationsCommandsTest : SetupKit() {
         val args = listOf(
             "create", "--name", "Hook", "--webhook", "--workflow", "Review", "--input", "env=prod",
             "--var", "ticket=\$.id", "--sample-payload", "sample.json", "--repository", "acme/web",
+            "--profile", "p-1",
         )
         assertEquals(0, automations(served, *args.toTypedArray()))
         assertEquals(
             """{"name":"Hook","trigger":{"kind":"webhook"},"action":{"workflowId":"wf-1","inputs":{"env":"prod"},""" +
-                """"repository":"acme/web"},"variables":[{"name":"ticket","path":"${'$'}.id"}],""" +
+                """"repository":"acme/web","profileId":"p-1"},"variables":[{"name":"ticket","path":"${'$'}.id"}],""" +
                 """"samplePayload":{"id":1}}""",
             bodyOf(create),
         )
@@ -199,6 +200,7 @@ class AutomationsCommandsTest : SetupKit() {
                 "Give --var or --variables-file, not both.",
             ),
             Triple(listOf("--prompt", "a", "--repository", "x y"), 64, "\"x y\" is not a repository"),
+            Triple(listOf("--prompt", "a", "--profile", " "), 64, "--profile needs a cloud profile's id."),
             Triple(listOf("--prompt", "a", "--var", "bad"), 64, "--var needs the form NAME="),
             Triple(listOf("--prompt", "a", "--sample-payload", "nope.json"), 66, "No file /work/acme/nope.json."),
             Triple(listOf("--prompt", "a", "--sample-payload", "v.json"), 64, "The sample payload is not a JSON"),
@@ -285,7 +287,9 @@ class AutomationsCommandsTest : SetupKit() {
         val put = "PUT /api/v1/automations/$hookId"
         val saved = hook.replace("\"version\":2", "\"version\":3")
         val served = routes(showHook to (200 to hook), put to (200 to saved), workflows to (200 to """{"items":[]}"""))
-        val clears = arrayOf("--clear-variables", "--clear-model", "--clear-effort", "--clear-sample-payload")
+        val clears = arrayOf(
+            "--clear-variables", "--clear-model", "--clear-effort", "--clear-sample-payload", "--clear-profile",
+        )
         assertEquals(0, automations(served, "edit", hookId, *clears, "--url-version", "current"))
         assertTrue("\"variables\":[]" in bodyOf(put).orEmpty(), bodyOf(put))
         assertOut("POST https://ostrom.example/hooks/abc/v/3/trigger")

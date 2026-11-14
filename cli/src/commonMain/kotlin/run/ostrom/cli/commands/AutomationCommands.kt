@@ -112,6 +112,7 @@ internal abstract class DefinitionCommand(name: String) : CliktCommand(name = na
             }
         }.multiple()
     val repository by option("--repository", help = "The repository the session works in, OWNER/NAME")
+    val profile by option("--profile", help = "The id of the cloud profile it runs on (your only one by default)")
     val agent by option("--agent", help = "The agent that works (claude by default)")
     val model by option("--model", help = "The model, the agent's default when not given")
     val effort by option("--effort", help = "The reasoning effort, the agent's default when not given")
@@ -165,6 +166,7 @@ private fun CliDependencies.optionsOf(
     workflow = workflow,
     inputs = given.inputs.takeIf { it.isNotEmpty() },
     repository = given.repository?.let(::requireRepository),
+    profile = given.profile?.let(::requireProfile),
     agent = given.agent,
     model = given.model,
     effort = given.effort,
@@ -270,6 +272,7 @@ internal class AutomationsEditCommand(private val dependencies: CliDependencies)
     private val clearModel by option("--clear-model", help = "Go back to the agent's own model").flag()
     private val clearEffort by option("--clear-effort", help = "Go back to the agent's own effort").flag()
     private val clearSample by option("--clear-sample-payload", help = "Remove the sample payload").flag()
+    private val clearProfile by option("--clear-profile", help = "Go back to your only cloud profile").flag()
     private val org by orgOption()
     private val server by serverFlag()
     private val json by jsonFlag()
@@ -281,6 +284,7 @@ internal class AutomationsEditCommand(private val dependencies: CliDependencies)
             Clear.MODEL.takeIf { clearModel },
             Clear.EFFORT.takeIf { clearEffort },
             Clear.SAMPLE.takeIf { clearSample },
+            Clear.PROFILE.takeIf { clearProfile },
         ).toSet()
         val (body, address) = dependencies.automations(server, org) { access ->
             val version = versionOf(urlVersion)

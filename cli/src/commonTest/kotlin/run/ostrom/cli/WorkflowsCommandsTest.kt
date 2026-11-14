@@ -339,14 +339,16 @@ class WorkflowsCommandsTest : SetupKit() {
     @Test
     fun aRunIsStartedWithItsInputsAndAFreshKeyEachTime() {
         val started = routes(show to (200 to definition), start to (201 to runJson()))
-        val args = arrayOf("workflows", "run", "deploy", "--input", "env=prod", "--repository", "acme/api")
+        val args = arrayOf(
+            "workflows", "run", "deploy", "--input", "env=prod", "--repository", "acme/api", "--profile", "p-1",
+        )
         assertEquals(0, run(started, *args))
         assertEquals(
             "Started run r1 of Deploy (v3).\nFollow it: ostrom workflows run-show r1   " +
                 "Stop it: ostrom workflows cancel r1\n",
             console.out.toString(),
         )
-        assertEquals("""{"inputs":{"env":"prod"},"repository":"acme/api"}""", bodyOf(start))
+        assertEquals("""{"inputs":{"env":"prod"},"repository":"acme/api","profileId":"p-1"}""", bodyOf(start))
         val first = requests.last { it.second.path == "/api/v1/workflows/deploy/runs" }.second
         assertNotNull(first.idempotencyKey)
         console.out.clear()

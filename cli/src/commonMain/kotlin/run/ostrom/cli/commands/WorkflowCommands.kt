@@ -256,7 +256,7 @@ internal class WorkflowsDeleteCommand(private val dependencies: CliDependencies)
     }
 }
 
-/** `ostrom workflows run ID [--input KEY=VALUE]... [--repository OWNER/NAME] [--wait ...]`. */
+/** `ostrom workflows run ID [--input KEY=VALUE]... [--repository OWNER/NAME] [--profile ID] [--wait ...]`. */
 internal class WorkflowsRunCommand(private val dependencies: CliDependencies) : CliktCommand(name = "run") {
     override fun help(context: Context) =
         "Start a run of a workflow as yourself; with --wait, follow it until it ends"
@@ -277,6 +277,10 @@ internal class WorkflowsRunCommand(private val dependencies: CliDependencies) : 
     private val repository by option(
         "--repository",
         help = "Run for this repository, OWNER/NAME (sent as is; a server that does not read it yet ignores it)",
+    )
+    private val profile by option(
+        "--profile",
+        help = "The id of the cloud profile its agent steps that name none run on (your only one by default)",
     )
     private val wait by option("--wait", help = "Follow the run until it ends").flag()
     private val interval by option("--interval", help = "With --wait, seconds between reads: $MIN_INTERVAL or more (3)")
@@ -307,6 +311,7 @@ internal class WorkflowsRunCommand(private val dependencies: CliDependencies) : 
             val request = objectOf(
                 "inputs" to resolveInputs(definition, inputs),
                 "repository" to repository?.let(::requireRepository),
+                "profileId" to profile,
             )
             // a fresh key at every call: a second command is a second run
             val key = Uuid.random().toString()

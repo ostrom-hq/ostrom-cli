@@ -67,6 +67,7 @@ private fun JsonObject.actionLines(): List<String> {
     val inputs = action.child("inputs")?.map { "  ${it.key} = ${oneLine(it.value.toString().trim('"'))}" }.orEmpty()
     return listOfNotNull(
         action.text("repository")?.let { "Repository: $it" },
+        action.text("profileId")?.let { "Profile: $it" },
         action.text("prompt")?.takeIf { it.isNotBlank() }?.let { "Prompt: ${oneLine(it, PROMPT_WIDTH)}" },
         action.text("effort")?.let { "Effort: $it" },
         action.number("maxRuntimeMinutes")?.let { "Runs for at most $it minutes" },
