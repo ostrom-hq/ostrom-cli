@@ -63,6 +63,7 @@ class ConfigureCommandTest : CliKit() {
     @Test
     fun missingInputAnInsecureServerAndAnAgentSessionAreRefused() {
         assertEquals(64, run(emptyMap(), "--server", "https://ostrom.example"), "no token")
+        assertEquals(64, run(emptyMap()), "no server asked for, nothing typed")
         typed += "ost_key"
         assertEquals(64, run(emptyMap(), "--server", " "), "no server")
         typed += "ost_key"
