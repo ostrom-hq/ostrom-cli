@@ -43,8 +43,6 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-      # The real server's image, ghcr.io/ostrom-hq/ostrom-server (private), for the journey against the real server.
-      packages: read
     env:
       HAS_SERVER_KEY: ${{ secrets.DEPLOY_KEY_SERVER != '' }}
     # The real server's database, for the CLI's journey against the real server (as ostrom-web's journeys). The
@@ -191,15 +189,14 @@ jobs:
           # The whole history: whether the image's commit contains the oldest server the CLI needs, and its own roles.
           fetch-depth: 0
           persist-credentials: false
-      # Until the image can be pulled (Actions access of the package for ostrom-cli, a gesture of Lyes) and contains the
+      # Until the image (public on Docker Hub, `latest` tracks main) can be pulled and contains the
       # oldest server the journey needs (MIN_SERVER: server#364, the capabilities ostrom login requires), the journey is
       # skipped with a warning and a line in the summary; with the repository variable OSTROM_CLI_REQUIRE_REAL_SERVER
       # set to `true`, a skip fails the job.
-      - name: Real server image (edge of ostrom-server main)
+      - name: Real server image (latest of ostrom-server main, public on Docker Hub)
         id: server
         env:
-          IMAGE: ghcr.io/ostrom-hq/ostrom-server:edge
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE: docker.io/ostromhq/ostrom-server:latest
           MIN_SERVER: fca8f9e
           REQUIRED: ${{ vars.OSTROM_CLI_REQUIRE_REAL_SERVER == 'true' }}
         run: |
@@ -218,23 +215,22 @@ jobs:
             echo "ready=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          docker pull --quiet "$IMAGE" || skip "$IMAGE cannot be pulled from this repository (package Actions access)."
+          docker pull --quiet "$IMAGE" || skip "$IMAGE cannot be pulled from Docker Hub."
           revision=$(docker inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$IMAGE")
           main=$(git -C .ostrom/server rev-parse HEAD)
           echo "Server image built from ostrom-server@${revision:0:7}; main is at ${main:0:7}." >> "$GITHUB_STEP_SUMMARY"
           [ -n "$revision" ] || skip "$IMAGE carries no org.opencontainers.image.revision label."
           git -C .ostrom/server cat-file -e "${revision}^{commit}" 2>/dev/null \
-            || skip "edge is ostrom-server@${revision:0:7}, a commit that is not in the history of main."
+            || skip "latest is ostrom-server@${revision:0:7}, a commit that is not in the history of main."
           git -C .ostrom/server merge-base --is-ancestor "$MIN_SERVER" "$revision" \
-            || skip "edge is ostrom-server@${revision:0:7}, older than $MIN_SERVER (server#364)."
+            || skip "latest is ostrom-server@${revision:0:7}, older than $MIN_SERVER (server#364)."
           # The database roles of the image's own commit, not of a main that may have moved past it.
           git -C .ostrom/server show "${revision}:ci/database-roles.sql" > "$RUNNER_TEMP/database-roles.sql"
           echo "ready=true" >> "$GITHUB_OUTPUT"
       - name: Start the real server (roles, migrate, serve as ostrom_app)
         if: steps.server.outputs.ready == 'true'
         env:
-          IMAGE: ghcr.io/ostrom-hq/ostrom-server:edge
+          IMAGE: docker.io/ostromhq/ostrom-server:latest
           PGPASSWORD: ostrom
           OWNER_URL: postgresql://ostrom_owner:ostrom_owner@localhost:5432/ostrom
         run: |
@@ -277,7 +273,7 @@ jobs:
       - name: End to end, the CLI journey against the real server (login to claude)
         if: steps.server.outputs.ready == 'true'
         env:
-          IMAGE: ghcr.io/ostrom-hq/ostrom-server:edge
+          IMAGE: docker.io/ostromhq/ostrom-server:latest
           OSTROM_E2E_STRICT: ${{ vars.OSTROM_CLI_REQUIRE_ALL_ROUTES == 'true' }}
         run: >-
           python3 e2e/journey.py --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
