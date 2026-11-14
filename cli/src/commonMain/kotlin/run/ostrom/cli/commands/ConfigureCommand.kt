@@ -50,14 +50,16 @@ internal class ConfigureCommand(private val dependencies: CliDependencies) : Cli
         if (token.isEmpty()) throw usage("no access token on standard input")
         runBlocking { check(serverUrl, token) }
         val login = runBlocking { loginOf(serverUrl, token) }
-        try {
+        val failed = try {
             dependencies.credentials(directory).save(serverUrl, Credentials(token, login))
             ConfigStoreImpl(dependencies.files, dependencies.configFile(directory)).set(ConfigKey.SERVER, serverUrl)
+            null
         } catch (e: FileWriteException) {
-            throw cannotWrite(e.path)
+            e.path
         } catch (e: IOException) {
-            throw cannotWrite("$directory (${e.message})")
+            "$directory (${e.message})"
         }
+        if (failed != null) throw cannotWrite(failed)
         dependencies.console.out("✓ Saved $serverUrl and its access token in $directory\n")
     }
 
