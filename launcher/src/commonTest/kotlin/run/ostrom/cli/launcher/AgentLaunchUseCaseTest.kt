@@ -26,6 +26,13 @@ private val SOURCES = listOf("--setting-sources", "user", "--add-dir", "/work/ac
 @OptIn(ExperimentalCoroutinesApi::class)
 class AgentLaunchUseCaseTest : AgentLaunchKit() {
     @Test
+    fun aBackgroundLaunchTellsItsRelay() = runTest {
+        serveALaunch()
+        start(background = true)
+        assertTrue(relaySettings.single().background, "--workload background reaches the relay")
+    }
+
+    @Test
     fun theAgentRunsWithTheRelayAndNeverWithTheDeviceToken() = runTest {
         serveALaunch()
         installed["git"] = "/usr/local/bin/git"

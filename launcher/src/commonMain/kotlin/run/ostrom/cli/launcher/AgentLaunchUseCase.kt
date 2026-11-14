@@ -32,6 +32,8 @@ import okio.IOException
  *   the agent, creating a launch or writing any file.
  * @property trustProjectSettings `--trust-project-settings` (Claude Code): the repository's own settings are read too.
  * @property teamHooks False for `--no-team-hooks`: this launch runs none of the team hooks the member approved.
+ * @property background `--workload background` (TeamCode's): the agent's model calls wait behind the org's interactive
+ *   ones in the admission queue; its quotas and permissions are the same.
  */
 data class LaunchRequest(
     val agent: Agent,
@@ -41,6 +43,7 @@ data class LaunchRequest(
     val dryRun: Boolean = false,
     val trustProjectSettings: Boolean = false,
     val teamHooks: Boolean = true,
+    val background: Boolean = false,
 )
 
 /**
@@ -218,6 +221,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
             mcp.toSet(),
             inference,
             run.pack?.gateCatalog,
+            background = run.request.background,
         )
         return dependencies.relays.start(settings).use { relay ->
             // S2-25: the hooks' capability goes to a private file, the agent's environment only gets its own

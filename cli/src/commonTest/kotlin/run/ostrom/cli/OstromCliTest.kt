@@ -35,6 +35,7 @@ import kotlinx.coroutines.test.runTest
 import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotSame
 import kotlin.test.assertSame
@@ -84,6 +85,16 @@ class OstromCliTest : CliKit() {
         )
         assertEquals(7, cli(environment = withServer).run(arrayOf("codex", "exec", "hi")))
         assertTrue(launches.last().first.teamHooks)
+    }
+
+    @Test
+    fun aLaunchIsInteractiveUnlessItSaysBackground() {
+        signIn("/home/maya/.config/ostrom")
+        assertEquals(7, cli(environment = withServer).run(arrayOf("run", "codex", "--workload", "background")))
+        assertTrue(launches.single().first.background)
+        assertEquals(7, cli(environment = withServer).run(arrayOf("run", "codex")))
+        assertFalse(launches.last().first.background)
+        assertEquals(64, cli(environment = withServer).run(arrayOf("run", "codex", "--workload", "batch")))
     }
 
     @Test

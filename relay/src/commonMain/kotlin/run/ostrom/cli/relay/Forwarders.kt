@@ -3,8 +3,10 @@ package run.ostrom.cli.relay
 
 import io.ktor.client.HttpClient
 import io.ktor.client.request.HttpRequestBuilder
+import io.ktor.client.request.header
 import io.ktor.client.request.setBody
 import io.ktor.client.request.url
+import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsBytes
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -12,12 +14,18 @@ import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.ByteArrayContent
 import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.request.httpMethod
 import io.ktor.server.request.path
 import io.ktor.server.request.queryString
+import io.ktor.server.response.header
 import io.ktor.server.response.respondBytes
 import io.ktor.server.response.respondText
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlin.time.Duration
 
 /** 2 MiB: a hook event or an MCP message. */
@@ -44,7 +52,7 @@ private val MCP_REQUEST_HEADERS = listOf("MCP-Protocol-Version", MCP_SESSION_HEA
 private val MCP_RESPONSE_HEADERS = listOf(MCP_SESSION_HEADER)
 private val INFERENCE_REQUEST_HEADERS = listOf("anthropic-version", "anthropic-beta", HttpHeaders.Accept)
 private val INFERENCE_RESPONSE_HEADERS =
-    listOf("retry-after", "x-should-retry", "request-id", "x-ostrom-error", "x-ostrom-request-id")
+    listOf("retry-after", "x-should-retry", "request-id", ERROR_HEADER, "x-ostrom-request-id")
 
 /** An agent that sees 401 from an MCP server starts an OAuth flow against the relay: it gets this 502 instead. */
 internal const val MCP_REFUSED = "Ostrom refused the MCP request; run `ostrom login` or check your access."
@@ -149,22 +157,44 @@ internal class McpForwarder(
     }
 }
 
+/** Sent upstream for a launch started with `--workload background` (TeamCode's `x-teamcode-workload`). */
+internal const val WORKLOAD_HEADER = "x-ostrom-workload"
+private const val BACKGROUND = "background"
+
+/** The gateway's own refusal names its cause here: a refusal Ostrom wrote, never a provider's answer. */
+internal const val ERROR_HEADER = "x-ostrom-error"
+private val REFUSAL_CODE = Regex("[a-z_]{1,64}")
+
 /**
  * The agent's model calls: the request as it came (up to 4 MiB) with only the headers a provider SDK needs, and the
- * response streamed back as it arrives. The agent disconnecting cancels the upstream call.
+ * response streamed back as it arrives. The agent disconnecting cancels the upstream call, and a call sent with POST
+ * that ends unfinished is cancelled in Ostrom too ([InferenceCancellation]). A refusal of Ostrom's own is told to the
+ * user once ([FailureNotices.refused]).
  */
 internal class InferenceForwarder(
     private val config: RelayConfig,
     private val upstream: () -> HttpClient,
     private val exchange: UpstreamExchange,
+    private val notices: FailureNotices,
 ) {
+    private val cancellation = InferenceCancellation(config, upstream, exchange)
+
     /** Forwards [call] to [upstreamPath]. */
     suspend fun forward(call: ApplicationCall, upstreamPath: String) {
         val body = call.receiveBounded(INFERENCE_BODY_LIMIT)
-        if (body == null) call.respondTooLarge() else relay(call, upstreamPath, body)
+        when {
+            body == null -> call.respondTooLarge()
+            call.request.httpMethod == HttpMethod.Post -> cancellation.guard { relay(call, upstreamPath, body, it) }
+            else -> relay(call, upstreamPath, body, null)
+        }
     }
 
-    private suspend fun relay(call: ApplicationCall, upstreamPath: String, body: ByteArray) {
+    private suspend fun relay(
+        call: ApplicationCall,
+        upstreamPath: String,
+        body: ByteArray,
+        attempt: InferenceAttempt?,
+    ) {
         val method = call.request.httpMethod
         val headers = call.request.headers
         val type = contentTypeOf(headers[HttpHeaders.ContentType])
@@ -176,8 +206,47 @@ internal class InferenceForwarder(
                 url(config.serverUrl + upstreamPath + if (query.isEmpty()) "" else "?$query")
                 identify(config)
                 copyHeaders(headers, INFERENCE_REQUEST_HEADERS)
-                if (method == HttpMethod.Post) setBody(ByteArrayContent(body, type))
-            }) { response -> call.streamFrom(response, INFERENCE_RESPONSE_HEADERS) }
+                if (config.background) header(WORKLOAD_HEADER, BACKGROUND)
+                if (attempt != null) {
+                    header(CLIENT_REQUEST_ID_HEADER, attempt.id)
+                    setBody(ByteArrayContent(body, type))
+                }
+            }) { response ->
+                attempt?.answered = true
+                answer(call, response)
+                attempt?.consumed = true
+            }
         }
     }
+
+    /** Streams [response] to the agent; a refusal of Ostrom's own is read whole (small JSON) to tell its cause. */
+    private suspend fun answer(call: ApplicationCall, response: HttpResponse) {
+        val code = response.headers[ERROR_HEADER]
+        if (response.status.isSuccess() || code == null || !REFUSAL_CODE.matches(code)) {
+            call.streamFrom(response, INFERENCE_RESPONSE_HEADERS)
+            return
+        }
+        val bytes = response.bodyAsBytes()
+        notices.refused(response.status.value, code) { refusalMessage(bytes) }
+        for (name in INFERENCE_RESPONSE_HEADERS) response.headers[name]?.let { call.response.header(name, it) }
+        call.response.header(HttpHeaders.CacheControl, "no-store")
+        call.respondBytes(bytes, response.contentType() ?: ContentType.Application.Json, response.status)
+    }
 }
+
+/**
+ * The `error.message` of a refusal's body, in the Anthropic and the OpenAI shapes alike, made printable (no control
+ * character, at most 600 characters); null when it has none.
+ */
+internal fun refusalMessage(body: ByteArray): String? {
+    val root = try {
+        Json.parseToJsonElement(body.decodeToString())
+    } catch (_: SerializationException) {
+        return null
+    }
+    val error = (root as? JsonObject)?.get("error") as? JsonObject
+    val message = (error?.get("message") as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
+    return message.map { if (it.isISOControl()) ' ' else it }.joinToString("").trim().take(MAX_MESSAGE)
+}
+
+private const val MAX_MESSAGE = 600
