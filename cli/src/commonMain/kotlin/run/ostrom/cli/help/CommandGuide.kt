@@ -126,7 +126,8 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
     ),
     "configure" to guide(
         "quickstart",
-        "echo \"\$KEY\" | ostrom configure --server https://ostrom.acme.dev" to "save a server and a service key",
+        "ostrom configure --server https://ostrom.acme.dev" to "save a server and a token typed on stdin",
+        "ostrom configure --server https://ostrom.acme.dev < key.txt" to "the same, for a service key in a file",
     ),
     "init" to guide(
         "quickstart",
