@@ -16,7 +16,8 @@ import time
 from mcp_relay import fake_claude
 
 ROUTES = (("POST", "/api/v1/waits/mcp"), ("GET", "/api/v1/waits"), ("POST", "/api/v1/waits/x/answer"))
-TOOLS = ["ask_human", "cancel_wait", "get_wait", "list_waits"]
+# TeamCode's waits server lists the same five (cli/.../mcp/WaitsMcpServer.kt): wait_for wakes the session by itself
+TOOLS = ["ask_human", "cancel_wait", "get_wait", "list_waits", "wait_for"]
 ASKED_WAIT_S = 120
 
 
@@ -96,7 +97,7 @@ class McpWaits:
         j.check(info.get("name") == "ostrom-waits", f"initialize: Ostrom's own server answers the agent ({info}): "
                                                    f"{str((asked.get('asked') or {}).get('stderr'))[-300:]}")
         tools = sorted(t.get("name") for t in ((answers.get(2) or {}).get("result") or {}).get("tools") or [])
-        j.check(tools == TOOLS, f"tools/list: ask_human, get_wait, list_waits, cancel_wait ({tools})")
+        j.check(tools == TOOLS, f"tools/list: ask_human, wait_for, list_waits, get_wait, cancel_wait ({tools})")
         ids = asked.get("ids") or [None, None]
         j.step["waits"] = ids
         if not j.check(all(ids), f"ask_human, twice: two waits open ({ids}): "
