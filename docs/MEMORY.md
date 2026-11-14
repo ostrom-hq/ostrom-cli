@@ -17,7 +17,7 @@ relay, with the agent's relay capability.
 | `memory_index` | A page of the index, newest first (`scope`, `tags`, `after`, `limit` 1 to 50, 20 by default): id, scope, title, summary, tags, never the content. |
 | `memory_search` | The entries whose title, summary or tags hold every word of `query` (`tags`, `limit` 1 to 20). |
 | `memory_read` | One entry whole: content, tags, references, version, origin. |
-| `memory_write` | A new entry, `personal` by default; a `team` entry is a proposal (status `proposed`) the session's owner accepts or rejects, and joins the team's memory only once accepted. |
+| `memory_write` | A new entry, `personal` by default; a `team` entry is a proposal (status `proposed`) the session's owner accepts or rejects, and joins the team's memory only once accepted (the answer's `note` says so). |
 | `memory_update` | Replaces an entry's title, summary and content at the version read (`expectedVersion`; `memory_conflict` otherwise); its tags, references and expiry are kept unless sent (empty or null clears them). |
 | `memory_forget` | Removes an entry for good. |
 

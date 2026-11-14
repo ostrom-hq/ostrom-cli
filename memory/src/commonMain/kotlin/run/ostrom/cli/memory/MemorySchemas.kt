@@ -78,7 +78,7 @@ internal object MemorySchemas {
             text("title", "A short title, at most 160 characters."),
             text("summary", "One or two sentences telling whether to read the content, at most 300 characters."),
             text("content", "The details, Markdown, at most 16,000 characters."),
-            text("scope", "personal (default) or team."),
+            text("scope", "personal (default) or team, a proposal until the member you work for accepts it."),
             TAGS,
             strings("refs", "Things the note is about: URLs, file paths or ids, at most 10."),
             text("expiresAt", "When the note stops being true, an ISO 8601 time (default: never)."),
