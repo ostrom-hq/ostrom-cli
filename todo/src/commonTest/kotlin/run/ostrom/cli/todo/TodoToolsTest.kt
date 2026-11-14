@@ -299,7 +299,7 @@ class TodoToolsTest {
         val (cleared, error) = tools.call("todo_reset")
         assertFalse(error, cleared)
         assertTrue(cleared.contains("todo_create"), cleared)
-        assertEquals(listOf("reset" to null), api.calls)
+        assertEquals(listOf<Pair<String, Any?>>("reset" to null), api.calls)
         assertEquals(null, api.read(), "as if there never was one")
         val active = FakeTodoApi(list).also { it.refuse("reset", "todo_active", "still active") }
         val (refused, failed) = tools(active).call("todo_reset")

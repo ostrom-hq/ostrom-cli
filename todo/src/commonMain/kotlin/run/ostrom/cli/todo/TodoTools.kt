@@ -45,6 +45,7 @@ class TodoUsageException(override val message: String) : Exception(message)
  * found, reports what they observed, and Ostrom decides. Nothing here deletes an item, rewrites a condition or marks
  * an item done by itself.
  */
+@Suppress("TooManyFunctions") // one small function per tool, as the tools are the class
 class TodoTools(private val api: TodoApi, private val checks: TodoChecks) {
     /** The MCP server: its tools, its name and its instructions ([TodoDocs.INSTRUCTIONS]). */
     fun dispatcher(version: String): McpDispatcher = McpDispatcher(version, tools(), TODO_SERVER, TodoDocs.INSTRUCTIONS)
