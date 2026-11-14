@@ -49,7 +49,7 @@ class TodoTools(private val api: TodoApi, private val checks: TodoChecks) {
     /** The MCP server: its tools, its name and its instructions ([TodoDocs.INSTRUCTIONS]). */
     fun dispatcher(version: String): McpDispatcher = McpDispatcher(version, tools(), TODO_SERVER, TodoDocs.INSTRUCTIONS)
 
-    /** The nine tools, in the order the agent reads them. */
+    /** The ten tools, in the order the agent reads them. */
     fun tools(): List<McpTool> = TodoSchemas.TOOLS.map { (tool, schema) ->
         object : McpTool {
             override val name = tool
@@ -75,6 +75,13 @@ class TodoTools(private val api: TodoApi, private val checks: TodoChecks) {
                 val id = required(arguments, "id")
                 api.note(id, NoteTodoItemRequest(text = required(arguments, "text")))
                 ToolAnswer("Noted on $id.")
+            }
+            "todo_reset" -> {
+                api.reset()
+                ToolAnswer(
+                    "The todo is cleared: this session has none now. Call todo_create to start a new one, with its " +
+                        "own reference and items.",
+                )
             }
             else -> {
                 val id = required(arguments, "id")
@@ -195,7 +202,11 @@ class TodoTools(private val api: TodoApi, private val checks: TodoChecks) {
         fun hint(code: String): String? = when (code) {
             NOT_DONE -> "Fix what is missing (merge the PR, wait for CI, publish the release), then call " +
                 "todo_complete again."
-            "todo_exists" -> "Use todo_add to add an item to the existing todo."
+            "todo_exists" -> "Use todo_add to add an item to the existing todo, or, if it is closed, todo_reset and " +
+                "then todo_create a new one."
+            "todo_closed" -> "The todo is closed: call todo_reset to clear it, then todo_create a new one."
+            "todo_active" -> "The todo is not closed yet: finish its items (todo_show lists them), or ask the owner " +
+                "to drop one with todo_drop. Only a closed todo is reset."
             TODO_NOT_FOUND -> "Create the todo first with todo_create (todo_help shows the format)."
             ALREADY_LINKED -> "A link does not change. If the PR was closed without merge, pass replaceClosed: true."
             "forbidden" -> "This session's credential cannot keep a todo; carry on without it."

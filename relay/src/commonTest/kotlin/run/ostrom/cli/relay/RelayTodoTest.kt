@@ -48,6 +48,7 @@ class RelayTodoTest {
             HttpMethod.Post to "/api/v1/todos/session/items/fix-1/proof",
             HttpMethod.Post to "/api/v1/todos/session/items/fix-1/link",
             HttpMethod.Post to "/api/v1/todos/session/items/fix-1/drop",
+            HttpMethod.Post to "/api/v1/todos/session/reset",
         )
         for ((method, path) in agent) {
             assertEquals(RelayTarget.Todo(hooksOnly = false), resolveTarget(method, path, config), path)
@@ -64,6 +65,7 @@ class RelayTodoTest {
             HttpMethod.Get to "/api/v1/todos/session/stop",
             HttpMethod.Post to "/api/v1/todos/session/context",
             HttpMethod.Get to "/api/v1/todos/session/items",
+            HttpMethod.Get to "/api/v1/todos/session/reset",
             HttpMethod.Post to "/api/v1/todos/session/items/../stop",
             HttpMethod.Post to "/api/v1/todos/session/items/fix/delete",
             HttpMethod.Post to "/api/v1/todos/other",

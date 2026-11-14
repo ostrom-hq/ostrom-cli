@@ -13,6 +13,7 @@ import run.ostrom.core.api.models.CreateTodoRequest
 import run.ostrom.core.api.models.DropTodoItemRequest
 import run.ostrom.core.api.models.LinkTodoItemRequest
 import run.ostrom.core.api.models.NoteTodoItemRequest
+import run.ostrom.core.api.models.ResetTodoRequest
 import run.ostrom.core.api.models.SessionTodo
 import run.ostrom.core.api.models.StartTodoItemRequest
 import run.ostrom.core.api.models.StartTodoItemResponse
@@ -57,6 +58,9 @@ interface TodoApi {
 
     /** Asks the session's owner to drop [item] (`requestTodoDrop`). */
     fun drop(item: String, request: DropTodoItemRequest): SessionTodo
+
+    /** Clears the session's list once it is closed, so it can create a new one (`resetTodo`, 409 `todo_active`). */
+    fun reset(): SessionTodo
 }
 
 /**
@@ -119,6 +123,9 @@ class RelayTodoApi(
 
     override fun drop(item: String, request: DropTodoItemRequest): SessionTodo =
         relay.post(item(item, "drop"), DropTodoItemRequest.serializer(), request, SessionTodo.serializer())
+
+    override fun reset(): SessionTodo =
+        relay.post("$TODO_ROOT/reset", ResetTodoRequest.serializer(), ResetTodoRequest(), SessionTodo.serializer())
 
     /** An item's route; an id that is no slug would reach another route of the relay, so it is refused here. */
     private fun item(id: String, action: String): String {

@@ -124,6 +124,15 @@ internal object TodoSchemas {
             "text" to text("The note."),
         ),
         tool(
+            "todo_reset",
+            "Clear this session's todo once it is closed (every item done or dropped, and the list done), as if the " +
+                "session never had one, so you can todo_create a new one with new references and items. Use it when " +
+                "the work you were asked is finished and you are given another task: a closed todo takes no more " +
+                "items (todo_add is refused). Refused while the todo is still active: you cannot skip an unfinished " +
+                "item with it.",
+            emptyList(),
+        ),
+        tool(
             "todo_drop",
             "Ask the session's owner to drop an item that no longer makes sense. Nothing is deleted: a wait asks " +
                 "them, and the item stays until they say yes. End your turn after calling it.",

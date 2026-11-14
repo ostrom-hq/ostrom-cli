@@ -63,6 +63,8 @@ class FakeTodoApi(
 
     override fun drop(item: String, request: DropTodoItemRequest) = answer("drop $item", request, ::written)
 
+    override fun reset(): SessionTodo = answer("reset", null) { SessionTodo(null).also { reads.clear(); after = null } }
+
     override fun context(): String? = answer("context", null) { context }
 
     override fun stop(request: TodoStopRequest): TodoStopDecision = answer("stop", request) {
