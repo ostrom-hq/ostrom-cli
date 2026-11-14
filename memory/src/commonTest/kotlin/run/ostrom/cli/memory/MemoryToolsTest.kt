@@ -172,6 +172,13 @@ class MemoryToolsTest {
         api.calls.clear()
         call("memory_update", """{$whole,"tags":[],"refs":[],"expiresAt":null}""")
         assertEquals(listOf("update m-1"), api.calls, "everything sent: nothing to read")
+        call("memory_update", """{$whole,"tags":null,"refs":["s"],"expiresAt":"2098-01-01T00:00:00Z"}""")
+        assertEquals(Triple(emptyList(), listOf("s"), "2098-01-01T00:00:00Z"), api.updated?.kept())
+        assertEquals(
+            "expiresAt is an ISO 8601 time, or null for never." to true,
+            call("memory_update", """{$whole,"expiresAt":1893456000}"""),
+        )
+        assertEquals(listOf("update m-1", "update m-1"), api.calls, "a wrong expiry is refused before any call")
     }
 
     private fun UpdateMemoryRequest.kept() = Triple(tags, refs, expiresAt)

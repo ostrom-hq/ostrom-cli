@@ -245,7 +245,7 @@ class CliDependencies(
                     val api = RelayMemoryApi(LoopbackHttpImpl(), target.port, target.token)
                     val start =
                         RelayMemoryApi(LoopbackHttpImpl(), target.port, target.token, RelayMemoryApi.START_MILLIS)
-                    McpServerImpl(MemoryTools(api, start).dispatcher(BuildInfo.VERSION), console)
+                    McpServerImpl(MemoryTools(api, start = start).dispatcher(BuildInfo.VERSION), console)
                 }
                 else -> McpBridge(target, LoopbackHttpImpl(), console)
             }

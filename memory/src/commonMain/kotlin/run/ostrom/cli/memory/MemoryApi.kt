@@ -109,7 +109,7 @@ class RelayMemoryApi(
          * The index read when the agent initializes the server: a slow Ostrom must not hold the agent's start (an MCP
          * client gives a server about ten seconds), which then goes on without the index.
          */
-        const val START_MILLIS = 3_000
+        const val START_MILLIS = 5_000
 
         /** The key of a call that did not reach Ostrom. */
         const val UNREACHABLE = "unreachable"
