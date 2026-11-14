@@ -81,6 +81,10 @@ class CloudSessionCommandsTest : SetupKit() {
         assertEquals(0, run(routes("GET /api/v1/cloud/sessions/cs6" to (200 to proven)), "cloud", "show", "cs6"))
         assertTrue(console.out.contains("Workspace    deletion proven\n"), console.out.toString())
         console.out.clear()
+        val stalled = """{"id":"cs7","status":"terminated","workspaceDeletion":{"state":"blocked","problem":{}}}"""
+        assertEquals(0, run(routes("GET /api/v1/cloud/sessions/cs7" to (200 to stalled)), "cloud", "show", "cs7"))
+        assertTrue(console.out.contains("Workspace    deletion blocked\n"), "a problem without a code adds nothing")
+        console.out.clear()
         assertEquals(0, run(routes(show to (200 to session)), "cloud", "show", "cs1", "--json"))
         assertEquals("$session\n", console.out.toString())
         assertEquals(66, run(routes(), "cloud", "show", "cs9"), "no such session")
