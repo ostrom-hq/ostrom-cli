@@ -90,15 +90,23 @@ internal class CloudShowCommand(private val dependencies: CliDependencies) : Cli
             return
         }
         val failure = shown.child("failure")?.let { listOfNotNull(it.text("code"), it.text("message")) }
+        // TeamCode's `cloud show`: a deletion is shown once it starts, with its problem's code when it is blocked.
+        val deletion = shown.child("workspaceDeletion")?.takeIf { it.text("state") != "none" }?.let { proof ->
+            "deletion ${proof.text("state")}" + (proof.child("problem")?.text("code")?.let { " ($it)" } ?: "")
+        }
         val rows = listOf(
             "Session" to listOfNotNull(shown.text("id"), shown.text("name")).joinToString(" · "),
             "Agent" to listOfNotNull(shown.text("agent"), shown.text("model")).joinToString(" · "),
-            "Status" to listOfNotNull(shown.text("status"), shown.text("phase")).joinToString(" · "),
+            "Status" to listOfNotNull(shown.text("status"), shown.text("phase"), shown.text("terminatedReason"))
+                .joinToString(" · "),
             "Repository" to listOfNotNull(shown.text("repo"), shown.text("ref")).joinToString(" @ "),
             "GitHub" to shown.text("githubAccess").orEmpty(),
             "Created" to shown.text("createdAt").orEmpty(),
             "Last active" to shown.text("lastActivityAt").orEmpty(),
+            "Paused" to shown.text("pausedAt").orEmpty(),
+            "Expires" to shown.text("expiresAt").orEmpty(),
             "Ended" to shown.text("endedAt").orEmpty(),
+            "Workspace" to deletion.orEmpty(),
             "Failure" to failure.orEmpty().joinToString(": "),
         ).filter { it.second.isNotEmpty() }
         rows.forEach { (label, value) -> dependencies.console.out("${label.padEnd(LABEL)}$value\n") }
