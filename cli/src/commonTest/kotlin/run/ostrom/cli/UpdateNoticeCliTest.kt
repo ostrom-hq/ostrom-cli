@@ -121,6 +121,16 @@ class UpdateNoticeCliTest : CliKit() {
     }
 
     @Test
+    fun theNotificationsSettingNeedsNoFileYet() {
+        assertEquals(0, cli().run(arrayOf("update", "--notifications", "status")))
+        assertOut("Update notifications: on.\n")
+        assertEquals(0, cli().run(arrayOf("update", "--notifications", "off")))
+        assertOut("Update notifications: off.\n")
+        fileSystem.write(NOTICE.toPath()) { writeUtf8("not json") }
+        assertEquals(0, cli().run(arrayOf("update", "--notifications", "off")))
+    }
+
+    @Test
     fun theNotificationsSettingTakesNoOtherOptionAndNeedsAFolder() {
         for (other in listOf("--check", "--rollback", "--json", "--version=1.0.0", "--record-latest")) {
             assertEquals(64, cli().run(arrayOf("update", "--notifications", "off", other)), other)
