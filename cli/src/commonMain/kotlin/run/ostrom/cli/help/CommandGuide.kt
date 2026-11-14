@@ -124,6 +124,11 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
         "ostrom whoami" to "who this device is signed in as, and your role in each organisation",
         "ostrom whoami --json" to "the same, for a script",
     ),
+    "configure" to guide(
+        "quickstart",
+        "ostrom configure --server https://ostrom.acme.dev" to "save a server and a token typed on stdin",
+        "ostrom configure --server https://ostrom.acme.dev < key.txt" to "the same, for a service key in a file",
+    ),
     "init" to guide(
         "quickstart",
         "ostrom init" to "set up this repository (admin: the organisation)",
