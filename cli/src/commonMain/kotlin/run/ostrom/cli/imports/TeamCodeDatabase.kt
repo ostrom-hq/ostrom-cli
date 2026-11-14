@@ -12,6 +12,10 @@ import run.ostrom.cli.platform.ProcessCapture
  * @property assignments `variant_assignments` of kind `MCP`.
  * @property policies `mcp_tool_policies` of the team.
  * @property accounts `accounts` of the team.
+ * @property workflows `workflows` of the team (none from a TeamCode that has no workflows).
+ * @property workflowSettings `workflow_settings` of the team: who may edit the workflows.
+ * @property automations `automations` of the team, without their secrets.
+ * @property profiles `cloud_profiles` of the team with their current version's `spec`.
  */
 data class TeamCodeTables(
     val members: List<Row>,
@@ -19,6 +23,10 @@ data class TeamCodeTables(
     val assignments: List<Row>,
     val policies: List<Row>,
     val accounts: List<Row>,
+    val workflows: List<Row> = emptyList(),
+    val workflowSettings: List<Row> = emptyList(),
+    val automations: List<Row> = emptyList(),
+    val profiles: List<Row> = emptyList(),
 )
 
 /** Why TeamCode could not be read, said to the developer. */
@@ -43,15 +51,17 @@ class TeamCodeDatabase(private val capture: ProcessCapture, private val mysql: S
         val existing = run(target, COLUMNS)["columns"].orEmpty()
             // information_schema names every column: no null to read
             .groupBy({ it["t"].toString().lowercase() }, { it["c"].toString().lowercase() })
-        val selects = WANTED.map { (table, wanted) ->
+        val selects = WANTED.mapNotNull { (table, wanted) ->
             val present = existing[table].orEmpty().toSet()
+            // a TeamCode before workflows and automations has no such table: nothing to import from it
+            if (wanted.optionalTable && present.isEmpty()) return@mapNotNull null
             val missing = wanted.required + wanted.filtered - present
             if (missing.isNotEmpty()) {
                 throw TeamCodeReadException("TeamCode's $table table has no ${missing.joinToString()} column.")
             }
             val columns = (wanted.required + wanted.optional.filter { it in present }).joinToString(", ") { "`$it`" }
             "SELECT '$table' AS ${MysqlBatch.MARKER}; SELECT $columns FROM `$table` WHERE ${wanted.filter(team)};"
-        }
+        } + listOfNotNull(profiles(existing, team))
         val tables = run(target, "START TRANSACTION READ ONLY; ${selects.joinToString(" ")} COMMIT;")
         return TeamCodeTables(
             members = tables["members"].orEmpty(),
@@ -59,7 +69,21 @@ class TeamCodeDatabase(private val capture: ProcessCapture, private val mysql: S
             assignments = tables["variant_assignments"].orEmpty(),
             policies = tables["mcp_tool_policies"].orEmpty(),
             accounts = tables["accounts"].orEmpty(),
+            workflows = tables["workflows"].orEmpty(),
+            workflowSettings = tables["workflow_settings"].orEmpty(),
+            automations = tables["automations"].orEmpty(),
+            profiles = tables["cloud_profiles"].orEmpty(),
         )
+    }
+
+    /** The team's profiles with the spec of their current version, when both tables have what is read. */
+    private fun profiles(existing: Map<String, List<String>>, team: String): String? {
+        val profile = existing["cloud_profiles"].orEmpty().toSet()
+        val version = existing["cloud_profile_versions"].orEmpty().toSet()
+        if (!profile.containsAll(PROFILE_COLUMNS) || !version.containsAll(VERSION_COLUMNS)) return null
+        return "SELECT 'cloud_profiles' AS ${MysqlBatch.MARKER}; SELECT p.`id` AS id, p.`name` AS name, " +
+            "v.`spec` AS spec FROM `cloud_profiles` p JOIN `cloud_profile_versions` v ON v.`profile_id` = p.`id` " +
+            "AND v.`version` = p.`current_version` WHERE p.`team_id` = '$team';"
     }
 
     private fun run(target: MysqlUrl, script: String): Map<String, List<Row>> {
@@ -91,6 +115,7 @@ class TeamCodeDatabase(private val capture: ProcessCapture, private val mysql: S
         val optional: List<String>,
         val filtered: List<String>,
         val filter: (String) -> String,
+        val optionalTable: Boolean = false,
     )
 
     /** The queries of the read. */
@@ -99,10 +124,19 @@ class TeamCodeDatabase(private val capture: ProcessCapture, private val mysql: S
         private val TEAM = Regex("[A-Za-z0-9_-]{1,64}")
         private val TEAM_ONLY = listOf("team_id")
         private val TEAM_AND_KIND = listOf("team_id", "kind")
+        private val PROFILE_COLUMNS = listOf("id", "name", "team_id", "current_version")
+        private val VERSION_COLUMNS = listOf("profile_id", "version", "spec")
         private val COLUMNS = "SELECT 'columns' AS ${MysqlBatch.MARKER}; " +
             "SELECT table_name AS t, column_name AS c FROM " +
             "information_schema.columns WHERE table_schema = DATABASE() AND table_name IN ('members', 'variants', " +
-            "'variant_assignments', 'mcp_tool_policies', 'accounts');"
+            "'variant_assignments', 'mcp_tool_policies', 'accounts', 'workflows', 'workflow_settings', " +
+            "'automations', 'cloud_profiles', 'cloud_profile_versions');"
+        private val AUTOMATION_COLUMNS = listOf(
+            "id", "owner_id", "name", "trigger_kind", "cron", "timezone", "catchup", "catchup_grace_minutes",
+            "action_kind", "profile_id", "model", "effort", "max_runtime_minutes", "prompt", "variables",
+            "sample_payload", "overlap", "max_runs_per_day", "enabled", "version",
+        )
+        private val AUTOMATION_OPTIONAL = listOf("workflow_id", "workflow_inputs")
         private val WANTED = mapOf(
             // a column filtered on is checked like a read one: a schema without it is named, not a mysql error
             "members" to Wanted(listOf("id", "username"), listOf("email"), TEAM_ONLY) { "team_id = '$it'" },
@@ -122,6 +156,22 @@ class TeamCodeDatabase(private val capture: ProcessCapture, private val mysql: S
                 listOf("email", "disabled"),
                 TEAM_ONLY,
             ) { "team_id = '$it'" },
+            // never `secret`, `previous_secret` nor the credential: a webhook automation's secret is rotated in Ostrom
+            "workflows" to Wanted(
+                listOf("id", "name", "version", "definition"),
+                listOf("created_at", "updated_at", "updated_by_id"),
+                TEAM_ONLY,
+                optionalTable = true,
+            ) { "team_id = '$it'" },
+            "workflow_settings" to Wanted(
+                listOf("editor_mode", "editor_ids"),
+                emptyList(),
+                TEAM_ONLY,
+                optionalTable = true,
+            ) { "team_id = '$it'" },
+            "automations" to Wanted(AUTOMATION_COLUMNS, AUTOMATION_OPTIONAL, TEAM_ONLY, optionalTable = true) {
+                "team_id = '$it'"
+            },
         )
     }
 }

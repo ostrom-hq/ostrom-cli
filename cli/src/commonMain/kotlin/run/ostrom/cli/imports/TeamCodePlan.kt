@@ -66,7 +66,8 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
             "accounts" to accounts,
             "memberMap" to memberMap,
         )
-        return PlannedImport(body, skipped)
+        // a TeamCode before workflows and automations adds nothing; one with them adds TeamCode's rows as they are
+        return PlannedImport(JsonObject(body + workflowParts(tables, skipped)), skipped)
     }
 
     private fun unsupported(variant: Row) = "MCP server ${variant["target"]} (${variant["name"]}): its command " +
