@@ -129,6 +129,26 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
         "ostrom configure --server https://ostrom.acme.dev" to "save a server and a token typed on stdin",
         "ostrom configure --server https://ostrom.acme.dev < key.txt" to "the same, for a service key in a file",
     ),
+    "keys" to guide(
+        "reference/cli",
+        "ostrom keys" to "the organisation's service keys",
+        "ostrom keys create --name ci --scopes inference:use --days 30" to "a key for a CI job, secret printed once",
+    ),
+    "keys list" to guide("reference/cli", "ostrom keys list" to "the service keys, never their secrets"),
+    "keys create" to guide(
+        "reference/cli",
+        "ostrom keys create --name ci" to "a key of 30 days that calls inference",
+        "ostrom keys create --name ci --scopes inference:use,usage:read --no-expiry" to "one that never expires",
+    ),
+    "keys revoke" to guide("reference/cli", "ostrom keys revoke 9f3c" to "stop a key at once"),
+    "auth" to guide("reference/cli", "ostrom auth sessions" to "your signed-in browser sessions"),
+    "auth sessions" to guide("reference/cli", "ostrom auth sessions" to "your signed-in browser sessions"),
+    "auth sessions list" to guide(
+        "reference/cli",
+        "ostrom auth sessions list" to "your signed-in browser sessions",
+        "ostrom auth sessions list --json" to "for a script",
+    ),
+    "auth sessions revoke" to guide("reference/cli", "ostrom auth sessions revoke 9f3c" to "sign a browser out"),
     "init" to guide(
         "quickstart",
         "ostrom init" to "set up this repository (admin: the organisation)",

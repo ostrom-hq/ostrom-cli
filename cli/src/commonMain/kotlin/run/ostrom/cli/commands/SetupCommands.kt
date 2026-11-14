@@ -40,6 +40,17 @@ internal fun setupCommands(dependencies: CliDependencies): List<CliktCommand> = 
         HooksApproveCommand(dependencies),
         HooksRefuseCommand(dependencies),
     ),
+    KeysCommand(dependencies).subcommands(
+        KeysListCommand(dependencies),
+        KeysCreateCommand(dependencies),
+        KeysRevokeCommand(dependencies),
+    ),
+    AuthCommand().subcommands(
+        AuthSessionsCommand(dependencies).subcommands(
+            AuthSessionsListCommand(dependencies),
+            AuthSessionsRevokeCommand(dependencies),
+        ),
+    ),
     InviteCommand(dependencies),
     MembersCommand(dependencies).subcommands(
         MembersListCommand(dependencies),
