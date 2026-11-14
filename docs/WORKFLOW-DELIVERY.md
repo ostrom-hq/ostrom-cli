@@ -29,7 +29,7 @@ An agent can end its turn without calling `deliver` and without asking a person.
 one more `Stop` entry beside the gate's, the wait's hold and the todo's, none replacing another; only when the delivery
 tool is connected), the first such stop is sent back to work once; the second ends the turn as before (the run then fails
 `ended_without_delivery`). Codex has no such hook here: the server's own reminder covers it. In a cloud session the runner
-adds it for Claude Code as `ostrom cloud workflow-stop` (5 s) when `ostrom-workflow` is connected: the same hook, asking
+adds it for Claude Code as the binary's hidden `cloud workflow-stop` (5 s) when `ostrom-workflow` is connected: the same hook, asking
 the server straight with the launch's agent token (`$OSTROM_URL`, `$OSTROM_AGENT_TOKEN`) instead of a relay, the server
 binding that token to its cloud session.
 
