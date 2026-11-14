@@ -1092,8 +1092,11 @@ def main():
     # 6.2: the server runs cloud sessions (a runtime driver, as the Docker of the CI's machine); skipped without
     parser.add_argument("--cloud-sessions", action="store_true", help="6.2: the server runs cloud sessions")
     parser.add_argument("--cloud-machine-image", help="6.2 on a registered runner: the image with ostrom at "
-                                                      "/usr/local/bin the machine runs, its only session and "
-                                                      "delivery image")
+                                                      "/usr/local/bin the machine runs, the only image the "
+                                                      "session's ostrom is delivered from")
+    parser.add_argument("--cloud-session-image", help="6.2 on a registered runner: the only image the session's "
+                                                      "containers may run (the server's session image); the "
+                                                      "machine's image when not given")
     # 6.6: a TeamCode team to import (ostrom-helm compose/demo/teamcode); skipped without, even with --strict
     parser.add_argument("--teamcode-db", help="6.6: mysql://user@host[:port]/database of a TeamCode team (its "
                                               "password in OSTROM_E2E_TEAMCODE_PASSWORD)")
