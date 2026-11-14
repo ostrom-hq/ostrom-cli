@@ -140,7 +140,7 @@ class WorkflowStopHookTest {
 
     @Test
     fun onlyTheServersNeedsActionDecidesAndAnOpenWaitIsTheServersToAccountFor() {
-        // the server's answer already holds that a wait is open (needsAction false): the hook adds no condition of its own
+        // the server's answer already holds that a wait is open (needsAction false): the hook adds no condition
         val waiting = """{"needsAction":false,"runId":"r1","openWait":true,"nodeTitle":"Analyze the ticket"}"""
         assertEquals(0 to "", run(event, Relay(ok(waiting))))
         // and whatever else the answer holds, needsAction true is a block

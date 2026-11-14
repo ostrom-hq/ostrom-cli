@@ -315,12 +315,16 @@ class CliDependencies(
             return object : HookRunner {
                 // the todo's hooks (`todo-stop`, `todo-context`) have their own runner: they fail open, never refuse;
                 // `todo-stop --wake` is the one Stop hook of a session that has both: the todo first, then the hold
-                override fun run(arguments: List<String>): Int {
-                    // the workflow step's Stop hook has its own too: it fails open, and says nothing but its block
-                    if (arguments == listOf(WorkflowStopHook.COMMAND)) {
-                        val files = FileSystemHookFiles(FileSystem.SYSTEM, SessionHooks::epochMillis)
-                        return WorkflowStopHook(console, environment, LoopbackHttpImpl(), files::read).run()
-                    }
+                override fun run(arguments: List<String>): Int =
+                    if (arguments == listOf(WorkflowStopHook.COMMAND)) workflowStop() else todoOrGate(arguments)
+
+                // the workflow step's Stop hook has its own runner too: it fails open, and says nothing but its block
+                private fun workflowStop(): Int {
+                    val files = FileSystemHookFiles(FileSystem.SYSTEM, SessionHooks::epochMillis)
+                    return WorkflowStopHook(console, environment, LoopbackHttpImpl(), files::read).run()
+                }
+
+                private fun todoOrGate(arguments: List<String>): Int {
                     val todo = arguments.firstOrNull()?.takeIf { it in TodoHookRunner.KINDS }
                     val holds = arguments == listOf(TodoHookRunner.STOP, TodoHookRunner.WAKE)
                     if (todo == null || arguments.size > 1 && !holds) return gate.run(arguments)

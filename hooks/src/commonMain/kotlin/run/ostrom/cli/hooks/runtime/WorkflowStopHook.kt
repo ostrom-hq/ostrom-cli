@@ -62,22 +62,30 @@ class WorkflowStopHook(
     }
 
     private fun answer(input: String, start: TimeMark): String? {
-        val event = (try {
+        val event = try {
             Json.parseToJsonElement(input) as? JsonObject
         } catch (_: SerializationException) {
             null
-        }) ?: return null
+        }
+        val pending = event?.takeIf(::isFirstStop)?.let { ask(start) }
+        return pending?.takeIf { (it["needsAction"] as? JsonPrimitive)?.booleanOrNull == true }?.let {
+            JsonObject(mapOf("decision" to JsonPrimitive("block"), "reason" to JsonPrimitive(reason(it)))).toString()
+        }
+    }
+
+    /** A `Stop` the agent has not been sent back from yet (an older Claude Code names no event, or no flag). */
+    private fun isFirstStop(event: JsonObject): Boolean {
         val name = (event["hook_event_name"] as? JsonPrimitive)?.contentOrNull
         val active = (event["stop_hook_active"] as? JsonPrimitive)?.booleanOrNull == true
-        if (name != null && name != STOP || active) return null
+        return (name == null || name == STOP) && !active
+    }
+
+    /** What the relay answers to the pending question within what is left of the two seconds; null when it fails. */
+    private fun ask(start: TimeMark): JsonObject? {
         val left = TIMEOUT_MILLIS - start.elapsedNow().inWholeMilliseconds
         val token = environment[TOKEN_FILE]?.let(read)?.trim()?.ifEmpty { null }
-        if (left <= 0 || token == null) return null
-        val calls = RelayCalls(environment[RELAY_URL], token, http)
-        val pending = calls.call(PENDING, null, left.toInt()) as? CallResult.Ok ?: return null
-        if ((pending.body["needsAction"] as? JsonPrimitive)?.booleanOrNull != true) return null
-        return JsonObject(mapOf("decision" to JsonPrimitive("block"), "reason" to JsonPrimitive(reason(pending.body))))
-            .toString()
+        val calls = token?.takeIf { left > 0 }?.let { RelayCalls(environment[RELAY_URL], it, http) }
+        return (calls?.call(PENDING, null, left.toInt()) as? CallResult.Ok)?.body
     }
 
     /** The hook's name, its route, and its limits. */
