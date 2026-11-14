@@ -29,14 +29,16 @@ internal const val MEMORY_BODY_LIMIT = 64 * 1024
 /**
  * The memory calls of the agent's `ostrom-memory` server: method, path, query and body as they came, with the launch's
  * credential and [ORIGIN_HEADER] `agent`, which the relay sets itself (none of the agent's headers is copied, so an
- * origin the agent sent never reaches Ostrom). Ostrom decides what the caller may read or write; the answer comes
- * back as it is.
+ * origin the agent sent never reaches Ostrom). A new entry names the session the relay knows ([AgentSession]) in place
+ * of any the agent names, so that Ostrom can propose a team entry to that session's owner. Ostrom decides what the
+ * caller may read or write; the answer comes back as it is.
  */
 internal class MemoryForwarder(
     private val config: RelayConfig,
     private val client: HttpClient,
     private val exchange: UpstreamExchange,
     private val timeout: Duration,
+    private val session: AgentSession,
 ) {
     /** Forwards [call]. */
     suspend fun forward(call: ApplicationCall) {
@@ -47,14 +49,17 @@ internal class MemoryForwarder(
     private suspend fun relay(call: ApplicationCall, body: ByteArray) {
         val method = call.request.httpMethod
         val query = call.request.queryString()
+        val known = session.current
         val target = config.serverUrl + call.request.path() + (if (query.isEmpty()) "" else "?$query")
         exchange.run(call, client, timeout, {
             this.method = method
             url(target)
             identify(config)
             header(ORIGIN_HEADER, AGENT_ORIGIN)
-            if (method == HttpMethod.Post || method == HttpMethod.Patch) {
-                setBody(ByteArrayContent(body, ContentType.Application.Json))
+            when (method) {
+                HttpMethod.Post -> setBody(ByteArrayContent(withSession(body, known), ContentType.Application.Json))
+                HttpMethod.Patch -> setBody(ByteArrayContent(body, ContentType.Application.Json))
+                else -> Unit
             }
         }) { response ->
             val type = response.contentType() ?: ContentType.Application.Json

@@ -108,7 +108,7 @@ private class Relay(
     private val session = AgentSession()
     private val hooks = HookForwarder(config, shared, exchange, timeouts, session)
     private val todo = TodoForwarder(config, shared, exchange, timeouts.hook, session)
-    private val memoryCalls = MemoryForwarder(config, shared, exchange, timeouts.hook)
+    private val memoryCalls = MemoryForwarder(config, shared, exchange, timeouts.hook, session)
     private val mcp = McpForwarder(config, upstream, exchange, session)
     private val inference = InferenceForwarder(config, upstream, exchange)
     private val policy = SignedCatalogForwarder(config, shared, exchange, timeouts.hook, memory)

@@ -123,6 +123,40 @@ class RelayMemoryTest {
     }
 
     @Test
+    fun aNewEntryNamesTheSessionTheRelayKnowsInPlaceOfTheAgents() {
+        val segment = """{"session":{"id":"claude-session-1~r2","agentSessionId":"claude-session-1"}}"""
+        val ostrom = FakeOstrom { request ->
+            if (request.url.encodedPath == "/api/v1/sessions") {
+                respond(segment, HttpStatusCode.OK, headersOf("Content-Type", "application/json"))
+            } else {
+                respond("{}", HttpStatusCode.Created, headersOf("Content-Type", "application/json"))
+            }
+        }
+        relayTest(ostrom, config) {
+            client.post("/api/v1/sessions") {
+                bearerAuth(TOKEN)
+                setBody("""{"id":"claude-session-1","launchId":"launch-1"}""")
+            }
+            client.post("/api/v1/memory") {
+                bearerAuth(TOKEN)
+                setBody("""{"title":"T","scope":"team","sessionId":"someone-else"}""")
+            }
+            client.patch("/api/v1/memory/m-1") {
+                bearerAuth(TOKEN)
+                setBody("""{"expectedVersion":1,"sessionId":"kept"}""")
+            }
+            val memory = ostrom.requests.filter { it.url.encodedPath.startsWith("/api/v1/memory") }
+            assertEquals(
+                listOf(
+                    """{"title":"T","scope":"team","sessionId":"claude-session-1~r2"}""",
+                    """{"expectedVersion":1,"sessionId":"kept"}""",
+                ),
+                memory.map { it.body.toByteArray().decodeToString() },
+            )
+        }
+    }
+
+    @Test
     fun ostromsRefusalComesBackAsItIsAndAnOversizedBodyStaysHere() {
         val ostrom = ostrom(typed = false)
         relayTest(ostrom, config) {
