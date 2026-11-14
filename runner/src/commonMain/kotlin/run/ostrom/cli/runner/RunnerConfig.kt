@@ -158,7 +158,9 @@ object SessionScript {
     /**
      * The script of the first terminal: on a server without a recipe, clone the repository once (never reset
      * afterwards), enter it, run the
-     * agent (with its model and first message, if any; Claude Code with the settings of its background-work hooks),
+     * agent (with its model and first message, if any; Claude Code with the settings of its background-work hooks;
+     * Claude Code and Codex with `ostrom-artifacts` when the runner connects it, [ArtifactsSession], the `=` forms so
+     * that a variadic option never swallows the first message),
      * then leave a login shell so the member can start the agent again. Values come from the environment, never from
      * the script's text. The clone and checkout run with [GIT_HARDENING] (no hook, no fsmonitor, HTTPS only, no
      * submodule), so a repository's content runs nothing.
@@ -192,6 +194,12 @@ fi
 set --
 if [ "${'$'}OSTROM_AGENT_COMMAND" = claude ] && [ -n "${'$'}{OSTROM_AGENT_SETTINGS:-}" ]; then
   set -- --settings "${'$'}OSTROM_AGENT_SETTINGS"
+fi
+if [ -n "${'$'}{OSTROM_ARTIFACTS_MCP:-}" ]; then
+  case "${'$'}OSTROM_AGENT_COMMAND" in
+    claude) set -- "${'$'}@" --disallowedTools=Artifact,ArtifactComments,ArtifactData,ArtifactCheck "--mcp-config=${'$'}OSTROM_ARTIFACTS_MCP" "--append-system-prompt=${'$'}OSTROM_ARTIFACTS_INSTRUCTIONS" ;;
+    codex) set -- "${'$'}@" -c "${'$'}OSTROM_ARTIFACTS_MCP" -c "${'$'}OSTROM_ARTIFACTS_INSTRUCTIONS" ;;
+  esac
 fi
 if [ -n "${'$'}{OSTROM_AGENT_MODEL:-}" ]; then
   case "${'$'}OSTROM_AGENT_COMMAND" in

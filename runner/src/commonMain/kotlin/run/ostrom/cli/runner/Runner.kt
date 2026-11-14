@@ -40,6 +40,8 @@ import kotlin.time.Instant
  * @param variables The owner's environment variables, given to each agent start, the runner's own winning; none on a
  *   runner that does not serve them.
  * @param deliveries Installs the owner's skills and team hooks before the agent's first terminal; none when null.
+ * @param artifacts The publication policy, asked once the launch is open: when the agent may publish, the session
+ *   script connects `ostrom-artifacts` ([ArtifactsSession]); never asked when null.
  */
 // Six collaborators and three tunings with defaults, all named at the call sites; one function per phase of a start.
 @Suppress("LongParameterList", "TooManyFunctions")
@@ -56,6 +58,7 @@ class Runner(
     private val prepare: Preparer? = null,
     private val variables: RunnerVariables? = null,
     private val deliveries: AgentDeliveries? = null,
+    private val artifacts: ArtifactsPolicy? = null,
 ) {
     private val output = Channel<ByteArray>(outputBuffer, BufferOverflow.DROP_OLDEST)
 
@@ -145,7 +148,8 @@ class Runner(
             log("execution ended: ${error.message}")
             return@coroutineScope 1
         }
-        val launched = prepared + launchVariables(opened) + claudeEnvironmentFile
+        // The runner's own variables: an owner's variable never overrides them (withVariables).
+        val launched = prepared + launchVariables(opened) + claudeEnvironmentFile + artifactsVariables(opened)
         // The owner's skills and team hooks.
         val delivered = deliver(opened, launched, current)
         delivered.code?.let { return@coroutineScope it }
@@ -219,6 +223,15 @@ class Runner(
             delay(reconnectDelay)
         }
         return RunnerLaunch.Refused(UNREACHABLE)
+    }
+
+    /** `ostrom-artifacts` for the agent of an opened launch that may publish now; nothing otherwise. */
+    private suspend fun artifactsVariables(launch: RunnerLaunch?): Map<String, String> {
+        val variables = ArtifactsSession.variables(config.agentCommand, config.binary)
+        val connected = launch is RunnerLaunch.Opened && artifacts != null && variables.isNotEmpty() &&
+            artifacts.canPublish(launch.agentToken)
+        if (connected) log("artifacts connected")
+        return if (connected) variables else emptyMap()
     }
 
     /** What the agent learns of its launch: its id, its token and where its hooks ask for checks, or the refusal. */
