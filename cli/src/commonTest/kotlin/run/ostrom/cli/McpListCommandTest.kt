@@ -12,13 +12,15 @@ class McpListCommandTest : SetupKit() {
         """{"name":"files","transport":"stdio","enabled":true,"scope":"shared","state":"ready"},""" +
         """{"name":"notes","transport":"stdio","enabled":true,"scope":"per-member",""" +
         """"state":"failed","failure":"start_failed"},""" +
-        """{"name":"odd","transport":"stdio","enabled":true,"scope":"shared","failure":"crashed"}]}"""
+        """{"name":"odd","transport":"stdio","enabled":true,"scope":"shared",""" +
+        """"failure":"crashed"},{}]}"""
 
     @Test
     fun eachServerIsALineWithItsStateAndLastFailure() {
         assertEquals(0, run(mapOf(list to (200 to servers)), "mcp", "list"))
         assertEquals(
-            "linear  sse  -\nfiles  stdio  ready\nnotes  stdio  failed (start_failed)\nodd  stdio  - (crashed)\n",
+            "linear  sse  -\nfiles  stdio  ready\nnotes  stdio  failed (start_failed)\n" +
+                "odd  stdio  - (crashed)\n?  -  -\n",
             console.out.toString(),
         )
     }
