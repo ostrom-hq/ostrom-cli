@@ -141,6 +141,14 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
         "ostrom keys create --name ci --scopes inference:use,usage:read --no-expiry" to "one that never expires",
     ),
     "keys revoke" to guide("reference/cli", "ostrom keys revoke 9f3c" to "stop a key at once"),
+    "devices" to guide("reference/cli", "ostrom devices" to "the workstations where you are signed in"),
+    "devices list" to guide(
+        "reference/cli",
+        "ostrom devices list" to "your workstations and their active sessions",
+        "ostrom devices list --json" to "for a script",
+    ),
+    "devices rename" to guide("reference/cli", "ostrom devices rename 9f3c --name laptop" to "name a workstation"),
+    "devices revoke" to guide("reference/cli", "ostrom devices revoke 9f3c" to "sign a workstation out for good"),
     "auth" to guide("reference/cli", "ostrom auth sessions" to "your signed-in browser sessions"),
     "auth sessions" to guide("reference/cli", "ostrom auth sessions" to "your signed-in browser sessions"),
     "auth sessions list" to guide(
