@@ -19,10 +19,10 @@ import kotlinx.serialization.json.JsonObject
 
 // `ostrom cloud list|show|pause|resume|delete`, as TeamCode's `teamcode cloud`, on `/api/v1/cloud/sessions`.
 
-private const val CLOUD_SESSIONS = "/api/v1/cloud/sessions"
+internal const val CLOUD_SESSIONS = "/api/v1/cloud/sessions"
 
 /** What a cloud command says to a server that runs no cloud session. */
-private const val NO_CLOUD_SESSIONS = "This Ostrom server runs no cloud session: ask your admin to update it."
+internal const val NO_CLOUD_SESSIONS = "This Ostrom server runs no cloud session: ask your admin to update it."
 
 /** The statuses a cloud session goes through (ostrom-core `CloudSession.status`). */
 private val STATUSES = listOf("creating", "running", "pausing", "paused", "resuming", "terminated", "failed")

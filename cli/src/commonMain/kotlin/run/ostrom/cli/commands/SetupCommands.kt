@@ -33,16 +33,7 @@ internal fun setupCommands(dependencies: CliDependencies): List<CliktCommand> = 
         GithubLinksCommand(dependencies),
         GithubUnlinkCommand(dependencies),
     ),
-    // `cloud attach` as TeamCode has it, and `attach` at the top too, as TeamCode keeps it
-    CloudCommand().subcommands(
-        CloudListCommand(dependencies),
-        CloudShowCommand(dependencies),
-        CloudChangeCommand(dependencies, "pause", "Pause a cloud session: the agent finishes its turn, then stops"),
-        CloudChangeCommand(dependencies, "resume", "Resume a paused cloud session"),
-        CloudDeleteCommand(dependencies),
-        CloudGithubCommand(dependencies),
-        AttachCommand(dependencies),
-    ),
+    cloudCommand(dependencies),
     HooksCommand(dependencies).subcommands(
         HooksListCommand(dependencies),
         HooksShowCommand(dependencies),
@@ -68,4 +59,16 @@ internal fun setupCommands(dependencies: CliDependencies): List<CliktCommand> = 
             RulesEditCommand(dependencies),
         ),
     ),
+)
+
+/** `ostrom cloud`: `cloud attach` as TeamCode has it, and `attach` at the top too, as TeamCode keeps it. */
+private fun cloudCommand(dependencies: CliDependencies) = CloudCommand().subcommands(
+    CloudCreateCommand(dependencies),
+    CloudListCommand(dependencies),
+    CloudShowCommand(dependencies),
+    CloudChangeCommand(dependencies, "pause", "Pause a cloud session: the agent finishes its turn, then stops"),
+    CloudChangeCommand(dependencies, "resume", "Resume a paused cloud session"),
+    CloudDeleteCommand(dependencies),
+    CloudGithubCommand(dependencies),
+    AttachCommand(dependencies),
 )
