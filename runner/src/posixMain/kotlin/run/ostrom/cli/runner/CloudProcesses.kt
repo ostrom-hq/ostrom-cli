@@ -76,6 +76,7 @@ actual fun runCloudProcess(command: String, args: List<String>): Nothing {
 }
 
 /** The runner (`ostrom cloud runner`): relays the agent's terminal and heartbeats until the server ends it. */
+@Suppress("LongMethod") // The runner's composition root: each collaborator is built and wired here, in order.
 private fun runner(socket: String, environment: Map<String, String>): Nothing {
     val config = try {
         RunnerConfig.from(environment) { path ->
@@ -114,7 +115,8 @@ private fun runner(socket: String, environment: Map<String, String>): Nothing {
             val deliveries = PodDeliveries(HttpDeliveryApi(client, config), terminals, config, ::log)
             val runner = Runner(config, server, terminals, environment, Clock.System, ::log,
                 prepare = preparer(config, server, terminals, gitHub), variables = variables, deliveries = deliveries,
-                servers = HttpCloudServers(client, config.serverUrl))
+                servers = HttpCloudServers(client, config.serverUrl),
+                answers = HttpWaitAnswers(client, config.serverUrl))
             // The agent's hooks report its background work there, as its uid: the agent socket's directory.
             val stateJob = launch {
                 AgentState.serve(selector, config.stateSocket, runner::agentState, ::log) {

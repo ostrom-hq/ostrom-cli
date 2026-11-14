@@ -42,6 +42,9 @@ import kotlin.time.Instant
  * @param deliveries Installs the owner's skills and team hooks before the agent's first terminal; none when null.
  * @param servers Which of Ostrom's MCP servers the agent gets, asked once the launch is open; the session script
  *   connects them ([CloudMcpSession]); never asked when null.
+ * @param answers The answers to the session's waits that arrived while it was paused, taken once the launch is open
+ *   when the waits' server is connected: the agent of this execution starts with them as its first message, after
+ *   the session's own first message if any; never taken when null.
  */
 // Six collaborators and three tunings with defaults, all named at the call sites; one function per phase of a start.
 @Suppress("LongParameterList", "TooManyFunctions")
@@ -59,6 +62,7 @@ class Runner(
     private val variables: RunnerVariables? = null,
     private val deliveries: AgentDeliveries? = null,
     private val servers: CloudServers? = null,
+    private val answers: WaitAnswers? = null,
 ) {
     private val output = Channel<ByteArray>(outputBuffer, BufferOverflow.DROP_OLDEST)
 
@@ -154,7 +158,8 @@ class Runner(
         val delivered = deliver(opened, launched, current)
         delivered.code?.let { return@coroutineScope it }
         val agentEnvironment = launched + delivered.variables
-        val first = terminals.start(SessionScript.FIRST, withVariables(agentEnvironment), directory)
+        // The answers are this execution's first message only: a shell started again never gets them.
+        val first = terminals.start(SessionScript.FIRST, withVariables(agentEnvironment + delivered.first), directory)
         current.terminal = first
         val terminalJob = launch { superviseTerminal(current, first, agentEnvironment) }
         val code = heartbeat(current)
@@ -178,7 +183,11 @@ class Runner(
         }
 
     /** What a phase before the agent gave, or the exit code when a heartbeat ended the runner meanwhile. */
-    private class Delivered(val variables: Map<String, String>, val code: Int? = null)
+    private class Delivered(
+        val variables: Map<String, String>,
+        val code: Int? = null,
+        val first: Map<String, String> = emptyMap(),
+    )
 
     /** Runs [work] with unready heartbeats meanwhile, as during the preparation; a stop cancels it. */
     private suspend fun beating(current: Current, work: suspend () -> Map<String, String>): Delivered =
@@ -199,7 +208,8 @@ class Runner(
      * Asks which of Ostrom's MCP servers the agent gets ([connected]), then installs what the owner receives, with
      * unready heartbeats meanwhile, as during the preparation; nothing installed without [deliveries] or when the
      * launch was refused (the agent then does not start). Claude Code's settings then get the todo's and the workflow's
-     * hooks for the servers connected ([CloudHookSettings]), over the team's.
+     * hooks for the servers connected ([CloudHookSettings]), over the team's. Last, the answers to the session's
+     * waits that arrived while it was paused ([firstMessage]), for the first terminal only.
      */
     @Suppress("ReturnCount") // Ended while asking, nothing to install, or installed.
     private suspend fun deliver(
@@ -214,7 +224,28 @@ class Runner(
         val installed = if (installer == null) null else beating(current) { installer.install(environment) }
         val variables = asked.variables + installed?.variables.orEmpty()
         val settings = variables[RunnerConfig.SETTINGS_VARIABLE] ?: environment[RunnerConfig.SETTINGS_VARIABLE]
-        return Delivered(variables + hookSettings(settings, names), installed?.code)
+        val hooked = variables + hookSettings(settings, names)
+        if (installed?.code != null) return Delivered(hooked, installed.code)
+        val answered = beating(current) { firstMessage(launch, names, environment + hooked) }
+        return Delivered(hooked, answered.code, answered.variables)
+    }
+
+    /**
+     * The first message with the answers to the session's waits that arrived while it was paused (TeamCode's message
+     * queued on a paused session, read first by its resumed pod): asked only of an opened launch whose agent has the
+     * waits' server, which says the server binds its token to its cloud session. Nothing to change when none came.
+     */
+    private suspend fun firstMessage(
+        launch: RunnerLaunch?,
+        connected: Set<String>,
+        environment: Map<String, String>,
+    ): Map<String, String> {
+        val asked = launch is RunnerLaunch.Opened && answers != null && CloudMcpSession.WAITS in connected
+        val messages = if (asked) answers.take((launch as RunnerLaunch.Opened).agentToken) else emptyList()
+        if (messages.isEmpty()) return emptyMap()
+        log("wait answers ${messages.size}")
+        val prompt = listOfNotNull(environment[PROMPT]) + messages
+        return mapOf(PROMPT to prompt.joinToString("\n\n"))
     }
 
     /** The settings with the cloud hooks of the connected servers, for Claude Code only; none to change otherwise. */
@@ -393,3 +424,6 @@ private const val UNREACHABLE = "the server could not be reached."
 
 /** The agent that reads `CLAUDE_ENV_FILE`. */
 private const val CLAUDE = "claude"
+
+/** The agent's first message, which the session script gives it ([SessionScript.FIRST]). */
+private const val PROMPT = "OSTROM_AGENT_PROMPT"
