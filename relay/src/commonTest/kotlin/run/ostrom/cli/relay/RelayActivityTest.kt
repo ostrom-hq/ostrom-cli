@@ -226,6 +226,28 @@ class RelayActivityTest {
     }
 
     @Test
+    fun aReportOstromSaysSupersededIsSentAgainByTheNextHook() {
+        val ostrom = FakeOstrom { request ->
+            when (request.url.encodedPath) {
+                "/api/v1/sessions" -> respond(SEGMENT, HttpStatusCode.OK, JSON)
+                else -> respond("""{"id":"x","superseded":true}""", HttpStatusCode.OK, JSON)
+            }
+        }
+        relayTest(ostrom) {
+            client.post("/api/v1/sessions") {
+                bearerAuth(TOKEN)
+                contentType(ContentType.Application.Json)
+                setBody("""{"id":"claude-session-1"}""")
+            }
+            hook("""{"hook_event_name":"Stop"}""")
+            ostrom.reports(1)
+            // the second report is sent once the first one's answer is read: superseded, so not remembered
+            hook("""{"hook_event_name":"Stop"}""")
+            ostrom.reports(2)
+        }
+    }
+
+    @Test
     fun aPayloadOverTheBoundIsRefused() {
         relayTest(ostrom()) {
             val answer = hook("x".repeat(HOOK_BODY_LIMIT + 1))
