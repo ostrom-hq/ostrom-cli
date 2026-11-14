@@ -41,7 +41,13 @@ def claude_hooks(arguments):
     plugin = arguments[arguments.index("--plugin-dir") + 1]
     with open(os.path.join(plugin, "hooks", "hooks.json")) as handle:
         hooks = json.load(handle)["hooks"]
-    return {event: entries[0]["hooks"][0]["command"] for event, entries in hooks.items()}
+    # Ostrom's command hook of each event; the activity hooks are HTTP hooks to the relay, without a command.
+    commands = {}
+    for event, entries in hooks.items():
+        found = [hook["command"] for entry in entries for hook in entry["hooks"] if hook.get("type") == "command"]
+        if found:
+            commands[event] = found[0]
+    return commands
 
 
 CODEX_OVERRIDE = re.compile(r'^hooks\.(\w+)=\[\{hooks=\[\{type="command",command=("(?:[^"\\]|\\.)*"),timeout=\d+}]}]$')
