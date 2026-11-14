@@ -70,19 +70,19 @@ internal class ConfigureCommand(private val dependencies: CliDependencies) : Cli
 
     /** Reads what [serverUrl] speaks with [token], before anything is kept: the same checks as `ostrom login`. */
     private suspend fun check(serverUrl: String, token: String) {
-        val refusal = when (val read = dependencies.capabilities.read(serverUrl, token)) {
+        val read = dependencies.capabilities.read(serverUrl, token)
+        if (read is CapabilitiesRead.Failed && read.status == UNAUTHORIZED) {
+            throw PrintMessage(
+                "ostrom: $serverUrl did not accept this access token (HTTP 401). Check the token, or sign in " +
+                    "with ostrom login. Nothing was saved.",
+                ExitCode.SIGN_IN_REQUIRED.code,
+                printError = true,
+            )
+        }
+        val refusal = when (read) {
             is CapabilitiesRead.Read -> incompatibility(serverUrl, read.capabilities, BuildInfo.VERSION)
             CapabilitiesRead.Unknown -> tooOld(serverUrl, BuildInfo.VERSION)
-            is CapabilitiesRead.Failed -> if (read.status == UNAUTHORIZED) {
-                throw PrintMessage(
-                    "ostrom: $serverUrl did not accept this access token (HTTP 401). Check the token, or sign in " +
-                        "with ostrom login. Nothing was saved.",
-                    ExitCode.SIGN_IN_REQUIRED.code,
-                    printError = true,
-                )
-            } else {
-                "$serverUrl did not say which Ostrom API it speaks (${read.reason})."
-            }
+            is CapabilitiesRead.Failed -> "$serverUrl did not say which Ostrom API it speaks (${read.reason})."
         }
         if (refusal != null) {
             throw PrintMessage("ostrom: $refusal Nothing was saved.", ExitCode.UNREACHABLE.code, printError = true)
@@ -92,7 +92,8 @@ internal class ConfigureCommand(private val dependencies: CliDependencies) : Cli
     /** The login the token belongs to when the server says it (a service key may not read it), else none. */
     private suspend fun loginOf(serverUrl: String, token: String): String {
         val answer = ServerJson(ApiServerTransport(dependencies.api(serverUrl))).get(ME, token)
-        return (answer as? ServerAnswer.Ok)?.body?.child("dev")?.text("login") ?: UNKNOWN_LOGIN
+        if (answer !is ServerAnswer.Ok) return UNKNOWN_LOGIN
+        return answer.body.child("dev")?.text("login") ?: UNKNOWN_LOGIN
     }
 
     private fun usage(what: String) = PrintMessage("ostrom: $what", ExitCode.USAGE.code, printError = true)
