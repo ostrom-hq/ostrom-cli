@@ -44,12 +44,14 @@ class SessionsCommandsTest : CliKit() {
         val items = """{"items":[{"id":"ses_41b2","agent":"claude","repo":"acme/api",""" +
             """"startedAt":"2026-10-30T14:02:11Z"},{"id":"ses_9","agent":"codex",""" +
             """"startedAt":"2026-10-30T12:07:11Z","endedAt":"2026-10-30T13:00:00Z"},""" +
-            """{"id":"ses_8","lost":true},{}],"next":"ses_8"}"""
+            """{"id":"ses_8","lost":true},{},{"id":"w","activity":"waiting_for_human"},""" +
+            """{"id":"k","activity":"working"},{"id":"e","endedAt":"2026-10-30T13:00:00Z","activity":"working"}],""" +
+            """"next":"ses_8"}"""
         val routes = mapOf("GET /api/v1/sessions?dev=maya" to (200 to items))
         assertEquals(0, serving(routes).run(arrayOf("sessions", "list")))
         assertEquals(
             "ses_41b2  claude  acme/api  running  5m\nses_9  codex  -  ended  2h\nses_8  -  -  lost  ?\n" +
-                "?  -  -  running  ?\n",
+                "?  -  -  running  ?\nw  -  -  waiting for a person  ?\nk  -  -  working  ?\ne  -  -  ended  ?\n",
             console.out.toString(),
         )
         assertEquals("More exist: ostrom sessions list --before ses_8\n", console.err.toString())

@@ -106,7 +106,12 @@ internal class SessionsShowCommand(
 private fun JsonObject.sessionLine(now: Long): String {
     val state = when {
         (this["lost"] as? JsonPrimitive)?.booleanOrNull == true -> "lost"
-        text("endedAt") == null -> "running"
+        // whether its agent works or waits for a person (sessions.activity.v1), only while it runs
+        text("endedAt") == null -> when (text("activity")) {
+            "waiting_for_human" -> "waiting for a person"
+            "working" -> "working"
+            else -> "running"
+        }
         else -> "ended"
     }
     val fields = listOf(text("id") ?: "?", text("agent") ?: "-", text("repo") ?: "-", state)

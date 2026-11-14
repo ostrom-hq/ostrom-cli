@@ -110,6 +110,7 @@ open class AgentLaunchKit {
         teamHooks: Boolean = true,
         background: Boolean = false,
         giveVariables: Boolean = true,
+        activity: Boolean = true,
     ): Int {
         val dependencies = LaunchDependencies(
             server = ServerJson(server),
@@ -152,6 +153,7 @@ open class AgentLaunchKit {
                 teamHooks = teamHooks,
                 background = background,
                 variables = giveVariables,
+                activity = activity,
             )
         return AgentLaunchUseCase(dependencies, adapters).launch(request, site)
     }

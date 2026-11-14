@@ -130,6 +130,17 @@ alternative: a second private file for `ostrom wait`, which a command of the age
   and go with `x-ostrom-origin: agent` set by the relay ([MEMORY.md](MEMORY.md)). Coming soon on the
   server: ostrom-server `main` does not serve `/api/v1/notifications` nor `/api/v1/checks` yet (ostrom-core's
   `api/contract/served-routes.txt`); the sessions and the signed policy are served since ostrom-server d9301e4.
+- Whether the agent works or waits for a person (TeamCode's "Waiting for a person", `sessions.activity.v1`):
+  `POST /activity`, for either capability, answered `{}` at once. The relay reads the event name, a notification's
+  type and, for a `Stop`, whether `background_tasks` or `session_crons` is non-empty; nothing else of the payload
+  leaves the machine (over 64 KiB, the name is read from the first 4 KiB). It reports `working` or
+  `waiting_for_human` to the session segment it knows (`POST /api/v1/sessions/{id}/activity`, the launch's agent
+  token, 1.5 s), one at a time, the latest state waiting; a state already reported is not sent again for 30 s; a
+  failure is sent again 2 s then 5 s later unless a newer state arrived; 403, 404 and 409 are not retried. Claude
+  Code reaches it by HTTP hooks on `Stop`, `Notification`, `UserPromptSubmit`, `PostToolUse` and
+  `PostToolUseFailure` with `OSTROM_RELAY_TOKEN` (`allowedEnvVars`); Codex by `ostrom hook activity` on `Stop` and
+  `UserPromptSubmit`, which sends the event name only. Installed only when the server announces the feature, and not
+  with `--no-activity`. Cloud sessions report nothing this way: their runner sees the agent's turns.
 - Ostrom unreachable or too slow: 502 with `{"error":{"type":"unreachable","message":"Ostrom is unreachable (…)"}}`,
   and one line for the user per outage through the starter's `report`; Ktor's own logger is silenced.
 - `hooks` never depends on `relay`: it speaks plain HTTP to the loopback URL and capability the launcher hands it

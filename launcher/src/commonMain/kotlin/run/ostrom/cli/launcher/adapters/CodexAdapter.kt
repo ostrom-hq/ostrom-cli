@@ -12,6 +12,9 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
+/** Codex has no `Notification` and no per-tool report of it: the activity reports its turn's start and end. */
+private val ACTIVITY_EVENTS = listOf("UserPromptSubmit" to "user_prompt_submit", "Stop" to "stop")
+
 /**
  * Codex: Ostrom's hooks and MCP servers by `-c` overrides, the rules and the package's context in
  * `developer_instructions` (Codex has no session context), and with a package, a `CODEX_HOME` made for the session (the
@@ -34,7 +37,9 @@ class CodexAdapter : AgentAdapter {
             OstromHook("SessionStart", "session_start", "session", START_SECONDS),
             // The launcher ends the session, never the hook (security audit S2-25): this one only reads the event.
             OstromHook("SessionEnd", "session_end", "session", END_SECONDS),
-        ) + if (layout.todo) listOf(OstromHook("Stop", "stop", "todo-stop", TODO_STOP_SECONDS)) else emptyList()
+        ) + (if (layout.todo) listOf(OstromHook("Stop", "stop", "todo-stop", TODO_STOP_SECONDS)) else emptyList()) +
+            // whether the agent works or waits for a person, as TeamCode's `teamcode agents hook` on these two events
+            activityHooks(layout)
         val ours = hooks.groupBy({ it.event }, { group(handler(layout, it)) })
         // the team hooks the member approved: later groups of the same events, not trusted by Ostrom (Codex asks the
         // member to review them in /hooks, as any hook it has not seen)
@@ -89,9 +94,21 @@ class CodexAdapter : AgentAdapter {
         )
         val hash = "sha256:" + sha256Hex(identity.toString().encodeToByteArray())
         listOf(POSIX_FLAGS, WINDOWS_FLAGS).map { layer ->
-            "${quoted("$layer:${hook.label}:0:0")}={trusted_hash=${quoted(hash)},enabled=true}"
+            val key = "$layer:${hook.label}:${groupOf(hooks, hook)}:0"
+            "${quoted(key)}={trusted_hash=${quoted(hash)},enabled=true}"
         }
     }.joinToString(",", "{", "}")
+
+    /** The index of [hook]'s group among its event's: Ostrom's come first, in their order. */
+    private fun groupOf(hooks: List<OstromHook>, hook: OstromHook): Int =
+        hooks.filter { it.event == hook.event }.indexOf(hook)
+
+    /** The activity's hooks, after the todo's on `Stop`, when the launch reports it. */
+    private fun activityHooks(layout: SessionLayout): List<OstromHook> = if (layout.activity) {
+        ACTIVITY_EVENTS.map { (event, label) -> OstromHook(event, label, ACTIVITY, ACTIVITY_SECONDS) }
+    } else {
+        emptyList()
+    }
 
     /** One hook's handler: the one source of both its `-c` override and the identity whose hash is trusted. */
     private fun handler(layout: SessionLayout, hook: OstromHook): Map<String, JsonPrimitive> = linkedMapOf(
@@ -135,6 +152,10 @@ class CodexAdapter : AgentAdapter {
         const val AFTER_SECONDS = 10L
         const val START_SECONDS = 20L
         const val END_SECONDS = 3L
+        const val ACTIVITY = "activity"
+
+        /** It waits 1.5 s at most for the relay, which answers at once. */
+        const val ACTIVITY_SECONDS = 2L
 
         /** The todo's Stop hook, as Claude Code's: its decision's own budget is 140 s. */
         const val TODO_STOP_SECONDS = 150L
