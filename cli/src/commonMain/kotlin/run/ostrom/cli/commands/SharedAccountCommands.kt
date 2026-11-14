@@ -45,13 +45,15 @@ internal class AccountsHandoverCommand(private val dependencies: CliDependencies
             ServerFeatures.SHARING_HANDOVER,
             "This Ostrom server hands no account over: ask your admin to update it.",
         )
-        val accounts = access.read(ACCOUNTS, "No shared accounts here.").list("items")
+        // As TeamCode's administrator: the token of `ostrom login --admin` lists the accounts and hands one over, the
+        // device's token holding no accounts scope (server#486)
+        val accounts = access.readToGovern(ACCOUNTS, "No shared accounts here.").list("items")
             .filterIsInstance<JsonObject>().mapNotNull { item ->
                 item.text("id")?.let { id -> Listed(id, item.text("label") ?: id, item.text("status")) }
             }
         val target = named(accounts)
         val path = "$ACCOUNTS/${segment(target.id)}/handover"
-        val done = access.write("POST", path, null, "No shared account $account.")
+        val done = access.write("POST", path, null, "No shared account $account.", governance = true)
         val status = done.text("status")?.let { " ($it)" }.orEmpty()
         dependencies.console.out("✓ Ostrom renews the tokens of ${target.name} from now on$status.\n")
     }
