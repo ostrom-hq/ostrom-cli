@@ -8,8 +8,10 @@ import com.github.ajalt.clikt.core.ProgramResult
 import com.github.ajalt.clikt.core.UsageError
 import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.arguments.multiple
+import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.clikt.parameters.types.choice
 import run.ostrom.cli.CliDependencies
 import run.ostrom.cli.ExitCode
 import run.ostrom.cli.cloud.CloudSite
@@ -57,6 +59,11 @@ internal class AgentCommand(
         "--no-team-hooks",
         help = "Run none of the team hooks you approved in this session (ostrom hooks list)",
     ).flag()
+    val workload by option(
+        "--workload",
+        help = "Scheduling class of the agent's model calls: background ones wait behind the team's " +
+            "interactive ones; quotas and permissions still apply",
+    ).choice(INTERACTIVE, BACKGROUND).default(INTERACTIVE)
     val agentArguments by argument("agent-args", help = "After --: passed to the agent as they are").multiple()
 
     override fun run() {
@@ -99,7 +106,16 @@ internal class AgentCommand(
             org = orgId,
             foldsCase = environment.operatingSystem.foldsCase,
         )
-        val request = LaunchRequest(agent, agentArguments, repo, model, dryRun, trustProjectSettings, !noTeamHooks)
+        val request = LaunchRequest(
+            agent,
+            agentArguments,
+            repo,
+            model,
+            dryRun,
+            trustProjectSettings,
+            !noTeamHooks,
+            background = workload == BACKGROUND,
+        )
         throw ProgramResult(runBlocking { dependencies.agents.run(request, site) })
     }
 
@@ -127,6 +143,8 @@ internal class AgentCommand(
     private companion object {
         const val NO_HOME = "no folder for ostrom's files: set OSTROM_HOME"
         const val TRUST_PROJECT_SETTINGS = "--trust-project-settings"
+        const val INTERACTIVE = "interactive"
+        const val BACKGROUND = "background"
         const val SIGN_IN = "no Ostrom server: run `ostrom login`, or set OSTROM_URL"
     }
 }

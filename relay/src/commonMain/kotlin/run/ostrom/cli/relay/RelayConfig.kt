@@ -14,6 +14,7 @@ package run.ostrom.cli.relay
  * @property gateCatalog The gate catalogue of the session's verified package (`ostrom/gates.json`, signed by the
  * instance's key), which the relay answers to `GET /api/v1/gates/catalog` from its own memory, out of the agent's reach
  * (security audit S2-20); null without a package, and the call then goes to Ostrom.
+ * @property background True to send every model call as `x-ostrom-workload: background` (`--workload background`).
  */
 data class RelayConfig(
     val serverUrl: String,
@@ -23,8 +24,10 @@ data class RelayConfig(
     val mcpServers: Set<String>,
     val inference: Boolean,
     val gateCatalog: String? = null,
+    val background: Boolean = false,
 ) {
     /** Everything but the credential, so that a configuration printed in a log or an error never carries it. */
     override fun toString(): String = "RelayConfig(serverUrl=$serverUrl, agentToken=<redacted>, " +
-        "userAgent=$userAgent, launchId=$launchId, mcpServers=$mcpServers, inference=$inference)"
+        "userAgent=$userAgent, launchId=$launchId, mcpServers=$mcpServers, inference=$inference, " +
+        "background=$background)"
 }

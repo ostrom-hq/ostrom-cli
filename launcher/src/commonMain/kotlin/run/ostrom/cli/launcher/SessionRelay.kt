@@ -13,6 +13,7 @@ package run.ostrom.cli.launcher
  * @property inference True to relay the inference routes.
  * @property gateCatalog The verified package's gate catalogue (`ostrom/gates.json`), which the relay answers from its
  * own memory (security audit S2-20); null without a package.
+ * @property background True to send the agent's model calls as `x-ostrom-workload: background`.
  */
 data class RelaySettings(
     val serverUrl: String,
@@ -22,6 +23,7 @@ data class RelaySettings(
     val mcpServers: Set<String>,
     val inference: Boolean,
     val gateCatalog: String? = null,
+    val background: Boolean = false,
 )
 
 /** A running local relay on `127.0.0.1`; [close] stops it. */

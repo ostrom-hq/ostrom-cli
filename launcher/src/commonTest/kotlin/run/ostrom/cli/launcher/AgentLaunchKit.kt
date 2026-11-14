@@ -105,6 +105,7 @@ open class AgentLaunchKit {
         executable: String = join("/opt/bin", "ostrom"),
         dryRun: Boolean = false,
         teamHooks: Boolean = true,
+        background: Boolean = false,
     ): Int {
         val dependencies = LaunchDependencies(
             server = ServerJson(server),
@@ -136,7 +137,8 @@ open class AgentLaunchKit {
             pathSeparator = pathSeparator,
             variable = { variables[it] },
         )
-        val request = LaunchRequest(agent, arguments, repo, model, dryRun, teamHooks = teamHooks)
+        val request =
+            LaunchRequest(agent, arguments, repo, model, dryRun, teamHooks = teamHooks, background = background)
         return AgentLaunchUseCase(dependencies, adapters).launch(request, site)
     }
 

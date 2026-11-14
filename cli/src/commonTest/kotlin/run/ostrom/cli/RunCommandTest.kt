@@ -5,10 +5,21 @@ import run.ostrom.cli.launcher.Agent
 import run.ostrom.cli.launcher.LaunchRequest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /** `ostrom run <agent> [options] -- <agent args>`, as TeamCode's `teamcode run`, and the former `ostrom <agent>`. */
 class RunCommandTest : CliKit() {
+    @Test
+    fun aLaunchIsInteractiveUnlessItSaysBackground() {
+        signIn("/home/maya/.config/ostrom")
+        assertEquals(7, cli(environment = withServer).run(arrayOf("run", "codex", "--workload", "background")))
+        assertTrue(launches.single().first.background)
+        assertEquals(7, cli(environment = withServer).run(arrayOf("run", "codex")))
+        assertFalse(launches.last().first.background)
+        assertEquals(64, cli(environment = withServer).run(arrayOf("run", "codex", "--workload", "batch")))
+    }
+
     @Test
     fun anOptionThatIsNotOstromsGoesAfterTheDoubleDash() {
         // as `teamcode run claude -- <args>`: before --, an option Ostrom does not know is a usage error

@@ -110,7 +110,7 @@ private class Relay(
     private val todo = TodoForwarder(config, shared, exchange, timeouts.hook, session)
     private val memoryCalls = MemoryForwarder(config, shared, exchange, timeouts.hook, session)
     private val mcp = McpForwarder(config, upstream, exchange, session)
-    private val inference = InferenceForwarder(config, upstream, exchange)
+    private val inference = InferenceForwarder(config, upstream, exchange, notices)
     private val policy = SignedCatalogForwarder(config, shared, exchange, timeouts.hook, memory)
 
     suspend fun handle(call: ApplicationCall) {

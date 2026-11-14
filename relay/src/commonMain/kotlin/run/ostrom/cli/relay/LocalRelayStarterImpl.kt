@@ -25,7 +25,7 @@ class LocalRelayStarterImpl(
     override fun start(config: RelayConfig): LocalRelay {
         val token = secureRandomBytes(TOKEN_BYTES).toHexString()
         val clientToken = secureRandomBytes(TOKEN_BYTES).toHexString()
-        val notices = FailureNotices(report)
+        val notices = FailureNotices(report = report)
         val server = embeddedServer(
             CIO,
             // The agent's stdout belongs to the agent: Ktor's own messages never reach it (silentLogger).

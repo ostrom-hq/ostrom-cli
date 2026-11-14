@@ -91,7 +91,13 @@ alternative: a second private file for `ostrom wait`, which a command of the age
   one, S2-20 and S2-38), `POST /mcp/{server}` for the launch's servers (to `/api/v1/mcp/{server}`, streamed, 401/403 from
   Ostrom become 502; Ostrom's own server, `ostrom`, goes to the waits server `/api/v1/waits/mcp`, with
   `?session=` the session segment Ostrom answered to the start hook, `<id>~r<n>` once resumed, none before), and with inference `/v1/messages`, `/v1/chat/completions`, `/v1/models` (to
-  `/api/v1/inference/…`, 4 MiB, the response streamed, only the provider headers forwarded). The session todo's
+  `/api/v1/inference/…`, 4 MiB, the response streamed, only the provider headers forwarded). As TeamCode's local
+  proxy: a launch started with `--workload background` sends every model call as `x-ostrom-workload: background`,
+  which waits behind the organisation's interactive calls in the admission queue; every `POST` carries a new
+  `x-ostrom-client-request-id`, and one that ends before the agent has its whole answer (the agent hung up, or the
+  answer was cut) is stopped in Ostrom (`POST /api/v1/inference/requests/{id}/cancel`, best effort on a client of its
+  own, two tries within 2.5 s); and a refusal of Ostrom's own (`x-ostrom-error`) reaches the agent as it is while its
+  cause is printed once per status and code every 10 minutes ("Ostrom answered HTTP 429 (budget_exhausted): …"). The session todo's
   routes (`/api/v1/todos/session`, its items' `start`, `notes`, `proof`, `link` and `drop`) are forwarded with the
   session segment the relay knows in place of any `sessionId` the caller names (the query of a read, the body of a
   write); the agent's capability opens them, while the Stop and SessionStart hooks' own (`stop`, `hook-error`,
