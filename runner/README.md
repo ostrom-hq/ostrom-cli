@@ -282,8 +282,9 @@ does, with its todo given back by `todo-context` when `ostrom-todo` is connected
 
 A running session's Stop hook does not hold the agent for an answer (as TeamCode's pod): Claude Code's terminal redraws
 its spinner every second while a hook runs, and the runner counts the terminal's output as activity, so a held hook
-would keep the session from its idle pause. An answer given while the session runs therefore waits on its wait for the
-session's next execution (an owner's resume, or a later answer that resumes the paused session).
+would keep the session from its idle pause. An answer given while the session runs stays on its wait; when the idle
+guard comes and an answer resolved since this execution started was never taken, the server follows the pause with a
+resume (ostrom-server#554), and the next execution hands it over as above.
 
 A refusal, an error or no answer in time leaves the server out, and the agent keeps its own tools. The token is
 revoked when the launch ends. The server takes the owner (and the origin) of what the agent publishes or writes from
