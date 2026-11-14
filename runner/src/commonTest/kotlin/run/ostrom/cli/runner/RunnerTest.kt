@@ -136,13 +136,18 @@ class RunnerTest {
     fun anEndedTerminalIsFollowedByAShell() = runTest {
         val server = FakeServer()
         val terminals = mutableListOf<FakeTerminal>()
+        val conversations = mutableListOf<String?>()
         val runner = Runner(
             config,
             server,
-            starter { script, _, _ -> FakeTerminal(script).also { terminals += it } },
+            starter { script, environment, _ ->
+                conversations += environment[SessionScript.NEW_CONVERSATION]
+                FakeTerminal(script).also { terminals += it }
+            },
             emptyMap(),
             clock,
             {},
+            newConversation = { "c-1" },
         )
         val done = CompletableDeferred<Int>()
         backgroundScope.launchRunner(runner, done)
@@ -158,6 +163,8 @@ class RunnerTest {
         terminals.first().output.send(null)
         testScheduler.advanceTimeBy(16.seconds)
         assertEquals(SessionScript.AGAIN, terminals.last().script)
+        // Only the agent's terminal is offered a new conversation's id: a shell started again starts no agent.
+        assertEquals(listOf("c-1", null), conversations)
         assertTrue(terminals.first().closed)
         assertEquals(listOf(false, true, false), server.backgrounds)
         runner.agentState(background = false)

@@ -277,8 +277,29 @@ server binds the token to its cloud session), the runner asks `POST /api/v1/wait
 before the agent). The messages it takes (`[Ostrom wait answered] …`, each handed over once) become the agent's first
 message for this execution only (`OSTROM_AGENT_PROMPT`, after the session's own first message if any; a shell started
 again never gets them). The pod's log says how many, never what. A refusal, an error or no answer in time gives none:
-the answers stay on their waits. The agent starts a new conversation on the kept workspace, as any resumed execution
-does, with its todo given back by `todo-context` when `ostrom-todo` is connected.
+the answers stay on their waits. The agent continues its conversation on the kept workspace (below), the answers as
+its next message, with its todo given back by `todo-context` when `ostrom-todo` is connected.
+
+### The agent's conversation across executions
+
+As TeamCode's pod resumes the conversation id it keeps in `$HOME/.teamcode/cloud-agent.json`, the session script of a
+new execution (a manual resume, an answer to a wait, after an idle pause) continues the agent's conversation instead of
+starting a new one. `HOME` is `/workspace/.home`, on the workspace volume, so the agent's own transcripts outlive the
+pod:
+
+- Claude Code starts with `--session-id <id>`, an id the runner gives the first terminal of each execution
+  (`OSTROM_AGENT_NEW_CONVERSATION`, which the script takes out of the agent's environment), and the script records it
+  in `$HOME/.ostrom/cloud-agent.json` (`{"kind":…,"conversationId":…}`, TeamCode's `AgentState`). The next execution
+  starts `claude --resume <id>` when the recorded kind is the session's agent and the transcript is still there
+  (`~/.claude/projects/<directory>/<id>.jsonl`); otherwise a new conversation starts, recorded in its place.
+- Codex starts `codex resume <id>` with its newest rollout (`$CODEX_HOME/sessions/**/rollout-*-<id>.jsonl`), recorded
+  in the same file; a first start, without any, starts a new conversation.
+
+The model, the MCP servers and the first message follow as for a new conversation: the first message (the answers to
+the waits) is the resumed conversation's next message. A conversation continued by hand in the shell left after the
+agent exits (`claude --resume`) is the member's; the next execution resumes the recorded one. OpenCode and Gemini CLI
+start a new conversation, as before. The agent's version is not compared, unlike TeamCode's headless host: a terminal
+agent reads an older transcript of its own.
 
 A running session's Stop hook does not hold the agent for an answer (as TeamCode's pod): Claude Code's terminal redraws
 its spinner every second while a hook runs, and the runner counts the terminal's output as activity, so a held hook

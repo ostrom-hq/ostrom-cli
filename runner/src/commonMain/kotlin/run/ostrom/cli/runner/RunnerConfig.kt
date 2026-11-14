@@ -161,7 +161,13 @@ object SessionScript {
      * agent (with its model and first message, if any; Claude Code with the settings of its background-work hooks;
      * Claude Code and Codex with Ostrom's MCP servers the runner connects, one argument per line of
      * [CloudMcpSession.ARGUMENTS_VARIABLE]),
-     * then leave a login shell so the member can start the agent again. Values come from the environment, never from
+     * then leave a login shell so the member can start the agent again. Claude Code and Codex continue the
+     * conversation they had in the session's previous execution, which the workspace volume keeps under `HOME`: Claude
+     * Code the one in `$HOME/.ostrom/cloud-agent.json` (TeamCode's `AgentState`: `kind`, `conversationId`) when its
+     * kind is the agent's and its transcript is still there (`--resume`; otherwise a new one under [NEW_CONVERSATION],
+     * recorded there), Codex its last one (`codex resume`, the newest rollout of `$CODEX_HOME/sessions`, recorded
+     * there too). The first message, the answers to the waits included, is then the next message of that
+     * conversation. Values come from the environment, never from
      * the script's text. The clone and checkout run with [GIT_HARDENING] (no hook, no fsmonitor, HTTPS only, no
      * submodule), so a repository's content runs nothing.
      */
@@ -192,6 +198,38 @@ if [ -n "${'$'}{OSTROM_LAUNCH_REFUSED:-}" ]; then
   exec bash -l
 fi
 set --
+conversation_new="${'$'}{OSTROM_AGENT_NEW_CONVERSATION:-}"
+unset OSTROM_AGENT_NEW_CONVERSATION
+conversation_kind="${'$'}{OSTROM_AGENT:-${'$'}OSTROM_AGENT_COMMAND}"
+conversation_state="${'$'}HOME/.ostrom/cloud-agent.json"
+conversation=""
+if [ -f "${'$'}conversation_state" ] && [ "${'$'}(sed -n 's/.*"kind" *: *"\([a-z-]*\)".*/\1/p' "${'$'}conversation_state" | head -n 1)" = "${'$'}conversation_kind" ]; then
+  conversation="${'$'}(sed -n 's/.*"conversationId" *: *"\([0-9a-f-]*\)".*/\1/p' "${'$'}conversation_state" | head -n 1)"
+fi
+case "${'$'}OSTROM_AGENT_COMMAND" in
+  claude)
+    projects="${'$'}{CLAUDE_CONFIG_DIR:-${'$'}HOME/.claude}/projects/${'$'}(pwd -P | sed 's/[^A-Za-z0-9]/-/g')"
+    if [ -n "${'$'}conversation" ] && [ -f "${'$'}projects/${'$'}conversation.jsonl" ]; then
+      echo "Resuming the agent's conversation ${'$'}conversation."
+      set -- --resume "${'$'}conversation"
+    else
+      conversation="${'$'}conversation_new"
+      [ -n "${'$'}conversation" ] && set -- --session-id "${'$'}conversation"
+    fi
+    ;;
+  codex)
+    conversation="${'$'}(find "${'$'}{CODEX_HOME:-${'$'}HOME/.codex}/sessions" -type f -name 'rollout-*.jsonl' 2>/dev/null | sed 's#.*/##' | sort | tail -n 1 | sed -n 's/.*\([0-9a-f]\{8\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{12\}\)\.jsonl${'$'}/\1/p')"
+    if [ -n "${'$'}conversation" ]; then
+      echo "Resuming the agent's conversation ${'$'}conversation."
+      set -- resume "${'$'}conversation"
+    fi
+    ;;
+  *) conversation="" ;;
+esac
+if [ -n "${'$'}conversation" ]; then
+  mkdir -p "${'$'}HOME/.ostrom"
+  (umask 077 && printf '{"kind":"%s","conversationId":"%s"}\n' "${'$'}conversation_kind" "${'$'}conversation" > "${'$'}conversation_state.tmp" && mv "${'$'}conversation_state.tmp" "${'$'}conversation_state")
+fi
 if [ "${'$'}OSTROM_AGENT_COMMAND" = claude ] && [ -n "${'$'}{OSTROM_AGENT_SETTINGS:-}" ]; then
   set -- --settings "${'$'}OSTROM_AGENT_SETTINGS"
 fi
@@ -222,6 +260,12 @@ echo
 echo "The agent exited. Run ${'$'}OSTROM_AGENT_COMMAND to start it again."
 exec bash -l
 """
+
+    /**
+     * The id the first terminal's Claude Code gets (`--session-id`) when it has no conversation to resume; the script
+     * takes it out of the agent's environment.
+     */
+    const val NEW_CONVERSATION = "OSTROM_AGENT_NEW_CONVERSATION"
 
     /** The script of a terminal started again after its shell ended. */
     const val AGAIN = """
