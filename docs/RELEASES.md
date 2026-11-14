@@ -129,6 +129,7 @@ floor, cannot lower it. A signed expiry date of the manifest, to refuse a replay
 3. compare `version` with its own (never move to an older or equal version unless asked, and never below the latest
    release's `floor`);
 4. download `assets[<its target>].url`, check `size` and `sha256`, unpack;
+   (a `github.com/<repo>/releases/download/…` address is fetched through GitHub's REST asset endpoint, `api.github.com/repos/<repo>/releases/assets/<id>`, the id read from the release's JSON: the public redirect carries a header line over 8 KB that the Linux and Windows engines refuse; the bytes are still verified as below; TeamCode 29adcf48)
 5. run the unpacked binary with `--ostrom-installation-probe <version> <apiVersion>` (the API version of the server
    the device is signed in to, else its own) and refuse it unless it exits 0 ([COMPATIBILITY.md](COMPATIBILITY.md));
 6. replace the binary atomically.
