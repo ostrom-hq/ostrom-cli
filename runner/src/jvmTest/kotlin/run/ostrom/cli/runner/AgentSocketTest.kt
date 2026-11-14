@@ -152,6 +152,28 @@ class AgentSocketTest {
     }
 
     @Test
+    fun theAgentsHookTellsTheRunnerOfItsBackgroundWorkOverItsSocket() = runBlocking {
+        withTimeout(20.seconds) {
+            val path = Files.createTempDirectory("ostrom-state").resolve("state.sock").toString()
+            val selector = SelectorManager(Dispatchers.IO)
+            val ready = CompletableDeferred<Unit>()
+            val reports = Channel<Boolean>(Channel.UNLIMITED)
+            val state = launch(Dispatchers.IO) {
+                AgentState.serve(selector, path, { reports.trySend(it) }, {}) { ready.complete(Unit) }
+            }
+            ready.await()
+            val connect = suspend { AgentSocket.connect(selector, path) }
+            assertTrue(AgentState.tell(connect, background = true))
+            assertEquals(true, reports.receive())
+            assertTrue(AgentState.tell(connect, background = false))
+            assertEquals(false, reports.receive())
+            state.cancel()
+            state.join()
+            selector.close()
+        }
+    }
+
+    @Test
     fun stoppingTheHostStopsTheTerminalsItServes() = runBlocking {
         withTimeout(20.seconds) {
             val path = Files.createTempDirectory("ostrom-agent").resolve("agent.sock").toString()
