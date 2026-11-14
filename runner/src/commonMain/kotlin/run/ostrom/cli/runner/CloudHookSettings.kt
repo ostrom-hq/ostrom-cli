@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli.runner
 
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 
@@ -39,13 +39,15 @@ object CloudHookSettings {
      * @param binary The `ostrom` binary.
      * @param servers The names of the MCP servers connected to the agent.
      *
-     * @return The settings, as JSON; null when no hook is to be added.
+     * @return The settings, as JSON; null when no hook is to be added, or when [settings] is no JSON object.
      */
+    @Suppress("ReturnCount") // nothing to add, settings left as they are, or the merged settings
     fun claude(settings: String?, binary: String, servers: Set<String>): String? {
         val todo = CloudMcpSession.TODO in servers
         val workflow = CloudMcpSession.WORKFLOW in servers
         if (!todo && !workflow) return null
-        val current = Json.parseToJsonElement(settings ?: AgentState.claudeSettings(binary)).jsonObject
+        // Settings that are no JSON object are left as they are: the runner never fails the agent's start for them.
+        val current = parsed(settings ?: AgentState.claudeSettings(binary)) ?: return null
         val hooks = (current["hooks"] as? JsonObject).orEmpty()
         val added = buildMap<String, MutableList<JsonObject>> {
             if (todo) {
@@ -63,6 +65,12 @@ object CloudHookSettings {
         }
         // Whatever else the settings hold stays as it is.
         return JsonObject(current + ("hooks" to JsonObject(merged))).toString()
+    }
+
+    private fun parsed(text: String): JsonObject? = try {
+        Json.parseToJsonElement(text) as? JsonObject
+    } catch (_: SerializationException) {
+        null
     }
 
     private fun entry(matcher: String?, binary: String, command: String, seconds: Int) = buildJsonObject {

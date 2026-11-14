@@ -90,6 +90,13 @@ class CloudHookSettingsTest {
     }
 
     @Test
+    fun settingsThatAreNoJsonObjectAreLeftAsTheyAre() {
+        for (broken in listOf("", "not json", "[]", "{\"hooks\":")) {
+            assertNull(CloudHookSettings.claude(broken, binary, todo), broken)
+        }
+    }
+
+    @Test
     fun aBinaryPathWithAQuoteIsQuotedForTheShell() {
         val settings = CloudHookSettings.claude(null, "/opt/it's/ostrom", workflow)
         assertEquals("'/opt/it'\\''s/ostrom' cloud workflow-stop", commands(settings, "Stop").last().first)
