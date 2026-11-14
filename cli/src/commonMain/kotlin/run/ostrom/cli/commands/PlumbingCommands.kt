@@ -78,7 +78,7 @@ class McpCommand(private val dependencies: CliDependencies) : CliktCommand(name 
 
     override fun run() {
         // `ostrom mcp list`: the servers you reach, with the state of the hosted commands
-        if (workflow == "list") return dependencies.listMcpServers(org, null, json)
+        if (workflow == "list") return dependencies.listMcpServers(org, json)
         if (workflow != null) {
             dependencies.console.err("ostrom mcp workflow: not implemented yet.\n")
             throw ProgramResult(ExitCode.NOT_IMPLEMENTED.code)
@@ -129,6 +129,7 @@ private val PLUMBING = """
     |  ostrom wait <id> [--timeout S]           wait for a yes; exit 0 yes, 2 no, 75 still waiting
     |  ostrom hook gate|session|wake            answer an agent hook (stdin: the hook event)
     |  ostrom mcp [workflow]                    the local MCP server, on stdio
+    |  ostrom mcp list [--json]                 the servers you reach, with the state of the hosted ones
     |  ostrom check <node>                      run a workflow check
     |""".trimMargin()
 

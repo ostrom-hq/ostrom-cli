@@ -16,13 +16,14 @@ private const val MCP_SERVERS = "/api/v1/mcp/servers?mine=true"
  * left out (`-`), never an error.
  */
 internal fun JsonObject.mcpLine(): String {
-    val state = text("state")?.let { state -> text("failure")?.let { "$state ($it)" } ?: state } ?: "-"
-    return listOf(text("name") ?: "?", text("transport") ?: "-", state).joinToString("  ")
+    val state = text("state") ?: "-"
+    val failure = text("failure")?.let { " ($it)" }.orEmpty()
+    return listOf(text("name") ?: "?", text("transport") ?: "-", state + failure).joinToString("  ")
 }
 
 /** `ostrom mcp list [--json]`: the MCP servers you reach and, for the hosted commands, their state. */
-internal fun CliDependencies.listMcpServers(org: String?, server: String?, json: Boolean) {
-    val access = orgAccess(server, org)
+internal fun CliDependencies.listMcpServers(org: String?, json: Boolean) {
+    val access = orgAccess(null, org)
     val answer = access.read(MCP_SERVERS, "No MCP servers on ${access.signed.serverUrl}.")
     val items = answer.list("items").filterIsInstance<JsonObject>()
     if (json) {

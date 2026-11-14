@@ -12,13 +12,13 @@ class McpListCommandTest : SetupKit() {
         """{"name":"files","transport":"stdio","enabled":true,"scope":"shared","state":"ready"},""" +
         """{"name":"notes","transport":"stdio","enabled":true,"scope":"per-member",""" +
         """"state":"failed","failure":"start_failed"},""" +
-        """{"name":"odd","transport":"stdio","enabled":true,"scope":"shared"}]}"""
+        """{"name":"odd","transport":"stdio","enabled":true,"scope":"shared","failure":"crashed"}]}"""
 
     @Test
     fun eachServerIsALineWithItsStateAndLastFailure() {
         assertEquals(0, run(mapOf(list to (200 to servers)), "mcp", "list"))
         assertEquals(
-            "linear  sse  -\nfiles  stdio  ready\nnotes  stdio  failed (start_failed)\nodd  stdio  -\n",
+            "linear  sse  -\nfiles  stdio  ready\nnotes  stdio  failed (start_failed)\nodd  stdio  - (crashed)\n",
             console.out.toString(),
         )
     }
@@ -26,7 +26,8 @@ class McpListCommandTest : SetupKit() {
     @Test
     fun jsonIsTheItemsAndAnEmptyListSaysHowToAddOne() {
         assertEquals(0, run(mapOf(list to (200 to servers)), "mcp", "list", "--json"))
-        assertEquals(true, console.out.toString().startsWith("[{\"name\":\"linear\""), console.out.toString())
+        val items = servers.removePrefix("""{"items":""").removeSuffix("}")
+        assertEquals("$items\n", console.out.toString())
         console.out.clear()
         assertEquals(0, run(mapOf(list to (200 to """{"items":[]}""")), "mcp", "list"))
         assertErr("No MCP server. An owner or an admin adds one on the console.\n")
