@@ -69,7 +69,7 @@ internal class CloudCreateCommand(private val dependencies: CliDependencies) : C
         }
         val access = dependencies.orgAccess(server, org)
         val signed = access.signed
-        dependencies.requireFeature(signed.serverUrl, signed.token, ServerFeatures.RUNNERS_CLOUD, NO_CLOUD_CREATE)
+        dependencies.requireFeature(signed.serverUrl, signed.token, ServerFeatures.RUNNERS_CLOUD, NO_CLOUD_SESSIONS)
         // An older server ignores unknown fields: never let it drop the recipe silently.
         if (environment != null) {
             dependencies.requireFeature(
@@ -86,13 +86,8 @@ internal class CloudCreateCommand(private val dependencies: CliDependencies) : C
             "prompt" to initial,
             "environment" to environment,
         )
-        val session = access.write("POST", CLOUD_SESSIONS_ROUTE, body, "No cloud sessions on ${signed.serverUrl}.")
+        val session = access.write("POST", CLOUD_SESSIONS, body, "No cloud sessions on ${signed.serverUrl}.")
         dependencies.console.out(if (json) "$session\n" else session.cloudLine(dependencies.clock()) + "\n")
-    }
-
-    private companion object {
-        const val CLOUD_SESSIONS_ROUTE = "/api/v1/cloud/sessions"
-        const val NO_CLOUD_CREATE = "This Ostrom server runs no cloud session: ask your admin to update it."
     }
 }
 
