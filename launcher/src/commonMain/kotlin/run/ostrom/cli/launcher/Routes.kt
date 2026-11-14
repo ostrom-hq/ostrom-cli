@@ -27,6 +27,9 @@ object Routes {
      */
     const val MCP_MINE = "/api/v1/mcp/servers?mine=true"
 
+    /** Whether the launch's agent may publish artifacts now (`getArtifactPolicy`). */
+    const val ARTIFACTS_POLICY = "/api/v1/artifacts/policy"
+
     /** `GET`: the models of the inference gateway; a 2xx with models means the organisation relays inference. */
     const val INFERENCE_MODELS = "/api/v1/inference/v1/models"
 

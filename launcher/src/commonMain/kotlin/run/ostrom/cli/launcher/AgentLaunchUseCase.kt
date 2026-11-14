@@ -193,6 +193,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         val todos = reads.hooks.todos
         val memory = reads.hooks.memory
         val workflowDelivery = reads.hooks.workflowDelivery
+        val artifacts = reads.hooks.artifacts
         val teamHooks = reads.hooks.team
         val plugin = join(temporary, "plugin")
         val relayTokenFile = join(temporary, "relay-token")
@@ -212,7 +213,12 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         // `ostrom` (rules_for, request_approval, get_receipt) is built into every Ostrom server
         // `ostrom-workflow` (deliver) is Ostrom's own too, connected only where the server takes a delivery
         val delivery = if (run.workflowDelivery) listOf(WORKFLOW_MCP) else emptyList()
-        val mcp = (listOf(BUILT_IN_MCP) + delivery + run.mcpServers + run.pack?.mcpServers.orEmpty()).distinct()
+        // `ostrom-artifacts` (publish, list, read, share) too, connected only when the agent may publish now
+        val publishing = if (run.artifacts) listOf(ARTIFACTS_MCP) else emptyList()
+        // an organisation's server never takes the name of one of Ostrom's own, whose routes the relay knows (the
+        // signed package's may: its workflow nodes call `ostrom-workflow`)
+        val theirs = run.mcpServers.filterNot { it in OWN_MCP }
+        val mcp = (listOf(BUILT_IN_MCP) + delivery + publishing + theirs + run.pack?.mcpServers.orEmpty()).distinct()
         val inference = run.inference
         val settings = RelaySettings(
             run.site.serverUrl,
@@ -252,7 +258,8 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         val block = dependencies.files.read(join(run.plugin, "ostrom", "AGENTS-block.md")).orEmpty()
         val context = if (run.pack == null) block else "$block\n${run.pack.context}\n"
         val memory = if (run.memory) "$context\n${SessionLayout.MEMORY_INSTRUCTIONS}\n" else context
-        val rules = if (run.workflowDelivery) "$memory\n${SessionLayout.WORKFLOW_INSTRUCTIONS}\n" else memory
+        val delivery = if (run.workflowDelivery) "$memory\n${SessionLayout.WORKFLOW_INSTRUCTIONS}\n" else memory
+        val rules = if (run.artifacts) "$delivery\n${SessionLayout.ARTIFACTS_INSTRUCTIONS}\n" else delivery
         val model = run.request.model?.let { listOf("--model", it) }.orEmpty()
         val arguments = beforeSeparator(run.request.arguments, model)
         val layout = SessionLayout(
@@ -274,6 +281,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
             todo = run.todos,
             memory = run.memory,
             workflowDelivery = run.workflowDelivery,
+            artifacts = run.artifacts,
             teamHooks = run.teamHooks,
         )
         return try {
@@ -360,6 +368,8 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         private const val NO_ADAPTER = 70
         private const val BUILT_IN_MCP = "ostrom"
         private const val WORKFLOW_MCP = SessionLayout.WORKFLOW_SERVER
+        private const val ARTIFACTS_MCP = SessionLayout.ARTIFACTS_SERVER
+        private val OWN_MCP = setOf(BUILT_IN_MCP, WORKFLOW_MCP, ARTIFACTS_MCP)
         private const val CANNOT_WRITE = 73
         private const val AGENT_MISSING = 127
         private const val GIT_MILLIS = 3_000

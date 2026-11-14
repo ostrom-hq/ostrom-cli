@@ -62,7 +62,11 @@ class ClaudeAdapter : AgentAdapter {
         // where it would swallow a prompt.
         val arguments = mutableListOf("--plugin-dir", layout.plugin)
         val mcp = mcpConfig(layout, files)
-        val ours = listOf(SETTINGS, settings) + (if (mcp == null) emptyList() else listOf("--mcp-config", mcp)) + read
+        // Claude Code's own artifact tools publish to claude.ai: off while `ostrom-artifacts` is connected. The `=`
+        // form is not variadic, and repeated `--disallowedTools` add up, so the developer's own list is kept.
+        val native = if (layout.artifacts) listOf(NATIVE_ARTIFACT_TOOLS) else emptyList()
+        val ours = listOf(SETTINGS, settings) + native +
+            (if (mcp == null) emptyList() else listOf("--mcp-config", mcp)) + read
         arguments += beforeSeparator(rest, ours)
         return AgentLaunch(arguments, own, notes + said)
     }
@@ -240,6 +244,10 @@ class ClaudeAdapter : AgentAdapter {
         /** TeamCode's: the decision's own budget is 140 s (the CLI's `TodoStop`). */
         private const val TODO_STOP_SECONDS = 150L
         private const val SETTINGS = "--settings"
+
+        /** Claude Code's own artifact tools, which publish to claude.ai (TeamCode's list). */
+        private const val NATIVE_ARTIFACT_TOOLS =
+            "--disallowedTools=Artifact,ArtifactComments,ArtifactData,ArtifactCheck"
         private const val SETTING_SOURCES = "--setting-sources"
         private const val ADD_DIR = "--add-dir"
         private const val USER = "user"

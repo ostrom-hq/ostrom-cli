@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli
 
+import run.ostrom.cli.launcher.ARTIFACTS
 import run.ostrom.cli.launcher.WORKFLOWS_DELIVER
 import run.ostrom.cli.launcher.adapters.SessionLayout
 import run.ostrom.core.api.models.ServerFeatures
@@ -13,5 +14,7 @@ class WorkflowDeliverFeatureTest {
     fun theLauncherNamesTheDeliveryAsTheServerDoes() {
         assertEquals(ServerFeatures.WORKFLOWS_DELIVER, WORKFLOWS_DELIVER)
         assertEquals("ostrom-workflow", SessionLayout.WORKFLOW_SERVER)
+        assertEquals(ServerFeatures.ARTIFACTS, ARTIFACTS)
+        assertEquals("ostrom-artifacts", SessionLayout.ARTIFACTS_SERVER)
     }
 }

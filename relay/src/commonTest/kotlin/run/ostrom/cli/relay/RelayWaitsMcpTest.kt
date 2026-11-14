@@ -57,6 +57,23 @@ class RelayWaitsMcpTest {
     }
 
     @Test
+    fun theArtifactsServerGoesToItsRouteWithTheAgentTokenAndNoSessionNorQuery() {
+        // TC-ART-14: `ostrom-artifacts` is Ostrom's own server, not one of the organisation's relayed ones.
+        val ostrom = ostrom()
+        relayTest(ostrom, relayConfig(mcpServers = setOf("ostrom", "ostrom-artifacts"))) {
+            start()
+            client.post("/mcp/ostrom-artifacts?session=another-session") { bearerAuth(TOKEN) }
+        }
+        val sent = ostrom.requests.map { request ->
+            request.url.encodedPath to request.url.parameters.entries().associate { it.key to it.value }
+        }
+        assertEquals(
+            listOf("/api/v1/sessions" to emptyMap(), "/api/v1/artifacts/mcp" to emptyMap<String, List<String>>()),
+            sent,
+        )
+    }
+
+    @Test
     fun theWorkflowStepsDeliveryServerIsBoundToTheSegmentAndTheAgentNamesNoOther() {
         val ostrom = ostrom()
         relayTest(ostrom, relayConfig(mcpServers = setOf("ostrom", "ostrom-workflow"))) {
