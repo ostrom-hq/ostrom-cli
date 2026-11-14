@@ -17,6 +17,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Clock
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
@@ -121,6 +122,29 @@ class AgentSocketTest {
             checks.join()
             selector.close()
             assertTrue("checks listening" in logs)
+        }
+    }
+
+    @Test
+    fun theAgentsCommandAsksTheRunnerForTheVariablesOverItsSocket() = runBlocking {
+        withTimeout(20.seconds) {
+            val path = Files.createTempDirectory("ostrom-env").resolve("environment.sock").toString()
+            val selector = SelectorManager(Dispatchers.IO)
+            val ready = CompletableDeferred<Unit>()
+            val logs = mutableListOf<String>()
+            val variables = RunnerVariables({ EnvironmentValues(mapOf("API_KEY" to "v")) }, Clock.System, {})
+            val server = launch(Dispatchers.IO) {
+                EnvironmentSocket.serve(selector, path, variables, { synchronized(logs) { logs += it } }) {
+                    ready.complete(Unit)
+                }
+            }
+            ready.await()
+            val answer = EnvironmentSocket.ask({ AgentSocket.connect(selector, path) })
+            assertEquals(mapOf("API_KEY" to "v"), answer?.variables)
+            server.cancel()
+            server.join()
+            selector.close()
+            assertTrue("environment listening" in logs)
         }
     }
 

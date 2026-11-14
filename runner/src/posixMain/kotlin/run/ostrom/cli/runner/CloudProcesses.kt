@@ -62,6 +62,7 @@ actual fun runCloudProcess(command: String, args: List<String>): Nothing {
         CloudProcess.MACHINE -> machine(environment)
         CloudProcess.CREDENTIAL -> credential(args.firstOrNull(), environment)
         CloudProcess.AGENT_STATE -> agentState(environment)
+        CloudProcess.ENVIRONMENT -> environmentScript(args)
         // Terminals on a PTY; the preparation's commands on pipes, their log written as the agent's uid.
         CloudProcess.AGENT_SUPERVISOR -> host(socket, AgentHost(PtyTerminal, commands = PtyTerminal.Commands))
         CloudProcess.CHECK_HOST -> checkHost(
@@ -109,7 +110,10 @@ private fun runner(socket: String, environment: Map<String, String>): Nothing {
             val gitHub = GitHubCredentialSource(server::gitHubToken, Clock.System)
             val gitHubJob = gitHubAccess(selector, config, gitHub)
             val preparer = preparer(config, server, terminals, gitHub)
-            val runner = Runner(config, server, terminals, environment, Clock.System, ::log, prepare = preparer)
+            val (variables, variablesJob) = environmentAccess(selector, config, server)
+            val runner = Runner(
+                config, server, terminals, environment, Clock.System, ::log, prepare = preparer, variables = variables,
+            )
             // The agent's hooks report its background work there, as its uid: the agent socket's directory.
             val stateJob = launch {
                 AgentState.serve(selector, config.stateSocket, runner::agentState, ::log) {
@@ -120,6 +124,7 @@ private fun runner(socket: String, environment: Map<String, String>): Nothing {
                 runner.run()
             } finally {
                 stateJob.cancel()
+                variablesJob.cancel()
                 gitHubJob.cancelAndJoin()
                 checksJob.cancel()
                 listener.stop()
@@ -325,7 +330,7 @@ private val GITHUB_FIRST_TIMEOUT = 10.seconds
 private const val SOCKET_MODE = 0x1B0
 
 /** rw for all (0666): the checks' socket, in a directory only the agent's and the runner's containers mount. */
-private const val OPEN_MODE = 0x1B6
+internal const val OPEN_MODE = 0x1B6
 
 /** The exit code of a bad configuration (1 is an execution the server ended). */
 internal const val EXIT_BAD_CONFIGURATION = 2

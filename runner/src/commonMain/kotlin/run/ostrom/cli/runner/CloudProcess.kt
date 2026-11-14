@@ -25,7 +25,27 @@ object CloudProcess {
     /** Claude Code's `Stop` and `SessionEnd` hook, in the agent's container: tells the runner of background work. */
     const val AGENT_STATE = "agent-state"
 
-    private val COMMANDS = setOf(RUNNER, AGENT_SUPERVISOR, CHECK_HOST, CREDENTIAL, MACHINE, AGENT_STATE)
+    /**
+     * The agent's `CLAUDE_ENV_FILE` script, in the agent's container: prints the owner's current variables as shell
+     * code, asked of the runner (`ostrom cloud environment --socket PATH`).
+     */
+    const val ENVIRONMENT = "environment"
+
+    private val COMMANDS = setOf(RUNNER, AGENT_SUPERVISOR, CHECK_HOST, CREDENTIAL, MACHINE, AGENT_STATE, ENVIRONMENT)
+
+    /**
+     * The value of `--socket PATH` (or `--socket=PATH`) in [args].
+     *
+     * @param args The arguments after the command.
+     *
+     * @return The path, or null without one.
+     */
+    fun socket(args: List<String>): String? {
+        val index = args.indexOf("--socket")
+        val value = if (index >= 0) args.getOrNull(index + 1) else args.firstOrNull { it.startsWith("--socket=") }
+            ?.removePrefix("--socket=")
+        return value?.takeIf { it.isNotBlank() }
+    }
 
     /**
      * The hidden command [args] name, if any.

@@ -190,6 +190,19 @@ A server without the route (404) leaves the clone to the first terminal's script
 `OSTROM_REPOSITORY_URL` with hooks, fsmonitor and submodules off and HTTPS only (`OSTROM_GIT_HARDENING`), so a
 repository's content runs nothing before the agent does.
 
+## The owner's environment variables (`runners.cloud.variables.v1`)
+
+The runner asks the server for the owner's variables (`POST /api/v1/cloud/runner/variables`) and keeps them in memory
+only, as TeamCode's `RunnerVariables`. Each agent start (the first terminal and every shell after it) asks again and
+gets them in its process environment, under the runner's own variables, which win. Claude Code also reads
+`CLAUDE_ENV_FILE=/run/ostrom/agent-env.sh` before each Bash command: the script holds no value and runs
+`ostrom cloud environment --socket /run/ostrom/environment.sock`, which asks the runner and prints `export` and `unset`
+lines; the runner asks the server again when its last answer is older than 30 seconds, so a rotated, added or removed
+variable reaches the next command without a restart. A failed read keeps the last values (retried after 15 seconds), a
+server without the route (404) is not asked again, and a fenced or refused execution gives none. Names that steer the
+shell, the loader, git, `gh` or the agent (TeamCode's list, with `OSTROM_`) never reach the agent, and no value is
+logged or put on a command line.
+
 ## The agent cannot read the runner token (S2-49)
 
 The agent and the runner never share a UID, a container, a process namespace or the token. They do share a group:

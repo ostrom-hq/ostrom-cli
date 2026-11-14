@@ -37,6 +37,8 @@ import kotlin.time.Instant
  * @param reconnectDelay Before reopening a dropped terminal link.
  * @param outputBuffer Output chunks kept while the link is down.
  * @param prepare Prepares the workspace before the agent starts; none on a runner without a recipe.
+ * @param variables The owner's environment variables, given to each agent start, the runner's own winning; none on a
+ *   runner that does not serve them.
  */
 @Suppress("LongParameterList") // Six collaborators and three tunings with defaults, all named at the call sites.
 class Runner(
@@ -50,6 +52,7 @@ class Runner(
     private val reconnectDelay: Duration = 2.seconds,
     private val outputBuffer: Int = 1024,
     private val prepare: Preparer? = null,
+    private val variables: RunnerVariables? = null,
 ) {
     private val output = Channel<ByteArray>(outputBuffer, BufferOverflow.DROP_OLDEST)
 
@@ -139,8 +142,8 @@ class Runner(
             log("execution ended: ${error.message}")
             return@coroutineScope 1
         }
-        val agentEnvironment = prepared + launchVariables(opened)
-        val first = terminals.start(SessionScript.FIRST, agentEnvironment, directory)
+        val agentEnvironment = prepared + launchVariables(opened) + claudeEnvironmentFile
+        val first = terminals.start(SessionScript.FIRST, withVariables(agentEnvironment), directory)
         current.terminal = first
         val terminalJob = launch { superviseTerminal(current, first, agentEnvironment) }
         val code = heartbeat(current)
@@ -148,6 +151,20 @@ class Runner(
         code
     }
 
+    /** The owner's variables asked of the server for an agent starting now, under [agentEnvironment], which wins. */
+    private suspend fun withVariables(agentEnvironment: Map<String, String>): Map<String, String> =
+        if (variables == null) agentEnvironment else variables.forStart() + agentEnvironment
+
+    /**
+     * Claude Code asks the runner for the owner's current variables before each Bash command, through the script next
+     * to the sockets: a rotated, added or removed variable reaches its next command without a restart.
+     */
+    private val claudeEnvironmentFile: Map<String, String> =
+        if (variables != null && config.agentCommand == CLAUDE) {
+            mapOf(AgentEnvironment.CLAUDE_ENV_FILE to EnvironmentSocket.scriptFor(config.credentialSocket))
+        } else {
+            emptyMap()
+        }
 
     /** Opens the agent's launch, a few times while the server cannot be reached; then the agent does not start. */
     private suspend fun openLaunch(): RunnerLaunch {
@@ -235,7 +252,7 @@ class Runner(
             // The agent ended with its terminal: its background work too.
             background = false
             log("terminal ended, starting a shell")
-            terminal = terminals.start(SessionScript.AGAIN, agentEnvironment, config.workspace)
+            terminal = terminals.start(SessionScript.AGAIN, withVariables(agentEnvironment), config.workspace)
             current.terminal = terminal
         }
     }
@@ -302,3 +319,6 @@ private const val LAUNCH_ATTEMPTS = 10
 
 /** Why the agent does not start when the server never answered the launch. */
 private const val UNREACHABLE = "the server could not be reached."
+
+/** The agent that reads `CLAUDE_ENV_FILE`. */
+private const val CLAUDE = "claude"
