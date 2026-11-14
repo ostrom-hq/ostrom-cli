@@ -37,8 +37,8 @@ internal class GitHubAsset(val repository: String, val tag: String?, val file: S
         )
 
         /** The asset an address names, or null for any other address (an enterprise host, a mirror, a test server). */
-        fun of(url: String): GitHubAsset? = PUBLIC.matchEntire(url)?.let {
-            GitHubAsset(it.groupValues[1], it.groupValues[2].ifEmpty { null }, it.groupValues[3])
+        fun of(url: String): GitHubAsset? = PUBLIC.matchEntire(url)?.destructured?.let { (repository, tag, file) ->
+            GitHubAsset(repository, tag.ifEmpty { null }, file)
         }
     }
 }
