@@ -156,7 +156,8 @@ object AgentEnvironment {
     private val NAME = Regex("[A-Z_][A-Z0-9_]{0,127}")
 
     /**
-     * Names that would steer the shell, the loader, git, `gh` or the agent's own connection: TeamCode's list. A value
+     * Names that would steer the shell, the loader, git, `gh` or the agent's own connection: TeamCode's list, then the
+     * server's further names (Nathan, 14/11/2026: the loader and the runtimes, Git's programs, ripgrep's file). A value
      * from an older server or a tampered answer never sets them.
      */
     private val RESERVED = setOf(
@@ -166,6 +167,13 @@ object AgentEnvironment {
         "GIT_SSH_COMMAND", "GIT_EXEC_PATH", "GIT_CONFIG_GLOBAL", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
         "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS", "REQUESTS_CA_BUNDLE", "GIT_TERMINAL_PROMPT",
         "GH_CONFIG_DIR", "SHELLOPTS", "BASHOPTS", "CDPATH", "GLOBIGNORE", "PS4",
+        // beyond TeamCode's list, as the server's EnvironmentRules
+        "GLIBC_TUNABLES", "NODE_TLS_REJECT_UNAUTHORIZED", "NODE_ICU_DATA", "ELECTRON_RUN_AS_NODE", "PYTHONUSERBASE",
+        "PYTHONEXECUTABLE", "PYTHONPLATLIBDIR", "PYTHONBREAKPOINT", "PERL5DB", "CLASSPATH", "DOTNET_STARTUP_HOOKS",
+        "CORECLR_PROFILER", "CORECLR_PROFILER_PATH", "CORECLR_ENABLE_PROFILING", "CURL_CA_BUNDLE", "SSLKEYLOGFILE",
+        "ZDOTDIR", "GIT_ASKPASS", "SSH_ASKPASS", "GIT_PROXY_COMMAND", "GIT_EXTERNAL_DIFF", "GIT_PAGER", "GIT_EDITOR",
+        "GIT_SEQUENCE_EDITOR", "GIT_TEMPLATE_DIR", "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "RIPGREP_CONFIG_PATH",
     )
 
     /** TeamCode's prefixes, with Ostrom's own variables (`OSTROM_`). */

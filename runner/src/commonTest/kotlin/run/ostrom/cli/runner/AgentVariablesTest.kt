@@ -140,6 +140,18 @@ class AgentVariablesTest {
     }
 
     @Test
+    fun theLoaderTheRuntimesAndGitsProgramsAreWithheldBeyondTeamCodesList() {
+        val beyond = listOf(
+            "GLIBC_TUNABLES", "NODE_TLS_REJECT_UNAUTHORIZED", "SSLKEYLOGFILE", "CURL_CA_BUNDLE", "DOTNET_STARTUP_HOOKS",
+            "CLASSPATH", "ZDOTDIR", "GIT_ASKPASS", "SSH_ASKPASS", "GIT_PROXY_COMMAND", "GIT_DIR", "RIPGREP_CONFIG_PATH",
+        )
+        for (name in beyond) assertFalse(AgentEnvironment.accepted(name), name)
+        for (name in listOf("GIT_AUTHOR_NAME", "PYTHONUNBUFFERED", "NODE_ENV")) {
+            assertTrue(AgentEnvironment.accepted(name), name)
+        }
+    }
+
+    @Test
     fun theScriptExportsQuotedValuesAndUnsetsWithdrawnNames() {
         val script = AgentEnvironment.script(
             mapOf("B" to "it's \$HOME `x` \"q\" \\", "A" to "plain", "PATH" to "/evil"),
