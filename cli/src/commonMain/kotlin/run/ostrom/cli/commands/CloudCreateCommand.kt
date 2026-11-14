@@ -128,7 +128,8 @@ private fun profileId(access: OrgAccess, value: String): String {
     if (PROFILE_ID.matches(value)) return value
     // A listing that cannot be read sends the value as an id, and the server answers (TeamCode's).
     val answer = runBlocking { access.server.get(CLOUD_PROFILES, access.signed.token) }
-    val listed = ((answer as? ServerAnswer.Ok)?.body?.get("profiles") as? JsonArray).orEmpty()
+    val body = if (answer is ServerAnswer.Ok) answer.body else JsonObject(emptyMap())
+    val listed = (body["profiles"] as? JsonArray).orEmpty()
         .filterIsInstance<JsonObject>()
         .mapNotNull { profile -> text(profile["id"])?.let { id -> id to text(profile["name"]) } }
     val named = listed.filter { it.second == value }
