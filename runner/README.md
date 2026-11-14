@@ -265,7 +265,25 @@ each event's entries, after the team hooks and next to the runner's own `Stop` a
 are the hooks of `ostrom hook` (the same decisions, [TODOS.md](../docs/TODOS.md), [WORKFLOW-DELIVERY.md](../docs/WORKFLOW-DELIVERY.md)),
 reaching the server with `$OSTROM_URL` and `$OSTROM_AGENT_TOKEN`, which binds the token to its cloud session: no relay,
 no session id. They fail open as the local hooks do, and the todo's Stop is never held for a wait's answer (no
-`--wake`): in a pod the answer arrives as a queued message.
+`--wake`): in a pod the answer arrives as the next execution's first message (below).
+
+### The answers to the session's waits (first message)
+
+TeamCode queues an answer to a wait (or a time, an event, a timeout) as a message on its session, which resumes a
+paused one, and the resumed pod reads it first. Ostrom's server resumes the paused cloud session the same way and keeps
+the answer on its wait; once the launch of the new execution is open and the agent has the waits' server (so the
+server binds the token to its cloud session), the runner asks `POST /api/v1/waits/wake` with the agent token and
+`waitMillis` 0 (never held, no session named; 20 s at most, heartbeating unready meanwhile, a stop ends the runner
+before the agent). The messages it takes (`[Ostrom wait answered] …`, each handed over once) become the agent's first
+message for this execution only (`OSTROM_AGENT_PROMPT`, after the session's own first message if any; a shell started
+again never gets them). The pod's log says how many, never what. A refusal, an error or no answer in time gives none:
+the answers stay on their waits. The agent starts a new conversation on the kept workspace, as any resumed execution
+does, with its todo given back by `todo-context` when `ostrom-todo` is connected.
+
+A running session's Stop hook does not hold the agent for an answer (as TeamCode's pod): Claude Code's terminal redraws
+its spinner every second while a hook runs, and the runner counts the terminal's output as activity, so a held hook
+would keep the session from its idle pause. An answer given while the session runs therefore waits on its wait for the
+session's next execution (an owner's resume, or a later answer that resumes the paused session).
 
 A refusal, an error or no answer in time leaves the server out, and the agent keeps its own tools. The token is
 revoked when the launch ends. The server takes the owner (and the origin) of what the agent publishes or writes from
