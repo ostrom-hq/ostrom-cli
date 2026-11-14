@@ -246,6 +246,13 @@ jobs:
           { cat /etc/ssl/certs/ca-certificates.crt; echo; cat "$RUNNER_TEMP/fake-mcp/cert.pem"; } > "$RUNNER_TEMP/fake-mcp/bundle.pem"
           openssl verify -CAfile "$RUNNER_TEMP/fake-mcp/bundle.pem" "$RUNNER_TEMP/fake-mcp/cert.pem"
           chmod 0644 "$RUNNER_TEMP/fake-mcp/bundle.pem"
+          # The server is a JVM: it reads no PEM bundle, it trusts the JDK's authorities plus this certificate through a
+          # trust store (javax.net.ssl.trustStore), as ostrom-server's own cli-journey.yml does.
+          java_home="${JAVA_HOME:-$(dirname "$(dirname "$(readlink -f "$(command -v keytool)")")")}"
+          cp "$java_home/lib/security/cacerts" "$RUNNER_TEMP/fake-mcp/trust.p12"
+          chmod 0644 "$RUNNER_TEMP/fake-mcp/trust.p12"
+          keytool -importcert -noprompt -alias fake-mcp -file "$RUNNER_TEMP/fake-mcp/cert.pem" \
+            -keystore "$RUNNER_TEMP/fake-mcp/trust.p12" -storetype PKCS12 -storepass changeit
           # The server's non-root user writes the mails (0644); the journey, as the runner's user, reads them.
           mkdir -p "$RUNNER_TEMP/ostrom-mail" && chmod 0777 "$RUNNER_TEMP/ostrom-mail"
           # Test values only: sign-in mails are written to a directory, the console is the server's own origin (the
@@ -256,14 +263,18 @@ jobs:
           OSTROM_MAIL_DIR=/var/lib/ostrom/mail
           OSTROM_PUBLIC_URL=http://127.0.0.1:4600
           OSTROM_CONSOLE_URL=http://127.0.0.1:4600
+          OSTROM_SIGNUP=open
+          OSTROM_READS_PER_MINUTE=6000
+          OSTROM_READS_IN_FLIGHT=64
+          OSTROM_READ_WAITS_IN_FLIGHT=256
           OSTROM_STRIPE_SECRET_KEY=sk_test_cli_e2e
           OSTROM_STRIPE_WEBHOOK_SECRET=whsec_cli_e2e
           OSTROM_STRIPE_API_BASE=http://127.0.0.1:12111
           ENV
           sed -i 's/^ *//' "$RUNNER_TEMP/server.env"
           docker run -d --name ostrom-server --network host -v "$RUNNER_TEMP/ostrom-mail:/var/lib/ostrom/mail" \
-            -v "$RUNNER_TEMP/fake-mcp/bundle.pem:/etc/ssl/certs/ca-certificates.crt:ro" \
-            -e OSTROM_MCP_ALLOW_PRIVATE_UPSTREAMS=true -e SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+            -v "$RUNNER_TEMP/fake-mcp/trust.p12:/etc/ostrom/trust.p12:ro" -e OSTROM_MCP_ALLOW_PRIVATE_UPSTREAMS=true \
+            -e JDK_JAVA_OPTIONS="-Djavax.net.ssl.trustStore=/etc/ostrom/trust.p12 -Djavax.net.ssl.trustStorePassword=changeit" \
             --env-file "$RUNNER_TEMP/server.env" "$IMAGE"
           for _ in $(seq 1 60); do curl -fsS 127.0.0.1:4600/ready >/dev/null 2>&1 && exit 0; sleep 1; done
           docker logs ostrom-server; exit 1
