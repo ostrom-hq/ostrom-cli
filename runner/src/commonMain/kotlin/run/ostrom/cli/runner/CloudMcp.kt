@@ -183,8 +183,9 @@ fun interface CloudServers {
  * [CloudServers] over HTTP, every question at once: `ostrom-artifacts` when the publication policy answers
  * `canPublish` (`GET /api/v1/artifacts/policy`), `ostrom-memory` when the memory answers the token
  * (`GET /api/v1/memory/index?limit=1`: a server without the memory, or a token without `memory:use`, does not), and
- * from the features the server announces (`GET /api/v1/capabilities`), as `ostrom run` reads them: the waits (`ostrom`)
- * whenever it answers, `ostrom-todo` with `todos.v1`, `ostrom-workflow` with `workflows.deliver.v1`.
+ * from the features the server announces (`GET /api/v1/capabilities`): the waits (`ostrom`), `ostrom-todo` with
+ * `todos.v1` and `ostrom-workflow` with `workflows.deliver.v1`, all three only with `runners.cloud.agent.v1`, which
+ * says the server binds the launch's agent token to its cloud session (a server without it cannot place that token).
  *
  * @param client An HTTP client.
  * @param serverUrl The server.
@@ -204,12 +205,14 @@ class HttpCloudServers(
         val remembers = memory.await()
         val features = capabilities.await()
         val served = features.orEmpty().mapNotNull { (it as? JsonPrimitive)?.content }
+        // The waits, the todo and the delivery act on the token's cloud session: only a server that binds it.
+        val bound = AGENT_SESSION in served
         setOfNotNull(
             CloudMcpSession.ARTIFACTS.takeIf { publishes },
             CloudMcpSession.MEMORY.takeIf { remembers },
-            CloudMcpSession.WAITS.takeIf { features != null },
-            CloudMcpSession.TODO.takeIf { TODOS in served },
-            CloudMcpSession.WORKFLOW.takeIf { WORKFLOWS_DELIVER in served },
+            CloudMcpSession.WAITS.takeIf { bound },
+            CloudMcpSession.TODO.takeIf { bound && TODOS in served },
+            CloudMcpSession.WORKFLOW.takeIf { bound && WORKFLOWS_DELIVER in served },
         )
     }
 
@@ -229,6 +232,9 @@ class HttpCloudServers(
     private companion object {
         const val TODOS = "todos.v1"
         const val WORKFLOWS_DELIVER = "workflows.deliver.v1"
+
+        // ostrom-core's ServerFeatures.RUNNERS_CLOUD_AGENT.
+        const val AGENT_SESSION = "runners.cloud.agent.v1"
     }
 
     private fun parsed(text: String): JsonObject? = try {
