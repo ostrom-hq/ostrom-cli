@@ -21,6 +21,7 @@ import run.ostrom.core.api.models.TodoLinkKind
 import run.ostrom.core.api.models.TodoProof
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class TodoToolsTest {
@@ -41,7 +42,7 @@ class TodoToolsTest {
         """[{"type":"pr_merged","repo":"acme/web"}]}}"""
 
     @Test
-    fun theServerIsNamedAndInstructedAndListsItsNineTools() {
+    fun theServerIsNamedAndInstructedAndListsItsTenTools() {
         val dispatcher = tools(FakeTodoApi()).dispatcher("1.2.3")
         val reply = Json.parseToJsonElement(
             dispatcher.handle("""{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}""").orEmpty(),
@@ -51,7 +52,7 @@ class TodoToolsTest {
         assertEquals(
             listOf(
                 "todo_help", "todo_create", "todo_show", "todo_start", "todo_complete", "todo_link", "todo_add",
-                "todo_note", "todo_drop",
+                "todo_note", "todo_reset", "todo_drop",
             ),
             tools(FakeTodoApi()).tools().map { it.name },
         )
@@ -104,7 +105,11 @@ class TodoToolsTest {
     @Test
     fun ostromsRefusalsComeWithWhatToDo() {
         val hints = mapOf(
-            "todo_exists" to "Use todo_add to add an item to the existing todo.",
+            "todo_exists" to "Use todo_add to add an item to the existing todo, or, if it is closed, todo_reset and " +
+                "then todo_create a new one.",
+            "todo_closed" to "The todo is closed: call todo_reset to clear it, then todo_create a new one.",
+            "todo_active" to "The todo is not closed yet: finish its items (todo_show lists them), or ask the owner " +
+                "to drop one with todo_drop. Only a closed todo is reset.",
             "todo_not_found" to "Create the todo first with todo_create (todo_help shows the format).",
             "already_linked" to "A link does not change. If the PR was closed without merge, pass replaceClosed: true.",
             "forbidden" to "This session's credential cannot keep a todo; carry on without it.",
@@ -285,6 +290,21 @@ class TodoToolsTest {
         assertTrue(dropped.startsWith("The session's owner is asked whether to drop fix (a wait is open)."), dropped)
         assertEquals("moot", (api.calls.last().second as DropTodoItemRequest).reason)
         assertEquals("reason is required." to true, tools.call("todo_drop", """{"id":"fix"}"""))
+    }
+
+    @Test
+    fun resetClearsTheClosedTodoOfItsSessionAndAnActiveOneIsRefusedWithAHint() {
+        val api = FakeTodoApi(list)
+        val tools = tools(api)
+        val (cleared, error) = tools.call("todo_reset")
+        assertFalse(error, cleared)
+        assertTrue(cleared.contains("todo_create"), cleared)
+        assertEquals(listOf<Pair<String, Any?>>("reset" to null), api.calls)
+        assertEquals(null, api.read(), "as if there never was one")
+        val active = FakeTodoApi(list).also { it.refuse("reset", "todo_active", "still active") }
+        val (refused, failed) = tools(active).call("todo_reset")
+        assertTrue(failed)
+        assertTrue(refused.contains("todo_active") && refused.contains("todo_drop"), refused)
     }
 
     @Test

@@ -66,6 +66,7 @@ class RelayTodoApiTest {
         api.complete("fix", CompleteTodoItemRequest(checks = emptyList()))
         api.link("fix", LinkTodoItemRequest(kind = TodoLinkKind.PR, ref = "https://github.com/a/b/pull/1"))
         api.drop("fix", DropTodoItemRequest(reason = "moot"))
+        api.reset()
         assertEquals("block", hooks.context())
         assertEquals(TodoStopAction.ALLOW, hooks.stop(TodoStopRequest(phase = TodoStopPhase.BEGIN)).action)
         hooks.hookError(TodoHookErrorRequest(text = "failed"))
@@ -79,6 +80,7 @@ class RelayTodoApiTest {
                 "POST /api/v1/todos/session/items/fix/proof",
                 "POST /api/v1/todos/session/items/fix/link",
                 "POST /api/v1/todos/session/items/fix/drop",
+                "POST /api/v1/todos/session/reset",
                 "GET /api/v1/todos/session/context",
                 "POST /api/v1/todos/session/stop",
                 "POST /api/v1/todos/session/hook-error",
@@ -89,6 +91,7 @@ class RelayTodoApiTest {
         assertEquals(setOf(mapOf("Authorization" to "Bearer cap")), relay.sent.map { it.second.headers }.toSet())
         assertEquals(null, relay.sent.first().second.body, "a read has no body")
         assertEquals("""{"text":"n"}""", relay.sent[4].second.body, "no session is named: the relay names it")
+        assertEquals("{}", relay.sent[8].second.body, "a reset names no session either")
     }
 
     @Test

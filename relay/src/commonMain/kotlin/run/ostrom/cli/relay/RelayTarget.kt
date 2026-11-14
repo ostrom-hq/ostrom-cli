@@ -104,7 +104,7 @@ private val HOOK_GET = Regex("/api/v1/gates/$ID")
 
 /** The todo routes the agent's `ostrom-todo` server calls (`getSessionTodo` is a GET of the root). */
 private const val TODO_ROOT = "/api/v1/todos/session"
-private val TODO_AGENT_POST = Regex("$TODO_ROOT(/items(/$ID/(start|notes|proof|link|drop))?)?")
+private val TODO_AGENT_POST = Regex("$TODO_ROOT(/items(/$ID/(start|notes|proof|link|drop))?|/reset)?")
 private val TODO_HOOK_POST = Regex("$TODO_ROOT/(stop|hook-error)")
 private const val TODO_CONTEXT = "$TODO_ROOT/context"
 internal const val WORKFLOW_PENDING = "/api/v1/workflows/session/pending"

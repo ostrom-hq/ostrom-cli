@@ -24,6 +24,7 @@ the agent's relay capability; the relay names the session itself.
 | `todo_add` | Adds an item found on the way, with the reason. |
 | `todo_note` | Notes progress on an item. |
 | `todo_drop` | Asks the session's owner to drop an item (a wait is opened). |
+| `todo_reset` | Clears the session's todo once it is closed (`POST /api/v1/todos/session/reset`), so `todo_create` can start a new one; refused (`todo_active`) while the list is active. |
 
 The server's instructions are TeamCode's, with Ostrom's names (`ask_human` and `wait_for` of the `ostrom` server,
 `publish` of `ostrom-artifacts`) and TeamCode #257's guidance: a check must stay true once the work moves on, never a
