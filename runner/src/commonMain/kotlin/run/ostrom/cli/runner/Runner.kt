@@ -58,6 +58,18 @@ class Runner(
     @Volatile
     private var lastOutputAt: Instant? = null
 
+    @Volatile
+    private var background = false
+
+    /**
+     * Records whether the agent has background work, as its hook reported ([AgentState]); reported with each heartbeat.
+     *
+     * @param background Whether it has.
+     */
+    fun agentState(background: Boolean) {
+        this.background = background
+    }
+
     /**
      * Runs until the server says stop or ends the execution.
      *
@@ -127,7 +139,7 @@ class Runner(
         while (true) {
             val instruction = try {
                 // Ready from the first beat: the terminal is started before the runner reports.
-                server.heartbeat(ready = true, stopped = false, lastModelRequestAt = lastOutput())
+                server.heartbeat(ready = true, stopped = false, lastModelRequestAt = lastOutput(), background)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: ExecutionEndedException) {
@@ -162,6 +174,8 @@ class Runner(
                 output.send(bytes)
             }
             current.terminal.close()
+            // The agent ended with its terminal: its background work too.
+            background = false
             log("terminal ended, starting a shell")
             current.terminal = terminals.start(SessionScript.AGAIN, agentEnvironment, config.workspace)
         }

@@ -13,6 +13,7 @@ class CloudProcessTest {
         assertEquals("check-host", CloudProcess.of(listOf("cloud", "check-host")))
         assertEquals("credential", CloudProcess.of(listOf("cloud", "credential", "get")))
         assertEquals("machine", CloudProcess.of(listOf("cloud", "machine")))
+        assertEquals("agent-state", CloudProcess.of(listOf("cloud", "agent-state")))
     }
 
     @Test

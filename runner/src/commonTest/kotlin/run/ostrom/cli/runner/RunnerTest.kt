@@ -64,8 +64,15 @@ class RunnerTest {
         val beats = mutableListOf<Triple<Boolean, Boolean, String?>>()
         val links = Channel<Result<TerminalLink>>(Channel.UNLIMITED)
         var lastFails = false
-        override suspend fun heartbeat(ready: Boolean, stopped: Boolean, lastModelRequestAt: String?): Instruction {
+        val backgrounds = mutableListOf<Boolean>()
+        override suspend fun heartbeat(
+            ready: Boolean,
+            stopped: Boolean,
+            lastModelRequestAt: String?,
+            background: Boolean,
+        ): Instruction {
             beats += Triple(ready, stopped, lastModelRequestAt)
+            backgrounds += background
             check(!(stopped && lastFails)) { "down" }
             if (stopped) return Instruction.STOP
             return instructions.receive().getOrThrow()
@@ -143,10 +150,17 @@ class RunnerTest {
         server.instructions.send(Result.success(Instruction.RUN))
         // The runner starts its terminal once it has read the instruction: let it run before looking.
         testScheduler.runCurrent()
+        // The agent's hook reports background work: the next heartbeat carries it, until its terminal ends.
+        runner.agentState(background = true)
+        testScheduler.advanceTimeBy(16.seconds)
+        server.instructions.send(Result.success(Instruction.RUN))
+        testScheduler.runCurrent()
         terminals.first().output.send(null)
         testScheduler.advanceTimeBy(16.seconds)
         assertEquals(SessionScript.AGAIN, terminals.last().script)
         assertTrue(terminals.first().closed)
+        assertEquals(listOf(false, true, false), server.backgrounds)
+        runner.agentState(background = false)
         server.instructions.send(Result.failure(ExecutionEndedException("replaced")))
         assertEquals(1, done.await())
         assertTrue(terminals.last().terminated)

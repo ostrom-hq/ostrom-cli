@@ -48,7 +48,8 @@ import kotlin.time.Clock
  * agent's side (its own container and uid, without the token, S2-49), and `ostrom cloud check-host` the side that runs
  * the hooks' checks for the runner (its own container, without the token, the workspace mounted, its socket in a
  * directory the agent's container does not mount). `ostrom cloud credential` is git's credential helper in the agent's
- * container. `ostrom cloud machine` is a registered runner on a machine of the organization: it signs of life with its
+ * container, and `ostrom cloud agent-state` Claude Code's hook that reports its background work. `ostrom cloud
+ * machine` is a registered runner on a machine of the organization: it signs of life with its
  * key until the server refuses it.
  *
  * @param command One of [CloudProcess]'s commands.
@@ -60,6 +61,7 @@ actual fun runCloudProcess(command: String, args: List<String>): Nothing {
     when (command) {
         CloudProcess.MACHINE -> machine(environment)
         CloudProcess.CREDENTIAL -> credential(args.firstOrNull(), environment)
+        CloudProcess.AGENT_STATE -> agentState(environment)
         CloudProcess.AGENT_SUPERVISOR -> host(socket, AgentHost(PtyTerminal))
         CloudProcess.CHECK_HOST -> checkHost(
             environment["OSTROM_CHECK_HOST_SOCKET"]?.takeIf { it.isNotBlank() }
@@ -104,9 +106,17 @@ private fun runner(socket: String, environment: Map<String, String>): Nothing {
                 ChecksSocket.serve(selector, config.checksSocket, checks::run, ::log) { chmod(it, OPEN_MODE.convert()) }
             }
             val gitHubJob = gitHubAccess(selector, config, server)
+            val runner = Runner(config, server, terminals, environment, Clock.System, ::log)
+            // The agent's hooks report its background work there, as its uid: the agent socket's directory.
+            val stateJob = launch {
+                AgentState.serve(selector, config.stateSocket, runner::agentState, ::log) {
+                    chmod(it, OPEN_MODE.convert())
+                }
+            }
             try {
-                Runner(config, server, terminals, environment, Clock.System, ::log).run()
+                runner.run()
             } finally {
+                stateJob.cancel()
                 gitHubJob.cancelAndJoin()
                 checksJob.cancel()
                 listener.stop()
@@ -219,6 +229,30 @@ private fun credential(operation: String?, environment: Map<String, String>): No
     exitProcess(0)
 }
 
+/**
+ * Claude Code's `Stop` and `SessionEnd` hook (`ostrom cloud agent-state`), in the agent's container: reads the hook's
+ * input, tells the runner whether background work remains ([AgentState]), prints nothing and succeeds, so the agent
+ * never waits on it nor shows anything.
+ */
+private fun agentState(environment: Map<String, String>): Nothing {
+    val socket = environment[RunnerConfig.STATE_VARIABLE]?.takeIf { it.isNotBlank() }
+        ?: RunnerConfig.DEFAULT_STATE_SOCKET
+    val payload = StringBuilder()
+    while (payload.length < AgentState.MAX_PAYLOAD) {
+        val line = readlnOrNull() ?: break
+        payload.append(line).append('\n')
+    }
+    runBlocking {
+        val selector = SelectorManager(Dispatchers.IO)
+        try {
+            AgentState.tell({ AgentSocket.connect(selector, socket) }, AgentState.background(payload.toString()))
+        } finally {
+            selector.close()
+        }
+    }
+    exitProcess(0)
+}
+
 /** A host (agent or checks): serves the runner's terminals on [socket], until the pod stops it (SIGTERM). */
 private fun host(socket: String, host: AgentHost): Nothing {
     // As pid 1 of its container, the host gets no default action for SIGTERM: without this, a stop waits the grace.
@@ -255,7 +289,7 @@ private val KNOWN_VARIABLES = listOf(
     "OSTROM_WORKSPACE", "OSTROM_AGENT_SOCKET", "OSTROM_RUNNER_CHECKS", "OSTROM_CHECK_HOST_SOCKET",
     "OSTROM_RUNNER_ID", "OSTROM_RUNNER_KEY", "OSTROM_RUNNER_KEY_FILE", "OSTROM_RUNNER_INTERVAL_SECONDS",
     "OSTROM_DOCKER_API_URL", "OSTROM_DOCKER_NETWORK", "OSTROM_RUNNER_SESSION_IMAGE", "OSTROM_CREDENTIAL_SOCKET",
-    "OSTROM_GH_CONFIG_DIR",
+    "OSTROM_GH_CONFIG_DIR", "OSTROM_AGENT_STATE_SOCKET",
 )
 
 internal const val CONNECT_TIMEOUT_MILLIS = 10_000L
