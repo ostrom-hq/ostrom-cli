@@ -10,7 +10,7 @@ import kotlin.test.assertTrue
 
 class TeamCodeDatabaseTest {
     private val url = "mysql://teamcode_ro@db.acme.example:3307/teamcode"
-    private val ACCOUNTS =
+    private val accountColumns =
         listOf("id", "provider", "provider_account_id", "display_name", "credential_envelope", "team_id")
 
     private fun fails(mysql: FakeMysql, url: String = this.url, team: String = "default"): String =
@@ -47,7 +47,7 @@ class TeamCodeDatabaseTest {
             "variants" to listOf("id", "target", "name", "binding", "config", "team_id", "kind"),
             "variant_assignments" to listOf("member_id", "variant_id", "team_id", "kind"),
             "mcp_tool_policies" to listOf("variant_id", "mode", "tools", "team_id"),
-            "accounts" to ACCOUNTS,
+            "accounts" to accountColumns,
             "workflows" to listOf("id", "name", "version", "definition", "created_at", "team_id"),
             "workflow_settings" to listOf("editor_mode", "editor_ids", "team_id"),
             "automations" to listOf(
@@ -85,7 +85,7 @@ class TeamCodeDatabaseTest {
             "variants" to listOf("id", "target", "name", "binding", "config", "team_id", "kind"),
             "variant_assignments" to listOf("member_id", "variant_id", "team_id", "kind"),
             "mcp_tool_policies" to listOf("variant_id", "mode", "tools", "team_id"),
-            "accounts" to ACCOUNTS,
+            "accounts" to accountColumns,
         )
         val noVersions = columns(*base, "cloud_profiles" to listOf("id", "name", "team_id", "current_version"))
         val noSpec = columns(

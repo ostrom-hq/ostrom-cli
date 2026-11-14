@@ -114,8 +114,8 @@ class TeamCodeDatabase(private val capture: ProcessCapture, private val mysql: S
         val required: List<String>,
         val optional: List<String>,
         val filtered: List<String>,
-        val filter: (String) -> String,
         val optionalTable: Boolean = false,
+        val filter: (String) -> String,
     )
 
     /** The queries of the read. */
