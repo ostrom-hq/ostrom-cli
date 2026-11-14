@@ -157,7 +157,7 @@ object AgentEnvironment {
 
     /**
      * Names that would steer the shell, the loader, git, `gh` or the agent's own connection: TeamCode's list, then the
-     * server's further names (Nathan, 14/11/2026: the loader and the runtimes, Git's programs, ripgrep's file). A value
+     * server's further names (the loader and the runtimes, Git's programs and TLS switches, ripgrep's file). A value
      * from an older server or a tampered answer never sets them.
      */
     private val RESERVED = setOf(
@@ -173,7 +173,8 @@ object AgentEnvironment {
         "CORECLR_PROFILER", "CORECLR_PROFILER_PATH", "CORECLR_ENABLE_PROFILING", "CURL_CA_BUNDLE", "SSLKEYLOGFILE",
         "ZDOTDIR", "GIT_ASKPASS", "SSH_ASKPASS", "GIT_PROXY_COMMAND", "GIT_EXTERNAL_DIFF", "GIT_PAGER", "GIT_EDITOR",
         "GIT_SEQUENCE_EDITOR", "GIT_TEMPLATE_DIR", "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
-        "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "RIPGREP_CONFIG_PATH",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "RIPGREP_CONFIG_PATH", "GCONV_PATH", "GIT_SSL_NO_VERIFY",
+        "GIT_SSL_CAINFO", "GIT_SSL_CAPATH", "GIT_ALLOW_PROTOCOL",
     )
 
     /** TeamCode's prefixes, with Ostrom's own variables (`OSTROM_`). */
