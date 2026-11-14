@@ -110,6 +110,13 @@ class CloudCreateCommandTest : SetupKit() {
         // A name nobody lists goes as is: the server answers that it has no such profile.
         assertEquals(0, run(listed, "cloud", "create", "--agent", "claude", "--profile", "mobile"))
         assertEquals("""{"agent":"claude","profileId":"mobile"}""", bodyOf(create))
+        // A listing that cannot be read, or a profile without a text id or name, finds none.
+        val refused = routes(withProfiles + (profiles to (403 to """{"error":"forbidden","message":"No."}""")))
+        assertEquals(0, run(refused, "cloud", "create", "--agent", "claude", "--profile", "backend"))
+        assertEquals("""{"agent":"claude","profileId":"backend"}""", bodyOf(create))
+        val odd = routes(withProfiles + (profiles to (200 to """{"profiles":[{"id":1,"name":"web"},{"id":"x"},3]}""")))
+        assertEquals(0, run(odd, "cloud", "create", "--agent", "claude", "--profile", "web"))
+        assertEquals("""{"agent":"claude","profileId":"web"}""", bodyOf(create))
         // A listing without profiles finds none.
         val empty = routes(withProfiles + (profiles to (200 to "{}")))
         assertEquals(0, run(empty, "cloud", "create", "--agent", "claude", "--profile", "web"))
@@ -125,6 +132,12 @@ class CloudCreateCommandTest : SetupKit() {
         val twice = routes(withProfiles + listing(backend to "Web", other to "WEB"))
         assertEquals(64, run(twice, "cloud", "create", "--agent", "claude", "--profile", "web"))
         assertErr("several profiles are named \"web\"")
+    }
+
+    @Test
+    fun anEmptyProfileIsAUsageError() {
+        assertEquals(64, run(routes(withProfiles), "cloud", "create", "--agent", "claude", "--profile", " "))
+        assertErr("Name the profile")
     }
 
     @Test

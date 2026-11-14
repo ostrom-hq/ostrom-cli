@@ -10,12 +10,14 @@ import com.github.ajalt.clikt.parameters.options.required
 import com.github.ajalt.clikt.parameters.types.choice
 import run.ostrom.cli.CliDependencies
 import run.ostrom.cli.ExitCode
+import run.ostrom.cli.launcher.ServerAnswer
 import run.ostrom.cli.launcher.objectOf
 import run.ostrom.core.api.models.ServerFeatures
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.jsonPrimitive
 
 /** What `ostrom cloud create` says to a server that takes no preparation recipe. */
 internal const val NO_RECIPE =
@@ -85,6 +87,7 @@ internal class CloudCreateCommand(private val dependencies: CliDependencies) : C
         val initial = message?.let { if (it == "-") generateSequence(dependencies.readLine).joinToString("\n") else it }
         if (initial != null && initial.isBlank()) throw stopWith(ExitCode.USAGE, "ostrom: the --message text is empty.")
         if (branch != null && repositories.isEmpty()) throw UsageError("Use --branch with --repo.")
+        if (profile?.isBlank() == true) throw UsageError("Name the profile: --profile ID|NAME.")
         val environment = recipe()
         val access = dependencies.orgAccess(server, org)
         val signed = access.signed
@@ -123,22 +126,26 @@ internal class CloudCreateCommand(private val dependencies: CliDependencies) : C
  */
 private fun profileId(access: OrgAccess, value: String): String {
     if (PROFILE_ID.matches(value)) return value
-    val answer = access.read(CLOUD_PROFILES, "No cloud profiles on ${access.signed.serverUrl}.")
-    val listed = (answer["profiles"] as? JsonArray).orEmpty().filterIsInstance<JsonObject>()
-    fun name(profile: JsonObject) = (profile["name"] as? JsonPrimitive)?.content
-    val named = listed.filter { name(it) == value }
-        .ifEmpty { listed.filter { name(it).equals(value, ignoreCase = true) } }
+    // A listing that cannot be read sends the value as an id, and the server answers (TeamCode's).
+    val answer = runBlocking { access.server.get(CLOUD_PROFILES, access.signed.token) }
+    val listed = ((answer as? ServerAnswer.Ok)?.body?.get("profiles") as? JsonArray).orEmpty()
+        .filterIsInstance<JsonObject>()
+        .mapNotNull { profile -> text(profile["id"])?.let { id -> id to text(profile["name"]) } }
+    val named = listed.filter { it.second == value }
+        .ifEmpty { listed.filter { it.second.equals(value, ignoreCase = true) } }
     return when (named.size) {
         0 -> value
-        1 -> named.single().getValue("id").jsonPrimitive.content
+        1 -> named.single().first
         else -> throw stopWith(
             ExitCode.USAGE,
-            "ostrom: several profiles are named \"$value\": " +
-                named.joinToString { it.getValue("id").jsonPrimitive.content } +
+            "ostrom: several profiles are named \"$value\": " + named.joinToString { it.first } +
                 ". Pass one of these ids to --profile.",
         )
     }
 }
+
+/** A JSON string's text, or null for anything else. */
+private fun text(element: JsonElement?): String? = (element as? JsonPrimitive)?.takeIf { it.isString }?.content
 
 /** The organization's cloud profiles the caller may use. */
 private const val CLOUD_PROFILES = "/api/v1/cloud/profiles"
