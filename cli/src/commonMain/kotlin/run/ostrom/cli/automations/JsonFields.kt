@@ -2,10 +2,8 @@
 package run.ostrom.cli.automations
 
 import run.ostrom.cli.launcher.child
-import run.ostrom.cli.launcher.list
 import run.ostrom.cli.launcher.text
 import run.ostrom.cli.workflows.number
-import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
 // Reads of a JSON object that may be absent: one safe call each, so a caller chains none of its own.
@@ -19,5 +17,3 @@ internal fun JsonObject?.sub(key: String): JsonObject? = this?.child(key)
 /** The whole-number field [key], or null when this object or the field is absent or not a whole number. */
 internal fun JsonObject?.int(key: String): Int? = this?.number(key)?.toIntOrNull()
 
-/** The array field [key], empty when this object or the field is absent. */
-internal fun JsonObject?.items(key: String): List<JsonElement> = this?.list(key).orEmpty()

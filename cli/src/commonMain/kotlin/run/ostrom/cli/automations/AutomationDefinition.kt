@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli.automations
 
+import run.ostrom.cli.launcher.list
 import run.ostrom.cli.launcher.objectOf
 import run.ostrom.cli.launcher.text
 import kotlinx.serialization.json.JsonArray
@@ -107,7 +108,7 @@ private fun variablesOf(saved: JsonObject?, given: AutomationOptions, webhook: B
     val asked = given.variables
     if (asked != null && Clear.VARIABLES in given.clears) refuse("--var and --clear-variables say opposite things.")
     if (!webhook && asked != null) refuse("Payload variables are for a --webhook automation: a cron has no payload.")
-    val old = if (kept && webhook) saved.items("variables") else emptyList()
+    val old = saved?.takeIf { kept && webhook }?.list("variables").orEmpty()
     return JsonArray(if (Clear.VARIABLES in given.clears) emptyList() else asked ?: old)
 }
 
@@ -167,17 +168,4 @@ private fun cloudAction(old: JsonObject?, given: AutomationOptions): JsonObject 
         "maxRuntimeMinutes" to (given.maxRuntimeMinutes ?: kept.int("maxRuntimeMinutes")),
         "repository" to (given.repository ?: old.str("repository")),
     )
-}
-
-private fun refuseCloudConflicts(given: AutomationOptions) {
-    if (given.inputs != null) refuse("--input is for a workflow action: add --workflow ID|NAME.")
-    if (given.model != null && Clear.MODEL in given.clears) refuse("--model and --clear-model say opposite things.")
-    if (given.effort != null && Clear.EFFORT in given.clears) refuse("--effort and --clear-effort say opposite things.")
-}
-
-/** `--input KEY=TEXT` pairs as the action's inputs: one value per key. */
-private fun inputMap(pairs: List<Pair<String, String>>): Map<String, String> {
-    pairs.groupBy { it.first }.filterValues { it.size > 1 }.keys.firstOrNull()
-        ?.let { refuse("Input $it is given twice: pass --input $it=... once.") }
-    return pairs.toMap()
 }
