@@ -52,7 +52,8 @@ gets 409 `org_required` from the policy check, and the launch stops with 64 and 
 personal environment variants), as TeamCode's `teamcode run` does. The launcher holds no rule of their names: it reads
 them through the `MemberVariables` port, which the CLI serves (`cli/.../launch/MemberVariablesImpl.kt`) with the
 runner's `AgentEnvironment`, so a local launch and a cloud session withhold the same names (TeamCode's reserved list
-and prefixes, plus `OSTROM_`).
+and prefixes, plus `OSTROM_`, and the server's further names: `GLIBC_TUNABLES`, `NODE_TLS_REJECT_UNAUTHORIZED`,
+`GIT_ASKPASS` and the other loader, runtime and Git names of ostrom-core's `createEnvironmentVariant`).
 
 - **Before the agent starts**, when the server announces `environment.v1`, the launch reads
   `GET /api/v1/environment` with the device token (scope `environment:read`), with its other reads. Only names are

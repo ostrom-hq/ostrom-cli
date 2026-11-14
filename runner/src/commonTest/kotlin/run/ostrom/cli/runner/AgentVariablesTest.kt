@@ -140,6 +140,26 @@ class AgentVariablesTest {
     }
 
     @Test
+    fun theLoaderTheRuntimesAndGitsProgramsAreWithheldBeyondTeamCodesList() {
+        // Every name ostrom-core's createEnvironmentVariant reserves beyond TeamCode's list.
+        val beyond = listOf(
+            "GLIBC_TUNABLES", "NODE_TLS_REJECT_UNAUTHORIZED", "NODE_ICU_DATA", "ELECTRON_RUN_AS_NODE", "PYTHONUSERBASE",
+            "PYTHONEXECUTABLE", "PYTHONPLATLIBDIR", "PYTHONBREAKPOINT", "PERL5DB", "CLASSPATH", "DOTNET_STARTUP_HOOKS",
+            "CORECLR_PROFILER", "CORECLR_PROFILER_PATH", "CORECLR_ENABLE_PROFILING", "CURL_CA_BUNDLE", "SSLKEYLOGFILE",
+            "GCONV_PATH", "OLDPWD", "SHELLOPTS", "BASHOPTS", "CDPATH", "GLOBIGNORE", "PS4", "ZDOTDIR",
+            "GIT_TERMINAL_PROMPT",
+            "GH_CONFIG_DIR", "GIT_ASKPASS", "SSH_ASKPASS", "GIT_PROXY_COMMAND", "GIT_EXTERNAL_DIFF", "GIT_PAGER",
+            "GIT_EDITOR", "GIT_SEQUENCE_EDITOR", "GIT_TEMPLATE_DIR", "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
+            "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_SSL_NO_VERIFY",
+            "GIT_SSL_CAINFO", "GIT_SSL_CAPATH", "GIT_ALLOW_PROTOCOL", "RIPGREP_CONFIG_PATH", "BASH_FUNC_X",
+        )
+        for (name in beyond) assertFalse(AgentEnvironment.accepted(name), name)
+        for (name in listOf("GIT_AUTHOR_NAME", "PYTHONUNBUFFERED", "NODE_ENV")) {
+            assertTrue(AgentEnvironment.accepted(name), name)
+        }
+    }
+
+    @Test
     fun theScriptExportsQuotedValuesAndUnsetsWithdrawnNames() {
         val script = AgentEnvironment.script(
             mapOf("B" to "it's \$HOME `x` \"q\" \\", "A" to "plain", "PATH" to "/evil"),
