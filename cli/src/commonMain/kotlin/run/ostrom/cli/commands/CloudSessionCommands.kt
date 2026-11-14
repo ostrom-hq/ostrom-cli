@@ -91,13 +91,16 @@ internal class CloudShowCommand(private val dependencies: CliDependencies) : Cli
         }
         val failure = shown.child("failure")?.let { listOfNotNull(it.text("code"), it.text("message")) }
         // TeamCode's `cloud show`: a deletion is shown once it starts, with its problem's code when it is blocked.
-        val deletion = shown.child("workspaceDeletion")?.takeIf { it.text("state") != "none" }?.let { proof ->
-            "deletion ${proof.text("state")}" + (proof.child("problem")?.text("code")?.let { " ($it)" } ?: "")
+        val deletion = shown.child("workspaceDeletion")?.let { proof ->
+            proof.text("state")?.takeIf { it.isNotBlank() && it != "none" }?.let { state ->
+                "deletion $state" + (proof.child("problem")?.text("code")?.let { " ($it)" } ?: "")
+            }
         }
+        val reason = shown.text("terminatedReason")?.takeIf { shown.text("status") == "terminated" }
         val rows = listOf(
             "Session" to listOfNotNull(shown.text("id"), shown.text("name")).joinToString(" · "),
             "Agent" to listOfNotNull(shown.text("agent"), shown.text("model")).joinToString(" · "),
-            "Status" to listOfNotNull(shown.text("status"), shown.text("phase"), shown.text("terminatedReason"))
+            "Status" to listOfNotNull(shown.text("status"), shown.text("phase"), reason)
                 .joinToString(" · "),
             "Repository" to listOfNotNull(shown.text("repo"), shown.text("ref")).joinToString(" @ "),
             "GitHub" to shown.text("githubAccess").orEmpty(),

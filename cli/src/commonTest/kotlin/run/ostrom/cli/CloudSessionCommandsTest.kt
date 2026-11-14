@@ -72,6 +72,11 @@ class CloudSessionCommandsTest : SetupKit() {
         assertTrue(console.out.contains("Status       terminated · expired\n"), console.out.toString())
         assertTrue(console.out.contains("Workspace    deletion blocked (volume_retained)\n"), console.out.toString())
         console.out.clear()
+        val partial = """{"id":"cs5","status":"running","terminatedReason":"expired","workspaceDeletion":{}}"""
+        assertEquals(0, run(routes("GET /api/v1/cloud/sessions/cs5" to (200 to partial)), "cloud", "show", "cs5"))
+        assertTrue(console.out.contains("Status       running\n"), "a reason only beside terminated")
+        assertFalse(console.out.contains("Workspace"), "a deletion without a state says nothing")
+        console.out.clear()
         assertEquals(0, run(routes(show to (200 to session)), "cloud", "show", "cs1", "--json"))
         assertEquals("$session\n", console.out.toString())
         assertEquals(66, run(routes(), "cloud", "show", "cs9"), "no such session")
