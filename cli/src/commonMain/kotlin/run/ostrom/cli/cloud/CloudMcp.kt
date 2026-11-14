@@ -72,16 +72,23 @@ class CloudMcp(
         }
     }
 
-    /** The tools of a server served here: the todo, its checks run in the agent's container, or the memory. */
-    private fun dispatcher(name: String?, http: ServerHttp, token: String): McpDispatcher =
-        if (name == CloudMcpSession.TODO) {
+    /**
+     * The tools of a server served here: the todo, its checks run in the agent's container, or the memory.
+     *
+     * @throws IllegalStateException For another name: [serve] refuses it first.
+     */
+    internal fun dispatcher(name: String?, http: ServerHttp, token: String): McpDispatcher = when (name) {
+        CloudMcpSession.TODO -> {
             val capture = ProcessCaptureImpl()
             val checks = TodoChecks(GitHub(capture), CommandCheck(capture, environment.operatingSystem))
             TodoTools(RelayTodoApi(http, NO_PORT, token), checks).dispatcher(version)
-        } else {
+        }
+        CloudMcpSession.MEMORY -> {
             val start = RelayMemoryApi(http, NO_PORT, token, RelayMemoryApi.START_MILLIS)
             MemoryTools(RelayMemoryApi(http, NO_PORT, token), start = start).dispatcher(version)
         }
+        else -> error("$name is not served here")
+    }
 
     private fun refuse(why: String): Int {
         console.err("ostrom cloud mcp: $why\n")

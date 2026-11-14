@@ -9,8 +9,10 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import run.ostrom.cli.CliKit
+import run.ostrom.cli.runner.ServerHttp
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class CloudMcpTest : CliKit() {
@@ -89,6 +91,13 @@ class CloudMcpTest : CliKit() {
         assertEquals("/api/v1/todos/session", read.url.encodedPath)
         assertEquals("", read.url.encodedQuery)
         assertEquals("Bearer agent-token", read.headers[HttpHeaders.Authorization])
+    }
+
+    @Test
+    fun onlyTheTodoAndTheMemoryAreServedHere() {
+        val mcp = CloudMcp(FakeEnvironment(agent), console, client("{}"), "1.2.3") { null }
+        val http = ServerHttp(client("{}"), "https://ostrom.example")
+        assertFailsWith<IllegalStateException> { mcp.dispatcher("ostrom-artifacts", http, "t") }
     }
 
     @Test

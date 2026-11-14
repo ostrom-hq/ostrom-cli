@@ -249,7 +249,8 @@ connects nothing):
 
 - Claude Code: `--disallowedTools=Artifact,ArtifactComments,ArtifactData,ArtifactCheck` while `ostrom-artifacts` is
   connected (its own artifact tools publish to claude.ai), one `--mcp-config=<json>`, and `--append-system-prompt=` with
-  TeamCode's instruction for the servers that have one (artifacts, memory, workflow delivery), in their `=` forms so a variadic option never swallows the first message.
+  the instruction of the servers that have one (TeamCode's for artifacts and memory, `ostrom run`'s for the
+  workflow delivery), in their `=` forms so a variadic option never swallows the first message.
 - Codex: `-c mcp_servers.<name>={command=…,args=["cloud","mcp","--server","<name>"],env_vars=["OSTROM_URL",
   "OSTROM_AGENT_TOKEN"]}` per server (Codex passes a stdio server only the variables it lists) and
   `-c developer_instructions=…`.
