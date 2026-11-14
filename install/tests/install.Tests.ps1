@@ -128,9 +128,11 @@ Describe 'install.ps1' {
     $r.Error | Should -Match 'SHA256SUMS.sig'
     Test-Path $r.Exe | Should -BeFalse
   }
-  It 'skips the signature check when asked, the checksum still checked' {
-    (Invoke-Installer @{ OSTROM_VERSION = '2.3.0'; OSTROM_SKIP_COSIGN = '1' }).Ok | Should -BeTrue
-    (Invoke-Installer @{ OSTROM_VERSION = '2.0.0'; OSTROM_SKIP_COSIGN = '1' }).Ok | Should -BeFalse
+  It 'has no way to skip the signature check' {
+    $r = Invoke-Installer @{ OSTROM_VERSION = '2.3.0'; OSTROM_SKIP_COSIGN = '1' }
+    $r.Ok | Should -BeFalse
+    $r.Error | Should -Match 'signature'
+    Test-Path $r.Exe | Should -BeFalse
   }
   It 'reads a DER signature whose integers carry a leading zero or are short' {
     $functions = (Get-Content -Raw $installer) -replace '(?m)^Install-Ostrom\s*$', ''

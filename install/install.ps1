@@ -5,11 +5,10 @@
 #   OSTROM_INSTALL_DIR      where to put ostrom.exe (default: %USERPROFILE%\.ostrom\bin); no admin rights needed
 #   OSTROM_DOWNLOAD_BASE    releases URL (default: https://github.com/ostrom-hq/ostrom-cli/releases)
 #   OSTROM_NO_MODIFY_PATH   set to 1 to leave your user PATH alone
-#   OSTROM_SKIP_COSIGN      set to 1 to skip the signature check of SHA256SUMS
 #
 # SHA256SUMS is checked against its signature and the key pinned below, with cosign when it is installed, else with
 # .NET (cosign signs a blob as ECDSA P-256 over its SHA-256; Windows PowerShell 5.1 and PowerShell 7 both check it). The
-# archive is then checked against SHA256SUMS.
+# archive is then checked against SHA256SUMS. There is no way to skip the signature check.
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
@@ -51,10 +50,6 @@ function ConvertFrom-DerSignature([byte[]]$Der) {
 
 # SHA256SUMS against its signature and the pinned key; throws when it does not verify.
 function Test-Signature([string]$Rel, [string]$Work) {
-  if ($env:OSTROM_SKIP_COSIGN -eq '1') {
-    Write-Host 'Signature check skipped (OSTROM_SKIP_COSIGN=1): only the checksum is checked.'
-    return
-  }
   $sums = Join-Path $Work 'SHA256SUMS'
   $sig = Join-Path $Work 'SHA256SUMS.sig'
   try { Invoke-WebRequest -Uri "$Rel/SHA256SUMS.sig" -OutFile $sig -UseBasicParsing }

@@ -135,7 +135,8 @@ assert_contains "cosign skips the transparency log" "$(cat "$tmp/cosign.calls")"
 stub2="$tmp/stub-bad"; mkdir -p "$stub2"; printf '#!/bin/sh\nexit 1\n' > "$stub2/cosign"; chmod +x "$stub2/cosign"
 if runi PATH="$stub2:$PATH" OSTROM_VERSION=1.2.3; then ko "failing cosign must refuse"; else ok "failing cosign refuses"; fi
 assert_eq "nothing installed after a bad signature" no "$([ -e "$LAST_HOME/.ostrom/bin/ostrom" ] && echo yes || echo no)"
-runi PATH="$stub2:$PATH" OSTROM_VERSION=1.2.3 OSTROM_SKIP_COSIGN=1 && ok "cosign can be skipped explicitly" || ko "cosign can be skipped explicitly"
+# no way around it: the former OSTROM_SKIP_COSIGN is not read any more
+if runi PATH="$stub2:$PATH" OSTROM_VERSION=1.2.3 OSTROM_SKIP_COSIGN=1; then ko "OSTROM_SKIP_COSIGN must not skip a failing cosign"; else ok "OSTROM_SKIP_COSIGN skips nothing"; fi
 
 # the signature, without cosign: openssl checks it against the pinned key
 runi OSTROM_VERSION=1.2.3 && ok "a signed release installs" || ko "a signed release installs"
@@ -145,11 +146,10 @@ assert_contains "says the signature does not verify" "$(cat "$tmp/out.log")" 'si
 assert_eq "nothing installed after a bad signature (openssl)" no "$([ -e "$LAST_HOME/.ostrom/bin/ostrom" ] && echo yes || echo no)"
 if runi OSTROM_VERSION=2.4.0; then ko "a release without its signature must be refused"; else ok "a release without its signature is refused"; fi
 assert_eq "nothing installed without a signature" no "$([ -e "$LAST_HOME/.ostrom/bin/ostrom" ] && echo yes || echo no)"
-runi OSTROM_VERSION=2.3.0 OSTROM_SKIP_COSIGN=1 && ok "the signature check can be skipped explicitly" \
-  || ko "the signature check can be skipped explicitly"
+if runi OSTROM_VERSION=2.3.0 OSTROM_SKIP_COSIGN=1; then ko "a bad signature must be refused whatever OSTROM_SKIP_COSIGN says"; else ok "a bad signature is refused whatever OSTROM_SKIP_COSIGN says"; fi
 
 # no verifier at all (neither cosign nor openssl on the PATH): the signature cannot be checked, so nothing is installed
-# unless the developer skips it by name (security audit of the CLI n°2, B1)
+# (and nothing skips it: security audit of the CLI n°2, B1)
 bare="$tmp/bare-path"; mkdir -p "$bare"
 for tool in sh curl wget sha256sum shasum perl uname mktemp rm sed head awk tar gzip mkdir chmod mv grep cut cat; do
   found=$(command -v "$tool" 2>/dev/null) && ln -s "$found" "$bare/$tool"
@@ -159,9 +159,8 @@ if runi PATH="$bare" OSTROM_VERSION=1.2.3; then ko "without any verifier, refuse
 assert_contains "says what to install" "$(cat "$tmp/out.log")" 'cosign or openssl'
 assert_eq "refuses before downloading anything" "$served_before" "$(grep -c 'GET ' "$tmp/server.log")"
 assert_eq "nothing installed without a verifier" no "$([ -e "$LAST_HOME/.ostrom/bin/ostrom" ] && echo yes || echo no)"
-runi PATH="$bare" OSTROM_VERSION=1.2.3 OSTROM_SKIP_COSIGN=1 && ok "installs without a verifier when told to skip it" \
-  || ko "installs without a verifier when told to skip it"
-assert_contains "says only the checksum was checked" "$(cat "$tmp/out.log")" 'only the checksum is checked'
+if runi PATH="$bare" OSTROM_VERSION=1.2.3 OSTROM_SKIP_COSIGN=1; then ko "OSTROM_SKIP_COSIGN must not install without a verifier"; else ok "OSTROM_SKIP_COSIGN does not install without a verifier"; fi
+assert_eq "nothing installed without a verifier, skip asked or not" no "$([ -e "$LAST_HOME/.ostrom/bin/ostrom" ] && echo yes || echo no)"
 
 # a download cut short runs nothing: the script only acts from its last line
 cut_at=$(grep -n 'mv -f' "$installer" | head -1 | cut -d: -f1)
