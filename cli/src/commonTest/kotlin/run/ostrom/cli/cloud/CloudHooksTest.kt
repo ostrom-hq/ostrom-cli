@@ -83,14 +83,23 @@ class CloudHooksTest : CliKit() {
     @Test
     fun everyHookFailsOpenWithoutTheVariablesOrWhenTheServerRefuses() {
         CloudHooks.COMMANDS.forEach { command ->
+            sent.clear()
             val without = agent - "OSTROM_URL"
             assertEquals(0, run(command, without) { error("never asked") }, command)
             assertEquals(0, run(command, agent - "OSTROM_AGENT_TOKEN") { error("never asked") }, command)
+            assertTrue(sent.isEmpty(), "$command asked the server without its variables")
             val error = """{"error":{"type":"x","message":"no"}}"""
             assertEquals(0, run(command, status = HttpStatusCode.Forbidden) { error }, command)
         }
         assertEquals("", console.out.toString())
         assertEquals("", console.err.toString())
+    }
+
+    @Test
+    fun anotherCommandDoesNothing() {
+        assertEquals(0, run("something-else") { error("never asked") })
+        assertTrue(sent.isEmpty())
+        assertEquals("", console.out.toString())
     }
 
     @Test

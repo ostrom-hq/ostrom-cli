@@ -219,8 +219,9 @@ class Runner(
 
     /** The settings with the cloud hooks of the connected servers, for Claude Code only; none to change otherwise. */
     private fun hookSettings(settings: String?, names: Set<String>): Map<String, String> {
-        val hooked = CloudHookSettings.claude(settings, config.binary, names).takeIf { config.agentCommand == CLAUDE }
-        return if (hooked == null || hooked == settings) emptyMap() else mapOf(RunnerConfig.SETTINGS_VARIABLE to hooked)
+        val claude = config.agentCommand == CLAUDE
+        val hooked = if (claude) CloudHookSettings.claude(settings, config.binary, names) else null
+        return hooked?.let { mapOf(RunnerConfig.SETTINGS_VARIABLE to it) }.orEmpty()
     }
 
     /** Opens the agent's launch, a few times while the server cannot be reached; then the agent does not start. */

@@ -39,14 +39,14 @@ object CloudHookSettings {
      * @param binary The `ostrom` binary.
      * @param servers The names of the MCP servers connected to the agent.
      *
-     * @return The settings, as JSON; [settings] as they were when no hook is to be added.
+     * @return The settings, as JSON; null when no hook is to be added.
      */
     fun claude(settings: String?, binary: String, servers: Set<String>): String? {
         val todo = CloudMcpSession.TODO in servers
         val workflow = CloudMcpSession.WORKFLOW in servers
-        if (!todo && !workflow) return settings
-        val hooks = Json.parseToJsonElement(settings ?: AgentState.claudeSettings(binary)).jsonObject
-            .getValue("hooks").jsonObject
+        if (!todo && !workflow) return null
+        val current = Json.parseToJsonElement(settings ?: AgentState.claudeSettings(binary)).jsonObject
+        val hooks = (current["hooks"] as? JsonObject).orEmpty()
         val added = buildMap<String, MutableList<JsonObject>> {
             if (todo) {
                 getOrPut("Stop") { mutableListOf() } += entry(null, binary, CloudProcess.TODO_STOP, TODO_STOP_SECONDS)
@@ -61,7 +61,8 @@ object CloudHookSettings {
         val merged = (hooks.keys + added.keys).associateWith { event ->
             JsonArray((hooks[event] as? JsonArray).orEmpty() + added[event].orEmpty())
         }
-        return buildJsonObject { put("hooks", JsonObject(merged)) }.toString()
+        // Whatever else the settings hold stays as it is.
+        return JsonObject(current + ("hooks" to JsonObject(merged))).toString()
     }
 
     private fun entry(matcher: String?, binary: String, command: String, seconds: Int) = buildJsonObject {

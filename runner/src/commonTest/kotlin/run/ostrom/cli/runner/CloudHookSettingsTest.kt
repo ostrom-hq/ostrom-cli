@@ -73,10 +73,20 @@ class CloudHookSettingsTest {
     }
 
     @Test
-    fun withoutTheTodoOrTheWorkflowTheSettingsAreAsTheyWere() {
+    fun withoutTheTodoOrTheWorkflowThereIsNothingToChange() {
         val others = setOf(CloudMcpSession.ARTIFACTS, CloudMcpSession.MEMORY, CloudMcpSession.WAITS)
         assertNull(CloudHookSettings.claude(null, binary, others))
-        assertEquals("{}", CloudHookSettings.claude("{}", binary, emptySet()))
+        assertNull(CloudHookSettings.claude("{}", binary, emptySet()))
+    }
+
+    @Test
+    fun otherSettingsKeysStayAndSettingsWithoutHooksAreCompleted() {
+        val settings = CloudHookSettings.claude("""{"env":{"A":"1"},"hooks":null}""", binary, workflow)
+        val root = Json.parseToJsonElement(settings.orEmpty()).jsonObject
+        assertEquals("1", root.getValue("env").jsonObject.getValue("A").jsonPrimitive.content)
+        assertEquals(listOf("'$binary' cloud workflow-stop" to 5), commands(settings, "Stop"))
+        val odd = CloudHookSettings.claude("""{"hooks":{"Stop":"x"}}""", binary, workflow)
+        assertEquals(listOf("'$binary' cloud workflow-stop" to 5), commands(odd, "Stop"))
     }
 
     @Test

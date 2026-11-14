@@ -50,11 +50,12 @@ class CloudHooks(
         if (url == null) return 0
         val http = ServerHttp(client, url)
         val token = { environment[McpForwarder.TOKEN_VARIABLE] }
+        val todo = TodoHookRunner(console, environment, files, http, capture, io, token)
         when (command) {
-            CloudProcess.WORKFLOW_STOP ->
-                WorkflowStopHook(console, environment, http, { null }, direct = token).run()
-            else -> TodoHookRunner(console, environment, files, http, capture, io, token)
-                .run(if (command == CloudProcess.TODO_CONTEXT) TodoHookRunner.CONTEXT else TodoHookRunner.STOP, null)
+            CloudProcess.WORKFLOW_STOP -> WorkflowStopHook(console, environment, http, { null }, direct = token).run()
+            CloudProcess.TODO_STOP -> todo.run(TodoHookRunner.STOP, null)
+            CloudProcess.TODO_CONTEXT -> todo.run(TodoHookRunner.CONTEXT, null)
+            else -> 0 // not one of [COMMANDS]: nothing to do, the agent goes on
         }
     }
 
