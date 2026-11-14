@@ -29,8 +29,8 @@ workflow, then cannot read them.
 At the go: make the repositories public, set the repository variable `RELEASE_DRAFT` to `false`
 (`gh variable set RELEASE_DRAFT --body false -R ostrom-hq/ostrom-cli`), and publish the existing draft
 (`gh release edit X.Y.Z --draft=false`) or cut the next tag. With `RELEASE_DRAFT=false` the next release is public
-at once and the Homebrew tap and Scoop bucket are updated (`taps` job). The packages under `ghcr.io/ostrom-hq` are
-made public in the organisation's package settings.
+at once and the Homebrew tap and Scoop bucket are updated (`taps` job). The image is on Docker Hub
+(`docker.io/ostromhq`), public.
 
 ## What a release contains
 
@@ -45,7 +45,7 @@ made public in the organisation's package settings.
 | `install.sh`, `install.ps1` | the installers (the site serves `install.sh` at `https://ostrom.run/install.sh`) |
 | `winget-manifests-<version>.tar.gz` | the three winget manifest files, to submit to `microsoft/winget-pkgs` after the go |
 
-Also published: the image `ghcr.io/ostrom-hq/ostrom-runner:<version>` and `:latest` (linux/amd64 and linux/arm64,
+Also published: the image `docker.io/ostromhq/ostrom-runner:<version>` and `:latest` (linux/amd64 and linux/arm64,
 signed by digest, with an SBOM and max-mode provenance attached by buildx), the Homebrew formula
 (`ostrom-hq/homebrew-tap`, `Formula/ostrom.rb`) and the Scoop manifest (`ostrom-hq/scoop-bucket`, `bucket/ostrom.json`).
 The `taps` job pushes them over SSH trusting only GitHub's published host keys, pinned in
@@ -83,7 +83,7 @@ cosign verify-blob --key cosign.pub --insecure-ignore-tlog \
   --signature ostrom-1.0.0-linux-x64.tar.gz.sig ostrom-1.0.0-linux-x64.tar.gz
 cosign verify-blob --key cosign.pub --insecure-ignore-tlog --signature SHA256SUMS.sig SHA256SUMS
 sha256sum -c --ignore-missing SHA256SUMS
-cosign verify --key cosign.pub --insecure-ignore-tlog ghcr.io/ostrom-hq/ostrom-runner:1.0.0
+cosign verify --key cosign.pub --insecure-ignore-tlog docker.io/ostromhq/ostrom-runner:1.0.0
 ```
 
 (`install.sh` and `install.ps1` check the signature of `SHA256SUMS` against the pinned cosign key, with `cosign` when it

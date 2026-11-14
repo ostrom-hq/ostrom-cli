@@ -13,7 +13,7 @@
     6.6 ostrom import teamcode: a TeamCode team into Ostrom, read back by its API
 
     python3 e2e/journey.py --binary ostrom --server http://127.0.0.1:4600 --mail-dir /tmp/mail \\
-        --seed "docker run --rm --network host --env-file server.env ghcr.io/ostrom-hq/ostrom-server:edge \\
+        --seed "docker run --rm --network host --env-file server.env docker.io/ostromhq/ostrom-server:latest \\
                 seed-test-account"
 
 6.6 imports ostrom-helm's fake TeamCode team (compose/demo/teamcode, its MySQL at 127.0.0.1:3307) when given it;

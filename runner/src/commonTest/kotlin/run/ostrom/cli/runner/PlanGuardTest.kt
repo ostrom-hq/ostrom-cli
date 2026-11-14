@@ -42,7 +42,7 @@ internal fun plan(session: Uuid, epoch: Long, token: String = "ostrom_runner_xyz
  * A plan with the delivery of the `ostrom` binary, as the server computes it once Docker delivers it like the pod's
  * init container: the execution's binary volume, filled by the delivery container, read-only in the other three.
  */
-internal fun deliveryPlan(session: Uuid, epoch: Long, runnerImage: String = "ghcr.io/ostrom-hq/ostrom-runner:1"):
+internal fun deliveryPlan(session: Uuid, epoch: Long, runnerImage: String = "docker.io/ostromhq/ostrom-runner:1"):
     ExecutionPlan {
     val hex = session.toHexString()
     val execution = "ostrom-s-$hex-e$epoch"
@@ -76,7 +76,7 @@ internal fun PlannedObject.withBinds(binds: List<String>): PlannedObject {
 }
 
 private fun container(hex: String, epoch: Long, user: String, token: String?) = buildJsonObject {
-    put("Image", "ghcr.io/ostrom-hq/ostrom-runner:1")
+    put("Image", "docker.io/ostromhq/ostrom-runner:1")
     put("User", user)
     putJsonArray("Entrypoint") { add(JsonPrimitive("/usr/local/bin/ostrom-runner")) }
     put("WorkingDir", "/workspace")
@@ -130,7 +130,7 @@ class PlanGuardTest {
         assertEquals(session.toHexString(), checked.volumes[0].label("ostrom.run/session"))
         assertNull(checked.containers.last().network(), "The engine's default network")
 
-        val placed = PlanGuard(runner, "sessions", "ghcr.io/ostrom-hq/ostrom-runner:1").check(sent)
+        val placed = PlanGuard(runner, "sessions", "docker.io/ostromhq/ostrom-runner:1").check(sent)
         assertEquals("sessions", placed.containers.last().network())
 
         // A volume without labels gets this runner's.
@@ -171,7 +171,7 @@ class PlanGuardTest {
         )
         for ((why, bad) in refused) assertFailsWith<IllegalArgumentException>(why) { guard.check(bad) }
         assertFailsWith<IllegalArgumentException>("another image than the machine's") {
-            PlanGuard(runner, null, "ghcr.io/ostrom-hq/ostrom-runner:2").check(sent)
+            PlanGuard(runner, null, "docker.io/ostromhq/ostrom-runner:2").check(sent)
         }
         assertEquals("ostrom-ws-$hex", guard.check(sent).volumes.first().name)
     }
@@ -183,10 +183,10 @@ class PlanGuardTest {
         assertEquals(sent.containers.map { it.name }, checked.containers.map { it.name })
         assertEquals(sent.volumes.map { it.name }, checked.volumes.map { it.name })
         // The machine may pin both images.
-        val pinned = PlanGuard(runner, null, "ghcr.io/ostrom-hq/ostrom-runner:1", "ghcr.io/ostrom-hq/ostrom-runner:1")
+        val pinned = PlanGuard(runner, null, "docker.io/ostromhq/ostrom-runner:1", "docker.io/ostromhq/ostrom-runner:1")
         assertEquals(4, pinned.check(sent).containers.size)
         assertFailsWith<IllegalArgumentException>("another delivery image than the machine's") {
-            PlanGuard(runner, null, null, "ghcr.io/ostrom-hq/ostrom-runner:2").check(sent)
+            PlanGuard(runner, null, null, "docker.io/ostromhq/ostrom-runner:2").check(sent)
         }
         // The team's session image and the runner image, each pinned on its own.
         val team = sent.copy(
@@ -194,7 +194,7 @@ class PlanGuardTest {
                 PlannedObject(it.name, JsonObject(it.body + ("Image" to JsonPrimitive("team:1"))))
             },
         )
-        val split = PlanGuard(runner, null, "team:1", "ghcr.io/ostrom-hq/ostrom-runner:1")
+        val split = PlanGuard(runner, null, "team:1", "docker.io/ostromhq/ostrom-runner:1")
         assertEquals(4, split.check(team).containers.size)
         assertFailsWith<IllegalArgumentException>("the session image pin applies to the delivery's peers only") {
             PlanGuard(runner, null, "team:1", null).check(sent)
@@ -234,7 +234,7 @@ class PlanGuardTest {
             guard.check(sent.copy(containers = sent.containers.drop(1) + delivery))
         }
         assertFailsWith<IllegalArgumentException>("a pinned session image without a pinned delivery image") {
-            PlanGuard(runner, null, "ghcr.io/ostrom-hq/ostrom-runner:1", null).check(sent)
+            PlanGuard(runner, null, "docker.io/ostromhq/ostrom-runner:1", null).check(sent)
         }
     }
 
