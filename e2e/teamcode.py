@@ -20,9 +20,9 @@ import re
 ROUTES = (("POST", "/api/v1/tokens"), ("POST", "/api/v1/import/teamcode"), ("GET", "/api/v1/mcp/servers"),
           ("GET", "/api/v1/secrets"), ("GET", "/api/v1/accounts"),
           ("POST", "/api/v1/accounts/00000000-0000-0000-0000-000000000000/handover"))
-# what the CLI's own calls need (the import, then the handover, which lists the accounts to find the one named): the
-# reads below go through the owner's browser session
-SCOPES = ["import:write", "accounts:read", "accounts:write", "profile:read"]
+# what the CLI's own calls need (the import, then the handover, which reads the org and lists its accounts to find the
+# one named); the reads below go through the owner's browser session
+SCOPES = ["import:write", "accounts:read", "accounts:write", "orgs:read", "profile:read"]
 
 # The demo team's MCP variants (compose/demo/teamcode/02-seed.sql), as Ostrom's console lists them once imported:
 # name -> (url, scope, credential header, whether an org secret holds a shared credential)
