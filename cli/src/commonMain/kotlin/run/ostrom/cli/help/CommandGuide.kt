@@ -315,6 +315,12 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
         "ostrom cloud list" to "your cloud sessions",
         "ostrom cloud github ses_41b2 --access shared" to "share your GitHub account",
     ),
+    "cloud create" to guide(
+        "cloud-sessions",
+        "ostrom cloud create --agent claude --repo https://github.com/acme/api" to "a session that clones acme/api",
+        "ostrom cloud create --agent codex --repo app=https://github.com/acme/app#main --branch fix-ci --message -" to
+            "on a new branch, its first message read from stdin",
+    ),
     "cloud list" to guide(
         "cloud-sessions",
         "ostrom cloud list" to "your cloud sessions, newest first",
