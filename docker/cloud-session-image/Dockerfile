@@ -107,17 +107,17 @@ SHELL ["/bin/sh", "-eu", "-c"]
 
 # Fails the build when the image no longer gives Ostrom what it needs, for example when a tools setup removed git, a
 # command the session's preparation runs (clone staging, setup markers), or a library the binary loads (linked or
-# opened at run time), and runs the binary as both session UIDs.
+# opened at run time; an executable file, not a shell builtin), and runs the binary as both session UIDs.
 RUN as() { setpriv --reuid="$1" --regid=1000 --clear-groups env HOME=/tmp "$2" "$3" >/dev/null; }; \
     for command in sh bash mkdir rm mv rmdir dirname basename touch test cat git; do \
-        command -v "${command}" >/dev/null || { echo "Missing ${command}" >&2; exit 1; }; \
+        [ -x "$(command -v "${command}")" ] || { echo "Missing ${command}" >&2; exit 1; }; \
     done \
     && git_version="$(git --version | sed 's/^git version //')" \
     && if ! printf '2.31.0\n%s\n' "${git_version}" | sort -C -V; then echo "git ${git_version} is older than 2.31" >&2; exit 1; fi \
     && [ "$(id -u runner):$(id -g runner):$(id -u agent):$(id -g agent)" = "1000:1000:1001:1000" ] \
     && if ldd /usr/local/bin/ostrom | grep 'not found'; then echo "ostrom is missing a library" >&2; exit 1; fi \
     && for library in libcrypto.so.3 libcurl.so.4 libz.so.1; do \
-        ldconfig -p | grep -q "${library}" || { echo "Missing ${library}" >&2; exit 1; }; \
+        ldconfig -p | grep -qF "${library} (" || { echo "Missing ${library}" >&2; exit 1; }; \
     done \
     && as 1000 /usr/local/bin/ostrom version \
     && as 1001 /usr/local/bin/ostrom version \
