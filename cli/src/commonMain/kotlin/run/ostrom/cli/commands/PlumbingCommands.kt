@@ -59,6 +59,8 @@ class WaitCommand(private val dependencies: CliDependencies) : CliktCommand(name
 /**
  * `ostrom mcp [workflow]`: the local MCP server on stdio, started by the agent. With `--session <file>`, a stdio
  * bridge to the session's local relay instead, for the server named by `--server` (Ostrom's own by default).
+ * `ostrom mcp list [--org] [--json]` lists the servers you reach and the state of the hosted ones (`--server` is the
+ * relayed server to bridge to here, so the server's address comes from the environment, as for any command).
  */
 class McpCommand(private val dependencies: CliDependencies) : CliktCommand(name = "mcp") {
     private val workflow by argument("workflow").optional()
@@ -67,12 +69,16 @@ class McpCommand(private val dependencies: CliDependencies) : CliktCommand(name 
         "--server",
         help = "The relayed MCP server to bridge to (ostrom-todo, ostrom-memory: served here)",
     ).default("ostrom")
+    private val org by orgOption()
+    private val json by jsonFlag()
 
     override val hiddenFromHelp = true
 
     override fun help(context: Context) = "Serve the local MCP server on stdio (started by the agent)"
 
     override fun run() {
+        // `ostrom mcp list`: the servers you reach, with the state of the hosted commands
+        if (workflow == "list") return dependencies.listMcpServers(org, null, json)
         if (workflow != null) {
             dependencies.console.err("ostrom mcp workflow: not implemented yet.\n")
             throw ProgramResult(ExitCode.NOT_IMPLEMENTED.code)
