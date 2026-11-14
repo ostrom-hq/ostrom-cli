@@ -15,6 +15,12 @@ internal sealed interface RelayTarget {
      */
     data object Wake : RelayTarget
 
+    /**
+     * `POST /activity`: an activity hook of the agent (whether it works or waits for a person), answered at once and
+     * reported in the background to the session the relay knows ([ActivityForwarder]).
+     */
+    data object Activity : RelayTarget
+
     /** `POST /mcp/{server}`, forwarded to `/api/v1/mcp/{server}`. */
     data class Mcp(val server: String) : RelayTarget
 
@@ -74,6 +80,7 @@ internal val SESSION_ID = Regex(SESSION)
 internal val SESSION_REOPEN = Regex("/api/v1/sessions/$SESSION/reopen")
 private const val API_PREFIX = "/api/v1/"
 private const val MCP_PREFIX = "/mcp/"
+internal const val ACTIVITY = "/activity"
 private const val GATE_CATALOG = "/api/v1/gates/catalog"
 internal const val WAITS_WAKE = "/api/v1/waits/wake"
 internal const val SIGNED_GATE_CATALOG = "/api/v1/gates/catalog/signed"
@@ -127,6 +134,7 @@ internal fun resolveTarget(method: HttpMethod, path: String, config: RelayConfig
     path == MEMORY_ROOT || path.startsWith("$MEMORY_ROOT/") -> memoryTarget(method, path)
     path.startsWith(API_PREFIX) -> hookTarget(method, path, config.gateCatalog)
     path.startsWith(MCP_PREFIX) -> mcpTarget(method, path.removePrefix(MCP_PREFIX), config.mcpServers)
+    path == ACTIVITY && method == HttpMethod.Post -> RelayTarget.Activity
     config.inference -> inferenceTarget(method, path)
     else -> RelayTarget.NotFound
 }
@@ -191,6 +199,6 @@ internal fun opens(target: RelayTarget, hooks: Boolean, client: Boolean): Boolea
     is RelayTarget.Hook -> hooks || client && target.longPoll
     is RelayTarget.Todo -> hooks || client && !target.hooksOnly
     is RelayTarget.Catalog, RelayTarget.SignedCatalog, RelayTarget.Wake, RelayTarget.WorkflowPending -> hooks
-    RelayTarget.NotFound -> true
+    RelayTarget.NotFound, RelayTarget.Activity -> true
     is RelayTarget.Mcp, is RelayTarget.Inference, RelayTarget.McpMethodNotAllowed, RelayTarget.Memory -> client
 }

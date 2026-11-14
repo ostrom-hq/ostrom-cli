@@ -49,6 +49,8 @@ data class RelayView(val url: String, val token: String, val mcpServers: List<St
  * `ostrom-workflow` MCP server (one of [RelayView.mcpServers]), the rules say when to call it, and Claude Code gets
  * the Stop hook that sends a step's agent back to work once.
  * @property teamHooks The team hooks the member approved, installed: run next to Ostrom's own, on their events.
+ * @property activity The agent's hooks report whether it works or waits for a person (`sessions.activity.v1`, not
+ * `--no-activity`): Claude Code's by HTTP to the relay, Codex's by `ostrom hook activity`.
  * @property artifacts The agent may publish artifacts now: it gets the `ostrom-artifacts` MCP server (one of
  * [RelayView.mcpServers]), the rules point it there, and Claude Code's own artifact tools are turned off.
  */
@@ -73,6 +75,7 @@ data class SessionLayout(
     val workflowDelivery: Boolean = false,
     val teamHooks: List<TeamHook> = emptyList(),
     val artifacts: Boolean = false,
+    val activity: Boolean = false,
 ) {
     /** `"<ostrom>" hook gate|session|wake`, the command an agent's hook runs. */
     fun hookCommand(kind: String): String = "${quoted(executable)} hook $kind"
