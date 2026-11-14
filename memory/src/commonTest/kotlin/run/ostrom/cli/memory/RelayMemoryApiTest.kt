@@ -88,6 +88,7 @@ class RelayMemoryApiTest {
                 Triple("memory_secret", 422, "Looks like a token."),
             ok("A local Ostrom capability is required.", 401) to Triple("http_401", 401, "Ostrom answered HTTP 401"),
             ok("""{"other":1}""", 409) to Triple("http_409", 409, "Ostrom answered HTTP 409"),
+            ok("", 101) to Triple("http_101", 101, "Ostrom answered HTTP 101"),
             ok("""{"entries":"no"}""") to Triple(RelayMemoryApi.UNREADABLE, null, "Ostrom's answer could not be read"),
             Result.failure<LoopbackResponse>(LoopbackException(LoopbackFailure.UNREACHABLE)) to Triple(
                 RelayMemoryApi.UNREACHABLE,

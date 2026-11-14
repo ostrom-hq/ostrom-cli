@@ -56,67 +56,44 @@ const val MEMORY_NOT_FOUND = "not_found"
  * @param timeoutMillis The bound of one call: a slower answer is an infrastructure problem, never a reason to wait.
  */
 class RelayMemoryApi(
-    private val http: LoopbackHttp,
-    private val port: Int,
-    private val token: String,
-    private val timeoutMillis: Int = CALL_MILLIS,
+    http: LoopbackHttp,
+    port: Int,
+    token: String,
+    timeoutMillis: Int = CALL_MILLIS,
 ) : MemoryApi {
+    private val relay = MemoryRelay(http, port, token, timeoutMillis)
+
     override fun index(scope: String?, tags: List<String>, after: String?, limit: Int): MemoryIndexPage {
         val query = listOf("scope" to scope, "tags" to joined(tags), "after" to after, "limit" to limit.toString())
-        return get("$MEMORY_ROOT/index" + QueryString.of(query), MemoryIndexPage.serializer())
+        return relay.call("GET", "$MEMORY_ROOT/index" + QueryString.of(query), null, MemoryIndexPage.serializer())
     }
 
     override fun search(query: String, tags: List<String>, limit: Int): MemorySearchResult {
         val parameters = listOf("q" to query, "tags" to joined(tags), "limit" to limit.toString())
-        return get("$MEMORY_ROOT/search" + QueryString.of(parameters), MemorySearchResult.serializer())
+        val path = "$MEMORY_ROOT/search" + QueryString.of(parameters)
+        return relay.call("GET", path, null, MemorySearchResult.serializer())
     }
 
-    override fun read(id: String): MemoryEntry = get(entry(id), MemoryEntry.serializer())
+    override fun read(id: String): MemoryEntry = relay.call("GET", entry(id), null, MemoryEntry.serializer())
 
-    override fun create(request: CreateMemoryRequest): MemoryEntry =
-        send("POST", MEMORY_ROOT, OstromJson.encodeToString(CreateMemoryRequest.serializer(), request))
+    override fun create(request: CreateMemoryRequest): MemoryEntry {
+        val body = OstromJson.encodeToString(CreateMemoryRequest.serializer(), request)
+        return relay.call("POST", MEMORY_ROOT, body, MemoryEntry.serializer())
+    }
 
-    override fun update(id: String, request: UpdateMemoryRequest): MemoryEntry =
-        send("PATCH", entry(id), OstromJson.encodeToString(UpdateMemoryRequest.serializer(), request))
+    override fun update(id: String, request: UpdateMemoryRequest): MemoryEntry {
+        val body = OstromJson.encodeToString(UpdateMemoryRequest.serializer(), request)
+        return relay.call("PATCH", entry(id), body, MemoryEntry.serializer())
+    }
 
     override fun forget(id: String) {
-        call("DELETE", entry(id), null)
-    }
-
-    private fun <T> get(path: String, answer: KSerializer<T>): T = decode(answer, call("GET", path, null))
-
-    private fun send(method: String, path: String, body: String): MemoryEntry =
-        decode(MemoryEntry.serializer(), call(method, path, body))
-
-    private fun <T> decode(answer: KSerializer<T>, body: String): T = try {
-        OstromJson.decodeFromString(answer, body)
-    } catch (_: IllegalArgumentException) {
-        // a SerializationException is one: an answer that is not what the contract says
-        throw MemoryApiException(UNREADABLE, null, "Ostrom's answer could not be read")
+        relay.send("DELETE", entry(id), null)
     }
 
     /** An entry's route; an id that is no plain id would reach another route of the relay, so it is refused here. */
     private fun entry(id: String): String {
         if (!ENTRY_ID.matches(id)) throw MemoryApiException(MEMORY_NOT_FOUND, null, "No memory entry '$id'.")
         return "$MEMORY_ROOT/$id"
-    }
-
-    private fun call(method: String, path: String, body: String?): String {
-        val request = LoopbackRequest(method, path, mapOf("Authorization" to "Bearer $token"), body)
-        val response = http.exchange(port, request, timeoutMillis)
-            .getOrElse { throw MemoryApiException(UNREACHABLE, null, "the local relay did not answer (${it.message})") }
-        if (response.status in SUCCESS) return response.body
-        throw refusal(response.status, response.body)
-    }
-
-    /** Ostrom's refusal is `{"error":{"type","message"}}`; the relay's own refusals are plain text. */
-    private fun refusal(status: Int, body: String): MemoryApiException {
-        val error = try {
-            OstromJson.decodeFromString(ApiError.serializer(), body).error
-        } catch (_: IllegalArgumentException) {
-            return MemoryApiException("http_$status", status, "Ostrom answered HTTP $status")
-        }
-        return MemoryApiException(error.type, status, error.message)
     }
 
     private fun joined(tags: List<String>): String? = tags.takeIf { it.isNotEmpty() }?.joinToString(",")
@@ -133,8 +110,49 @@ class RelayMemoryApi(
         const val UNREADABLE = "unreadable"
 
         /** An entry's id as the relay lets it through (a UUID is one). */
-        val ENTRY_ID = Regex("[A-Za-z0-9_-]{1,128}")
+        private val ENTRY_ID = Regex("[A-Za-z0-9_-]{1,128}")
+    }
+}
 
+/** One memory call through the relay on `127.0.0.1:[port]` with [token], bounded by [timeoutMillis]. */
+private class MemoryRelay(
+    private val http: LoopbackHttp,
+    private val port: Int,
+    private val token: String,
+    private val timeoutMillis: Int,
+) {
+    /** The answer of [method] [path] with [body], read as [answer] says. */
+    fun <T> call(method: String, path: String, body: String?, answer: KSerializer<T>): T =
+        decode(answer, send(method, path, body))
+
+    /** The body of Ostrom's answer to [method] [path] with [body], or the refusal. */
+    fun send(method: String, path: String, body: String?): String {
+        val request = LoopbackRequest(method, path, mapOf("Authorization" to "Bearer $token"), body)
+        val response = http.exchange(port, request, timeoutMillis).getOrElse {
+            throw MemoryApiException(RelayMemoryApi.UNREACHABLE, null, "the local relay did not answer (${it.message})")
+        }
+        if (response.status !in SUCCESS) throw refusal(response.status, response.body)
+        return response.body
+    }
+
+    private fun <T> decode(answer: KSerializer<T>, body: String): T = try {
+        OstromJson.decodeFromString(answer, body)
+    } catch (_: IllegalArgumentException) {
+        // a SerializationException is one: an answer that is not what the contract says
+        throw MemoryApiException(RelayMemoryApi.UNREADABLE, null, "Ostrom's answer could not be read")
+    }
+
+    /** Ostrom's refusal is `{"error":{"type","message"}}`; the relay's own refusals are plain text. */
+    private fun refusal(status: Int, body: String): MemoryApiException {
+        val error = try {
+            OstromJson.decodeFromString(ApiError.serializer(), body).error
+        } catch (_: IllegalArgumentException) {
+            return MemoryApiException("http_$status", status, "Ostrom answered HTTP $status")
+        }
+        return MemoryApiException(error.type, status, error.message)
+    }
+
+    private companion object {
         private val SUCCESS = 200..299
     }
 }

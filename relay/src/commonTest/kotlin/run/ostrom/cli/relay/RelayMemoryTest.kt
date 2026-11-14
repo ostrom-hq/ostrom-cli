@@ -99,6 +99,10 @@ class RelayMemoryTest {
             }
             client.delete("/api/v1/memory/m-1") { bearerAuth(TOKEN) }
             client.get("/api/v1/memory/index") { bearerAuth(TOKEN) }
+            assertEquals(
+                listOf("", """{"title":"T"}""", """{"expectedVersion":1}""", "", ""),
+                ostrom.requests.map { it.body.toByteArray().decodeToString() },
+            )
         }
         val sent = ostrom.requests
         assertEquals(
@@ -116,10 +120,6 @@ class RelayMemoryTest {
             assertEquals(listOf("Bearer $AGENT_TOKEN"), request.headers.getAll("Authorization"))
             assertEquals(LAUNCH, request.headers[LAUNCH_HEADER])
         }
-        assertEquals(
-            listOf("", """{"title":"T"}""", """{"expectedVersion":1}""", "", ""),
-            sent.map { it.body.toByteArray().decodeToString() },
-        )
     }
 
     @Test

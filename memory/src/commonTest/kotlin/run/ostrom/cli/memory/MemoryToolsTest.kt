@@ -79,6 +79,8 @@ class MemoryToolsTest {
         assertEquals("m-2", json(text).getValue("entries").jsonArray.single().jsonObject["id"]?.jsonPrimitive?.content)
         call("memory_search", """{"query":"x","limit":3}""")
         assertEquals("search x [] 3", api.calls.last())
+        call("memory_search", """{"query":"y"}""")
+        assertEquals("search y [] 20", api.calls.last())
     }
 
     @Test
