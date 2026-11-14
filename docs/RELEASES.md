@@ -189,7 +189,7 @@ no remote revocation of a root already installed is claimed, as in TeamCode. The
 ## Update notices and their opt-out
 
 `ostrom update` is manual; there is a once-a-day notice on stderr after a command (`! ostrom X is available`), refreshed
-by a detached `ostrom update --record-latest`. Turn it off for this device with `ostrom update --notifications off`
+by a detached background lookup. Turn it off for this device with `ostrom update --notifications off`
 (`on`, `status`), or in one process, a CI or a locked environment, with any non-empty `OSTROM_DISABLE_AUTOUPDATE`. The
 explicit `ostrom update --check` still works. `ostrom update --check --json` prints one line, from the signed manifest
 only: `{"currentVersion":"1.0.0","latestVersion":"1.1.0","updateAvailable":true,"keyId":"<id>"}`.
