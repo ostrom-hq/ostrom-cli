@@ -112,12 +112,9 @@ private fun runner(socket: String, environment: Map<String, String>): Nothing {
             val gitHubJob = gitHubAccess(selector, config, gitHub)
             val preparer = preparer(config, server, terminals, gitHub)
             val (variables, variablesJob) = environmentAccess(selector, config, server)
-            // The owner's skills and team hooks, installed by `ostrom cloud install-*` in the agent's container.
             val deliveries = PodDeliveries(HttpDeliveryApi(client, config), terminals, config, ::log)
-            val runner = Runner(
-                config, server, terminals, environment, Clock.System, ::log, prepare = preparer, variables = variables,
-                deliveries = deliveries,
-            )
+            val runner = Runner(config, server, terminals, environment, Clock.System, ::log, prepare = preparer,
+                variables = variables, deliveries = deliveries)
             // The agent's hooks report its background work there, as its uid: the agent socket's directory.
             val stateJob = launch {
                 AgentState.serve(selector, config.stateSocket, runner::agentState, ::log) {

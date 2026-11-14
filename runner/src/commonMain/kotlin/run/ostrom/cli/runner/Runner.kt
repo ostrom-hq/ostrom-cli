@@ -41,7 +41,8 @@ import kotlin.time.Instant
  *   runner that does not serve them.
  * @param deliveries Installs the owner's skills and team hooks before the agent's first terminal; none when null.
  */
-@Suppress("LongParameterList") // Six collaborators and three tunings with defaults, all named at the call sites.
+// Six collaborators and three tunings with defaults, all named at the call sites; one function per phase of a start.
+@Suppress("LongParameterList", "TooManyFunctions")
 class Runner(
     private val config: RunnerConfig,
     private val server: ServerApi,
