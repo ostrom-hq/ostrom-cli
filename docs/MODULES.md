@@ -16,6 +16,7 @@ all Ostrom repositories are in `ostrom-core/docs/CONVENTIONS.md`; this page only
 | `mcp` | `run.ostrom.cli.mcp` | the local MCP server on stdio (`ostrom mcp`) | `platform` |
 | `relay` | `run.ostrom.cli.relay` | the launch's local relay on `127.0.0.1` (Ktor CIO): hooks, MCP and inference reach Ostrom through it | `platform` |
 | `todo` | `run.ostrom.cli.todo` | the session todo's `ostrom-todo` MCP server (`ostrom mcp --server ostrom-todo`, served in-process), its checks run on this machine (`gh`, a shell command), and its hooks (`ostrom hook todo-stop\|todo-context`): [TODOS.md](TODOS.md) | `platform`, `mcp`, ostrom-core `api` |
+| `memory` | `run.ostrom.cli.memory` | the agent memory's `ostrom-memory` MCP server (`ostrom mcp --server ostrom-memory`, served in-process): the index in its instructions, the six `memory_*` tools: [MEMORY.md](MEMORY.md) | `platform`, `mcp`, ostrom-core `api` |
 | `cli` | `run.ostrom.cli` | the command tree (Clikt), `main`, the wiring (`CliDependencies`), the executable | all of the above |
 
 Rules that keep the binary fast and the modules apart:
@@ -94,7 +95,10 @@ alternative: a second private file for `ostrom wait`, which a command of the age
   routes (`/api/v1/todos/session`, its items' `start`, `notes`, `proof`, `link` and `drop`) are forwarded with the
   session segment the relay knows in place of any `sessionId` the caller names (the query of a read, the body of a
   write); the agent's capability opens them, while the Stop and SessionStart hooks' own (`stop`, `hook-error`,
-  `GET …/context`) take the hooks' capability only ([TODOS.md](TODOS.md)). Coming soon on the
+  `GET …/context`) take the hooks' capability only ([TODOS.md](TODOS.md)). The memory routes `ostrom-memory` calls (`GET
+  /api/v1/memory/index|search|{id}`, `POST /api/v1/memory`, `PATCH|DELETE /api/v1/memory/{id}`, an id of one plain
+  segment, never a person's routes: proposals, curation, reviews, superseded, restore) take the agent's capability only,
+  and go with `x-ostrom-origin: agent` set by the relay ([MEMORY.md](MEMORY.md)). Coming soon on the
   server: ostrom-server `main` does not serve `/api/v1/notifications` nor `/api/v1/checks` yet (ostrom-core's
   `api/contract/served-routes.txt`); the sessions and the signed policy are served since ostrom-server d9301e4.
 - Ostrom unreachable or too slow: 502 with `{"error":{"type":"unreachable","message":"Ostrom is unreachable (…)"}}`,

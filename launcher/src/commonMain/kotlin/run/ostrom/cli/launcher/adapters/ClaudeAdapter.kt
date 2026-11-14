@@ -195,14 +195,14 @@ class ClaudeAdapter : AgentAdapter {
 
     /** The relayed MCP servers, or null when there is none. */
     private fun mcpConfig(layout: SessionLayout, files: LaunchFiles): String? {
-        if (layout.relay.mcpServers.isEmpty() && !layout.todo) return null
+        if (layout.relay.mcpServers.isEmpty() && layout.ownServers.isEmpty()) return null
         val servers = layout.relay.mcpServers.associate { name ->
             mcpLabel(name) to mapOf(
                 "type" to "http",
                 "url" to "${layout.relay.url}/mcp/$name",
                 "headers" to mapOf("Authorization" to "Bearer \${${LaunchVariables.RELAY_TOKEN}}"),
             )
-        } + layout.todoServer.mapValues { (_, arguments) ->
+        } + layout.ownServers.mapValues { (_, arguments) ->
             mapOf("type" to "stdio", "command" to layout.executable, "args" to arguments)
         }
         val path = join(layout.temporary, "mcp.json")

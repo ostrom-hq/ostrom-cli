@@ -54,7 +54,7 @@ private const val WRONG_CAPABILITY = "This Ostrom capability does not open this 
 /**
  * The relay's application: every request goes through one handler, which checks the capability (401), then that the
  * request comes from a local program (403), then the allow-list (404), then that the capability opens the route (403:
- * the hooks' [token] opens the hook routes, the agent's [clientToken] its MCP servers and inference, S2-25).
+ * the hooks' [token] opens the hook routes, the agent's [clientToken] its MCP servers, memory and inference, S2-25).
  *
  * @param policyFreshFor How long the signed gate policy is answered from memory.
  * @param clock Measures that time.
@@ -108,6 +108,7 @@ private class Relay(
     private val session = AgentSession()
     private val hooks = HookForwarder(config, shared, exchange, timeouts, session)
     private val todo = TodoForwarder(config, shared, exchange, timeouts.hook, session)
+    private val memoryCalls = MemoryForwarder(config, shared, exchange, timeouts.hook, session)
     private val mcp = McpForwarder(config, upstream, exchange, session)
     private val inference = InferenceForwarder(config, upstream, exchange)
     private val policy = SignedCatalogForwarder(config, shared, exchange, timeouts.hook, memory)
@@ -136,6 +137,7 @@ private class Relay(
             is RelayTarget.Hook -> hooks.forward(call, target.longPoll)
             RelayTarget.Wake -> hooks.hold(call)
             is RelayTarget.Todo -> todo.forward(call)
+            RelayTarget.Memory -> memoryCalls.forward(call)
             is RelayTarget.Catalog -> call.respondText(target.catalog, ContentType.Application.Json)
             RelayTarget.SignedCatalog -> policy.forward(call)
             is RelayTarget.Mcp -> mcp.forward(call, target.server)

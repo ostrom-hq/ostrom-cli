@@ -43,6 +43,18 @@ class McpDispatcherTest {
     }
 
     @Test
+    fun instructionsWrittenAtStartAreWrittenWhenTheAgentInitializesOnly() {
+        var written = 0
+        val late = McpDispatcher("0.1.0", name = "ostrom-memory", instructionsAtStart = { "Index ${++written}" })
+        assertEquals(0, written, "nothing is read before the handshake")
+        val reply = late.handle(rpc(""""id":1,"method":"initialize","params":{}}"""))
+        assertTrue(reply.orEmpty().contains(""""instructions":"Index 1""""), reply)
+        assertEquals(1, written)
+        val both = McpDispatcher("0.1.0", instructions = "Fixed.", instructionsAtStart = { error("never read") })
+        assertTrue(both.handle(rpc(""""id":2,"method":"initialize","params":{}}""")).orEmpty().contains("Fixed."))
+    }
+
+    @Test
     fun anUnknownProtocolVersionGetsTheNewest() {
         val params = """"params":{"protocolVersion":"2099-01-01"}}"""
         val reply = dispatcher.handle(rpc(""""id":"a","method":"initialize",$params"""))

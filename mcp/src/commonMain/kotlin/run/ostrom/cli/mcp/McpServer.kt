@@ -31,12 +31,15 @@ interface McpTool {
  * @param tools The tools offered; none in the socle.
  * @param name The server's name, given as `serverInfo.name`.
  * @param instructions What the agent is told about the server (the handshake's `instructions`), or nothing.
+ * @param instructionsAtStart Without [instructions], what the agent is told, written when it initializes the server:
+ * the memory's index is read then, not when the process starts.
  */
 class McpDispatcher(
     private val version: String,
     tools: List<McpTool> = emptyList(),
     private val name: String = "ostrom",
     private val instructions: String? = null,
+    private val instructionsAtStart: (() -> String)? = null,
 ) {
     private val tools = tools.associateBy { it.name }
 
@@ -74,7 +77,8 @@ class McpDispatcher(
 
     private fun initializeResult(params: JsonObject): JsonObject {
         val asked = (params["protocolVersion"] as? JsonPrimitive)?.content
-        val told = instructions?.let { mapOf("instructions" to JsonPrimitive(it)) }.orEmpty()
+        val text = instructions ?: instructionsAtStart?.invoke()
+        val told = text?.let { mapOf("instructions" to JsonPrimitive(it)) }.orEmpty()
         return JsonObject(
             mapOf(
                 "protocolVersion" to JsonPrimitive(asked.takeIf { it in SUPPORTED_VERSIONS } ?: NEWEST_VERSION),
