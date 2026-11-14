@@ -197,7 +197,8 @@ class HttpCloudServers(
         val artifacts = async {
             ask(agentToken, "/api/v1/artifacts/policy") { it?.get("canPublish") == JsonPrimitive(true) }
         }
-        val memory = async { ask(agentToken, "/api/v1/memory/index?limit=1") { true } }
+        // The index is a JSON object: a page that is not one (a proxy's fallback) is no memory.
+        val memory = async { ask(agentToken, "/api/v1/memory/index?limit=1") { it != null } }
         setOfNotNull(
             CloudMcpSession.ARTIFACTS.takeIf { artifacts.await() },
             CloudMcpSession.MEMORY.takeIf { memory.await() },
@@ -278,7 +279,8 @@ object CloudMcpSession {
      * @param binary The `ostrom` binary of the session.
      * @param servers The servers to connect, names of [SERVERS].
      *
-     * @return The variable.
+     * @return The variable. No argument holds a line break, as the script reads one per line: the paths go through
+     *   JSON, which escapes it, and the instructions are single lines.
      */
     fun variables(agentCommand: String, binary: String, servers: Set<String>): Map<String, String> {
         val connected = SERVERS.filterKeys { it in servers }

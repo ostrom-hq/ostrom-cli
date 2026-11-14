@@ -39,8 +39,8 @@ object CloudProcess {
 
     /**
      * One of Ostrom's MCP servers on stdio, in the agent's container (`ostrom cloud mcp --server <name>`,
-     * [CloudMcpSession]): served by the CLI's composition, which holds the memory's and the todo's tools, so it is no
-     * command of [of].
+     * [CloudMcpSession]): served by the CLI's composition, which holds the memory's tools, so it is no command of
+     * [of].
      */
     const val MCP = "mcp"
 

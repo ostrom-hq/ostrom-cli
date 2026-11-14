@@ -73,7 +73,11 @@ class CloudMcpTest : CliKit() {
         assertEquals(2, serve(agent, listOf("--server")))
         assertTrue("unknown server ostrom-nope" in console.err)
         assertTrue("unknown server (none)" in console.err)
-        assertTrue("no server or agent token" in console.err)
+        assertTrue("OSTROM_AGENT_TOKEN not set" in console.err)
+        assertTrue("OSTROM_URL not set" in console.err)
+        // A wrong name is told even without the variables.
+        assertEquals(2, serve(emptyMap(), listOf("--server", "ostrom-other")))
+        assertTrue("unknown server ostrom-other" in console.err)
         assertTrue(sent.isEmpty())
     }
 }

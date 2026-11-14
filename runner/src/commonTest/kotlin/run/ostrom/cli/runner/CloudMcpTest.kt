@@ -248,6 +248,9 @@ class CloudMcpTest {
         answers.forEach { answer ->
             assertTrue(servers(mapOf("/api/v1/artifacts/policy" to answer)).available("t").isEmpty(), answer.first)
         }
+        // A memory index that is no JSON object (a proxy's page) is no memory.
+        val page = "<html></html>" to HttpStatusCode.OK
+        assertTrue(servers(mapOf("/api/v1/memory/index" to page)).available("t").isEmpty())
         val broken = HttpCloudServers(client(Exchange()) { error("down") }, "http://s")
         assertTrue(broken.available("t").isEmpty())
     }
@@ -304,6 +307,15 @@ class CloudMcpTest {
             arguments.take(3),
         )
         assertTrue(arguments[3].startsWith("developer_instructions=\"Publish every page"), arguments[3])
+    }
+
+    @Test
+    fun aLineBreakInTheBinarysPathStaysInOneArgument() {
+        listOf("claude" to 3, "codex" to 6).forEach { (agent, count) ->
+            val both = setOf(CloudMcpSession.ARTIFACTS, CloudMcpSession.MEMORY)
+            val arguments = CloudMcpSession.variables(agent, "/opt/a\nb", both)
+            assertEquals(count, arguments.getValue(CloudMcpSession.ARGUMENTS_VARIABLE).lines().size, agent)
+        }
     }
 
     @Test

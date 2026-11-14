@@ -241,9 +241,11 @@ class Runner(
      */
     private suspend fun serverVariables(launch: RunnerLaunch?): Map<String, String> {
         val asked = launch is RunnerLaunch.Opened && servers != null && CloudMcpSession.connects(config.agentCommand)
-        val names = if (asked) servers.available((launch as RunnerLaunch.Opened).agentToken) else emptySet()
-        if (names.isNotEmpty()) log("mcp servers ${names.sorted()}")
-        return CloudMcpSession.variables(config.agentCommand, config.binary, names)
+        val answered = if (asked) servers.available((launch as RunnerLaunch.Opened).agentToken) else emptySet()
+        val names = answered.filterTo(mutableSetOf()) { it in CloudMcpSession.SERVERS }
+        val variables = CloudMcpSession.variables(config.agentCommand, config.binary, names)
+        if (variables != CloudMcpSession.NONE) log("mcp servers ${names.sorted()}")
+        return variables
     }
 
     /** What the agent learns of its launch: its id, its token and where its hooks ask for checks, or the refusal. */

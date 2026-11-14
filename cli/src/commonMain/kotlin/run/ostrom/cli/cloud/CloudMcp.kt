@@ -48,20 +48,23 @@ class CloudMcp(
         val url = environment[McpForwarder.URL_VARIABLE]?.trimEnd('/')
         val token = environment[McpForwarder.TOKEN_VARIABLE]
         val route = CloudMcpSession.FORWARDED[name]
+        val missing = listOf(McpForwarder.URL_VARIABLE to url, McpForwarder.TOKEN_VARIABLE to token)
+            .filter { it.second == null }.map { it.first }
         return client.use {
             when {
-                url == null || token == null -> refuse("no server or agent token in the environment")
+                route == null && name != CloudMcpSession.MEMORY -> refuse("unknown server ${name ?: "(none)"}")
+                url == null || token == null -> refuse("${missing.joinToString(" and ")} not set")
                 route != null -> runBlocking {
                     val read: suspend () -> String? = { withContext(Dispatchers.IO) { readLine() } }
                     McpForwarder(client, url, route, token, read, console::data).serve()
                 }
-                name == CloudMcpSession.MEMORY -> {
+                // The memory, the one server served here.
+                else -> {
                     val http = ServerHttp(client, url)
                     val start = RelayMemoryApi(http, NO_PORT, token, RelayMemoryApi.START_MILLIS)
                     val tools = MemoryTools(RelayMemoryApi(http, NO_PORT, token), start = start)
                     McpServerImpl(tools.dispatcher(version), console, readLine).serve()
                 }
-                else -> refuse("unknown server ${name ?: "(none)"}")
             }
         }
     }
