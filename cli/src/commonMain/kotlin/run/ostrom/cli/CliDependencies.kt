@@ -135,7 +135,8 @@ class CliDependencies(
     val cloud: CloudRunner,
     val selfUpdate: SelfUpdate,
     val updateNotice: UpdateNotice? = null,
-    val releaseVerification: ReleaseVerification = ReleaseVerification(FileSystem.SYSTEM, ReleaseTrust(floor = BuildInfo.FLOOR)),
+    val releaseVerification: ReleaseVerification =
+        ReleaseVerification(FileSystem.SYSTEM, ReleaseTrust(floor = BuildInfo.FLOOR)),
     val stderrIsTerminal: () -> Boolean,
     val postHogKey: String,
     val sendStatistics: suspend (url: String, body: String) -> Unit,

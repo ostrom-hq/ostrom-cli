@@ -6,6 +6,9 @@ import run.ostrom.cli.launcher.sha256Hex
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
 
+/** A PEM public key: its header, at least one line of base64, its footer. */
+private const val PEM_MIN_LINES = 3
+
 /** The most roots a binary trusts at once (TeamCode's bound): the current key, the next one, a few retired ones. */
 internal const val MAX_RELEASE_ROOTS = 8
 
@@ -50,9 +53,8 @@ data class ReleaseTrust(val keys: List<String> = ShippedReleaseKeys.pems, val fl
 @OptIn(ExperimentalEncodingApi::class)
 internal fun releaseKeyId(pem: String): String? {
     val lines = pem.trim().lines().map { it.trim() }
-    if (lines.size < 3 || lines.first() != "-----BEGIN PUBLIC KEY-----" || lines.last() != "-----END PUBLIC KEY-----") {
-        return null
-    }
+    val framed = lines.first() == "-----BEGIN PUBLIC KEY-----" && lines.last() == "-----END PUBLIC KEY-----"
+    if (lines.size < PEM_MIN_LINES || !framed) return null
     return try {
         sha256Hex(Base64.decode(lines.subList(1, lines.size - 1).joinToString("")))
     } catch (_: IllegalArgumentException) {

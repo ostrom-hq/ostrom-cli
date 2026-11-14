@@ -5,6 +5,7 @@ import run.ostrom.cli.ExitCode
 import run.ostrom.cli.launcher.child
 import run.ostrom.cli.launcher.parseObject
 import run.ostrom.cli.launcher.text
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import okio.Buffer
@@ -14,7 +15,7 @@ import okio.IOException
 import okio.Path
 import okio.Path.Companion.toPath
 
-/** What `ostrom verify-release` checked: the release [version], the id of the root that signed it, the binary's target. */
+/** What `ostrom verify-release` checked: the release [version], the id of the root that signed it, the target. */
 class VerifiedRelease(val version: String, val keyId: String, val verifiedTarget: String?)
 
 /** A release that is not what its signature says, or a file that cannot be read: why, and the exit code for it. */
@@ -29,6 +30,7 @@ class ReleaseRefused(val code: ExitCode, val text: String) : Exception(text)
  * @param fileSystem Where the files are.
  * @param trust The roots a manifest may be signed with.
  */
+@Suppress("TooManyFunctions") // small steps, each one refusal
 class ReleaseVerification(
     private val fileSystem: FileSystem,
     private val trust: ReleaseTrust = ReleaseTrust(),
@@ -39,29 +41,44 @@ class ReleaseVerification(
      * @throws ReleaseRefused With the exit code that says why.
      */
     fun verify(manifest: String, signature: String, archive: String?, target: String?): VerifiedRelease {
-        if ((archive == null) != (target == null)) {
-            throw ReleaseRefused(ExitCode.USAGE, "ostrom verify-release: --archive and --target go together.")
-        }
+        requireTogether(archive, target)
         val bytes = read(manifest.toPath(), MAX_MANIFEST_BYTES)
-        val signed = read(signature.toPath(), MAX_SIGNATURE_BYTES)
-        val keyId = trust.verify(bytes, signed.decodeToString())
-            ?: throw ReleaseRefused(ExitCode.SIGNATURE_REFUSED, "✗ The release signature does not match any root this ostrom trusts.")
-        val body = parseObject(bytes.decodeToString())
-        val version = body?.text("version")?.takeIf { SemVer.of(it) != null }
-            ?: throw ReleaseRefused(ExitCode.FAILED, "✗ The release manifest cannot be read.")
+        val keyId = trust.verify(bytes, read(signature.toPath(), MAX_SIGNATURE_BYTES).decodeToString())
+            ?: throw ReleaseRefused(ExitCode.SIGNATURE_REFUSED, "✗ The signature matches none of the trusted roots.")
+        val body = parseObject(bytes.decodeToString()) ?: throw unreadableManifest()
+        val version = versionOf(body)
         if (archive != null && target != null) checkArchive(archive.toPath(), version, target, body.child("assets"))
         return VerifiedRelease(version, keyId, target)
     }
 
-    private fun checkArchive(path: Path, version: String, target: String, assets: kotlinx.serialization.json.JsonObject?) {
-        val entry = assets?.child(target)
-            ?: throw ReleaseRefused(ExitCode.NOT_FOUND, "No ostrom $version is built for $target.")
-        val sha256 = entry.text("sha256")
-        val size = (entry["size"] as? JsonPrimitive)?.longOrNull
-        if (sha256 == null || size == null) throw ReleaseRefused(ExitCode.FAILED, "✗ The release manifest cannot be read.")
+    private fun requireTogether(archive: String?, target: String?) {
+        if ((archive == null) != (target == null)) {
+            throw ReleaseRefused(ExitCode.USAGE, "ostrom verify-release: --archive and --target go together.")
+        }
+    }
+
+    private fun versionOf(body: JsonObject): String =
+        body.text("version")?.takeIf { SemVer.of(it) != null } ?: throw unreadableManifest()
+
+    private fun checkArchive(path: Path, version: String, target: String, assets: JsonObject?) {
+        val (sha256, size) = signedEntry(assets, version, target)
         val (count, hash) = digest(path, size)
         if (count != size || hash != sha256) {
-            throw ReleaseRefused(ExitCode.SIGNATURE_REFUSED, "✗ $path does not match the size and SHA-256 the manifest signs.")
+            throw ReleaseRefused(
+                ExitCode.SIGNATURE_REFUSED,
+                "✗ $path does not match the size and SHA-256 the manifest signs.",
+            )
+        }
+    }
+
+    /** The SHA-256 and size the manifest signs for [target]. */
+    private fun signedEntry(assets: JsonObject?, version: String, target: String): Pair<String, Long> {
+        val entry = assets?.child(target)
+            ?: throw ReleaseRefused(ExitCode.NOT_FOUND, "No ostrom $version is built for $target.")
+        val size = (entry["size"] as? JsonPrimitive)?.longOrNull
+        return (entry.text("sha256") to size).let { (sha, bytes) ->
+            if (sha == null || bytes == null) throw unreadableManifest()
+            sha to bytes
         }
     }
 
@@ -70,26 +87,30 @@ class ReleaseVerification(
         regular(path)
         try {
             HashingSource.sha256(fileSystem.source(path)).use { source ->
-                val sink = Buffer()
-                var total = 0L
-                while (true) {
-                    val read = source.read(sink, BLOCK)
-                    if (read == -1L) break
-                    total += read
-                    sink.clear()
-                    if (total > limit) return total to ""
-                }
-                return total to source.hash.hex()
+                val total = count(source, limit)
+                return total to if (total > limit) "" else source.hash.hex()
             }
         } catch (_: IOException) {
             throw unreadable(path)
         }
     }
 
+    /** The bytes [source] holds, read in blocks and dropped, stopping one byte past [limit]. */
+    private fun count(source: HashingSource, limit: Long): Long {
+        val sink = Buffer()
+        var total = 0L
+        while (total <= limit) {
+            val read = source.read(sink, BLOCK)
+            if (read == -1L) break
+            total += read
+            sink.clear()
+        }
+        return total
+    }
+
     /** The bytes of the regular file [path], at most [limit] of them. */
     private fun read(path: Path, limit: Long): ByteArray {
-        val size = regular(path)
-        if (size > limit) throw ReleaseRefused(ExitCode.FAILED, "✗ $path is larger than $limit bytes.")
+        if (regular(path) > limit) throw ReleaseRefused(ExitCode.FAILED, "✗ $path is larger than $limit bytes.")
         return try {
             fileSystem.read(path) { readByteArray() }
         } catch (_: IOException) {
@@ -109,6 +130,8 @@ class ReleaseVerification(
     }
 
     private fun unreadable(path: Path) = ReleaseRefused(ExitCode.NOT_FOUND, "✗ $path is not a readable file.")
+
+    private fun unreadableManifest() = ReleaseRefused(ExitCode.FAILED, "✗ The release manifest cannot be read.")
 
     private companion object {
         const val MAX_MANIFEST_BYTES = 16L * 1024

@@ -35,7 +35,7 @@ class ReleaseTrustTest {
     @Test
     fun aBridgeReleaseTrustsBothThenTheOldRootIsRetired() {
         // before: only the old root; the bridge: both; after: only the new one
-        assertNull(ReleaseTrust(old).verify(manifest, signedByNext), "a binary of before does not know the next key yet")
+        assertNull(ReleaseTrust(old).verify(manifest, signedByNext), "a binary of before knows no next key")
         assertEquals(RotationVectors.NEXT_ID, ReleaseTrust(listOf(old, next)).verify(manifest, signedByNext))
         assertNull(ReleaseTrust(next).verify(manifest, signedByOld), "the retired key signs nothing any more")
     }

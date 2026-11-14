@@ -71,7 +71,7 @@ internal class UpdateCommand(private val dependencies: CliDependencies) : CliktC
         throw ProgramResult(code)
     }
 
-    /** `--notifications on|off|status`: the daily notice, which also stops for any non-empty OSTROM_DISABLE_AUTOUPDATE. */
+    /** `--notifications on|off|status`: the daily notice (it also stops for any OSTROM_DISABLE_AUTOUPDATE). */
     private fun notificationsSetting() {
         val notice = dependencies.updateNotice
         if (notice == null) {

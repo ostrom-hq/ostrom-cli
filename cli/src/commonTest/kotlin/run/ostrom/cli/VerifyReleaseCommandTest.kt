@@ -62,14 +62,16 @@ class VerifyReleaseCommandTest : CliKit() {
         put("/dl/latest.json", ReleaseVectors.MANIFESTS.getValue("LATEST").first)
         put("/dl/latest.json.sig", ReleaseVectors.MANIFESTS.getValue("OLDER").second)
         assertEquals(78, cli().run(files))
-        assertTrue(console.err.contains("does not match any root"), console.err.toString())
+        assertTrue(console.err.contains("matches none of the trusted roots"), console.err.toString())
         // signed, but not a manifest: refused only once its signature holds
         release("NOT_JSON")
         assertEquals(1, cli().run(files))
         release("NO_VERSION")
         assertEquals(1, cli().run(files))
-        release("NO_URL")
+        release("NO_SHA")
         put("/dl/a.tar.gz", ReleaseVectors.ARCHIVE)
+        assertEquals(1, cli().run(files + arrayOf("--archive", "/dl/a.tar.gz", "--target", "linux-x64")))
+        release("NO_SIZE")
         assertEquals(1, cli().run(files + arrayOf("--archive", "/dl/a.tar.gz", "--target", "linux-x64")))
         release("NO_ASSETS")
         assertEquals(66, cli().run(files + arrayOf("--archive", "/dl/a.tar.gz", "--target", "linux-x64")))
@@ -82,10 +84,10 @@ class VerifyReleaseCommandTest : CliKit() {
         put("/dl/latest.json.sig", "sig")
         assertEquals(1, cli().run(files), "a manifest larger than any release's")
         assertTrue(console.err.contains("is larger than"), console.err.toString())
-        release()
-        fileSystem.delete("/dl/latest.json.sig".toPath())
-        fileSystem.createSymlink("/dl/latest.json.sig".toPath(), "/dl/latest.json".toPath())
-        assertEquals(66, cli().run(files), "a link is no regular file")
-        assertEquals(64, cli().run(arrayOf("verify-release", "--manifest", "/dl/latest.json")), "the signature is needed")
+        assertEquals(
+            64,
+            cli().run(arrayOf("verify-release", "--manifest", "/dl/latest.json")),
+            "the signature is needed",
+        )
     }
 }

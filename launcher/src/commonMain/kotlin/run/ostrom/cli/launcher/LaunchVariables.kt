@@ -129,6 +129,7 @@ object LaunchVariables {
         "OSTROM_CONSOLE_URL",
         "OSTROM_GITHUB_WEB_URL",
         "OSTROM_RELEASES_URL",
+        "OSTROM_DISABLE_AUTOUPDATE",
         "OSTROM_PLUGIN_ROOT",
         "OSTROM_BIN",
         "OSTROM_KEEP_PLUGIN",

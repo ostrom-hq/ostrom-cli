@@ -55,12 +55,12 @@ class UpdateNotice(
     /** What is due at [time], stamped in the file; null when nothing is. @throws FileWriteException */
     private fun stamp(time: Long): Due? {
         val state = parseObject(files.read(path)) ?: JsonObject(emptyMap())
-        if (state[NOTIFICATIONS] == JsonPrimitive(false)) return null
+        val on = state[NOTIFICATIONS] != JsonPrimitive(false)
         val latest = state.text(LATEST)
-        val fresh = latest != null && newer(latest, current) && due(state.millis(NOTIFIED), time)
+        val fresh = on && latest != null && newer(latest, current) && due(state.millis(NOTIFIED), time)
         // asked only when there is something to say: it may look for a running session
         val notice = if (fresh) advice()?.let { "! ostrom $latest is available. $it\n" } else null
-        val check = due(state.millis(CHECKED), time)
+        val check = on && due(state.millis(CHECKED), time)
         if (notice == null && !check) return null
         val stamps = listOfNotNull(NOTIFIED.takeIf { notice != null }, CHECKED.takeIf { check })
         files.write(path, JsonObject(state + stamps.associateWith { JsonPrimitive(time) }).toString())

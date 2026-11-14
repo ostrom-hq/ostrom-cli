@@ -105,7 +105,7 @@ private class Asset(
  * @param probe Runs a binary with [INSTALLATION_PROBE].
  * @param trust The release key and the floor this binary was built with.
  */
-@Suppress("LongParameterList") // One parameter per collaborator, each replaced in tests.
+@Suppress("LongParameterList", "TooManyFunctions") // One parameter per collaborator, each replaced in tests.
 class SelfUpdate(
     private val downloads: Downloads,
     private val fileSystem: FileSystem,
@@ -130,32 +130,43 @@ class SelfUpdate(
             stop(ExitCode.USAGE, "ostrom update: ${request.version} is not a version (1.2.3 or v1.2.3).")
         }
         if (!request.checkOnly) refuseIn(sessions)
-        val asset = try {
-            manifest(request)
-        } catch (none: NoRelease) {
-            // `--check --json` of a repository with no release yet: nothing newer, said as data (never an error)
-            if (!(request.checkOnly && request.json && request.version == null)) throw none
+        val asset = manifestOrNone(request)
+        if (asset == null) {
             say(checkJson(request.current, null, null))
-            return ExitCode.OK.code
-        }
-        when {
-            request.checkOnly && request.json -> ExitCode.OK.code.also {
-                say(checkJson(request.current, asset.version, asset.keyId))
-            }
-            request.version == null && !newer(asset.version, request.current) ->
-                ExitCode.OK.code.also { say("✓ ostrom ${request.current} is up to date.") }
-            asset.version == request.current ->
-                ExitCode.OK.code.also { say("✓ ostrom ${request.current} is already installed.") }
-            request.checkOnly -> ExitCode.OK.code.also {
-                val run = if (request.version == null) "ostrom update" else "ostrom update --version ${asset.version}"
-                say("! ostrom ${asset.version} is available. Run $run.")
-                say("  Release key: ${asset.keyId}")
-            }
-            else -> install(request, asset, apiVersion)
+            ExitCode.OK.code
+        } else {
+            answer(request, asset, apiVersion)
         }
     } catch (stopped: Stop) {
         say(stopped.text)
         stopped.code.code
+    }
+
+    /**
+     * The signed manifest, or null for `--check --json` of a repository with no release yet: nothing newer, said as
+     * data (never an error). A version asked for that is not there stays an error.
+     */
+    private suspend fun manifestOrNone(request: UpdateRequest): Asset? = try {
+        manifest(request)
+    } catch (none: NoRelease) {
+        if (request.checkOnly && request.json && request.version == null) null else throw none
+    }
+
+    /** What to do with the signed [asset]: say it, or install it. */
+    private suspend fun answer(request: UpdateRequest, asset: Asset, apiVersion: suspend () -> Int): Int = when {
+        request.checkOnly && request.json -> ExitCode.OK.code.also {
+            say(checkJson(request.current, asset.version, asset.keyId))
+        }
+        request.version == null && !newer(asset.version, request.current) ->
+            ExitCode.OK.code.also { say("✓ ostrom ${request.current} is up to date.") }
+        asset.version == request.current ->
+            ExitCode.OK.code.also { say("✓ ostrom ${request.current} is already installed.") }
+        request.checkOnly -> ExitCode.OK.code.also {
+            val run = if (request.version == null) "ostrom update" else "ostrom update --version ${asset.version}"
+            say("! ostrom ${asset.version} is available. Run $run.")
+            say("  Release key: ${asset.keyId}")
+        }
+        else -> install(request, asset, apiVersion)
     }
 
     /**
