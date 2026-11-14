@@ -223,6 +223,28 @@ agent can change their folder), each item's files in chunks, then one result per
   the pod's log, with counts only, and the agent starts with what is installed. Each kind takes 60 s at most; the
   runner heartbeats (unready) meanwhile.
 
+## Artifacts (`artifacts.v1`)
+
+Once the launch is open, the runner asks the publication policy with the launch's agent token
+(`GET /api/v1/artifacts/policy`, 20 s at most), as TeamCode's runner asks with `tcex_`. When the owner may publish
+(`canPublish`), Claude Code and Codex get the `ostrom-artifacts` MCP server, as `ostrom run` connects it: the hidden
+`ostrom cloud artifacts-mcp`, a stdio server in the agent's container that posts each message to
+`$OSTROM_URL/api/v1/artifacts/mcp` with `$OSTROM_AGENT_TOKEN` (already in the agent's environment). It reaches the
+server directly, so it works under the Kubernetes and the Docker drivers alike. The runner sets two variables the
+session script reads, which hold names and paths only, never the token, and which an owner's variable cannot override:
+
+- Claude Code: `--disallowedTools=Artifact,ArtifactComments,ArtifactData,ArtifactCheck` (its own artifact tools publish
+  to claude.ai), `--mcp-config=<json>` and `--append-system-prompt=<the instruction>`, in their `=` forms so a variadic
+  option never swallows the first message.
+- Codex: `-c mcp_servers.ostrom-artifacts={command=…,args=["cloud","artifacts-mcp"],env_vars=["OSTROM_URL",
+  "OSTROM_AGENT_TOKEN"]}` (Codex passes a stdio server only the variables it lists) and `-c developer_instructions=…`.
+
+The runner heartbeats (unready) while it asks. A refusal, an error or no answer in time starts the agent without the
+server, with its own tools, and the two variables set empty. The server forwards each message as it reads it, so a
+long call never holds back a cancellation. The token is
+revoked when the launch ends, so the server then refuses the agent's publications. The server takes the publication's
+owner (and later its origin) from the token, never from the call.
+
 ## The agent cannot read the runner token (S2-49)
 
 The agent and the runner never share a UID, a container, a process namespace or the token. They do share a group:

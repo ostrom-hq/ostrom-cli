@@ -37,9 +37,12 @@ object CloudProcess {
     /** Installs the owner's team hooks for the runner, in the agent's container ([CloudInstall]). */
     const val INSTALL_HOOKS = "install-hooks"
 
+    /** The agent's `ostrom-artifacts` MCP server on stdio, in the agent's container ([ArtifactsMcp]). */
+    const val ARTIFACTS_MCP = "artifacts-mcp"
+
     private val COMMANDS = setOf(
         RUNNER, AGENT_SUPERVISOR, CHECK_HOST, CREDENTIAL, MACHINE, AGENT_STATE, ENVIRONMENT,
-        INSTALL_SKILLS, INSTALL_HOOKS,
+        INSTALL_SKILLS, INSTALL_HOOKS, ARTIFACTS_MCP,
     )
 
     /**

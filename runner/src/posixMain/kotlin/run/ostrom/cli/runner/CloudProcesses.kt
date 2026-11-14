@@ -64,6 +64,7 @@ actual fun runCloudProcess(command: String, args: List<String>): Nothing {
         CloudProcess.AGENT_STATE -> agentState(environment)
         CloudProcess.ENVIRONMENT -> environmentScript(args)
         CloudProcess.INSTALL_SKILLS, CloudProcess.INSTALL_HOOKS -> install(command, args, environment)
+        CloudProcess.ARTIFACTS_MCP -> artifactsMcp(environment)
         // Terminals on a PTY; the preparation's commands on pipes, their log written as the agent's uid.
         CloudProcess.AGENT_SUPERVISOR -> host(socket, AgentHost(PtyTerminal, commands = PtyTerminal.Commands))
         CloudProcess.CHECK_HOST -> checkHost(
@@ -110,11 +111,11 @@ private fun runner(socket: String, environment: Map<String, String>): Nothing {
             }
             val gitHub = GitHubCredentialSource(server::gitHubToken, Clock.System)
             val gitHubJob = gitHubAccess(selector, config, gitHub)
-            val preparer = preparer(config, server, terminals, gitHub)
             val (variables, variablesJob) = environmentAccess(selector, config, server)
             val deliveries = PodDeliveries(HttpDeliveryApi(client, config), terminals, config, ::log)
-            val runner = Runner(config, server, terminals, environment, Clock.System, ::log, prepare = preparer,
-                variables = variables, deliveries = deliveries)
+            val runner = Runner(config, server, terminals, environment, Clock.System, ::log,
+                prepare = preparer(config, server, terminals, gitHub), variables = variables, deliveries = deliveries,
+                artifacts = HttpArtifactsPolicy(client, config.serverUrl))
             // The agent's hooks report its background work there, as its uid: the agent socket's directory.
             val stateJob = launch {
                 AgentState.serve(selector, config.stateSocket, runner::agentState, ::log) {
@@ -314,6 +315,7 @@ private fun readEnvironment(): Map<String, String> {
 
 private val KNOWN_VARIABLES = listOf(
     "PATH", "HOME", "LANG", "USER", "SHELL", "OSTROM_SERVER_URL", "OSTROM_SESSION_ID", "OSTROM_EPOCH", "OSTROM_AGENT",
+    "OSTROM_URL", "OSTROM_AGENT_TOKEN",
     "OSTROM_AGENT_COMMAND", "OSTROM_AGENT_MODEL", "OSTROM_AGENT_PROMPT", "OSTROM_AGENT_PROMPT_FILE",
     "OSTROM_REPOSITORY_URL", "OSTROM_REPOSITORY_REF", "OSTROM_RUNNER_TOKEN", "OSTROM_RUNNER_TOKEN_FILE",
     "OSTROM_WORKSPACE", "OSTROM_AGENT_SOCKET", "OSTROM_RUNNER_CHECKS", "OSTROM_CHECK_HOST_SOCKET",
