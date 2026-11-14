@@ -13,7 +13,7 @@ import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 import kotlin.uuid.Uuid
 
-class RunnerArtifactsTest {
+class RunnerCloudMcpTest {
     private val config = RunnerConfig(
         "http://s",
         Uuid.random(),
@@ -61,7 +61,7 @@ class RunnerArtifactsTest {
 
     private suspend fun firstEnvironment(
         launch: RunnerLaunch,
-        artifacts: ArtifactsPolicy?,
+        servers: CloudServers?,
         runnerConfig: RunnerConfig = config,
         variables: RunnerVariables? = null,
     ): Map<String, String> {
@@ -80,94 +80,86 @@ class RunnerArtifactsTest {
             clock,
             {},
             variables = variables,
-            artifacts = artifacts,
+            servers = servers,
         )
         assertEquals(0, runner.run())
         return environments.single()
     }
 
+    private val both = setOf(CloudMcpSession.ARTIFACTS, CloudMcpSession.MEMORY)
+
     @Test
-    fun anAgentThatMayPublishGetsTheServerAskedWithItsAgentToken() = runTest {
+    fun theAgentGetsTheServersTheServerAnswersForAskedWithItsAgentToken() = runTest {
         val asked = mutableListOf<String>()
-        val environment = firstEnvironment(RunnerLaunch.Opened("L-1", "agent-token"), ArtifactsPolicy {
+        val environment = firstEnvironment(RunnerLaunch.Opened("L-1", "agent-token"), CloudServers {
             asked += it
-            true
+            both
         })
         assertEquals(listOf("agent-token"), asked)
         assertEquals(
-            ArtifactsSession.variables("claude", RunnerConfig.BINARY)[ArtifactsSession.MCP_VARIABLE],
-            environment[ArtifactsSession.MCP_VARIABLE],
+            CloudMcpSession.variables("claude", RunnerConfig.BINARY, both)[CloudMcpSession.ARGUMENTS_VARIABLE],
+            environment[CloudMcpSession.ARGUMENTS_VARIABLE],
         )
-        assertEquals(ArtifactsSession.INSTRUCTIONS, environment[ArtifactsSession.INSTRUCTIONS_VARIABLE])
     }
 
     @Test
-    fun anAgentThatMayNotPublishGetsNothing() = runTest {
-        val environment = firstEnvironment(RunnerLaunch.Opened("L-1", "t"), ArtifactsPolicy { false })
-        // Set empty: the script connects nothing, whatever the owner's variables say.
-        assertEquals("", environment[ArtifactsSession.MCP_VARIABLE])
-        assertEquals("", environment[ArtifactsSession.INSTRUCTIONS_VARIABLE])
+    fun noServerLeavesTheVariableEmpty() = runTest {
+        val environment = firstEnvironment(RunnerLaunch.Opened("L-1", "t"), CloudServers { emptySet() })
+        assertEquals("", environment[CloudMcpSession.ARGUMENTS_VARIABLE])
     }
 
     @Test
-    fun aRefusedLaunchARunnerWithoutPolicyOrAnotherAgentIsNeverAsked() = runTest {
+    fun aRefusedLaunchARunnerWithoutServersOrAnotherAgentIsNeverAsked() = runTest {
         val asked = mutableListOf<String>()
-        val policy = ArtifactsPolicy {
+        val servers = CloudServers {
             asked += it
-            true
+            both
         }
-        val refused = firstEnvironment(RunnerLaunch.Refused("no"), policy)
+        val refused = firstEnvironment(RunnerLaunch.Refused("no"), servers)
         val without = firstEnvironment(RunnerLaunch.Opened("L-1", "t"), null)
-        val gemini = firstEnvironment(RunnerLaunch.Opened("L-1", "t"), policy, config.copy(agentCommand = "gemini"))
+        val gemini = firstEnvironment(RunnerLaunch.Opened("L-1", "t"), servers, config.copy(agentCommand = "gemini"))
         assertTrue(asked.isEmpty())
-        listOf(refused, without, gemini).forEach { assertEquals("", it[ArtifactsSession.MCP_VARIABLE]) }
+        listOf(refused, without, gemini).forEach { assertEquals("", it[CloudMcpSession.ARGUMENTS_VARIABLE]) }
     }
 
     @Test
-    fun theRunnerHeartbeatsUnreadyWhileThePolicyIsAsked() = runTest {
+    fun theRunnerHeartbeatsUnreadyWhileTheServersAreAsked() = runTest {
         val server = Server(RunnerLaunch.Opened("L-1", "t"), ArrayDeque(listOf(Instruction.RUN)))
         val starter = object : TerminalStarter {
             override suspend fun start(script: String, environment: Map<String, String>, directory: String): Terminal =
                 Quiet()
         }
-        val slow = ArtifactsPolicy {
+        val slow = CloudServers {
             delay(20.seconds)
-            true
+            both
         }
-        assertEquals(0, Runner(config, server, starter, emptyMap(), clock, {}, artifacts = slow).run())
+        assertEquals(0, Runner(config, server, starter, emptyMap(), clock, {}, servers = slow).run())
         assertEquals(listOf(false, true), server.beats)
     }
 
     @Test
-    fun aStopWhileThePolicyIsAskedEndsTheRunnerBeforeTheAgent() = runTest {
+    fun aStopWhileTheServersAreAskedEndsTheRunnerBeforeTheAgent() = runTest {
         val server = Server(RunnerLaunch.Opened("L-1", "t"))
         val starter = object : TerminalStarter {
             override suspend fun start(script: String, environment: Map<String, String>, directory: String): Terminal =
                 error("the agent must not start")
         }
-        val hangs = ArtifactsPolicy { awaitCancellation() }
-        assertEquals(0, Runner(config, server, starter, emptyMap(), clock, {}, artifacts = hangs).run())
+        val hangs = CloudServers { awaitCancellation() }
+        assertEquals(0, Runner(config, server, starter, emptyMap(), clock, {}, servers = hangs).run())
         assertEquals(listOf(false), server.beats)
     }
 
     @Test
-    fun anOwnersVariableNeverConnectsTheServerWhenThePolicySaysNo() = runTest {
+    fun anOwnersVariableNeverConnectsOrOverridesTheServers() = runTest {
         val owner = RunnerVariables({
-            EnvironmentValues(mapOf(ArtifactsSession.MCP_VARIABLE to "forged"))
+            EnvironmentValues(mapOf(CloudMcpSession.ARGUMENTS_VARIABLE to "--forged"))
         }, clock, {})
-        val environment = firstEnvironment(RunnerLaunch.Opened("L-1", "t"), { false }, variables = owner)
-        assertEquals("", environment[ArtifactsSession.MCP_VARIABLE])
-    }
-
-    @Test
-    fun anOwnersVariableNeverOverridesTheServer() = runTest {
-        val owner = RunnerVariables({
-            EnvironmentValues(mapOf(ArtifactsSession.MCP_VARIABLE to "forged"))
-        }, clock, {})
-        val environment = firstEnvironment(RunnerLaunch.Opened("L-1", "t"), { true }, variables = owner)
+        val none = firstEnvironment(RunnerLaunch.Opened("L-1", "t"), { emptySet() }, variables = owner)
+        assertEquals("", none[CloudMcpSession.ARGUMENTS_VARIABLE])
+        val some = firstEnvironment(RunnerLaunch.Opened("L-1", "t"), { both }, variables = owner)
         assertEquals(
-            ArtifactsSession.variables("claude", RunnerConfig.BINARY)[ArtifactsSession.MCP_VARIABLE],
-            environment[ArtifactsSession.MCP_VARIABLE],
+            CloudMcpSession.variables("claude", RunnerConfig.BINARY, both)[CloudMcpSession.ARGUMENTS_VARIABLE],
+            some[CloudMcpSession.ARGUMENTS_VARIABLE],
         )
     }
 }

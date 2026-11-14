@@ -40,8 +40,8 @@ import kotlin.time.Instant
  * @param variables The owner's environment variables, given to each agent start, the runner's own winning; none on a
  *   runner that does not serve them.
  * @param deliveries Installs the owner's skills and team hooks before the agent's first terminal; none when null.
- * @param artifacts The publication policy, asked once the launch is open: when the agent may publish, the session
- *   script connects `ostrom-artifacts` ([ArtifactsSession]); never asked when null.
+ * @param servers Which of Ostrom's MCP servers the agent gets, asked once the launch is open; the session script
+ *   connects them ([CloudMcpSession]); never asked when null.
  */
 // Six collaborators and three tunings with defaults, all named at the call sites; one function per phase of a start.
 @Suppress("LongParameterList", "TooManyFunctions")
@@ -58,7 +58,7 @@ class Runner(
     private val prepare: Preparer? = null,
     private val variables: RunnerVariables? = null,
     private val deliveries: AgentDeliveries? = null,
-    private val artifacts: ArtifactsPolicy? = null,
+    private val servers: CloudServers? = null,
 ) {
     private val output = Channel<ByteArray>(outputBuffer, BufferOverflow.DROP_OLDEST)
 
@@ -150,7 +150,7 @@ class Runner(
         }
         // The runner's own variables: an owner's variable never overrides them (withVariables).
         val launched = prepared + launchVariables(opened) + claudeEnvironmentFile
-        // `ostrom-artifacts`, then the owner's skills and team hooks.
+        // Ostrom's MCP servers, then the owner's skills and team hooks.
         val delivered = deliver(opened, launched, current)
         delivered.code?.let { return@coroutineScope it }
         val agentEnvironment = launched + delivered.variables
@@ -196,9 +196,9 @@ class Runner(
         }
 
     /**
-     * Asks whether the agent may publish ([artifactsVariables]), then installs what the owner receives, with unready
-     * heartbeats meanwhile, as during the preparation; nothing installed without [deliveries] or when the launch was
-     * refused (the agent then does not start).
+     * Asks which of Ostrom's MCP servers the agent gets ([serverVariables]), then installs what the owner receives,
+     * with unready heartbeats meanwhile, as during the preparation; nothing installed without [deliveries] or when the
+     * launch was refused (the agent then does not start).
      */
     @Suppress("ReturnCount") // Ended while asking, nothing to install, or installed.
     private suspend fun deliver(
@@ -206,11 +206,11 @@ class Runner(
         environment: Map<String, String>,
         current: Current,
     ): Delivered {
-        val artifacts = beating(current) { artifactsVariables(launch) }
-        if (artifacts.code != null) return artifacts
-        val installer = deliveries.takeIf { launch !is RunnerLaunch.Refused } ?: return artifacts
+        val connected = beating(current) { serverVariables(launch) }
+        if (connected.code != null) return connected
+        val installer = deliveries.takeIf { launch !is RunnerLaunch.Refused } ?: return connected
         val installed = beating(current) { installer.install(environment) }
-        return Delivered(artifacts.variables + installed.variables, installed.code)
+        return Delivered(connected.variables + installed.variables, installed.code)
     }
 
     /** Opens the agent's launch, a few times while the server cannot be reached; then the agent does not start. */
@@ -236,15 +236,14 @@ class Runner(
     }
 
     /**
-     * `ostrom-artifacts` for the agent of an opened launch that may publish now; otherwise the script's variables set
-     * empty, so that an owner's variable of the same name never connects anything.
+     * Ostrom's MCP servers for the agent of an opened launch, those the server answers for; otherwise the script's
+     * variable set empty, so that an owner's variable of the same name never connects anything.
      */
-    private suspend fun artifactsVariables(launch: RunnerLaunch?): Map<String, String> {
-        val variables = ArtifactsSession.variables(config.agentCommand, config.binary)
-        val connected = launch is RunnerLaunch.Opened && artifacts != null && variables.isNotEmpty() &&
-            artifacts.canPublish(launch.agentToken)
-        if (connected) log("artifacts connected")
-        return if (connected) variables else ArtifactsSession.NONE
+    private suspend fun serverVariables(launch: RunnerLaunch?): Map<String, String> {
+        val asked = launch is RunnerLaunch.Opened && servers != null && CloudMcpSession.connects(config.agentCommand)
+        val names = if (asked) servers.available((launch as RunnerLaunch.Opened).agentToken) else emptySet()
+        if (names.isNotEmpty()) log("mcp servers ${names.sorted()}")
+        return CloudMcpSession.variables(config.agentCommand, config.binary, names)
     }
 
     /** What the agent learns of its launch: its id, its token and where its hooks ask for checks, or the refusal. */

@@ -27,7 +27,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
-class ArtifactsMcpTest {
+class CloudMcpTest {
     private class Exchange {
         val requests = mutableListOf<HttpRequestData>()
         val bodies = mutableListOf<String>()
@@ -67,7 +67,7 @@ class ArtifactsMcpTest {
             first = false
             input.removeFirstOrNull()
         }
-        val mcp = ArtifactsMcp(client, "http://s", "agent-token", read) { output += it }
+        val mcp = McpForwarder(client, "http://s", "/api/v1/artifacts/mcp", "agent-token", read) { output += it }
         val code = mcp.serve()
         assertEquals(0, code)
         return output
@@ -160,7 +160,7 @@ class ArtifactsMcpTest {
             if (slow) delay(60.seconds)
             respond(if (slow) """{"id":1}""" else """{"id":2}""", HttpStatusCode.OK, json)
         }
-        ArtifactsMcp(client, "http://s", "t", { input.removeFirstOrNull() }) { output += it }.serve()
+        McpForwarder(client, "http://s", "/r", "t", { input.removeFirstOrNull() }) { output += it }.serve()
         assertEquals(listOf("{\"id\":2}\n", "{\"id\":1}\n"), output)
     }
 
@@ -209,77 +209,112 @@ class ArtifactsMcpTest {
         assertEquals(2, output.size)
     }
 
-    @Test
-    fun thePolicySaysCanPublish() = runTest {
-        val exchange = Exchange()
-        val policy = HttpArtifactsPolicy(
-            client(exchange) { respond("""{"canPublish":true}""", HttpStatusCode.OK, json) },
+    private fun TestScope.servers(
+        answers: Map<String, Pair<String, HttpStatusCode>>,
+        exchange: Exchange = Exchange(),
+    ) =
+        HttpCloudServers(
+            client(exchange) { request ->
+                val (body, status) = answers[request.url.encodedPath] ?: ("" to HttpStatusCode.NotFound)
+                respond(body, status, json)
+            },
             "http://s",
         )
-        assertTrue(policy.canPublish("agent-token"))
-        val request = exchange.requests.single()
-        assertEquals("/api/v1/artifacts/policy", request.url.encodedPath)
-        assertEquals("Bearer agent-token", request.headers[HttpHeaders.Authorization])
+
+    @Test
+    fun theServersAreAskedWithTheAgentToken() = runTest {
+        val exchange = Exchange()
+        val available = servers(
+            mapOf(
+                "/api/v1/artifacts/policy" to ("""{"canPublish":true}""" to HttpStatusCode.OK),
+                "/api/v1/memory/index" to ("""{"items":[]}""" to HttpStatusCode.OK),
+            ),
+            exchange,
+        ).available("agent-token")
+        assertEquals(setOf(CloudMcpSession.ARTIFACTS, CloudMcpSession.MEMORY), available)
+        assertTrue(exchange.requests.all { it.headers[HttpHeaders.Authorization] == "Bearer agent-token" })
+        assertEquals("1", exchange.requests.single { it.url.encodedPath.endsWith("index") }.url.parameters["limit"])
     }
 
     @Test
-    fun aRefusalAnErrorOrAnUnreadableAnswerIsNo() = runTest {
+    fun aRefusalAnErrorOrAnUnreadableAnswerLeavesTheServerOut() = runTest {
         val answers = listOf(
             """{"canPublish":false,"reason":"artifacts_disabled"}""" to HttpStatusCode.OK,
             """{"canPublish":"yes"}""" to HttpStatusCode.OK,
             """[]""" to HttpStatusCode.OK,
+            """not json""" to HttpStatusCode.OK,
             """{"canPublish":true}""" to HttpStatusCode.Forbidden,
         )
-        answers.forEach { (body, status) ->
-            val policy = HttpArtifactsPolicy(client(Exchange()) { respond(body, status, json) }, "http://s")
-            assertFalse(policy.canPublish("t"), body)
+        answers.forEach { answer ->
+            assertTrue(servers(mapOf("/api/v1/artifacts/policy" to answer)).available("t").isEmpty(), answer.first)
         }
-        val broken = HttpArtifactsPolicy(client(Exchange()) { error("down") }, "http://s")
-        assertFalse(broken.canPublish("t"))
+        val broken = HttpCloudServers(client(Exchange()) { error("down") }, "http://s")
+        assertTrue(broken.available("t").isEmpty())
     }
 
     @Test
-    fun aPolicyWithoutAnAnswerInTimeIsNo() = runTest {
-        val slow = HttpArtifactsPolicy(
+    fun aServerWithoutAnAnswerInTimeIsLeftOut() = runTest {
+        val slow = HttpCloudServers(
             client(Exchange()) {
                 delay(30.seconds)
                 respond("""{"canPublish":true}""", HttpStatusCode.OK, json)
             },
             "http://s",
         )
-        assertFalse(slow.canPublish("t"))
+        assertTrue(slow.available("t").isEmpty())
     }
 
+    private fun lines(agent: String, servers: Set<String>): List<String> =
+        CloudMcpSession.variables(agent, "/opt/ostrom/ostrom", servers)[CloudMcpSession.ARGUMENTS_VARIABLE].orEmpty()
+            .lines()
+
     @Test
-    fun claudeGetsAStdioServerAndTheInstruction() {
-        val variables = ArtifactsSession.variables("claude", "/opt/ostrom/ostrom")
+    fun claudeGetsOneConfigTheInstructionsAndItsArtifactToolsOff() {
+        val arguments = lines("claude", setOf(CloudMcpSession.MEMORY, CloudMcpSession.ARTIFACTS))
+        assertEquals("--disallowedTools=Artifact,ArtifactComments,ArtifactData,ArtifactCheck", arguments[0])
         assertEquals(
-            """{"mcpServers":{"ostrom-artifacts":{"type":"stdio","command":"/opt/ostrom/ostrom",""" +
-                """"args":["cloud","artifacts-mcp"]}}}""",
-            variables[ArtifactsSession.MCP_VARIABLE],
+            "--mcp-config=" + """{"mcpServers":{"ostrom-artifacts":{"type":"stdio","command":"/opt/ostrom/ostrom",""" +
+                """"args":["cloud","mcp","--server","ostrom-artifacts"]},"ostrom-memory":{"type":"stdio",""" +
+                """"command":"/opt/ostrom/ostrom","args":["cloud","mcp","--server","ostrom-memory"]}}}""",
+            arguments[1],
         )
-        assertEquals(ArtifactsSession.INSTRUCTIONS, variables[ArtifactsSession.INSTRUCTIONS_VARIABLE])
+        assertTrue(arguments[2].startsWith("--append-system-prompt=Publish every page"), arguments[2])
+        assertTrue("`ostrom-memory` MCP server is your memory" in arguments[2])
+        assertEquals(3, arguments.size)
     }
 
     @Test
-    fun codexGetsOverridesThatNameTheVariablesItPasses() {
-        val variables = ArtifactsSession.variables("codex", "/opt/ostrom/ostrom")
+    fun claudeKeepsItsArtifactToolsWithoutTheArtifactsServer() {
+        val arguments = lines("claude", setOf(CloudMcpSession.MEMORY))
+        assertTrue(arguments[0].startsWith("--mcp-config="), arguments[0])
+        assertFalse(arguments.any { it.startsWith("--disallowedTools") })
+    }
+
+    @Test
+    fun codexGetsAnOverridePerServerThatNamesTheVariablesItPasses() {
+        val arguments = lines("codex", setOf(CloudMcpSession.ARTIFACTS))
         assertEquals(
-            """mcp_servers.ostrom-artifacts={command="/opt/ostrom/ostrom",args=["cloud","artifacts-mcp"],""" +
-                """env_vars=["OSTROM_URL","OSTROM_AGENT_TOKEN"]}""",
-            variables[ArtifactsSession.MCP_VARIABLE],
+            listOf(
+                "-c",
+                """mcp_servers.ostrom-artifacts={command="/opt/ostrom/ostrom",""" +
+                    """args=["cloud","mcp","--server","ostrom-artifacts"],""" +
+                    """env_vars=["OSTROM_URL","OSTROM_AGENT_TOKEN"]}""",
+                "-c",
+            ),
+            arguments.take(3),
         )
-        val instructions = variables[ArtifactsSession.INSTRUCTIONS_VARIABLE].orEmpty()
-        assertTrue(instructions.startsWith("developer_instructions=\"Publish every page"), instructions)
+        assertTrue(arguments[3].startsWith("developer_instructions=\"Publish every page"), arguments[3])
     }
 
     @Test
-    fun anotherAgentGetsNothing() {
-        assertTrue(ArtifactsSession.variables("gemini", "/opt/ostrom/ostrom").isEmpty())
+    fun noServerOrAnotherAgentGetsAnEmptyVariable() {
+        assertEquals(CloudMcpSession.NONE, CloudMcpSession.variables("claude", "/o", emptySet()))
+        assertEquals(CloudMcpSession.NONE, CloudMcpSession.variables("gemini", "/o", setOf(CloudMcpSession.MEMORY)))
+        assertEquals(CloudMcpSession.NONE, CloudMcpSession.variables("claude", "/o", setOf("unknown")))
     }
 
     @Test
-    fun theArtifactsServerIsAHiddenCloudCommand() {
-        assertEquals(CloudProcess.ARTIFACTS_MCP, CloudProcess.of(listOf("cloud", "artifacts-mcp")))
+    fun theServersCommandIsNoRunnerProcess() {
+        assertNull(CloudProcess.of(listOf("cloud", CloudProcess.MCP, "--server", "ostrom-memory")))
     }
 }

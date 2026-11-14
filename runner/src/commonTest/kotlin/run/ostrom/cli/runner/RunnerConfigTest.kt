@@ -139,9 +139,8 @@ class RunnerConfigTest {
         assertEquals("/run/ostrom/state.sock", environment[RunnerConfig.STATE_VARIABLE])
         assertEquals(AgentState.claudeSettings(RunnerConfig.BINARY), environment[RunnerConfig.SETTINGS_VARIABLE])
         assertTrue("--settings \"\$OSTROM_AGENT_SETTINGS\"" in SessionScript.FIRST)
-        // `ostrom-artifacts`, in `=` forms that never swallow the first message.
-        assertTrue("\"--mcp-config=\$OSTROM_ARTIFACTS_MCP\"" in SessionScript.FIRST)
-        assertTrue("-c \"\$OSTROM_ARTIFACTS_MCP\" -c \"\$OSTROM_ARTIFACTS_INSTRUCTIONS\"" in SessionScript.FIRST)
+        // Ostrom's MCP servers: one argument per line of the variable.
+        assertTrue("\$OSTROM_AGENT_ARGUMENTS\nOSTROM_ARGUMENTS" in SessionScript.FIRST)
         assertEquals("xterm-256color", environment["TERM"])
         assertEquals("C.UTF-8", environment["LANG"])
         assertEquals("/opt/ostrom:/usr/bin", environment["PATH"])

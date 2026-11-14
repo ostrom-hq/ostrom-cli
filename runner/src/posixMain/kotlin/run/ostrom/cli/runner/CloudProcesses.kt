@@ -64,7 +64,6 @@ actual fun runCloudProcess(command: String, args: List<String>): Nothing {
         CloudProcess.AGENT_STATE -> agentState(environment)
         CloudProcess.ENVIRONMENT -> environmentScript(args)
         CloudProcess.INSTALL_SKILLS, CloudProcess.INSTALL_HOOKS -> install(command, args, environment)
-        CloudProcess.ARTIFACTS_MCP -> artifactsMcp(environment)
         // Terminals on a PTY; the preparation's commands on pipes, their log written as the agent's uid.
         CloudProcess.AGENT_SUPERVISOR -> host(socket, AgentHost(PtyTerminal, commands = PtyTerminal.Commands))
         CloudProcess.CHECK_HOST -> checkHost(
@@ -115,7 +114,7 @@ private fun runner(socket: String, environment: Map<String, String>): Nothing {
             val deliveries = PodDeliveries(HttpDeliveryApi(client, config), terminals, config, ::log)
             val runner = Runner(config, server, terminals, environment, Clock.System, ::log,
                 prepare = preparer(config, server, terminals, gitHub), variables = variables, deliveries = deliveries,
-                artifacts = HttpArtifactsPolicy(client, config.serverUrl))
+                servers = HttpCloudServers(client, config.serverUrl))
             // The agent's hooks report its background work there, as its uid: the agent socket's directory.
             val stateJob = launch {
                 AgentState.serve(selector, config.stateSocket, runner::agentState, ::log) {
