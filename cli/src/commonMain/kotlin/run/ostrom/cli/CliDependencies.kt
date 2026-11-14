@@ -30,6 +30,9 @@ import run.ostrom.cli.mcp.McpBridge
 import run.ostrom.cli.mcp.McpDispatcher
 import run.ostrom.cli.mcp.McpServer
 import run.ostrom.cli.mcp.McpServerImpl
+import run.ostrom.cli.memory.MemoryDocs
+import run.ostrom.cli.memory.MemoryTools
+import run.ostrom.cli.memory.RelayMemoryApi
 import run.ostrom.cli.todo.CommandCheck
 import run.ostrom.cli.todo.GitHub
 import run.ostrom.cli.todo.RelayTodoApi
@@ -227,15 +230,23 @@ class CliDependencies(
         /**
          * `ostrom mcp --session … --server <name>`: a stdio bridge to the relay for a relayed server; for the session
          * todo ([TODO_SERVER]) the server itself, served in this process, which calls the relay's todo routes and runs
-         * the checks on this machine (docs/TODOS.md).
+         * the checks on this machine (docs/TODOS.md); for the memory ([MemoryDocs.LABEL]) likewise, through the relay's
+         * memory routes (docs/MEMORY.md).
          */
-        internal fun mcpBridge(target: BridgeTarget, console: Console, environment: Environment): McpServer {
-            if (target.server != TODO_SERVER) return McpBridge(target, LoopbackHttpImpl(), console)
-            val api = RelayTodoApi(LoopbackHttpImpl(), target.port, target.token)
-            val capture = ProcessCaptureImpl()
-            val checks = TodoChecks(GitHub(capture), CommandCheck(capture, environment.operatingSystem))
-            return McpServerImpl(TodoTools(api, checks).dispatcher(BuildInfo.VERSION), console)
-        }
+        internal fun mcpBridge(target: BridgeTarget, console: Console, environment: Environment): McpServer =
+            when (target.server) {
+                TODO_SERVER -> {
+                    val api = RelayTodoApi(LoopbackHttpImpl(), target.port, target.token)
+                    val capture = ProcessCaptureImpl()
+                    val checks = TodoChecks(GitHub(capture), CommandCheck(capture, environment.operatingSystem))
+                    McpServerImpl(TodoTools(api, checks).dispatcher(BuildInfo.VERSION), console)
+                }
+                MemoryDocs.LABEL -> {
+                    val api = RelayMemoryApi(LoopbackHttpImpl(), target.port, target.token)
+                    McpServerImpl(MemoryTools(api).dispatcher(BuildInfo.VERSION), console)
+                }
+                else -> McpBridge(target, LoopbackHttpImpl(), console)
+            }
 
         /** `ostrom wait`: asks through the relay of the session this process runs in. */
         private fun gateWait(environment: Environment, console: Console): GateWait {

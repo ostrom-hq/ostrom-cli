@@ -65,7 +65,7 @@ class McpCommand(private val dependencies: CliDependencies) : CliktCommand(name 
     private val session by option("--session", help = "The session's settings (session-env.json): bridge to its relay")
     private val server by option(
         "--server",
-        help = "The relayed MCP server to bridge to (ostrom-todo: the session todo, served here)",
+        help = "The relayed MCP server to bridge to (ostrom-todo, ostrom-memory: served here)",
     ).default("ostrom")
 
     override val hiddenFromHelp = true

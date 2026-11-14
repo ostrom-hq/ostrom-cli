@@ -188,6 +188,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         val inference = reads.inference
         val waitsWake = reads.hooks.waitsWake
         val todos = reads.hooks.todos
+        val memory = reads.hooks.memory
         val workflowDelivery = reads.hooks.workflowDelivery
         val teamHooks = reads.hooks.team
         val plugin = join(temporary, "plugin")
@@ -246,7 +247,8 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
     private fun prepare(run: Run, relay: RelayView, environment: Map<String, String?>): AgentLaunch {
         val block = dependencies.files.read(join(run.plugin, "ostrom", "AGENTS-block.md")).orEmpty()
         val context = if (run.pack == null) block else "$block\n${run.pack.context}\n"
-        val rules = if (run.workflowDelivery) "$context\n${SessionLayout.WORKFLOW_INSTRUCTIONS}\n" else context
+        val memory = if (run.memory) "$context\n${SessionLayout.MEMORY_INSTRUCTIONS}\n" else context
+        val rules = if (run.workflowDelivery) "$memory\n${SessionLayout.WORKFLOW_INSTRUCTIONS}\n" else memory
         val model = run.request.model?.let { listOf("--model", it) }.orEmpty()
         val arguments = beforeSeparator(run.request.arguments, model)
         val layout = SessionLayout(
@@ -266,6 +268,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
             trustProject = run.request.trustProjectSettings,
             waitsWake = run.waitsWake,
             todo = run.todos,
+            memory = run.memory,
             workflowDelivery = run.workflowDelivery,
             teamHooks = run.teamHooks,
         )

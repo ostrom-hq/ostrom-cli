@@ -24,8 +24,9 @@ MODULE_GRAPH: dict = {
     "mcp": {"platform"},
     "relay": {"platform"},  # never a dependency of hooks: hooks stay light (docs/MODULES.md)
     "todo": {"platform", "mcp"},  # the session todo: its MCP server and its hooks (docs/TODOS.md)
+    "memory": {"platform", "mcp"},  # the agent memory's MCP server (docs/MEMORY.md)
     "runner": {"platform"},  # the cloud session's processes (runner/README.md)
-    "cli": {"platform", "hooks", "launcher", "mcp", "apiClient", "relay", "todo", "runner"},
+    "cli": {"platform", "hooks", "launcher", "mcp", "apiClient", "relay", "todo", "memory", "runner"},
 }
 
 PRODUCTION_SOURCE_SET = re.compile(r"/src/[A-Za-z0-9]*Main/")

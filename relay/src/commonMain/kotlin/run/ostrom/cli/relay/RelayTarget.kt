@@ -25,6 +25,12 @@ internal sealed interface RelayTarget {
      */
     data class Todo(val hooksOnly: Boolean) : RelayTarget
 
+    /**
+     * A memory route the agent's `ostrom-memory` server calls (the index, the search, an entry), forwarded as it came
+     * with the launch's credential and `x-ostrom-origin: agent`: Ostrom then knows the call is an agent's.
+     */
+    data object Memory : RelayTarget
+
     /** `GET /api/v1/gates/catalog`, answered with the package's verified [catalog] without leaving the machine. */
     data class Catalog(val catalog: String) : RelayTarget
 
@@ -88,6 +94,17 @@ private val TODO_AGENT_POST = Regex("$TODO_ROOT(/items(/$ID/(start|notes|proof|l
 private val TODO_HOOK_POST = Regex("$TODO_ROOT/(stop|hook-error)")
 private const val TODO_CONTEXT = "$TODO_ROOT/context"
 
+/**
+ * The memory routes the agent's `ostrom-memory` server calls, and nothing else of `/api/v1/memory`: the proposals, the
+ * curation, its reviews, the superseded entries and a restore are a person's (ostrom-core `api/openapi.yaml`, tag
+ * `memory`). An entry's id is one plain segment (a UUID is one), never one of those routes' names.
+ */
+private const val MEMORY_ROOT = "/api/v1/memory"
+private val MEMORY_LISTS = setOf("$MEMORY_ROOT/index", "$MEMORY_ROOT/search")
+private val MEMORY_ENTRY = Regex("$MEMORY_ROOT/($ID)")
+private val MEMORY_RESERVED = setOf("index", "search", "proposals", "curation", "reviews", "superseded")
+private val MEMORY_ENTRY_METHODS = setOf(HttpMethod.Get, HttpMethod.Patch, HttpMethod.Delete)
+
 /** An MCP server name, as the server accepts it. */
 internal val MCP_SERVER_NAME = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
@@ -109,6 +126,7 @@ private fun hookTarget(method: HttpMethod, path: String, catalog: String?): Rela
     method == HttpMethod.Post && HOOK_POST.matches(path) -> RelayTarget.Hook(longPoll = false)
     method == HttpMethod.Post && path == WAITS_WAKE -> RelayTarget.Wake
     path.startsWith(TODO_ROOT) -> todoTarget(method, path)
+    path.startsWith(MEMORY_ROOT) -> memoryTarget(method, path)
     method == HttpMethod.Get && path == SIGNED_GATE_CATALOG -> RelayTarget.SignedCatalog
     method == HttpMethod.Get && path == GATE_CATALOG ->
         if (catalog == null) RelayTarget.Hook(longPoll = false) else RelayTarget.Catalog(catalog)
@@ -131,6 +149,17 @@ private fun todoTarget(method: HttpMethod, path: String): RelayTarget = when {
     else -> RelayTarget.NotFound
 }
 
+/** A memory route ([MEMORY_ROOT] and under) the agent's tools call; anything else under it is a 404. */
+private fun memoryTarget(method: HttpMethod, path: String): RelayTarget {
+    val id = MEMORY_ENTRY.matchEntire(path)?.groupValues?.get(1)
+    val allowed = when {
+        method == HttpMethod.Post -> path == MEMORY_ROOT
+        method == HttpMethod.Get && path in MEMORY_LISTS -> true
+        else -> id != null && id !in MEMORY_RESERVED && method in MEMORY_ENTRY_METHODS
+    }
+    return if (allowed) RelayTarget.Memory else RelayTarget.NotFound
+}
+
 private fun inferenceTarget(method: HttpMethod, path: String): RelayTarget {
     val upstreamPath = INFERENCE_ROUTES[method to path]
     return if (upstreamPath == null) RelayTarget.NotFound else RelayTarget.Inference(upstreamPath)
@@ -142,12 +171,13 @@ private fun inferenceTarget(method: HttpMethod, path: String): RelayTarget {
  * take the agent's (security audit S2-25). The agent's opens one hook route, reading where a gate stands
  * (`GET /api/v1/gates/{id}`, which `ostrom wait` calls from the agent's shell): it neither asks, consumes nor closes
  * anything. The agent's opens the todo routes its `ostrom-todo` server calls, never the Stop hook's (a stop, a hook
- * error) nor the reminder block. Off the allow-list, either gets its 404.
+ * error) nor the reminder block. The memory routes are the agent's tools' only: no hook reads or writes the memory.
+ * Off the allow-list, either gets its 404.
  */
 internal fun opens(target: RelayTarget, hooks: Boolean, client: Boolean): Boolean = when (target) {
     is RelayTarget.Hook -> hooks || client && target.longPoll
     is RelayTarget.Todo -> hooks || client && !target.hooksOnly
     is RelayTarget.Catalog, RelayTarget.SignedCatalog, RelayTarget.Wake -> hooks
     RelayTarget.NotFound -> true
-    is RelayTarget.Mcp, is RelayTarget.Inference, RelayTarget.McpMethodNotAllowed -> client
+    is RelayTarget.Mcp, is RelayTarget.Inference, RelayTarget.McpMethodNotAllowed, RelayTarget.Memory -> client
 }

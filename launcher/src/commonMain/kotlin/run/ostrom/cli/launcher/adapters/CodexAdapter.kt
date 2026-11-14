@@ -50,8 +50,8 @@ class CodexAdapter : AgentAdapter {
             overrides += "mcp_servers.${mcpLabel(name)}={url=$url," +
                 "bearer_token_env_var=\"${LaunchVariables.RELAY_TOKEN}\"}"
         }
-        // the session todo's server, served by this binary (a JSON string or list is a TOML one too)
-        layout.todoServer.forEach { (label, arguments) ->
+        // the todo's and the memory's servers, served by this binary (a JSON string or list is a TOML one too)
+        layout.ownServers.forEach { (label, arguments) ->
             val args = JsonArray(arguments.map(::JsonPrimitive))
             overrides += "mcp_servers.$label={command=${quoted(layout.executable)},args=$args}"
         }

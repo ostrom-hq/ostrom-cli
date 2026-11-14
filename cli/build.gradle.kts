@@ -115,6 +115,7 @@ kotlin {
                 implementation(projects.apiClient)
                 implementation(projects.relay)
                 implementation(projects.todo)
+                implementation(projects.memory)
                 implementation(projects.runner)
                 implementation(libs.clikt)
                 implementation(libs.coroutines.core)
