@@ -109,8 +109,9 @@ SHELL ["/bin/sh", "-eu", "-c"]
 # command the session's preparation runs (clone staging, setup markers), or a library the binary loads (linked or
 # opened at run time; an executable file, not a shell builtin), and runs the binary as both session UIDs.
 RUN as() { setpriv --reuid="$1" --regid=1000 --clear-groups env HOME=/tmp "$2" "$3" >/dev/null; }; \
+    on_path() ( IFS=:; for directory in ${PATH}; do [ -x "${directory}/$1" ] && exit 0; done; exit 1 ); \
     for command in sh bash mkdir rm mv rmdir dirname basename touch test cat git; do \
-        [ -x "$(command -v "${command}")" ] || { echo "Missing ${command}" >&2; exit 1; }; \
+        on_path "${command}" || { echo "Missing ${command}" >&2; exit 1; }; \
     done \
     && git_version="$(git --version | sed 's/^git version //')" \
     && if ! printf '2.31.0\n%s\n' "${git_version}" | sort -C -V; then echo "git ${git_version} is older than 2.31" >&2; exit 1; fi \
