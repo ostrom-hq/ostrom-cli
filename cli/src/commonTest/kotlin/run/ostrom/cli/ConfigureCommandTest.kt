@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli
 
+import run.ostrom.cli.api.OstromApi
+import run.ostrom.cli.api.ServerRequest
+import run.ostrom.cli.api.ServerResponse
+import run.ostrom.cli.api.ServerUnreachableException
+import okio.IOException
 import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -67,6 +72,22 @@ class ConfigureCommandTest : CliKit() {
         val failing = "GET /api/v1/capabilities" to (500 to """{"error":{"type":"internal","message":"boom"}}""")
         assertEquals(69, run(mapOf(failing), "--server", "https://ostrom.example"))
         assertTrue(console.err.contains("did not say which Ostrom API it speaks (boom)"), console.err.toString())
+        assertTrue(secretsKept.isEmpty())
+    }
+
+    @Test
+    fun aServerThatCannotBeReachedSavesNothing() {
+        typed += "ost_key"
+        val down: (String) -> OstromApi = { url ->
+            object : OstromApi {
+                override suspend fun get(path: String) = send(ServerRequest("GET", path))
+                override suspend fun send(request: ServerRequest): ServerResponse =
+                    throw ServerUnreachableException(url, IOException("connection reset"))
+            }
+        }
+        val args = arrayOf("configure", "--server", "https://ostrom.example")
+        assertEquals(69, cli(environment = env, api = down).run(args))
+        assertTrue(console.err.contains("did not say which Ostrom API it speaks"), console.err.toString())
         assertTrue(secretsKept.isEmpty())
     }
 
