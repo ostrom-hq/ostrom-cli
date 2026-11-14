@@ -169,7 +169,7 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
         agent: Agent,
         model: String?,
         site: LaunchSite,
-        labels: Map<String, String> = emptyMap(),
+        labels: Map<String, String>,
     ): Launch {
         // labels a server cannot keep are never dropped without a word: the launch stops
         if (labels.isNotEmpty() && SESSIONS_LABELS !in features(site)) {
