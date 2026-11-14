@@ -49,7 +49,8 @@ class RunLabelOptionTest : CliKit() {
         val routes = mapOf(asked to (200 to items), capabilities(ServerFeatures.SESSIONS_LABELS))
         val arguments = arrayOf("sessions", "list", "--label", "team=core", "--label", "env=ci")
         assertEquals(0, cli(environment = withServer, api = serverOf(routes)).run(arguments))
-        assertEquals("s1  claude  -  running  0s  env=ci  team=core\ns2  -  -  running  ?  odd=\n", console.out.toString())
+        val lines = "s1  claude  -  running  0s  env=ci  team=core\ns2  -  -  running  ?  odd=\n"
+        assertEquals(lines, console.out.toString())
     }
 
     @Test
