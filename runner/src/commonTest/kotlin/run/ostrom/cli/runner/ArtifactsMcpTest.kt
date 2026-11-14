@@ -60,7 +60,14 @@ class ArtifactsMcpTest {
     ): List<String> {
         val input = ArrayDeque(lines.toList())
         val output = mutableListOf<String>()
-        val mcp = ArtifactsMcp(client, "http://s", "agent-token", { input.removeFirstOrNull() }) { output += it }
+        var first = true
+        // As an agent does: the next message once the last one is answered (in virtual time).
+        val read: suspend () -> String? = {
+            if (!first) delay(1.seconds)
+            first = false
+            input.removeFirstOrNull()
+        }
+        val mcp = ArtifactsMcp(client, "http://s", "agent-token", read) { output += it }
         val code = mcp.serve()
         assertEquals(0, code)
         return output
@@ -91,6 +98,8 @@ class ArtifactsMcpTest {
         assertEquals(listOf("{\"id\":1}\n", "{\"id\":2}\n"), output)
         val bare = serve(client(Exchange()) { respond("data: {\"id\":3}", HttpStatusCode.OK) }, """{"id":3}""")
         assertEquals(listOf("{\"id\":3}\n"), bare)
+        val batch = serve(client(Exchange()) { respond("[{\"id\": 4}]", HttpStatusCode.OK) }, """[{"id":4}]""")
+        assertEquals(listOf("[{\"id\":4}]\n"), batch)
     }
 
     @Test
@@ -139,6 +148,50 @@ class ArtifactsMcpTest {
         assertFalse("secret detail" in message)
         val notification = serve(client(Exchange()) { error("down") }, """{"method":"notifications/x"}""")
         assertTrue(notification.isEmpty())
+    }
+
+    @Test
+    fun aLongCallHoldsBackNoOtherMessage() = runTest {
+        val exchange = Exchange()
+        val output = mutableListOf<String>()
+        val input = ArrayDeque(listOf("""{"id":1,"method":"tools/call"}""", """{"id":2,"method":"ping"}"""))
+        val client = client(exchange) { request ->
+            val slow = "tools/call" in request.body.toByteArray().decodeToString()
+            if (slow) delay(60.seconds)
+            respond(if (slow) """{"id":1}""" else """{"id":2}""", HttpStatusCode.OK, json)
+        }
+        ArtifactsMcp(client, "http://s", "t", { input.removeFirstOrNull() }) { output += it }.serve()
+        assertEquals(listOf("{\"id\":2}\n", "{\"id\":1}\n"), output)
+    }
+
+    @Test
+    fun anEventsDataLinesMakeOneMessageOnOneLine() = runTest {
+        val stream = "id: 4\r\nevent: message\r\ndata: {\"id\":1,\r\ndata:  \"result\": {}}\r\n\r\n: ping\r\n\r\n" +
+            "data: not json\ndata: at all\n"
+        val output = serve(client(Exchange()) { respond(stream, HttpStatusCode.OK) }, """{"id":1}""")
+        assertEquals(listOf("{\"id\":1,\"result\":{}}\n", "not json at all\n"), output)
+    }
+
+    @Test
+    fun aSessionTheServerNoLongerKnowsIsDropped() = runTest {
+        val exchange = Exchange()
+        var calls = 0
+        val output = serve(
+            client(exchange) {
+                calls++
+                when (calls) {
+                    1 -> respond("""{"id":1}""", HttpStatusCode.OK, headersOf("Mcp-Session-Id", "S-1"))
+                    2 -> respond("gone", HttpStatusCode.NotFound, headersOf("Mcp-Session-Id", "S-2"))
+                    else -> respond("""{"id":3}""", HttpStatusCode.OK, json)
+                }
+            },
+            """{"id":1,"method":"initialize"}""",
+            """{"id":2,"method":"tools/list"}""",
+            """{"id":3,"method":"initialize"}""",
+        )
+        assertEquals("S-1", exchange.requests[1].headers["Mcp-Session-Id"])
+        assertNull(exchange.requests[2].headers["Mcp-Session-Id"])
+        assertEquals(3, output.size)
     }
 
     @Test

@@ -149,8 +149,8 @@ class Runner(
             return@coroutineScope 1
         }
         // The runner's own variables: an owner's variable never overrides them (withVariables).
-        val launched = prepared + launchVariables(opened) + claudeEnvironmentFile + artifactsVariables(opened)
-        // The owner's skills and team hooks.
+        val launched = prepared + launchVariables(opened) + claudeEnvironmentFile
+        // `ostrom-artifacts`, then the owner's skills and team hooks.
         val delivered = deliver(opened, launched, current)
         delivered.code?.let { return@coroutineScope it }
         val agentEnvironment = launched + delivered.variables
@@ -177,30 +177,40 @@ class Runner(
             emptyMap()
         }
 
-    /** What [deliveries] installed, or the exit code when a heartbeat ended the runner meanwhile. */
+    /** What a phase before the agent gave, or the exit code when a heartbeat ended the runner meanwhile. */
     private class Delivered(val variables: Map<String, String>, val code: Int? = null)
 
+    /** Runs [work] with unready heartbeats meanwhile, as during the preparation; a stop cancels it. */
+    private suspend fun beating(current: Current, work: suspend () -> Map<String, String>): Delivered =
+        coroutineScope {
+            val working = async { work() }
+            var done: Delivered? = null
+            while (done == null) {
+                done = withTimeoutOrNull(heartbeatInterval) { Delivered(working.await()) }
+                    ?: beat(current, ready = false)?.let { code ->
+                        working.cancel()
+                        Delivered(emptyMap(), code)
+                    }
+            }
+            done
+        }
+
     /**
-     * Installs what the owner receives, with unready heartbeats meanwhile, as during the preparation; nothing without
-     * [deliveries] or when the launch was refused (the agent then does not start).
+     * Asks whether the agent may publish ([artifactsVariables]), then installs what the owner receives, with unready
+     * heartbeats meanwhile, as during the preparation; nothing installed without [deliveries] or when the launch was
+     * refused (the agent then does not start).
      */
+    @Suppress("ReturnCount") // Ended while asking, nothing to install, or installed.
     private suspend fun deliver(
         launch: RunnerLaunch?,
         environment: Map<String, String>,
         current: Current,
-    ): Delivered = coroutineScope {
-        val installer = deliveries.takeIf { launch !is RunnerLaunch.Refused }
-            ?: return@coroutineScope Delivered(emptyMap())
-        val installing = async { installer.install(environment) }
-        var delivered: Delivered? = null
-        while (delivered == null) {
-            delivered = withTimeoutOrNull(heartbeatInterval) { Delivered(installing.await()) }
-                ?: beat(current, ready = false)?.let { code ->
-                    installing.cancel()
-                    Delivered(emptyMap(), code)
-                }
-        }
-        delivered
+    ): Delivered {
+        val artifacts = beating(current) { artifactsVariables(launch) }
+        if (artifacts.code != null) return artifacts
+        val installer = deliveries.takeIf { launch !is RunnerLaunch.Refused } ?: return artifacts
+        val installed = beating(current) { installer.install(environment) }
+        return Delivered(artifacts.variables + installed.variables, installed.code)
     }
 
     /** Opens the agent's launch, a few times while the server cannot be reached; then the agent does not start. */
@@ -225,13 +235,16 @@ class Runner(
         return RunnerLaunch.Refused(UNREACHABLE)
     }
 
-    /** `ostrom-artifacts` for the agent of an opened launch that may publish now; nothing otherwise. */
+    /**
+     * `ostrom-artifacts` for the agent of an opened launch that may publish now; otherwise the script's variables set
+     * empty, so that an owner's variable of the same name never connects anything.
+     */
     private suspend fun artifactsVariables(launch: RunnerLaunch?): Map<String, String> {
         val variables = ArtifactsSession.variables(config.agentCommand, config.binary)
         val connected = launch is RunnerLaunch.Opened && artifacts != null && variables.isNotEmpty() &&
             artifacts.canPublish(launch.agentToken)
         if (connected) log("artifacts connected")
-        return if (connected) variables else emptyMap()
+        return if (connected) variables else ArtifactsSession.NONE
     }
 
     /** What the agent learns of its launch: its id, its token and where its hooks ask for checks, or the refusal. */

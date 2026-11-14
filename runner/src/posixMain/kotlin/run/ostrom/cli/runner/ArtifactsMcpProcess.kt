@@ -6,7 +6,10 @@ package run.ostrom.cli.runner
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
 import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.IO
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import platform.posix.fflush
 import kotlin.system.exitProcess
 
@@ -28,7 +31,7 @@ internal fun artifactsMcp(environment: Map<String, String>): Nothing {
             install(HttpTimeout) { connectTimeoutMillis = CONNECT_TIMEOUT_MILLIS }
         }
         try {
-            ArtifactsMcp(client, url, token, ::readlnOrNull) { message ->
+            ArtifactsMcp(client, url, token, { withContext(Dispatchers.IO) { readlnOrNull() } }) { message ->
                 print(message)
                 fflush(null)
             }.serve()

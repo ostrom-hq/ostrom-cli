@@ -239,7 +239,9 @@ session script reads, which hold names and paths only, never the token, and whic
 - Codex: `-c mcp_servers.ostrom-artifacts={command=…,args=["cloud","artifacts-mcp"],env_vars=["OSTROM_URL",
   "OSTROM_AGENT_TOKEN"]}` (Codex passes a stdio server only the variables it lists) and `-c developer_instructions=…`.
 
-A refusal, an error or no answer in time starts the agent without the server, with its own tools. The token is
+The runner heartbeats (unready) while it asks. A refusal, an error or no answer in time starts the agent without the
+server, with its own tools, and the two variables set empty. The server forwards each message as it reads it, so a
+long call never holds back a cancellation. The token is
 revoked when the launch ends, so the server then refuses the agent's publications. The server takes the publication's
 owner (and later its origin) from the token, never from the call.
 

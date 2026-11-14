@@ -15,9 +15,14 @@ import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
@@ -40,31 +45,36 @@ import kotlin.time.Duration.Companion.seconds
  * @param client An HTTP client.
  * @param serverUrl The server (`OSTROM_URL`).
  * @param token The launch's agent token (`OSTROM_AGENT_TOKEN`).
- * @param readLine Reads the next line of stdin, or null at its end.
+ * @param readLine Reads the next line of stdin, or null at its end (off the thread the answers resume on).
  * @param write Writes one message, its newline included, to stdout.
  */
 class ArtifactsMcp(
     private val client: HttpClient,
     private val serverUrl: String,
     private val token: String,
-    private val readLine: () -> String?,
+    private val readLine: suspend () -> String?,
     private val write: (String) -> Unit,
 ) {
     /** The server's MCP session, when it gives one (`Mcp-Session-Id`), sent back with each later message. */
     private var session: String? = null
 
+    /** One message at a time on stdout. */
+    private val output = Mutex()
+
     /**
-     * Serves until stdin ends.
+     * Serves until stdin ends and every message read has its answer. Each message is forwarded as it is read, so a
+     * long call never holds back a cancellation or another call.
      *
      * @return The exit code.
      */
-    suspend fun serve(): Int {
+    suspend fun serve(): Int = coroutineScope {
         var line = readLine()
         while (line != null) {
-            if (line.isNotBlank()) forward(line)
+            val message = line
+            if (message.isNotBlank()) launch { forward(message) }
             line = readLine()
         }
-        return 0
+        0
     }
 
     private suspend fun forward(line: String) {
@@ -78,10 +88,12 @@ class ArtifactsMcp(
                 timeout { requestTimeoutMillis = REQUEST_TIMEOUT.inWholeMilliseconds }
                 setBody(line)
             }
-            response.headers[SESSION_HEADER]?.let { session = it }
             if (response.status.isSuccess()) {
+                response.headers[SESSION_HEADER]?.let { session = it }
                 messagesOf(response.bodyAsText())
             } else {
+                // A session the server no longer knows: the agent's next initialize starts another.
+                if (response.status == HttpStatusCode.NotFound) session = null
                 listOfNotNull(id?.let { error(it, "Ostrom answered ${response.status.value}") })
             }
         } catch (error: CancellationException) {
@@ -89,18 +101,32 @@ class ArtifactsMcp(
         } catch (error: Exception) {
             listOfNotNull(id?.let { error(it, "the server could not be reached (${error::class.simpleName})") })
         }
-        messages.forEach { write(it + "\n") }
+        output.withLock { messages.forEach { write(it + "\n") } }
     }
 
-    /** The messages of an answer: a JSON body, or the `data:` lines of an event stream. */
+    /**
+     * The messages of an answer, one line each: a JSON body, or each event of an event stream (its `data:` lines
+     * joined), made compact.
+     */
     private fun messagesOf(text: String): List<String> {
         val body = text.trim()
-        return when {
-            body.startsWith("event:") || body.startsWith("data:") ->
-                body.lines().filter { it.startsWith("data:") }.map { it.removePrefix("data:").trim() }
+        val messages = when {
             body.isEmpty() -> emptyList()
-            else -> listOf(body)
+            body.startsWith("{") || body.startsWith("[") -> listOf(body)
+            else -> body.replace("\r\n", "\n").split("\n\n").mapNotNull { event ->
+                event.lines().filter { it.startsWith("data:") }
+                    .joinToString("\n") { it.removePrefix("data:").removePrefix(" ") }
+                    .takeIf { it.isNotBlank() }
+            }
         }
+        return messages.map(::compact)
+    }
+
+    /** One line: JSON written again without its line breaks; anything else as it came, on one line. */
+    private fun compact(message: String): String = try {
+        Json.parseToJsonElement(message).toString()
+    } catch (_: SerializationException) {
+        message.replace('\n', ' ')
     }
 
     /** The id of a request, or null for a notification (or a line that is not JSON: nothing to answer). */
@@ -192,6 +218,9 @@ object ArtifactsSession {
 
     /** The instruction (Claude Code's text, Codex's override). */
     const val INSTRUCTIONS_VARIABLE = "OSTROM_ARTIFACTS_INSTRUCTIONS"
+
+    /** The script's variables when nothing is connected: empty, whatever the owner's variables say. */
+    val NONE: Map<String, String> = mapOf(MCP_VARIABLE to "", INSTRUCTIONS_VARIABLE to "")
 
     /** The name the server takes in the agent, as `ostrom run` connects it. */
     const val SERVER = "ostrom-artifacts"

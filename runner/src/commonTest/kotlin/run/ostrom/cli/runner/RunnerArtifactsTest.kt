@@ -3,12 +3,13 @@ package run.ostrom.cli.runner
 
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Clock
+import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 import kotlin.uuid.Uuid
 
@@ -103,8 +104,9 @@ class RunnerArtifactsTest {
     @Test
     fun anAgentThatMayNotPublishGetsNothing() = runTest {
         val environment = firstEnvironment(RunnerLaunch.Opened("L-1", "t"), ArtifactsPolicy { false })
-        assertNull(environment[ArtifactsSession.MCP_VARIABLE])
-        assertNull(environment[ArtifactsSession.INSTRUCTIONS_VARIABLE])
+        // Set empty: the script connects nothing, whatever the owner's variables say.
+        assertEquals("", environment[ArtifactsSession.MCP_VARIABLE])
+        assertEquals("", environment[ArtifactsSession.INSTRUCTIONS_VARIABLE])
     }
 
     @Test
@@ -118,7 +120,43 @@ class RunnerArtifactsTest {
         val without = firstEnvironment(RunnerLaunch.Opened("L-1", "t"), null)
         val gemini = firstEnvironment(RunnerLaunch.Opened("L-1", "t"), policy, config.copy(agentCommand = "gemini"))
         assertTrue(asked.isEmpty())
-        listOf(refused, without, gemini).forEach { assertNull(it[ArtifactsSession.MCP_VARIABLE]) }
+        listOf(refused, without, gemini).forEach { assertEquals("", it[ArtifactsSession.MCP_VARIABLE]) }
+    }
+
+    @Test
+    fun theRunnerHeartbeatsUnreadyWhileThePolicyIsAsked() = runTest {
+        val server = Server(RunnerLaunch.Opened("L-1", "t"), ArrayDeque(listOf(Instruction.RUN)))
+        val starter = object : TerminalStarter {
+            override suspend fun start(script: String, environment: Map<String, String>, directory: String): Terminal =
+                Quiet()
+        }
+        val slow = ArtifactsPolicy {
+            delay(20.seconds)
+            true
+        }
+        assertEquals(0, Runner(config, server, starter, emptyMap(), clock, {}, artifacts = slow).run())
+        assertEquals(listOf(false, true), server.beats)
+    }
+
+    @Test
+    fun aStopWhileThePolicyIsAskedEndsTheRunnerBeforeTheAgent() = runTest {
+        val server = Server(RunnerLaunch.Opened("L-1", "t"))
+        val starter = object : TerminalStarter {
+            override suspend fun start(script: String, environment: Map<String, String>, directory: String): Terminal =
+                error("the agent must not start")
+        }
+        val hangs = ArtifactsPolicy { awaitCancellation() }
+        assertEquals(0, Runner(config, server, starter, emptyMap(), clock, {}, artifacts = hangs).run())
+        assertEquals(listOf(false), server.beats)
+    }
+
+    @Test
+    fun anOwnersVariableNeverConnectsTheServerWhenThePolicySaysNo() = runTest {
+        val owner = RunnerVariables({
+            EnvironmentValues(mapOf(ArtifactsSession.MCP_VARIABLE to "forged"))
+        }, clock, {})
+        val environment = firstEnvironment(RunnerLaunch.Opened("L-1", "t"), { false }, variables = owner)
+        assertEquals("", environment[ArtifactsSession.MCP_VARIABLE])
     }
 
     @Test
