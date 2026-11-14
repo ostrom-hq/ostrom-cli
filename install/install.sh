@@ -7,14 +7,13 @@
 #   OSTROM_INSTALL_DIR      where to put the binary (default: ~/.ostrom/bin); no root needed
 #   OSTROM_DOWNLOAD_BASE    releases URL (default: https://github.com/ostrom-hq/ostrom-cli/releases)
 #   OSTROM_NO_MODIFY_PATH   set to 1 to leave your shell profile alone
-#   OSTROM_SKIP_COSIGN      set to 1 to skip the signature check of SHA256SUMS
 #   OSTROM_TARGET           force a target (linux-x64, linux-arm64, macos-arm64), for tests
 #
 # SHA256SUMS is checked against its signature and the key pinned below, with cosign when it is installed, else with
 # openssl (cosign signs a blob as ECDSA P-256 over its SHA-256: openssl checks the same signature). The archive is then
 # checked against SHA256SUMS. With neither tool, nothing is installed: the checksum alone comes from the same place as
-# the archive.
-#   OSTROM_SKIP_COSIGN=1 skips the signature check (the checksum is still checked).
+# the archive. There is no way to skip the signature check (as TeamCode's installer: the release's signature is
+# authenticated, or nothing is installed).
 # A download with curl is never redirected from HTTPS to HTTP (wget has no such option; the signature covers it).
 #
 # Everything runs from main, called on the last line: a download cut short runs nothing.
@@ -57,19 +56,14 @@ detect_target() {
 }
 
 verifier() { # the tool that checks the signature, before anything is downloaded, or stop
-  if [ "${OSTROM_SKIP_COSIGN:-}" = "1" ]; then tool=none
-  elif command -v cosign >/dev/null 2>&1; then tool=cosign
+  if command -v cosign >/dev/null 2>&1; then tool=cosign
   elif command -v openssl >/dev/null 2>&1; then tool=openssl
   else
-    fail "neither cosign nor openssl is installed, so the signature of SHA256SUMS cannot be checked: refusing to install. Install cosign or openssl, or set OSTROM_SKIP_COSIGN=1 to check the checksum only"
+    fail "neither cosign nor openssl is installed, so the signature of SHA256SUMS cannot be checked: refusing to install. Install cosign or openssl and run the installer again"
   fi
 }
 
 verify_signature() { # <release url> <work dir>: SHA256SUMS against its signature and the pinned key, or stop
-  if [ "$tool" = none ]; then
-    say "Signature check skipped (OSTROM_SKIP_COSIGN=1): only the checksum is checked."
-    return 0
-  fi
   fetch "$1/SHA256SUMS.sig" "$2/SHA256SUMS.sig" \
     || fail "SHA256SUMS.sig could not be downloaded: refusing to install"
   printf '%s\n' "$COSIGN_PUB" > "$2/cosign.pub"
