@@ -63,13 +63,18 @@ internal class LaunchHooks(
     val artifacts: Boolean = false,
 )
 
-/** What a launch read of Ostrom before its agent starts ([AgentLaunchUseCase]). */
+/**
+ * What a launch read of Ostrom before its agent starts ([AgentLaunchUseCase]).
+ *
+ * @property variables The member's environment variables the agent starts with ([MemberVariables]), or null.
+ */
 internal class LaunchReads(
     val pack: SessionPackage?,
     val keys: String,
     val mcp: List<String>,
     val inference: Boolean,
     val hooks: LaunchHooks,
+    val variables: Map<String, String>? = null,
 )
 
 /**
@@ -213,10 +218,11 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
 
     /**
      * What a launch reads of Ostrom once it has its agent token: the session package, the instance's keys, the MCP
-     * servers, whether the models are relayed and what the server serves, with the team skills synced meanwhile. None
-     * depends on another, so they are asked together (PERF-CLI): the agent waits on one round trip for them, not one
-     * each. A refused package stops the launch first, then keys that cannot be read, as when they were asked one after
-     * the other; the notes are said in that order too, the team skills' last.
+     * servers, whether the models are relayed, what the server serves and the member's environment variables, with
+     * the team skills synced meanwhile. None depends on another, so they are asked together (PERF-CLI): the agent
+     * waits on one round trip for them, not one each. A refused package stops the launch first, then keys that cannot
+     * be read, as when they were asked one after the other; the notes are said in that order too, the team skills'
+     * last.
      */
     suspend fun reads(request: LaunchRequest, site: LaunchSite, repo: String, launch: Launch): LaunchReads =
         coroutineScope {
@@ -233,6 +239,10 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
                 val notes = mutableListOf<String>()
                 team.teamHooks(request, site, features.await(), notes::add) to notes
             }
+            // read before the agent starts: it begins with the current values in its environment
+            val variables = async {
+                if (request.variables) dependencies.variables.read(site, features.await()) else VariablesRead(null)
+            }
             val pack = packageOf(repo, site, keep = true)
             val read = keys.await()()
             val (servers, notes) = mcp.await()
@@ -245,6 +255,8 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
             val wake = request.agent == Agent.CLAUDE && WAITS_WAKE in served
             val (publishes, publishNote) = artifacts.await()
             publishNote?.let(dependencies.say)
+            val given = variables.await()
+            given.notes.forEach(dependencies.say)
             val launchHooks = LaunchHooks(
                 waitsWake = wake,
                 todos = TODOS in served,
@@ -253,7 +265,7 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
                 memory = MEMORY in served,
                 artifacts = publishes,
             )
-            LaunchReads(pack, read, servers, inference.await(), launchHooks)
+            LaunchReads(pack, read, servers, inference.await(), launchHooks, given.variables)
         }
 
     /**

@@ -59,6 +59,10 @@ internal class AgentCommand(
         "--no-team-hooks",
         help = "Run none of the team hooks you approved in this session (ostrom hooks list)",
     ).flag()
+    val noVariables by option(
+        "--no-variables",
+        help = "Do not give the agent the environment variables assigned to you for this launch",
+    ).flag()
     val workload by option(
         "--workload",
         help = "Scheduling class of the agent's model calls: background ones wait behind the team's " +
@@ -115,6 +119,7 @@ internal class AgentCommand(
             trustProjectSettings,
             !noTeamHooks,
             background = workload == BACKGROUND,
+            variables = !noVariables,
         )
         throw ProgramResult(runBlocking { dependencies.agents.run(request, site) })
     }
@@ -122,8 +127,13 @@ internal class AgentCommand(
     private fun cwd() = dependencies.workingDirectory()
 
     /** Options that do not go together, a usage error before anything is read. */
+    @Suppress("ThrowsCount") // One usage error per pair of options.
     private fun refuseOptionsTogether() {
         if (cloud && dryRun) throw UsageError("--dry-run checks a launch on this machine: it does not go with --cloud")
+        // a cloud session's runner gives the variables itself, from the owner's assignments
+        if (cloud && noVariables) {
+            throw UsageError("--no-variables is for a launch on this machine: it does not go with --cloud")
+        }
         // the agents that read a repository's own configuration only when the developer asks
         val trusting = agent == Agent.CLAUDE || agent == Agent.GEMINI
         if (trustProjectSettings && (cloud || !trusting)) {

@@ -46,6 +46,29 @@ as `Ostrom-Org` on every call (`ApiServerTransport`); one the person is not a me
 nothing is looked up, the header is left out and the server takes the person's only organisation; a member of several
 gets 409 `org_required` from the policy check, and the launch stops with 64 and the way to name one.
 
+## The member's environment variables
+
+`ostrom run <agent>` gives the agent the environment variables assigned to the developer in the console (team or
+personal environment variants), as TeamCode's `teamcode run` does. The launcher holds no rule of their names: it reads
+them through the `MemberVariables` port, which the CLI serves (`cli/.../launch/MemberVariablesImpl.kt`) with the
+runner's `AgentEnvironment`, so a local launch and a cloud session withhold the same names (TeamCode's reserved list
+and prefixes, plus `OSTROM_`).
+
+- **Before the agent starts**, when the server announces `environment.v1`, the launch reads
+  `GET /api/v1/environment` with the device token (scope `environment:read`), with its other reads. Only names are
+  said on stderr: the variables given, those withheld because their name is reserved, and those the server could not
+  serve now (`unavailable`). A credential that may not read them (a service key in `OSTROM_TOKEN`: 403) starts the
+  agent without them, and says so; any other failure starts it without them too. `--no-variables` asks for none (it
+  does not go with `--cloud`, whose runner gives them itself).
+- **Every agent** gets them in its process environment, first: Ostrom's own variables always win.
+- **Claude Code** also gets `CLAUDE_ENV_FILE`, a script it sources before each Bash command. It holds no value: it
+  sources a values file the launch rewrites when the variables change, read again every 60 seconds, so a value
+  rotated, added or removed while the agent runs reaches its next command (a removed name is unset). Both files are
+  private (0600, in the launch's 0700 folder) and removed when the launch ends, even with `OSTROM_KEEP_PLUGIN`. A
+  script the developer had in `CLAUDE_ENV_FILE` keeps running, first. A failed refresh keeps the last values; what the
+  refresh says waits until the agent has exited, since it owns the terminal meanwhile.
+- **Codex and the other agents** keep the values they start with.
+
 ## The local relay
 
 While `ostrom run <agent>` runs, the launcher starts a `LocalRelay`

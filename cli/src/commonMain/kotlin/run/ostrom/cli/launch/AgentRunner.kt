@@ -48,8 +48,9 @@ class AgentRunnerImpl(
     private val userAgent: String,
 ) : AgentRunner {
     override suspend fun run(request: LaunchRequest, site: LaunchSite): Int {
+        val server = ServerJson(ApiServerTransport(api(site.serverUrl), site.org))
         val dependencies = LaunchDependencies(
-            server = ServerJson(ApiServerTransport(api(site.serverUrl), site.org)),
+            server = server,
             files = files,
             finder = finder,
             processes = processes,
@@ -59,6 +60,7 @@ class AgentRunnerImpl(
             say = { console.err("$it\n") },
             blocking = blocking,
             userAgent = userAgent,
+            variables = MemberVariablesImpl(server, files),
         )
         return AgentLaunchUseCase(dependencies, ADAPTERS).launch(request, site)
     }

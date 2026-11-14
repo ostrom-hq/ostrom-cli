@@ -34,6 +34,7 @@ import okio.IOException
  * @property teamHooks False for `--no-team-hooks`: this launch runs none of the team hooks the member approved.
  * @property background `--workload background` (TeamCode's): the agent's model calls wait behind the org's interactive
  *   ones in the admission queue; its quotas and permissions are the same.
+ * @property variables False for `--no-variables`: the agent gets none of the member's environment variables.
  */
 data class LaunchRequest(
     val agent: Agent,
@@ -44,6 +45,7 @@ data class LaunchRequest(
     val trustProjectSettings: Boolean = false,
     val teamHooks: Boolean = true,
     val background: Boolean = false,
+    val variables: Boolean = true,
 )
 
 /**
@@ -100,6 +102,8 @@ class LaunchDependencies(
     // owner-only mode of their folders and executable files
     val skillFiles: FileSystem = FileSystem.SYSTEM,
     val restrict: (String, Boolean) -> Unit = ::restrictToOwner,
+    // the member's own environment variables, served by the CLI (MemberVariables)
+    val variables: MemberVariables = NoMemberVariables,
 )
 
 /** The launch stops before the agent runs, with an exit code of the spec (CLI.md § 2.3). */
@@ -195,6 +199,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         val workflowDelivery = reads.hooks.workflowDelivery
         val artifacts = reads.hooks.artifacts
         val teamHooks = reads.hooks.team
+        val variables = reads.variables
         val plugin = join(temporary, "plugin")
         val relayTokenFile = join(temporary, "relay-token")
         val sessionFile = join(temporary, "session-id")
@@ -236,7 +241,16 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
             val launcherEnvironment = environmentOf(run, relay, laid)
             val prepared = prepare(run, RelayView(relay.url, relay.clientToken, mcp, inference), launcherEnvironment)
             prepared.notes.forEach { dependencies.say("ostrom: $it") }
-            val environment = launcherEnvironment + prepared.environment
+            // the member's variables go first: Ostrom's own and the agent's always win (their names are refused anyway)
+            val held = mutableListOf<String>()
+            val delivery = run.variables?.let {
+                dependencies.variables.deliver(run.request.agent, it, run.site, run.temporary, held::add)
+            } ?: KeptVariables
+            // what the delivery said before the agent starts is said now; the rest waits until it has exited
+            held.forEach(dependencies.say)
+            held.clear()
+            val environment = run.variables.orEmpty() + launcherEnvironment + prepared.environment +
+                delivery.environment
             val settingsFile = join(run.temporary, SessionLayout.SESSION_SETTINGS)
             files.write(settingsFile, sessionSettings(environment).toString(), FileAccess.PRIVATE)
             val lifeline = SessionLifeline(
@@ -248,7 +262,12 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
                 dependencies.say,
             )
             val every = run.site.variable(ALIVE_VARIABLE).orEmpty().toLongOrNull() ?: ALIVE_MILLIS
-            val code = runAgent(listOf(run.executable) + prepared.arguments, environment, lifeline, every)
+            val code = try {
+                runAgent(listOf(run.executable) + prepared.arguments, environment, lifeline, every, delivery)
+            } finally {
+                delivery.close()
+                held.forEach(dependencies.say)
+            }
             lifeline.end(code, run.model, run.name, run.pack, join(run.site.configDirectory, "receipts"))
             code
         }
@@ -331,10 +350,13 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         environment: Map<String, String?>,
         lifeline: SessionLifeline,
         everyMillis: Long,
+        delivery: VariablesDelivery,
     ): Int = coroutineScope {
         val beat = this.launch { lifeline.keepAlive(everyMillis) }
+        val refresh = this.launch { delivery.keepCurrent() }
         val result = withContext(dependencies.blocking) { dependencies.processes.run(command, environment) }
         beat.cancelAndJoin()
+        refresh.cancelAndJoin()
         when (result) {
             is ProcessResult.Exited -> result.code
             ProcessResult.NotFound -> AGENT_MISSING.also { dependencies.say("ostrom: cannot start ${command.first()}") }
