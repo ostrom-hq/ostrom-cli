@@ -193,6 +193,8 @@ class MemoryToolsTest {
     fun ostromsRefusalReachesTheAgentAsAToolErrorWithWhatToDo() {
         val hints = mapOf(
             "memory_team_forbidden" to "write it as personal",
+            "memory_proposal_session" to "a proposal to the session's owner",
+            "memory_proposals_limit" to "Too many of your team proposals",
             "memory_secret" to "looks like a credential",
             "memory_conflict" to "read it again",
             "memory_limit" to "The memory is full",

@@ -73,7 +73,7 @@ internal object MemorySchemas {
         tool(
             "memory_write",
             "Save a note for later sessions. Personal by default (this member only). Never include a secret: it is " +
-                "refused. An agent cannot write a team entry yet.",
+                "refused. A team entry is proposed to the member you work for, who accepts or rejects it.",
             listOf("title", "summary", "content"),
             text("title", "A short title, at most 160 characters."),
             text("summary", "One or two sentences telling whether to read the content, at most 300 characters."),

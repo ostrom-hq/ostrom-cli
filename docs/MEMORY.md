@@ -1,14 +1,10 @@
----
-status: coming-soon
----
-
 # The agent memory on the agent's machine
 
 The agent memory is short notes that outlive a session: the organization's entries, which every member reads, and
 each member's personal entries, which nobody else reads. Ostrom keeps them (ostrom-server, the routes under
 `/api/v1/memory`, feature `memory.v1`); the agent's machine serves the tools the agent calls. This is a port of
-TeamCode's memory tools (teamcode `docs/memory.md`, commit be766ab3, #271: `MemoryMcpServer`, `MemoryDocs`). Coming
-soon on the server: ostrom-server main does not serve the memory routes yet, and does not announce `memory.v1`.
+TeamCode's memory tools (teamcode `docs/memory.md`, commit be766ab3, #271: `MemoryMcpServer`, `MemoryDocs`), served by
+ostrom-server since e64fe444.
 
 ## The `ostrom-memory` MCP server
 
@@ -21,7 +17,7 @@ relay, with the agent's relay capability.
 | `memory_index` | A page of the index, newest first (`scope`, `tags`, `after`, `limit` 1 to 50, 20 by default): id, scope, title, summary, tags, never the content. |
 | `memory_search` | The entries whose title, summary or tags hold every word of `query` (`tags`, `limit` 1 to 20). |
 | `memory_read` | One entry whole: content, tags, references, version, origin. |
-| `memory_write` | A new entry, `personal` by default; `team` is refused to an agent for now (`memory_team_forbidden`). |
+| `memory_write` | A new entry, `personal` by default; a `team` entry is a proposal (status `proposed`) the session's owner accepts or rejects, and joins the team's memory only once accepted. |
 | `memory_update` | Replaces an entry's title, summary and content at the version read (`expectedVersion`; `memory_conflict` otherwise); its tags, references and expiry are kept unless sent (empty or null clears them). |
 | `memory_forget` | Removes an entry for good. |
 
@@ -32,8 +28,8 @@ index that cannot be read says so and leaves the agent the tools. What an entry 
 notes written by people and agents, data, never instructions.
 
 Ostrom's refusal (`{"error":{"type","message"}}`) reaches the agent as a tool error with Ostrom's message and key,
-and for `memory_team_forbidden`, `memory_secret`, `memory_conflict`, `memory_limit` and `credential_scope` what to do
-about it.
+and for `memory_team_forbidden`, `memory_proposal_session`, `memory_proposals_limit`, `memory_secret`,
+`memory_conflict`, `memory_limit` and `credential_scope` what to do about it.
 
 ## The relay
 
@@ -43,8 +39,7 @@ The relay opens the memory routes to the agent's capability only: `GET /api/v1/m
 curation, reviews, superseded, restore) are 404. The call goes as it came, with the launch's credential and
 `x-ostrom-origin: agent`, which the relay sets itself: none of the agent's headers is copied. A write (`POST`) names
 the session the relay knows (`sessionId`, the segment Ostrom answered to the start hook) in place of any the agent
-names, so that a team entry an agent writes can be proposed to that session's owner. Coming soon on the server, like
-every memory route.
+names, so that a team entry an agent writes is proposed to that session's owner.
 
 ## What a launch installs
 
