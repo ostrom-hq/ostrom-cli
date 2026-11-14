@@ -118,12 +118,14 @@ kotlin {
                 implementation(projects.memory)
                 implementation(projects.runner)
                 implementation(libs.clikt)
+                implementation(libs.ktor.client.core)
                 implementation(libs.coroutines.core)
                 implementation(libs.serialization.json)
             }
         }
         commonTest.dependencies {
             implementation(libs.okio.fakefilesystem)
+            implementation(libs.ktor.client.mock)
         }
     }
 }

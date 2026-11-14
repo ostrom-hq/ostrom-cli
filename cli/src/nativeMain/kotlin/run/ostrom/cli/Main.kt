@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli
 
+import run.ostrom.cli.cloud.CloudMcp
 import run.ostrom.cli.hooks.HookKind
 import run.ostrom.cli.hooks.runtime.GateTexts
 import run.ostrom.cli.hooks.runtime.HookReplies
@@ -8,6 +9,7 @@ import run.ostrom.cli.platform.ConsoleImpl
 import run.ostrom.cli.platform.EnvironmentImpl
 import run.ostrom.cli.platform.exitOnCrash
 import run.ostrom.cli.runner.CloudProcess
+import run.ostrom.cli.runner.cloudMcpClient
 import run.ostrom.cli.runner.runCloudProcess
 import run.ostrom.cli.update.installationProbeExit
 import run.ostrom.core.api.models.ServerFeatures
@@ -30,6 +32,10 @@ fun main(args: Array<String>) {
             exitOnCrash(refusal.exitCode, refusal.stdout, refusal.stderr)
         }
         exitProcess(CliDependencies.hookRunner(ConsoleImpl(), environment).run(args.drop(1)))
+    }
+    // Ostrom's MCP servers for a cloud session's agent (hidden), which need the CLI's memory tools
+    if (args.firstOrNull() == "cloud" && args.getOrNull(1) == CloudProcess.MCP) {
+        exitProcess(CloudMcp(EnvironmentImpl(), ConsoleImpl(), cloudMcpClient(), BuildInfo.VERSION).serve(args.drop(2)))
     }
     // the processes of a cloud session's containers (hidden): git's credential helper among them, started per request
     CloudProcess.of(args.asList())?.let { runCloudProcess(it, args.drop(2)) }
