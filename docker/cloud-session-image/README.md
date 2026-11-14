@@ -26,8 +26,8 @@ The server builds each container itself. None of the following comes from the im
 
 The template installs all of this before your block and checks it after:
 
-- Linux with glibc, `/bin/sh`, `bash` and the POSIX commands the session scripts use.
-- The libraries the `ostrom` binary loads: libcurl, OpenSSL 3 and zlib.
+- Linux with glibc, `/bin/sh`, `bash` and the POSIX commands the session scripts and the preparation of a recipe use (`mkdir`, `rm`, `mv`, `rmdir`, `dirname`, `touch`, `test`, `basename`, `cat`).
+- The libraries the `ostrom` binary loads, linked or opened at run time: libcurl (`libcurl.so.4`), OpenSSL 3 (`libcrypto.so.3`) and zlib (`libz.so.1`).
 - `git` 2.31 or later.
 - The agent CLIs on `PATH`, installed system-wide: `claude`, `codex`, `opencode`, `gemini`, as your profiles' agents require. Claude Code's self-update is turned off.
 - Users `runner` (1000) and `agent` (1001) in group `ostrom` (1000), as in TeamCode's template.
