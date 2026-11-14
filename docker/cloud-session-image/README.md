@@ -15,7 +15,8 @@ The server builds each container itself. None of the following comes from the im
 
 - **Commands.** The init container runs `cp <runner binary> /opt/ostrom/ostrom` into a volume. Every other container mounts that volume read-only and runs `/opt/ostrom/ostrom cloud agent-supervisor`, `cloud runner` or `cloud check-host`. An `ENTRYPOINT` or `CMD` in the image is never used.
 - **Users.**
-  - The agent and the check host run as UID 1000, the runner as UID 1001. They share group 2000 for the socket directory `/run/ostrom`.
+  - The runner runs as UID 1000, the agent and the check host as UID 1001, all in group 1000 (GID and fsGroup). These are TeamCode's UIDs, so an image built for TeamCode also runs on Ostrom.
+  - The runner keeps nothing of its own where the agent can read it, although they share the group: its token is only in its process environment, it mounts no workspace, its root file system is read-only, and it shares only the socket directory `/run/ostrom` with the agent (the agent's socket at mode 0660).
   - All run non-root, with no privilege escalation and all capabilities dropped.
   - `HOME` is `/workspace/.home`, on the workspace volume.
 - **Credentials.** The runner token reaches the runner's container only. The agent's git and `gh` get GitHub through the runner (`GIT_CONFIG_*`, `GH_CONFIG_DIR`), never through the image.
@@ -29,9 +30,10 @@ The template installs all of this before your block and checks it after:
 - The libraries the `ostrom` binary loads: libcurl, OpenSSL 3 and zlib.
 - `git` 2.31 or later.
 - The agent CLIs on `PATH`, installed system-wide: `claude`, `codex`, `opencode`, `gemini`, as your profiles' agents require. Claude Code's self-update is turned off.
-- Users `agent` (1000) and `runner` (1001) in group `ostrom` (2000).
-- `/workspace` owned by UID 1000.
-- `/run/ostrom` and `/run/ostrom-check` owned by 1000:2000 with mode 2770, so the volumes mounted there start with these modes.
+- Users `runner` (1000) and `agent` (1001) in group `ostrom` (1000), as in TeamCode's template.
+- `/workspace` owned by 1001:1000.
+- `/run/ostrom` and `/run/ostrom-check` owned by 1001:1000 with mode 2770, so the Docker volumes mounted there start with these modes.
+- Everything usable by UIDs 1000 and 1001; the template's check runs `ostrom` as both and the agent CLIs as 1001.
 - `gh` is optional.
 
 ## Adding your tools
