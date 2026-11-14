@@ -151,7 +151,7 @@ private fun todoTarget(method: HttpMethod, path: String): RelayTarget = when {
 
 /** A memory route ([MEMORY_ROOT] and under) the agent's tools call; anything else under it is a 404. */
 private fun memoryTarget(method: HttpMethod, path: String): RelayTarget {
-    val id = MEMORY_ENTRY.matchEntire(path)?.groupValues?.get(1)
+    val id = MEMORY_ENTRY.matchEntire(path)?.let { it.groupValues[1] }
     val allowed = when {
         method == HttpMethod.Post -> path == MEMORY_ROOT
         method == HttpMethod.Get && path in MEMORY_LISTS -> true

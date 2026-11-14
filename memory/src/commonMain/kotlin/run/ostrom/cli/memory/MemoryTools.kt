@@ -171,9 +171,10 @@ class MemoryTools(private val api: MemoryApi) {
         /** The list of strings [name], empty when absent. */
         fun strings(arguments: JsonObject, name: String): List<String> = when (val value = arguments[name]) {
             null, JsonNull -> emptyList()
-            is JsonArray -> value.map {
-                (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content
-                    ?: throw MemoryUsageException("$name is a list of strings.")
+            is JsonArray -> value.map { element ->
+                val text = element as? JsonPrimitive
+                if (text == null || !text.isString) throw MemoryUsageException("$name is a list of strings.")
+                text.content
             }
             else -> throw MemoryUsageException("$name is a list of strings.")
         }
