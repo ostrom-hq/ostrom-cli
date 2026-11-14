@@ -20,6 +20,7 @@ import kotlin.time.Clock
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
+import kotlin.uuid.Uuid
 
 /**
  * The runner's loop: one terminal at a time (the session script, then a shell whenever the previous one ends),
@@ -45,6 +46,7 @@ import kotlin.time.Instant
  * @param answers The answers to the session's waits that arrived while it was paused, taken once the launch is open
  *   when the waits' server is connected: the agent of this execution starts with them as its first message, after
  *   the session's own first message if any; never taken when null.
+ * @param newConversation The id of a new conversation of the agent, used when it has none to resume.
  */
 // Six collaborators and three tunings with defaults, all named at the call sites; one function per phase of a start.
 @Suppress("LongParameterList", "TooManyFunctions")
@@ -63,6 +65,7 @@ class Runner(
     private val deliveries: AgentDeliveries? = null,
     private val servers: CloudServers? = null,
     private val answers: WaitAnswers? = null,
+    private val newConversation: () -> String = { Uuid.random().toString() },
 ) {
     private val output = Channel<ByteArray>(outputBuffer, BufferOverflow.DROP_OLDEST)
 
@@ -158,8 +161,14 @@ class Runner(
         val delivered = deliver(opened, launched, current)
         delivered.code?.let { return@coroutineScope it }
         val agentEnvironment = launched + delivered.variables
-        // The answers are this execution's first message only: a shell started again never gets them.
-        val first = terminals.start(SessionScript.FIRST, withVariables(agentEnvironment + delivered.first), directory)
+        // The answers are this execution's first message only: a shell started again never gets them. The id is the
+        // conversation's should the agent start a new one rather than resume its last ([SessionScript.FIRST]).
+        val conversation = mapOf(SessionScript.NEW_CONVERSATION to newConversation())
+        val first = terminals.start(
+            SessionScript.FIRST,
+            withVariables(agentEnvironment + delivered.first + conversation),
+            directory,
+        )
         current.terminal = first
         val terminalJob = launch { superviseTerminal(current, first, agentEnvironment) }
         val code = heartbeat(current)
