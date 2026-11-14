@@ -318,6 +318,7 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
     "cloud create" to guide(
         "cloud-sessions",
         "ostrom cloud create --agent claude --repo https://github.com/acme/api" to "a session that clones acme/api",
+        "ostrom cloud create --agent claude --profile backend" to "on the profile named backend",
         "ostrom cloud create --agent codex --repo app=https://github.com/acme/app#main --branch fix-ci --message -" to
             "on a new branch, its first message read from stdin",
     ),

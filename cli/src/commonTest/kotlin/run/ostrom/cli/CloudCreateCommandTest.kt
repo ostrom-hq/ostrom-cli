@@ -84,4 +84,53 @@ class CloudCreateCommandTest : SetupKit() {
         val unnamed = assertFailsWith<UsageError> { parseRepository("https://github.com/.git") }
         assertEquals("Name the directory: --repo PATH=https://github.com/.git.", unnamed.message)
     }
+
+    private val profiles = "GET /api/v1/cloud/profiles"
+    private val backend = "0b0e5d1c-0000-4000-8000-00000000000a"
+    private val withProfiles = mapOf(capabilities("runners.cloud.v1", "runners.cloud.profiles.v1"))
+
+    private fun listing(vararg named: Pair<String, String>) = profiles to (
+        200 to named.joinToString(",", """{"profiles":[""", "]}") { (id, name) -> """{"id":"$id","name":"$name"}""" }
+        )
+
+    @Test
+    fun aProfileIdAndAnImageAreSentAsGiven() {
+        val options = arrayOf("--agent", "claude", "--profile", backend, "--image", "team/api:2")
+        assertEquals(0, run(routes(withProfiles), "cloud", "create", *options))
+        assertEquals("""{"agent":"claude","profileId":"$backend","image":"team/api:2"}""", bodyOf(create))
+        assertTrue(sent().none { it == profiles }, "an id needs no listing")
+    }
+
+    @Test
+    fun aProfileNameIsFoundAmongTheListedOnesAsTeamCodeFindsIt() {
+        val other = "0b0e5d1c-0000-4000-8000-00000000000b"
+        val listed = routes(withProfiles + listing(backend to "Backend", other to "web"))
+        assertEquals(0, run(listed, "cloud", "create", "--agent", "claude", "--profile", "backend"))
+        assertEquals("""{"agent":"claude","profileId":"$backend"}""", bodyOf(create))
+        // A name nobody lists goes as is: the server answers that it has no such profile.
+        assertEquals(0, run(listed, "cloud", "create", "--agent", "claude", "--profile", "mobile"))
+        assertEquals("""{"agent":"claude","profileId":"mobile"}""", bodyOf(create))
+        // A listing without profiles finds none.
+        val empty = routes(withProfiles + (profiles to (200 to "{}")))
+        assertEquals(0, run(empty, "cloud", "create", "--agent", "claude", "--profile", "web"))
+        assertEquals("""{"agent":"claude","profileId":"web"}""", bodyOf(create))
+    }
+
+    @Test
+    fun anExactNameWinsAndTwoOfTheSameNameAreRefused() {
+        val other = "0b0e5d1c-0000-4000-8000-00000000000b"
+        val exact = routes(withProfiles + listing(backend to "Web", other to "web"))
+        assertEquals(0, run(exact, "cloud", "create", "--agent", "claude", "--profile", "web"))
+        assertEquals("""{"agent":"claude","profileId":"$other"}""", bodyOf(create))
+        val twice = routes(withProfiles + listing(backend to "Web", other to "WEB"))
+        assertEquals(64, run(twice, "cloud", "create", "--agent", "claude", "--profile", "web"))
+        assertErr("several profiles are named \"web\"")
+    }
+
+    @Test
+    fun anOlderServerNeverDropsTheProfileSilently() {
+        assertEquals(69, run(routes(), "cloud", "create", "--agent", "claude", "--image", "team/api:2"))
+        assertErr("does not start sessions from a cloud profile")
+        assertTrue(sent().none { it == create }, "nothing created")
+    }
 }
