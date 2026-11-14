@@ -63,9 +63,10 @@ class MachineRunnerTest {
         assertEquals(MachineDocker("http://127.0.0.1:2375", null, null, null), plain.docker)
         assertTrue("docker=MachineDocker(apiUrl=http://127.0.0.1:2375" in plain.toString())
         val placed = MachineConfig.from(
-            env + ("OSTROM_DOCKER_NETWORK" to "sessions") + ("OSTROM_RUNNER_SESSION_IMAGE" to "img:1"),
+            env + ("OSTROM_DOCKER_NETWORK" to "sessions") + ("OSTROM_RUNNER_SESSION_IMAGE" to "img:1") +
+                ("OSTROM_RUNNER_DELIVERY_IMAGE" to "runner:1"),
         ) { error("no file") }
-        assertEquals(MachineDocker("http://127.0.0.1:2375", "sessions", "img:1", null), placed.docker)
+        assertEquals(MachineDocker("http://127.0.0.1:2375", "sessions", "img:1", null, "runner:1"), placed.docker)
         for (max in listOf(0, 256)) {
             val capped = MachineConfig.from(env + ("OSTROM_RUNNER_MAX_SESSIONS" to "$max")) { error("no file") }
             assertEquals(max, capped.docker?.maxSessions)

@@ -20,6 +20,7 @@ internal class FakeDockerEngine : DockerEngine {
     val created = mutableListOf<PlannedObject>()
     var failStart: Exception? = null
     var failRemove: Exception? = null
+    var failVolumeRemove: Exception? = null
     var onStart: suspend (PlannedObject) -> Unit = {}
 
     var info: EngineInfo? = EngineInfo(cpus = 2, memoryBytes = 8L shl 30)
@@ -51,6 +52,7 @@ internal class FakeDockerEngine : DockerEngine {
     }
 
     override suspend fun removeVolume(name: String) {
+        failVolumeRemove?.let { throw it }
         volumes.removeAll { it.name == name }
     }
 
@@ -146,6 +148,37 @@ class MachineSessionsTest {
 
         sessions.apply(work())
         assertEquals(emptyList(), engine.volumes)
+    }
+
+    @Test
+    fun anExecutionsBinaryVolumeEndsWithItAndTheWorkspaceStays() = runTest {
+        val first = AssignedExecution(a.toString(), 1, deliveryPlan(a, 1))
+        sessions.receive(work(first))
+        sessions.apply(work(first))
+        assertEquals(4, engine.containers.size)
+        assertTrue(engine.volumes.any { it.name == "ostrom-ws-${a.toHexString()}-e1-bin" })
+
+        // The next execution: the first one's binary goes, its successor's and the workspace stay.
+        val second = AssignedExecution(a.toString(), 2, deliveryPlan(a, 2))
+        sessions.receive(work(second))
+        sessions.apply(work(second))
+        val names = engine.volumes.map { it.name }.toSet()
+        assertTrue("ostrom-ws-${a.toHexString()}-e1-bin" !in names)
+        assertTrue("ostrom-ws-${a.toHexString()}-e2-bin" in names)
+        assertTrue("ostrom-ws-${a.toHexString()}" in names)
+
+        // A volume still held is retried at the next heartbeat, the others go on.
+        engine.failVolumeRemove = DockerApiException("delete a volume", HttpStatusCode.Conflict)
+        sessions.apply(work(workspaces = listOf(a)))
+        assertTrue(lines.any { it.startsWith("could not delete ostrom-ws-${a.toHexString()}-e2-bin") })
+        engine.failVolumeRemove = CancellationException("stopped")
+        assertFailsWith<CancellationException> { sessions.apply(work(workspaces = listOf(a))) }
+        engine.failVolumeRemove = null
+
+        // Paused: no execution, so no binary either.
+        sessions.apply(work(workspaces = listOf(a)))
+        assertEquals(setOf("ostrom-ws-${a.toHexString()}", "ostrom-ws-${a.toHexString()}-socket",
+            "ostrom-ws-${a.toHexString()}-checks"), engine.volumes.map { it.name }.toSet())
     }
 
     @Test

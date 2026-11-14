@@ -85,6 +85,7 @@ data class MachineConfig(
                     optional("OSTROM_DOCKER_NETWORK"),
                     optional("OSTROM_RUNNER_SESSION_IMAGE"),
                     maxSessions,
+                    optional("OSTROM_RUNNER_DELIVERY_IMAGE"),
                 )
             }
             val interval = if (seconds == null) DEFAULT_INTERVAL else seconds.seconds
@@ -102,5 +103,13 @@ data class MachineConfig(
  * @property image The only image a session may run (`OSTROM_RUNNER_SESSION_IMAGE`); the server's choice when null.
  * @property maxSessions The sessions it runs at once at most (`OSTROM_RUNNER_MAX_SESSIONS`, 0 to 256; 0 drains the
  *   machine); what the machine holds when null.
+ * @property deliveryImage The only image the `ostrom` binary of a session may come from
+ *   (`OSTROM_RUNNER_DELIVERY_IMAGE`, the runner image); the server's choice when null.
  */
-data class MachineDocker(val apiUrl: String, val network: String?, val image: String?, val maxSessions: Int?)
+data class MachineDocker(
+    val apiUrl: String,
+    val network: String?,
+    val image: String?,
+    val maxSessions: Int?,
+    val deliveryImage: String? = null,
+)

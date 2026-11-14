@@ -60,7 +60,7 @@ internal fun machine(environment: Map<String, String>): Nothing {
             val sessions = config.docker?.let { docker ->
                 MachineSessions(
                     HttpDockerEngine(checkNotNull(engine), docker.apiUrl, config.runnerId),
-                    PlanGuard(config.runnerId, docker.network, docker.image),
+                    PlanGuard(config.runnerId, docker.network, docker.image, docker.deliveryImage),
                     docker.maxSessions,
                     ::log,
                 )
