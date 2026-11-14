@@ -38,6 +38,7 @@ class LabelsLaunchTest : AgentLaunchKit() {
         assertEquals(mapOf("a" to "b=c"), Labels.parseAll(listOf("a=b=c")).getOrThrow())
         assertEquals(mapOf("a" to "2"), Labels.parseAll(listOf("a=1", "a=2")).getOrThrow())
         assertTrue(Labels.parse("a").isFailure)
+        assertTrue(Labels.parseAll(listOf("ok=1", "bad")).isFailure)
         assertTrue(Labels.parse("-a=1").isFailure)
         assertTrue(Labels.parse("a=" + "x".repeat(257)).isFailure)
         assertTrue(Labels.parseAll((1..17).map { "k$it=v" }).isFailure)

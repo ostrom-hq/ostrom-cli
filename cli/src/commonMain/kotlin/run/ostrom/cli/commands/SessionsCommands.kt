@@ -57,8 +57,8 @@ internal class SessionsListCommand(private val dependencies: CliDependencies) : 
     val server by option("--server", help = SERVER_HELP)
 
     override fun run() {
-        val signed = dependencies.signedIn(server)
         val labels = Labels.parseAll(label).getOrElse { throw UsageError("--label: ${it.message}") }
+        val signed = dependencies.signedIn(server)
         // a server that does not know labels would list every session: it is said instead
         if (labels.isNotEmpty()) {
             dependencies.requireFeature(signed.serverUrl, signed.token, ServerFeatures.SESSIONS_LABELS, NO_LABELS)
