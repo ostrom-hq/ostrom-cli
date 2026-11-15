@@ -55,16 +55,20 @@ private val MEMBER_REFERENCE = Regex("[A-Za-z0-9._-]{1,64}")
 internal fun CliktCommand.memberOption() =
     option("--member", help = "Act for this member (id or login): owners and admins only")
 
+/** Stops on a malformed `--member`, a usage error, before any request. */
+internal fun checkMember(member: String?) {
+    if (member != null && !MEMBER_REFERENCE.matches(member)) {
+        throw stopWith(ExitCode.USAGE, "ostrom: --member is a member id or login: 1 to 64 of A-Z a-z 0-9 . _ -")
+    }
+}
+
 /**
- * The checked `--member`, or null: a malformed one is a usage error, and a server without
- * `runners.cloud.onbehalf.v1` would ignore the header and act on the caller's own sessions, so the command stops
- * before any write.
+ * The checked `--member`, or null: a server without `runners.cloud.onbehalf.v1` would ignore the header and act on
+ * the caller's own sessions, so the command stops before any write.
  */
 internal fun CliDependencies.onBehalfOf(access: OrgAccess, member: String?): String? {
     if (member == null) return null
-    if (!MEMBER_REFERENCE.matches(member)) {
-        throw stopWith(ExitCode.USAGE, "ostrom: --member is a member id or login: 1 to 64 of A-Z a-z 0-9 . _ -")
-    }
+    checkMember(member)
     requireFeature(access.signed.serverUrl, access.signed.token, RUNNERS_CLOUD_ON_BEHALF, NO_ON_BEHALF)
     return member
 }
@@ -177,6 +181,7 @@ internal class CloudChangeCommand(
     private val server by serverFlag()
 
     override fun run() {
+        checkMember(member)
         val access = dependencies.cloudAccess(server, org)
         val onBehalfOf = dependencies.onBehalfOf(access, member)
         val path = "${cloudSessionPath(session)}/$action"
@@ -203,6 +208,7 @@ internal class CloudDeleteCommand(private val dependencies: CliDependencies) : C
         if (!yes) {
             throw stopWith(ExitCode.USAGE, "ostrom: deleting $session and its workspace cannot be undone: add --yes.")
         }
+        checkMember(member)
         val access = dependencies.cloudAccess(server, org)
         val onBehalfOf = dependencies.onBehalfOf(access, member)
         access.write("DELETE", cloudSessionPath(session), null, "No cloud session $session.", onBehalfOf = onBehalfOf)

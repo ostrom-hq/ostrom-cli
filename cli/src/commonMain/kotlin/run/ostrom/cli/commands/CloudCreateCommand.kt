@@ -107,6 +107,7 @@ internal class CloudCreateCommand(private val dependencies: CliDependencies) : C
         if (initial != null && initial.isBlank()) throw stopWith(ExitCode.USAGE, "ostrom: the --message text is empty.")
         if (branch != null && repositories.isEmpty()) throw UsageError("Use --branch with --repo.")
         if (profile?.isBlank() == true) throw UsageError("Name the profile: --profile ID|NAME.")
+        checkMember(member)
         val key = key()
         val environment = recipe()
         val access = dependencies.orgAccess(server, org)

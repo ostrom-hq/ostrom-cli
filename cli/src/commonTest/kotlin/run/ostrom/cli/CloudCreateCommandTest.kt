@@ -75,6 +75,8 @@ class CloudCreateCommandTest : SetupKit() {
         assertEquals(69, run(routes(), "cloud", "create", "--agent", "claude", "--member", "ada"))
         assertErr("does not act on behalf of another member")
         assertEquals(1, sent().count { it == create }, "nothing created for the caller instead")
+        assertEquals(64, run(mapOf(capabilities()), "cloud", "create", "--agent", "claude", "--member", "a b"))
+        assertErr("--member is a member id or login")
     }
 
     private fun keyOf(route: String): String? =
