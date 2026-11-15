@@ -67,6 +67,9 @@ fun ServerResponse.apiError(): ErrorDetail? = try {
  */
 class ServerUnreachableException(val url: String, cause: Throwable) : Exception(cause) {
     val reason: String = cause.message ?: cause.toString()
+
+    /** The family of the failure (DNS, TLS, proxy...), when the HTTP stack raised it. */
+    val family: NetworkFailure? = networkFailure(cause)
 }
 
 /**
