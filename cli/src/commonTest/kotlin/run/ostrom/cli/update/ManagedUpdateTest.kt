@@ -138,6 +138,7 @@ class ManagedUpdateTest {
         fake.delete("$bundle/latest.json.sig".toPath())
         fake.createDirectories("$bundle/latest.json.sig".toPath())
         assertEquals(66, updater().install(request(bundle = bundle)), "a folder")
+        fake.delete("$bundle/latest.json.sig".toPath())
         writeBundle()
         fake.write("$bundle/latest.json".toPath()) { writeUtf8("x".repeat(20_000)) }
         assertEquals(1, updater().install(request(bundle = bundle)))
