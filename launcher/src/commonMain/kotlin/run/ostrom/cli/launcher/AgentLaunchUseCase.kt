@@ -207,6 +207,8 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         val teamHooks = reads.hooks.team
         val activity = reads.hooks.activity
         val guidance = reads.hooks.guidance
+        val local = reads.hooks.local
+        val agent = request.agent
         val variables = reads.variables
         val plugin = join(temporary, "plugin")
         val relayTokenFile = join(temporary, "relay-token")
@@ -272,7 +274,13 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
                 val settingsFile = join(run.temporary, SessionLayout.SESSION_SETTINGS)
                 files.write(settingsFile, sessionSettings(environment).toString(), FileAccess.PRIVATE)
                 val every = run.site.variable(ALIVE_VARIABLE).orEmpty().toLongOrNull() ?: ALIVE_MILLIS
-                runAgent(listOf(run.executable) + prepared.arguments, environment, lifeline, every, delivery)
+                // the launch's own cloud session (TeamCode's local session), listed beside the cloud and remote ones
+                val own = if (run.local) LocalSession.open(dependencies, run.site, run.launch, run.agent) else null
+                try {
+                    runAgent(listOf(run.executable) + prepared.arguments, environment, lifeline, every, delivery, own)
+                } finally {
+                    own.closeIfOpen()
+                }
             } finally {
                 delivery.close()
                 held.forEach(dependencies.say)
@@ -356,18 +364,22 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         )
     }
 
+    @Suppress("LongParameterList") // the agent and what runs beside it, one each
     private suspend fun runAgent(
         command: List<String>,
         environment: Map<String, String?>,
         lifeline: SessionLifeline,
         everyMillis: Long,
         delivery: VariablesDelivery,
+        local: LocalSession?,
     ): Int = coroutineScope {
         val beat = this.launch { lifeline.keepAlive(everyMillis) }
         val refresh = this.launch { delivery.keepCurrent() }
+        val hosted = local?.let { this.launch { it.keepHosted() } }
         val result = withContext(dependencies.blocking) { dependencies.processes.run(command, environment) }
         beat.cancelAndJoin()
         refresh.cancelAndJoin()
+        hosted?.cancelAndJoin()
         when (result) {
             is ProcessResult.Exited -> result.code
             ProcessResult.NotFound -> AGENT_MISSING.also { dependencies.say("ostrom: cannot start ${command.first()}") }
