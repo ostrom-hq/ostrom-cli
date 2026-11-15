@@ -18,6 +18,7 @@ import run.ostrom.cli.api.ServerRequest
 import run.ostrom.cli.api.ServerResponse
 import run.ostrom.cli.platform.DetachedProcess
 import run.ostrom.cli.platform.FileStoreImpl
+import run.ostrom.cli.platform.OperatingSystem
 import run.ostrom.cli.relay.LocalRelay
 import run.ostrom.cli.relay.LocalRelayStarter
 import run.ostrom.cli.relay.RelayConfig
@@ -253,6 +254,10 @@ class RemoteCommandsTest : SetupKit() {
         fileSystem.createDirectories("/work/acme".toPath())
         assertEquals(66, remote("start", "gone"))
         assertErr("ostrom: gone does not exist.")
+        // Windows hosts as macOS and Linux do: its directory is read with Windows paths, then refused the same way.
+        operatingSystem = OperatingSystem.WINDOWS
+        assertEquals(66, remote("start", "gone"))
+        operatingSystem = OperatingSystem.LINUX
         assertEquals(69, remote("start", features = arrayOf("runners.cloud.v1")))
         assertErr("runs no remote session (runners.cloud.remote.v1)")
         answer(create, 201 to """{"status":"creating"}""")
