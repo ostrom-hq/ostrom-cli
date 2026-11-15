@@ -33,6 +33,15 @@ class RunnerConfigTest {
     )
 
     @Test
+    fun theSessionsModeSaysWhetherItsAgentRunsHeadless() {
+        assertFalse(RunnerConfig.from(base) { "t" }.conversation, "Absent, a session is a terminal")
+        val conversation = RunnerConfig.from(base + ("OSTROM_SESSION_MODE" to "conversation")) { "t" }
+        assertTrue(conversation.conversation)
+        assertTrue("mode=conversation" in conversation.toString())
+        assertFalse(RunnerConfig.from(base + ("OSTROM_SESSION_MODE" to "terminal")) { "t" }.conversation)
+    }
+
+    @Test
     fun theConfigurationComesFromThePodsEnvironment() {
         val config = RunnerConfig.from(
             base + ("OSTROM_REPOSITORY_URL" to "https://github.com/a/b") + ("OSTROM_REPOSITORY_REF" to "main"),

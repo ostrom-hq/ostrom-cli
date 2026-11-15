@@ -95,6 +95,38 @@ class AgentHostTest {
     }
 
     @Test
+    fun aConversationsAgentRunsWithoutATerminalAndAHostWithoutProcessesRefusesIt() = runTest {
+        val terminal = ScriptedTerminal()
+        val starts = mutableListOf<List<String>>()
+        val processes = ProcessStarter { script, arguments, _, directory ->
+            starts += listOf(script, directory) + arguments
+            terminal
+        }
+        val exec = start.copy(exec = true, arguments = listOf("claude", "-p"))
+        val fromRunner = ByteChannel()
+        val toRunner = ByteChannel()
+        val host = AgentHost(RecordingStarter(ScriptedTerminal()), processes = processes)
+        val served = launch { host.serve(fromRunner, toRunner) }
+        AgentFrames.write(fromRunner, exec)
+        AgentFrames.write(fromRunner, AgentFrame.Input("{}\n".encodeToByteArray()))
+        terminal.output.send("ok\n".encodeToByteArray())
+        assertEquals("ok\n", assertIs<AgentFrame.Output>(AgentFrames.read(toRunner)).bytes.decodeToString())
+        terminal.exitCode = 0
+        terminal.output.send(null)
+        assertEquals(AgentFrame.Exit(0), AgentFrames.read(toRunner))
+        fromRunner.flushAndClose()
+        served.join()
+        assertEquals(listOf(listOf("run", "/workspace", "claude", "-p")), starts)
+        assertEquals(listOf("{}\n"), terminal.written)
+
+        val refused = ByteChannel()
+        val input = ByteChannel()
+        AgentFrames.write(input, exec)
+        AgentHost(RecordingStarter(ScriptedTerminal())).serve(input, refused)
+        assertEquals(AgentFrame.Exit(null), AgentFrames.read(refused))
+    }
+
+    @Test
     fun aStopEndsTheTerminalAndReportsTheEnd() = runTest {
         val terminal = ScriptedTerminal()
         val fromRunner = ByteChannel()

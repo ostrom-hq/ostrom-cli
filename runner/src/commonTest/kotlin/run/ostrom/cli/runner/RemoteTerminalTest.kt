@@ -55,6 +55,18 @@ class RemoteTerminalTest {
     }
 
     @Test
+    fun aConversationsAgentIsAskedForWithoutATerminal() = runTest {
+        val pipe = Pipe()
+        RemoteTerminalStarter({ pipe }).process("exec \"$@\"", listOf("claude", "-p"), mapOf("A" to "b"), "/workspace")
+        assertEquals(
+            AgentFrame.Start(
+                "exec \"$@\"", mapOf("A" to "b"), "/workspace", exec = true, arguments = listOf("claude", "-p"),
+            ),
+            AgentFrames.read(pipe.toHost),
+        )
+    }
+
+    @Test
     fun theStarterGivesUpAfterItsAttemptsAndNeverHidesACancellation() = runTest {
         var attempts = 0
         val failing = RemoteTerminalStarter({

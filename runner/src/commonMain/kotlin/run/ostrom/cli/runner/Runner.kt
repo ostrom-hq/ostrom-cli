@@ -6,6 +6,8 @@
 package run.ostrom.cli.runner
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.BufferOverflow
@@ -15,9 +17,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import run.ostrom.cli.runner.conversation.RunnerAgent
 import kotlin.concurrent.Volatile
 import kotlin.time.Clock
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 import kotlin.uuid.Uuid
@@ -49,6 +53,8 @@ import kotlin.uuid.Uuid
  * @param newConversation The id of a new conversation of the agent, used when it has none to resume.
  * @param inference Serves the agent's model calls on the pod's loopback under the execution's own credential, once the
  *   launch is open (`runners.cloud.inference.v1`); the agent keeps its own provider configuration when null.
+ * @param conversation Creates the headless agent of a `conversation` session ([RunnerConfig.conversation]), relayed to
+ *   the server's runner channel instead of a terminal; a session in that mode relays a terminal without it.
  */
 // Six collaborators and three tunings with defaults, all named at the call sites; one function per phase of a start.
 @Suppress("LongParameterList", "TooManyFunctions")
@@ -69,6 +75,7 @@ class Runner(
     private val answers: WaitAnswers? = null,
     private val newConversation: () -> String = { Uuid.random().toString() },
     private val inference: InferenceProxy? = null,
+    private val conversation: ConversationStarter? = null,
 ) {
     private val output = Channel<ByteArray>(outputBuffer, BufferOverflow.DROP_OLDEST)
 
@@ -104,9 +111,12 @@ class Runner(
         val current = Current(null)
         return try {
             coroutineScope {
-                val linkJob = launch { relay(current) }
-                val code = prepareThenRun(base, current)
-                linkJob.cancel()
+                val links = mutableListOf<Job>()
+                // A conversation's agent has no terminal: the link opens only if the server says it runs in one.
+                val relayLink = { links += launch { relay(current) } }
+                if (conversation == null || !config.conversation) relayLink()
+                val code = prepareThenRun(base, current, relayLink)
+                links.forEach { it.cancel() }
                 code
             }
         } finally {
@@ -121,7 +131,12 @@ class Runner(
         current.terminal?.close()
     }
 
-    private suspend fun prepareThenRun(base: Map<String, String>, current: Current): Int = coroutineScope {
+    @Suppress("CyclomaticComplexMethod") // The phases of a start, in order, each of which may end it.
+    private suspend fun prepareThenRun(
+        base: Map<String, String>,
+        current: Current,
+        relayLink: () -> Unit,
+    ): Int = coroutineScope {
         val preparing = async {
             try {
                 // The commands never get the first message, which is the agent's.
@@ -171,6 +186,7 @@ class Runner(
         val delivered = deliver(opened, launched, current)
         delivered.code?.let { return@coroutineScope it }
         val agentEnvironment = launched + delivered.variables
+        headless(agentEnvironment + delivered.first, directory, current, relayLink)?.let { return@coroutineScope it }
         // The answers are this execution's first message only: a shell started again never gets them. The id is the
         // conversation's should the agent start a new one rather than resume its last ([SessionScript.FIRST]).
         val conversation = mapOf(SessionScript.NEW_CONVERSATION to newConversation())
@@ -216,20 +232,126 @@ class Runner(
         val first: Map<String, String> = emptyMap(),
     )
 
+    /**
+     * Runs a `conversation` session's agent headless, when the server agrees; otherwise opens the terminal's link.
+     *
+     * @param environment The agent's environment with its first message, over the owner's variables.
+     *
+     * @return The exit code, or null when the agent runs in a terminal.
+     */
+    @Suppress("ReturnCount") // Not a conversation, stopped while preparing, headless, or in a terminal.
+    private suspend fun headless(
+        environment: Map<String, String>,
+        directory: String,
+        current: Current,
+        relayLink: () -> Unit,
+    ): Int? {
+        val starter = conversation?.takeIf { config.conversation } ?: return null
+        // The owner's variables under the runner's, as a terminal's; the first message is the conversation's.
+        val started = withVariables(environment)
+        val agent = starter.create(started - PROMPT, directory, started[PROMPT]) { lastOutputAt = clock.now() }
+        val (headless, code) = whileBeating(current) { agent.prepare() }
+        code?.let { return it }
+        if (headless == true) return converse(agent)
+        log("the session's agent runs in a terminal")
+        relayLink()
+        return null
+    }
+
     /** Runs [work] with unready heartbeats meanwhile, as during the preparation; a stop cancels it. */
-    private suspend fun beating(current: Current, work: suspend () -> Map<String, String>): Delivered =
+    private suspend fun beating(current: Current, work: suspend () -> Map<String, String>): Delivered {
+        val (variables, code) = whileBeating(current, work)
+        return Delivered(variables.orEmpty(), code)
+    }
+
+    /**
+     * Runs [work] with unready heartbeats meanwhile; a stop cancels it.
+     *
+     * @return What it gave, or the exit code once a heartbeat ended the runner.
+     */
+    private suspend fun <T : Any> whileBeating(current: Current, work: suspend () -> T): Pair<T?, Int?> =
         coroutineScope {
             val working = async { work() }
-            var done: Delivered? = null
+            var done: Pair<T?, Int?>? = null
             while (done == null) {
-                done = withTimeoutOrNull(heartbeatInterval) { Delivered(working.await()) }
+                done = withTimeoutOrNull(heartbeatInterval) { working.await() to null }
                     ?: beat(current, ready = false)?.let { code ->
                         working.cancel()
-                        Delivered(emptyMap(), code)
+                        null to code
                     }
             }
             done
         }
+
+    /**
+     * A conversation's lifecycle (TeamCode's `RunnerLoop` with its agent): the agent runs beside the heartbeats; a
+     * stop drains it first (the turn finishes or is interrupted, the transcript is flushed), heartbeating meanwhile,
+     * then reports it stopped. A run instruction while draining cancels the drain. The agent's input poll, which sees
+     * a pause first, and the end of the drain start the next heartbeat at once.
+     *
+     * @return The exit code: 0 after a stop, 1 when the execution ended or was fenced.
+     */
+    @Suppress("NestedBlockDepth") // The heartbeat loop and its three instructions.
+    private suspend fun converse(agent: RunnerAgent): Int = coroutineScope {
+        val wake = Channel<Unit>(Channel.CONFLATED)
+        agent.onInstructionChange { wake.trySend(Unit) }
+        val running = launch { agent.run() }
+        running.invokeOnCompletion { wake.trySend(Unit) }
+        var draining: Deferred<Boolean>? = null
+        try {
+            while (!agent.fenced) {
+                val instruction = try {
+                    ask(background || agent.backgroundWork)
+                } catch (error: ExecutionEndedException) {
+                    log("execution ended: ${error.message}")
+                    return@coroutineScope 1
+                }
+                if (instruction == Instruction.STOP) {
+                    val drain = draining ?: async { agent.drain(clock.now().plus(PAUSE_DRAIN).toEpochMilliseconds()) }
+                        .also {
+                            log("stopping: draining the agent")
+                            it.invokeOnCompletion { wake.trySend(Unit) }
+                            draining = it
+                        }
+                    if (drain.isCompleted) {
+                        log("stopping")
+                        stopped(ready = true)
+                        return@coroutineScope 0
+                    }
+                } else if (instruction == Instruction.RUN) {
+                    draining?.let {
+                        it.cancel()
+                        draining = null
+                        agent.resumeAfterDrain()
+                    }
+                }
+                withTimeoutOrNull(heartbeatInterval) { wake.receive() }
+            }
+            log("execution fenced")
+            1
+        } finally {
+            withContext(NonCancellable) { agent.stop() }
+            running.cancel()
+        }
+    }
+
+    /**
+     * One heartbeat of a ready runner.
+     *
+     * @return The instruction, or null when the server could not be reached.
+     *
+     * @throws ExecutionEndedException When the server ended the execution.
+     */
+    private suspend fun ask(background: Boolean): Instruction? = try {
+        server.heartbeat(ready = true, stopped = false, lastModelRequestAt = lastOutputAt?.toString(), background)
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: ExecutionEndedException) {
+        throw error
+    } catch (error: Exception) {
+        log("heartbeat failed: ${error::class.simpleName}")
+        null
+    }
 
     /**
      * Starts the agent's inference relay ([relayed]), asks which of Ostrom's MCP servers the agent gets
@@ -363,6 +485,12 @@ class Runner(
         if (instruction != Instruction.STOP) return null
         log("stopping")
         current.terminal?.terminate()
+        stopped(ready)
+        return 0
+    }
+
+    /** The last heartbeat: the agent is stopped. */
+    private suspend fun stopped(ready: Boolean) {
         try {
             server.heartbeat(ready = ready, stopped = true, lastModelRequestAt = lastOutputAt?.toString())
         } catch (error: CancellationException) {
@@ -370,7 +498,6 @@ class Runner(
         } catch (error: Exception) {
             log("last heartbeat failed: ${error::class.simpleName}")
         }
-        return 0
     }
 
     private suspend fun superviseTerminal(current: Current, first: Terminal, agentEnvironment: Map<String, String>) {
@@ -442,6 +569,29 @@ fun interface Preparer {
      */
     suspend fun prepare(environment: Map<String, String>, output: suspend (ByteArray) -> Unit): PreparationOutcome
 }
+
+/** Creates the headless agent of a `conversation` session (the conversation host in a pod). */
+fun interface ConversationStarter {
+    /**
+     * Creates the agent.
+     *
+     * @param environment The agent's environment, the runner's own variables included.
+     * @param directory The agent's directory (the prepared repository).
+     * @param firstMessage The execution's first message: the session's own, then the answers to its waits.
+     * @param activity Called for each line of the agent: the runner reports the last as model activity.
+     *
+     * @return The agent.
+     */
+    fun create(
+        environment: Map<String, String>,
+        directory: String,
+        firstMessage: String?,
+        activity: () -> Unit,
+    ): RunnerAgent
+}
+
+/** How long a conversation's agent may drain once told to stop: the server's pause deadline (ostrom-server). */
+private val PAUSE_DRAIN = 2.minutes
 
 /** The legacy clone's variables, left out once the runner prepared the workspace. */
 private val REPOSITORY_VARIABLES = setOf("OSTROM_REPOSITORY_URL", "OSTROM_REPOSITORY_REF")

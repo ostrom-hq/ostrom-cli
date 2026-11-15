@@ -329,6 +329,35 @@ the organization serves no model through Ostrom (`GET /api/v1/inference/v1/model
 for another agent than Claude Code, and on a Docker delivery, whose containers do not share a loopback.
 `OSTROM_AGENT_TOKEN` is still given to the agent for Ostrom's MCP servers and hooks (above).
 
+## A conversation session (`OSTROM_SESSION_MODE=conversation`)
+
+A session in `conversation` mode has no terminal: its agent runs headless, as TeamCode's cloud agent host runs it, and
+the runner relays it to the server's runner channel (`POST /api/v1/cloud/runner/agent|events|inputs|inputs/ack`, with
+the runner's credential, as its other calls). The runner reads the mode from `OSTROM_SESSION_MODE`; absent or `terminal`, it relays a terminal as
+before, and so it does when the server answers `409 terminal_session`.
+
+- **Exec mode of the agent host.** The runner asks the agent's container for a process without a PTY
+  (`AgentFrame.Start` with `exec`, its arguments as `sh -c` positional parameters): stdin and stdout on pipes, stderr
+  in the host's log. The agent's lines cross as INPUT and OUTPUT frames.
+- **The agents.** Claude Code runs in stream-json mode (`-p --input-format stream-json --output-format stream-json`,
+  `--permission-prompt-tool stdio` when the server relays permissions, `--include-partial-messages` for live text),
+  with the pod's `--settings` and MCP servers; Codex runs `codex app-server` (JSON-RPC). OpenCode and Gemini CLI have
+  no headless mode: their messages are refused (`agent_unavailable`) and the transcript says why.
+- **The loop** (`conversation/ConversationHost.kt`, TeamCode's `AgentHost`): the execution's first message (the
+  session's prompt and the answers to its waits) starts the agent and is recorded as the member's; the events go up in
+  batches with consecutive sequences (at most 200 events, 1 MB; resent from `acceptedThrough + 1`; an event refused
+  for its content is replaced by a marker); the inputs come from a long poll that carries the desired status (a pause
+  reaches the heartbeat loop at once) and what the host takes (task stops, model and effort changes; no files yet).
+  Messages, interrupts, permission answers (with their deadline), task stops, model and effort changes are
+  acknowledged one by one.
+- **A pause drains** the agent within the server's 2 minutes: open requests are denied, the running turn and the
+  background tasks get the time left, then the turn is interrupted, the agent stopped and the transcript flushed;
+  the stopped heartbeat follows. A resume while draining cancels it.
+- **Resume.** The conversation id is kept in `$HOME/.ostrom/cloud-agent.json` (`{"kind","version","conversationId"}`,
+  written by short processes of the agent host, as the agent's uid). The next execution resumes it (`claude --resume`,
+  Codex `thread/resume`) only when the server says `resumable` and the agent's kind and version (`<agent> --version`)
+  are unchanged; otherwise it starts a new conversation and says `status{conversation: transcript_only}`.
+
 ## The agent cannot read the runner token (S2-49)
 
 The agent and the runner never share a UID, a container, a process namespace or the token. They do share a group:

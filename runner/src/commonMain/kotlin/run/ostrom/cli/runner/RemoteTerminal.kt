@@ -73,6 +73,28 @@ class RemoteTerminalStarter(
         return RemoteTerminal(connection, exitWait)
     }
 
+    /**
+     * Starts a conversation's agent in the agent's container: without a terminal, stdin and stdout on pipes.
+     *
+     * @param script The shell script, run with [arguments] as its positional parameters.
+     * @param arguments Its positional parameters.
+     * @param environment Its environment.
+     * @param directory Its working directory.
+     *
+     * @return The process, as a terminal whose input is its stdin and whose output its stdout.
+     */
+    suspend fun process(
+        script: String,
+        arguments: List<String>,
+        environment: Map<String, String>,
+        directory: String,
+    ): Terminal {
+        val connection = connectWithRetries()
+        val start = AgentFrame.Start(script, environment, directory, exec = true, arguments = arguments)
+        AgentFrames.write(connection.output, start)
+        return RemoteTerminal(connection, exitWait)
+    }
+
     private suspend fun connectWithRetries(): AgentConnection {
         repeat(attempts - 1) {
             try {

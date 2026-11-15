@@ -25,6 +25,8 @@ class AgentFramesTest {
     fun everyFrameCrossesTheWireUnchanged() = runTest {
         val start = AgentFrame.Start("echo hi", mapOf("HOME" to "/workspace/.home"), "/workspace")
         assertEquals(start, roundTrip(start))
+        val exec = start.copy(exec = true, arguments = listOf("claude", "-p"))
+        assertEquals(exec, roundTrip(exec))
         val input = assertIs<AgentFrame.Input>(roundTrip(AgentFrame.Input(byteArrayOf(1, 2))))
         assertContentEquals(byteArrayOf(1, 2), input.bytes)
         assertEquals(AgentFrame.Resize(120, 40), roundTrip(AgentFrame.Resize(120, 40)))

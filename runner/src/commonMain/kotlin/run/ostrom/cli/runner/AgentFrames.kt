@@ -24,6 +24,10 @@ sealed interface AgentFrame {
      * @property directory Its working directory.
      * @property log For a preparation command: the script runs without a terminal (stdin from `/dev/null`), and the
      *   host writes its output, masked, to this log and sends back the masked lines only.
+     * @property exec For a conversation's agent: `sh -c script` runs with [arguments] as its positional parameters,
+     *   without a terminal, stdin and stdout on pipes (TeamCode's exec supervisor); INPUT frames are its stdin, OUTPUT
+     *   frames its stdout, and its stderr goes to the host's log.
+     * @property arguments The positional parameters of an [exec] script.
      */
     @Serializable
     data class Start(
@@ -31,6 +35,8 @@ sealed interface AgentFrame {
         val environment: Map<String, String>,
         val directory: String,
         val log: PreparationLog? = null,
+        val exec: Boolean = false,
+        val arguments: List<String> = emptyList(),
     ) : AgentFrame
 
     /** Runner to host: keystrokes. */
