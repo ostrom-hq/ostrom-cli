@@ -332,6 +332,14 @@ jobs:
           # Ed25519 manifest, against the roots the CLI trusts (rotation: several), naming the one that signed
           sh "$GITHUB_WORKSPACE/scripts/release/verify-manifest.sh" latest.json latest.json.sig "$keys"/roots/*.pem
           rm -f "$keys/release.key" "$keys/cosign.key"
+      # A dry run's throwaway cosign key (public half), for the install smoke to put in place of the pinned one.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ env.PUBLISH != 'true' }}
+        with:
+          name: dry-run-cosign-pub
+          path: ${{ runner.temp }}/keys/cosign.pub
+          if-no-files-found: error
+          overwrite: true
       - name: Package-manager manifests and installers
         env:
           REPO: ${{ github.repository }}
@@ -473,9 +481,56 @@ jobs:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: cosign sign --yes --key env://COSIGN_PRIVATE_KEY --tlog-upload=false "$IMAGE@$DIGEST"
 
+  # The packed release installed on each system through its own installer, before anything is published
+  # (scripts/release/smoke-install.py; TeamCode's smoke-bootstrap): on a tag it must install, run, reinstall and refuse
+  # a changed payload; on a dry run the binaries trust only the release keys, so the hand-over must refuse the
+  # throwaway-signed manifest after the installer's own checks passed.
+  smoke:
+    name: install smoke (${{ matrix.target }})
+    needs: [version, package]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-x64, runner: ubuntu-24.04 }
+          - { target: linux-arm64, runner: ubuntu-24.04-arm }
+          - { target: macos-arm64, runner: macos-15 }
+          - { target: windows-x64, runner: windows-latest }
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      PUBLISH: ${{ needs.version.outputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts/release/smoke-install.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-dist
+          path: dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: ${{ env.PUBLISH != 'true' }}
+        with:
+          name: dry-run-cosign-pub
+          path: dry-run-keys
+      - name: Install through the release's installer
+        shell: bash
+        run: |
+          set -eu
+          py=python3; [ "$RUNNER_OS" != Windows ] || py=python
+          if [ "$PUBLISH" = true ]; then
+            "$py" -I scripts/release/smoke-install.py --dist dist --version "$VERSION"
+          else
+            "$py" -I scripts/release/smoke-install.py --dist dist --version "$VERSION" \
+              --dry-run-cosign-pub dry-run-keys/cosign.pub
+          fi
+
   publish:
     name: GitHub Release
-    needs: [version, package, image, session-image]
+    needs: [version, package, image, session-image, smoke]
     if: ${{ needs.version.outputs.publish == 'true' }}
     environment: release
     runs-on: ubuntu-24.04

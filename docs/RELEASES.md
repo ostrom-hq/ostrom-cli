@@ -19,6 +19,13 @@ artifact of the run. A dry run reads no signing secret: it runs on any branch an
 so cosign and the manifest are signed with throwaway keys made in the job (checked against them, openssl included),
 and the macOS and Windows binaries are not code-signed. Only a tag signs with the release keys.
 
+**Install smoke.** Before `publish`, the `smoke` job installs the packed release on Linux x64 and arm64, macOS and
+Windows through its own `install.sh` / `install.ps1`, served from `127.0.0.1` with a private HOME
+(`scripts/release/smoke-install.py`). On a tag it must install, the launcher must run the version, a second run of the
+installer must succeed, and a payload changed after its installation must be refused. On a dry run the binaries trust
+only the release keys: with the throwaway cosign key put in place of the pinned one, the installer's checks pass and
+the binary it hands over to must refuse the throwaway-signed `latest.json`, leaving nothing selected.
+
 **Who can cut a release.** The tag ruleset `release-tags` lets only organisation admins create, move or delete a tag
 `[0-9]*` or `v[0-9]*`. The jobs that sign or publish (`build-macos`, `package`, `image`, `publish`, `taps`) run in the
 `release` environment, which admits only those tags; a dry run enters no environment. The signing keys and the tap
