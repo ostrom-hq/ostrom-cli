@@ -197,6 +197,8 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
         "ostrom update --check" to "only say whether one is out",
         "ostrom update --rollback" to "back to the version before",
         "ostrom update --notifications off" to "no more daily notice on this device",
+        "ostrom update --automatic on" to "update by itself every hour (an ostrom install installation)",
+        "ostrom update --automatic status" to "whether it does, and its last attempt",
     ),
     "verify-release" to guide(
         "install",

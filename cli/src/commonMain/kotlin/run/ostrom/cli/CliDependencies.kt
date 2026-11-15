@@ -56,6 +56,7 @@ import run.ostrom.cli.platform.LoopbackHttpImpl
 import run.ostrom.cli.platform.ProcessCapture
 import run.ostrom.cli.platform.ProcessCaptureImpl
 import run.ostrom.cli.platform.ProcessLauncherImpl
+import run.ostrom.cli.platform.currentUserId
 import run.ostrom.cli.platform.RawTerminalImpl
 import run.ostrom.cli.platform.SecretStore
 import run.ostrom.cli.platform.SystemInstallationFiles
@@ -117,6 +118,7 @@ import kotlin.time.TimeSource
  * @property postHogKey The usage statistics destination of this build; blank means none.
  * @property sendStatistics Posts usage statistics (opt-in only).
  * @property clock The time, in milliseconds since the epoch (the expiry of `ostrom login --admin`'s token).
+ * @property userId The numeric id of the user running this process (macOS, Linux), for `ostrom update --automatic`.
  */
 @Suppress("LongParameterList") // The composition root: one parameter per dependency, each replaced in tests.
 class CliDependencies(
@@ -149,6 +151,7 @@ class CliDependencies(
     val sendStatistics: suspend (url: String, body: String) -> Unit,
     val secrets: () -> SecretStore = { systemSecretStore(environment, files) },
     val clock: () -> Long = SessionHooks::epochMillis,
+    val userId: () -> String? = ::currentUserId,
 ) {
     /** The opt-in usage statistics. */
     val usage: UsageStatistics by lazy {

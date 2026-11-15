@@ -32,6 +32,7 @@ import run.ostrom.cli.platform.SecretStore
 import run.ostrom.cli.platform.StandardInput
 import run.ostrom.cli.platform.terminalSafe
 import run.ostrom.cli.update.AgentSessionsImpl
+import run.ostrom.cli.update.Installations
 import run.ostrom.cli.update.ReleaseTrust
 import run.ostrom.cli.update.ReleaseVerification
 import run.ostrom.cli.update.ReleaseVectors
@@ -92,6 +93,9 @@ open class CliKit {
 
     /** The system the command line runs on. */
     protected var operatingSystem = OperatingSystem.LINUX
+
+    /** The managed installations `ostrom update` sees; none by default. */
+    internal var managedInstallations: Installations? = null
     protected val fileSystem = FakeFileSystem()
     protected val hookCalls = mutableListOf<List<String>>()
     protected val statistics = mutableListOf<String>()
@@ -212,6 +216,7 @@ open class CliKit {
                 sessions = AgentSessionsImpl(FakeEnvironment(environment), fileSystem, "/tmp", noRelay),
                 probe = { binary, version, api -> true.also { probes += Triple(binary, version, api) } },
                 trust = ReleaseTrust(ReleaseVectors.KEY_PEM),
+                installations = managedInstallations,
             ),
             releaseVerification = ReleaseVerification(fileSystem, ReleaseTrust(ReleaseVectors.KEY_PEM)),
             updateNotice = UpdateNotice(FileStoreImpl(fileSystem), NOTICE, "1.0.0", { now }, { noticeAdvice() }) {
@@ -228,6 +233,7 @@ open class CliKit {
             sendStatistics = { _, body -> statistics += body },
             secrets = secrets,
             clock = { now },
+            userId = { "1000" },
         ),
     )
 

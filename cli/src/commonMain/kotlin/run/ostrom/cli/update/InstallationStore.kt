@@ -174,8 +174,8 @@ internal class InstallationPaths(root: Path, val target: String) {
 @Suppress("TooManyFunctions") // TeamCode's store, one function per step.
 internal class InstallationStore(
     val paths: InstallationPaths,
-    private val fileSystem: FileSystem,
-    private val files: InstallationFiles,
+    val fileSystem: FileSystem,
+    val files: InstallationFiles,
     private val random: () -> String = { secureRandomBytes(RANDOM_BYTES).toByteString().hex() },
 ) {
     private val texts = FileStoreImpl(fileSystem)
