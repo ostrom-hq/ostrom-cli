@@ -36,6 +36,7 @@ import run.ostrom.cli.workflows.endLine
 import run.ostrom.cli.workflows.listRuns
 import run.ostrom.cli.workflows.parseDefinition
 import run.ostrom.cli.workflows.refuse
+import run.ostrom.cli.workflows.requireProfile
 import run.ostrom.cli.workflows.requireRepository
 import run.ostrom.cli.workflows.resolveInputs
 import run.ostrom.cli.workflows.runDetails
@@ -311,7 +312,7 @@ internal class WorkflowsRunCommand(private val dependencies: CliDependencies) : 
             val request = objectOf(
                 "inputs" to resolveInputs(definition, inputs),
                 "repository" to repository?.let(::requireRepository),
-                "profileId" to profile,
+                "profileId" to profile?.let(::requireProfile),
             )
             // a fresh key at every call: a second command is a second run
             val key = Uuid.random().toString()

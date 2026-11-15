@@ -340,7 +340,7 @@ class WorkflowsCommandsTest : SetupKit() {
     fun aRunIsStartedWithItsInputsAndAFreshKeyEachTime() {
         val started = routes(show to (200 to definition), start to (201 to runJson()))
         val args = arrayOf(
-            "workflows", "run", "deploy", "--input", "env=prod", "--repository", "acme/api", "--profile", "p-1",
+            "workflows", "run", "deploy", "--input", "env=prod", "--repository", "acme/api", "--profile", " p-1",
         )
         assertEquals(0, run(started, *args))
         assertEquals(
@@ -384,6 +384,7 @@ class WorkflowsCommandsTest : SetupKit() {
         assertEquals(64, run(read, "workflows", "run", "deploy", "--input", "novalue"))
         assertErr("\"novalue\" needs the form KEY=VALUE.")
         refused("\"x y\" is not a repository: write OWNER/NAME.", "--input", "env=a", "--repository", "x y")
+        refused("--profile needs a cloud profile's id.", "--input", "env=a", "--profile", " ")
         refused("--interval is 2 seconds or more.", "--interval", "1")
         refused("--timeout is 1 to 1440 minutes.", "--timeout", "0")
         refused("--timeout is 1 to 1440 minutes.", "--timeout", "1441")

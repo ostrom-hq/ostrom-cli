@@ -14,8 +14,8 @@ internal fun inputMap(pairs: List<Pair<String, String>>): Map<String, String> {
     return pairs.toMap()
 }
 
-/** [value] when it names a cloud profile (not blank), else a refusal. */
+/** [value] trimmed when it names a cloud profile (not blank), else a refusal. */
 internal fun requireProfile(value: String): String {
     if (value.isBlank()) refuse("--profile needs a cloud profile's id.")
-    return value
+    return value.trim()
 }

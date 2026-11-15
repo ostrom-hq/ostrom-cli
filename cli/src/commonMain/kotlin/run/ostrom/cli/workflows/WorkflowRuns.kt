@@ -77,6 +77,12 @@ internal fun requireRepository(value: String): String {
     return value
 }
 
+/** [value] trimmed when it names a cloud profile (not blank), else a usage message. */
+internal fun requireProfile(value: String): String {
+    if (value.isBlank()) refuse("--profile needs a cloud profile's id.")
+    return value.trim()
+}
+
 /** What `workflows runs` asks: the filters of the list and how many runs. */
 internal class RunsQuery(
     val all: Boolean,
