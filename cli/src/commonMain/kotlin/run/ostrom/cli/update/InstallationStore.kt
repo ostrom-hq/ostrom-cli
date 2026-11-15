@@ -23,6 +23,7 @@ import run.ostrom.cli.platform.FileWriteException
 import run.ostrom.cli.platform.InstallationFiles
 import run.ostrom.cli.platform.restrictToOwner
 import run.ostrom.cli.platform.secureRandomBytes
+import kotlin.time.Clock
 
 /**
  * A step of the managed installation refused, named by [code] (TeamCode's `release_*` codes): what
@@ -209,6 +210,7 @@ internal class InstallationPaths(root: Path, val target: String) {
  *
  * @param files The locks, flushes and ownership checks of the system.
  * @param random A fresh random hex suffix, for the names of the folders being written.
+ * @param now The time, in nanoseconds since the epoch (the unit of [FileIdentity] times).
  */
 @Suppress("TooManyFunctions") // TeamCode's store, one function per step.
 internal class InstallationStore(
@@ -216,6 +218,7 @@ internal class InstallationStore(
     val fileSystem: FileSystem,
     val files: InstallationFiles,
     private val random: () -> String = { secureRandomBytes(RANDOM_BYTES).toByteString().hex() },
+    private val now: () -> Long = { Clock.System.now().let { it.epochSeconds * NANOS + it.nanosecondsOfSecond } },
 ) {
     private val texts = FileStoreImpl(fileSystem)
 
@@ -350,7 +353,9 @@ internal class InstallationStore(
      * binary (17 MB, hundreds of milliseconds on every hook) is not computed again when `launch-cache.json` records
      * this very payload with the [FileIdentity] its binary still has: same device and inode, size, modification and
      * change times. Anything else (no identity, no record or one that does not read, another payload, any field that
-     * differs) checks in full, then records the binary's identity, when it did not change while it was read.
+     * differs) checks in full, then records the binary's identity, when it did not change while it was read and its
+     * change time is at least [SETTLED_NANOS] old: a write in the same tick of the file system's clock as the check
+     * would leave the same times (git's "racy timestamp"), so a binary changed that recently is checked in full again.
      */
     fun validateForLaunch(version: InstalledVersion) {
         validateManifest(version)
@@ -359,7 +364,8 @@ internal class InstallationStore(
         val identity = files.identity(binary.toString())
         if (identity != null && launchRecord() == LaunchRecord(version, identity)) return
         validateFile(binary, version)
-        if (identity != null && files.identity(binary.toString()) == identity) {
+        val settled = identity != null && now() - identity.changed >= SETTLED_NANOS
+        if (settled && files.identity(binary.toString()) == identity) {
             try {
                 writePrivate(paths.launchCache, LaunchRecord(version, identity).json().toString())
             } catch (_: InstallationException) {
@@ -542,6 +548,10 @@ internal class InstallationStore(
         const val BINARY_INVALID = "release_binary_invalid"
         const val ROLLBACK_UNAVAILABLE = "release_rollback_unavailable"
         private const val RANDOM_BYTES = 16
+        private const val NANOS = 1_000_000_000L
+
+        /** How old a binary's change time must be for a launch to record it: 2 s, as git's racy-timestamp rule. */
+        const val SETTLED_NANOS = 2 * NANOS
         private const val MAX_RECORD_BYTES = 8192L
     }
 }

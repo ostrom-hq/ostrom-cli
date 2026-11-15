@@ -634,7 +634,7 @@ static inline int ostrom_install_seal_w(const unsigned short *path) {
 
 /*
  * The identity of the regular file at `path`, never a reparse point: volume serial number, file index, size, and the
- * last write and change times (100 ns units), in `identity[0..4]`. Returns 0, or -1.
+ * last write and change times (nanoseconds since 1970), in `identity[0..4]`. Returns 0, or -1.
  */
 static inline int ostrom_install_identity_w(const unsigned short *path, long long *identity) {
     HANDLE file = CreateFileW((LPCWSTR)path, FILE_READ_ATTRIBUTES,
@@ -651,8 +651,9 @@ static inline int ostrom_install_identity_w(const unsigned short *path, long lon
     identity[0] = (long long)information.dwVolumeSerialNumber;
     identity[1] = ((long long)information.nFileIndexHigh << 32) | information.nFileIndexLow;
     identity[2] = ((long long)information.nFileSizeHigh << 32) | information.nFileSizeLow;
-    identity[3] = times.LastWriteTime.QuadPart;
-    identity[4] = times.ChangeTime.QuadPart;
+    /* 100 ns units since 1601, as nanoseconds since 1970 like stat's */
+    identity[3] = (times.LastWriteTime.QuadPart - 116444736000000000LL) * 100;
+    identity[4] = (times.ChangeTime.QuadPart - 116444736000000000LL) * 100;
     return 0;
 }
 

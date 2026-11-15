@@ -45,7 +45,7 @@ interface InstallationFiles {
 /**
  * What tells, without reading it, that a file is still the one that was checked: its [device] and [inode] (the volume
  * serial number and the file index on Windows), its [size], and its [modified] and [changed] times (nanoseconds since
- * the epoch on macOS and Linux, 100 ns units on Windows). Any write, `chmod` or replacement of the file changes
+ * the epoch; 100 ns steps on Windows). Any write, `chmod` or replacement of the file changes
  * [changed], which a process cannot set back on macOS and Linux (only a change of the system clock can).
  */
 data class FileIdentity(val device: Long, val inode: Long, val size: Long, val modified: Long, val changed: Long)

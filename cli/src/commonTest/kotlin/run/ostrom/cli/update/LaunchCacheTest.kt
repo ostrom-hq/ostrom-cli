@@ -11,6 +11,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.time.Clock
 
 /**
  * The launch cache: a launch skips the SHA-256 of a payload it checked in full while the binary keeps the same file
@@ -94,6 +95,15 @@ class LaunchCacheTest {
         files.identityOf = { identity.copy(changed = identity.changed + reads++) }
         assertEquals(0, launch())
         assertFalse(cached())
+    }
+
+    @Test
+    fun aBinaryChangedTooRecentlyIsNotRecorded() {
+        val version = installed()
+        val justNow = Clock.System.now().let { it.epochSeconds * 1_000_000_000 + it.nanosecondsOfSecond }
+        files.identities[store.paths.binary(version).toString()] = identity.copy(changed = justNow)
+        assertEquals(0, launch())
+        assertFalse(cached(), "a write in the same tick as the check would keep the same times")
     }
 
     @Test

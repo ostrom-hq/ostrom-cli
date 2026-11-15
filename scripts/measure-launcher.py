@@ -11,12 +11,13 @@ payload against its attestation and runs it in its place: that check is on the p
 builds the layout `ostrom install` writes around --binary in a temporary root (the launcher and one payload, both
 copies of --binary, their attestation, the selection), then:
 
-1. runs the launcher once: it checks the payload in full and must leave `launch-cache.json`;
-2. measures the hook through the launcher (median and p95 of --runs warm starts) and on the bare binary, and exits 1
-   when the launcher's median is above --max-hook-ms or its overhead (launcher median minus bare median) above
-   --max-overhead-ms;
-3. rewrites the payload with one byte changed, its size kept: the launcher must refuse it (`release_binary_invalid`),
-   so the cache never runs a payload that changed since its full check.
+1. waits until the payload is SETTLE_S old (a launch records only a binary whose change time is 2 s old), then runs
+   the launcher once: it checks the payload in full and must leave `launch-cache.json`;
+2. measures the hook through the launcher (median and p95 of --runs warm starts) and on the bare binary, in
+   interleaved rounds, and exits 1 when the launcher's median is above --max-hook-ms or its overhead (launcher median
+   minus bare median) above --max-overhead-ms;
+3. rewrites the payload with one byte changed, its size kept: the launcher must refuse it (`release_binary_invalid`):
+   the write moved the payload's file identity, so the cache is not trusted and the payload is hashed again.
 
 The layout is written by hand because a CI build is not signed by a release key that `ostrom install` trusts; it is
 the layout `InstallationStore` reads (cli/update/InstallationStore.kt). Results go to stdout and, in GitHub Actions,
@@ -30,7 +31,10 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 
+ROUNDS = 10
+SETTLE_S = 2.5
 HERE = os.path.dirname(os.path.abspath(__file__))
 spec = importlib.util.spec_from_file_location("measure", os.path.join(HERE, "measure.py"))
 measure = importlib.util.module_from_spec(spec)
@@ -95,12 +99,17 @@ def main():
     with tempfile.TemporaryDirectory(prefix="ostrom-launcher-") as work:
         root = os.path.join(os.path.realpath(work), "ostrom")
         launcher, payload = layout(binary, root, args.target, version_of(binary))
+        time.sleep(SETTLE_S)
         first = subprocess.run([launcher, *hook], input=measure.EVENT, capture_output=True, env=env)
         measure.checked([launcher, *hook], first.returncode, first.stderr, (0, 2))
         if not os.path.isfile(os.path.join(root, "launch-cache.json")):
             failed.append("the launcher checked the payload in full but wrote no launch-cache.json")
-        through, _ = measure.run_many([launcher, *hook], args.runs, stdin=measure.EVENT, env=env, accepted=(0, 2))
-        bare, _ = measure.run_many([binary, *hook], args.runs, stdin=measure.EVENT, env=env, accepted=(0, 2))
+        # interleaved, ten rounds each, so that a runner slowing down part way weighs on both sides alike
+        through, bare = [], []
+        for _ in range(ROUNDS):
+            for command, walls in (([launcher, *hook], through), ([binary, *hook], bare)):
+                walls += measure.run_many(command, max(1, args.runs // ROUNDS), stdin=measure.EVENT, env=env,
+                                          accepted=(0, 2))[0]
         with open(payload, "r+b") as handle:
             byte = handle.read(1)
             handle.seek(0)
