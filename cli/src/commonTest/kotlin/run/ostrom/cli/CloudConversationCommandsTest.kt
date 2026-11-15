@@ -345,7 +345,23 @@ class CloudConversationCommandsTest : SetupKit() {
         assertEquals("10:00:01 #1 > Hi\n10:00:02 #2 Hello\n", console.out.toString())
         assertErr("Disconnected; reconnecting from event 1.")
         assertErr("The session has ended.")
-        assertEquals(listOf(2_000L, 2_000L, 4_000L, 2_000L), waits, "Backoff after failures, two seconds otherwise")
+        assertEquals(
+            listOf(2_000L, 2_000L, 4_000L) + List(5) { 2_000L },
+            waits,
+            "Backoff after failures, two seconds otherwise; the session is read every fifth empty page",
+        )
+    }
+
+    @Test
+    fun aPageThatCannotMoveTheCursorIsNotAskedForAgainAtOnce() {
+        val old = json(1, "message.user", """{"text":"Hi"}""")
+        val live = served.toMutableMap()
+        live["$events?after=1&limit=200"] = 200 to page(old, last = 1, nextAfter = 2)
+        live["GET /api/v1/cloud/sessions/cs1"] = 200 to """{"id":"cs1","status":"terminated"}"""
+        onSleep = { live["$events?after=1&limit=200"] = 200 to page(last = 1) }
+        assertEquals(0, runLive(live, "cloud", "logs", "cs1", "--after", "1", "-f"))
+        assertEquals(listOf(2_000L), waits, "The same page is asked for again after the pause only")
+        assertEquals(4, sent().count { it.startsWith(events) })
     }
 
     @Test

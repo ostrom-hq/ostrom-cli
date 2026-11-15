@@ -231,12 +231,7 @@ internal class CloudLogsCommand(private val dependencies: CliDependencies) : Cli
             var cursor = after ?: tailStart(tail, last, { json || it.shown() }) {
                 access.page(session, "before=$it&limit=$PAGE_LIMIT")
             }
-            while (true) {
-                val page = access.page(session, "after=$cursor&limit=$PAGE_LIMIT")
-                page.events.forEach(print)
-                cursor = page.events.lastOrNull()?.seq ?: cursor
-                if (page.nextAfter == null) break
-            }
+            cursor = access.drain(session, cursor, print)
             if (follow && !dependencies.followEvents(access, session, cursor, print)) {
                 throw ProgramResult(ExitCode.FAILED.code)
             }
@@ -255,49 +250,90 @@ internal suspend fun CliDependencies.followEvents(
     after: Long,
     print: (CloudEvent) -> Unit,
 ): Boolean {
-    val notice = { text: String -> console.err("$text\n") }
-    var cursor = after
+    val follow = TranscriptFollow(access, id, after, print) { console.err("$it\n") }
     var wait = FOLLOW_EVERY
-    // Events written just before the session ended may follow the empty page: one more page is read after the end.
-    var endSeen = false
     while (true) {
-        val answer = access.server.get(eventsPath(id, "after=$cursor&limit=$PAGE_LIMIT"), access.signed.token)
-        var more = false
-        when (answer) {
-            is ServerAnswer.Ok -> {
-                val page = try {
-                    OstromJson.decodeFromJsonElement(CloudEventPage.serializer(), answer.body)
-                } catch (error: SerializationException) {
-                    notice(
-                        "The event after $cursor cannot be read (${error.message}). Update ostrom, or follow from a " +
-                            "later event with `ostrom cloud logs $id --follow --after <sequence>`.",
-                    )
-                    return false
-                }
-                for (event in page.events.filter { it.seq > cursor }) {
-                    print(event)
-                    cursor = event.seq
-                }
+        when (val step = follow.step()) {
+            FollowStep.ENDED, FollowStep.UNREADABLE -> return step == FollowStep.ENDED
+            FollowStep.AT_ONCE -> wait = FOLLOW_EVERY
+            FollowStep.LATER -> {
                 wait = FOLLOW_EVERY
-                more = page.nextAfter != null
-                if (page.events.isEmpty() && (endSeen || ended(access, id))) {
-                    if (endSeen) {
-                        notice("The session has ended.")
-                        return true
-                    }
-                    endSeen = true
-                    more = true
-                }
+                sleep(wait)
             }
-            is ServerAnswer.Failed -> {
-                refusedTranscript(answer)?.let { throw stopWith(ExitCode.REFUSED, it) }
-                notice("Disconnected; reconnecting from event $cursor.")
+            FollowStep.FAILED -> {
+                sleep(wait)
+                wait = (wait * 2).coerceAtMost(MAX_BACKOFF)
             }
         }
-        if (!more) {
-            sleep(wait)
-            if (answer is ServerAnswer.Failed) wait = (wait * 2).coerceAtMost(MAX_BACKOFF)
+    }
+}
+
+/** What [TranscriptFollow.step] read: ask again at once, after the pause, after a backoff, or stop. */
+private enum class FollowStep { AT_ONCE, LATER, FAILED, ENDED, UNREADABLE }
+
+/**
+ * The state of `logs --follow`: the last printed sequence, whether the session's end was seen (events written just
+ * before it may follow the empty page: one more page is read after it), and the empty pages read (the session is read
+ * on the first, then every [ENDED_EVERY]: the stream checks every 15 s).
+ */
+private class TranscriptFollow(
+    private val access: OrgAccess,
+    private val id: String,
+    private var cursor: Long,
+    private val print: (CloudEvent) -> Unit,
+    private val notice: (String) -> Unit,
+) {
+    private var endSeen = false
+    private var empty = 0
+
+    @Suppress("ReturnCount") // a failed read, an unreadable page, then what the page says
+    suspend fun step(): FollowStep {
+        val answer = access.server.get(eventsPath(id, "after=$cursor&limit=$PAGE_LIMIT"), access.signed.token)
+        if (answer is ServerAnswer.Failed) {
+            refusedTranscript(answer)?.let { throw stopWith(ExitCode.REFUSED, it) }
+            notice("Disconnected; reconnecting from event $cursor.")
+            return FollowStep.FAILED
         }
+        val page = decoded((answer as ServerAnswer.Ok).body) ?: return FollowStep.UNREADABLE
+        val start = cursor
+        for (event in page.events.filter { it.seq > cursor }) {
+            print(event)
+            cursor = event.seq
+        }
+        return when {
+            page.events.isNotEmpty() ->
+                // Only a page that moved the cursor is followed at once: another would be asked for again and again.
+                if (page.nextAfter != null && cursor > start) FollowStep.AT_ONCE else FollowStep.LATER
+            endSeen -> FollowStep.ENDED.also { notice("The session has ended.") }
+            empty++ % ENDED_EVERY == 0 && ended(access, id) -> FollowStep.AT_ONCE.also { endSeen = true }
+            else -> FollowStep.LATER
+        }
+    }
+
+    @Suppress("SwallowedException") // its message is said
+    private fun decoded(body: JsonObject): CloudEventPage? = try {
+        OstromJson.decodeFromJsonElement(CloudEventPage.serializer(), body)
+    } catch (error: SerializationException) {
+        notice(
+            "The event after $cursor cannot be read (${error.message}). Update ostrom, or follow from a later event " +
+                "with `ostrom cloud logs $id --follow --after <sequence>`.",
+        )
+        null
+    }
+}
+
+/**
+ * Prints every page after [from] and returns the last sequence printed. A page that does not move the cursor ends it:
+ * asking for it again would never end.
+ */
+private suspend fun OrgAccess.drain(id: String, from: Long, print: (CloudEvent) -> Unit): Long {
+    var cursor = from
+    while (true) {
+        val page = page(id, "after=$cursor&limit=$PAGE_LIMIT")
+        page.events.forEach(print)
+        val start = cursor
+        cursor = maxOf(cursor, page.events.lastOrNull()?.seq ?: cursor)
+        if (page.nextAfter == null || cursor == start) return cursor
     }
 }
 
@@ -380,8 +416,8 @@ internal class CloudSendCommand(private val dependencies: CliDependencies) : Cli
     private val json by jsonFlag()
 
     override fun run() {
-        val message = if (text == "-") generateSequence(dependencies.readLine).joinToString("\n") else text
         val access = dependencies.conversationAccess(server, org)
+        val message = if (text == "-") generateSequence(dependencies.readLine).joinToString("\n") else text
         val request = messageRequest(message, wake = !noWake)
         val input = runBlocking {
             var input = dependencies.sendWithRetry(access, session, request, idempotencyKey ?: Uuid.random().toString())
@@ -487,6 +523,7 @@ private const val EXTRA_PAGES = 10
 private const val DEFAULT_TAIL = 50
 private const val MAX_TAIL = 10_000
 private const val FOLLOW_EVERY = 2_000L
+private const val ENDED_EVERY = 5
 private const val MAX_BACKOFF = 15_000L
 private const val WAIT_EVERY = 1_000L
 private const val FIRST_RETRY = 1_000L
