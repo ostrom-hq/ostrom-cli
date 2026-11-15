@@ -133,8 +133,8 @@ internal class StagedDesktop(val version: String, val directory: Path)
  * @param restrict Makes a folder the owner's alone.
  * @param random A fresh name part (16 hex digits).
  */
-@Suppress("LongParameterList", "TooManyFunctions", "ThrowsCount", "TooGenericExceptionCaught")
-// one collaborator each, replaced in tests; a failed stage is cleaned up, then rethrown as it is
+@Suppress("LongParameterList", "TooManyFunctions", "ThrowsCount")
+// one collaborator each, replaced in tests
 internal class DesktopInstaller(
     private val os: OperatingSystem,
     private val target: String,
@@ -241,6 +241,7 @@ internal class DesktopInstaller(
         // Next to the app it replaces, on the same volume, so that putting it in place is a rename.
         val unpacked = applications / "$MACOS_STAGE${random()}"
         makePrivate(unpacked, "desktop_staging_unavailable")
+        var done = false
         try {
             ran(listOf("ditto", "-x", "-k", zip.toString(), unpacked.toString()), EXTRACT_MILLIS, "extract the package")
             val app = unpacked / DesktopLocations.APP
@@ -255,10 +256,9 @@ internal class DesktopInstaller(
                 )
             }
             expectVersion(app, version)
-            return StagedDesktop(version, unpacked)
-        } catch (failure: Throwable) {
-            deleteQuietly(unpacked)
-            throw failure
+            return StagedDesktop(version, unpacked).also { done = true }
+        } finally {
+            if (!done) deleteQuietly(unpacked)
         }
     }
 
@@ -294,6 +294,7 @@ internal class DesktopInstaller(
         fs.createDirectories(root)
         val unpacked = root / "$LINUX_STAGE${random()}"
         makePrivate(unpacked, "desktop_staging_unavailable")
+        var done = false
         try {
             val extract = listOf("tar", "-xzf", archive.toString(), "-C", unpacked.toString(), "--no-same-owner")
             ran(extract, EXTRACT_MILLIS, "extract the package")
@@ -301,10 +302,9 @@ internal class DesktopInstaller(
             val launcher = fs.metadataOrNull(locations.executable(app))?.isRegularFile == true
             if (fs.list(unpacked) != listOf(app) || !launcher) throw layout()
             expectVersion(app, version)
-            return StagedDesktop(version, unpacked)
-        } catch (failure: Throwable) {
-            deleteQuietly(unpacked)
-            throw failure
+            return StagedDesktop(version, unpacked).also { done = true }
+        } finally {
+            if (!done) deleteQuietly(unpacked)
         }
     }
 
