@@ -34,7 +34,21 @@ interface InstallationFiles {
      * Linux) belongs to this user and gives nothing to its group or others.
      */
     fun isPrivate(path: String, directory: Boolean): Boolean
+
+    /**
+     * The [FileIdentity] of the regular file at [path], never followed when it is a link: null when it cannot be read
+     * or is not a regular file.
+     */
+    fun identity(path: String): FileIdentity?
 }
+
+/**
+ * What tells, without reading it, that a file is still the one that was checked: its [device] and [inode] (the volume
+ * serial number and the file index on Windows), its [size], and its [modified] and [changed] times (nanoseconds since
+ * the epoch; 100 ns steps on Windows). Any write, `chmod` or replacement of the file changes
+ * [changed], which a process cannot set back on macOS and Linux (only a change of the system clock can).
+ */
+data class FileIdentity(val device: Long, val inode: Long, val size: Long, val modified: Long, val changed: Long)
 
 /** [InstallationFiles] of this system. */
 // coverage: the system's own locks and files; the managed installation's tests use a fake InstallationFiles.
@@ -44,6 +58,7 @@ object SystemInstallationFiles : InstallationFiles {
     override fun seal(path: String) = sealInstallationFile(path)
     override fun flushDirectory(path: String) = flushInstallationDirectory(path)
     override fun isPrivate(path: String, directory: Boolean): Boolean = isPrivateInstallationPath(path, directory)
+    override fun identity(path: String): FileIdentity? = installationFileIdentity(path)
 }
 
 internal expect fun tryLockInstallationFile(path: String, exclusive: Boolean): AutoCloseable?
@@ -53,6 +68,8 @@ internal expect fun sealInstallationFile(path: String)
 internal expect fun flushInstallationDirectory(path: String)
 
 internal expect fun isPrivateInstallationPath(path: String, directory: Boolean): Boolean
+
+internal expect fun installationFileIdentity(path: String): FileIdentity?
 
 /**
  * Runs the payload [path] with [arguments] in place of this process: `execv` on macOS and Linux (it returns only when

@@ -254,6 +254,12 @@ TeamCode's:
 - `current.json`: the selected version and the previous one, switched atomically; `transaction.json` while a switch is
   under way, so that an interrupted one is put back by the next launch. Every launch checks the selected binary
   against its attestation before running it.
+- `launch-cache.json`: the file identity of the selected binary (device and inode, or volume serial and file index on
+  Windows; size; modification and change times) recorded after a launch checked its SHA-256 in full. A launch whose
+  binary still has exactly that identity skips the SHA-256 (hashing the whole binary took about 400 ms on every hook);
+  any difference, or a record that is missing or does not read, checks in full again. A binary changed less than 2 s
+  before the check is not recorded (a write in the same tick would keep the same times). Deleting the file is
+  harmless.
 - `writer.lock` (one installer at a time) and `installation.lock` (a switch or a recovery).
 
 `ostrom update` and `ostrom update --rollback` run from such an installation add a version folder and switch the

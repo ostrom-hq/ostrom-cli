@@ -159,6 +159,14 @@ jobs:
           --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
           --sizes cli/build/bin/*/releaseExecutable/ostrom.* --max-size-mb 19 --size-budget mingwX64=21
           --max-hook-p95-ms 20 --max-version-p95-ms 30 --max-cold-ms 300 --max-hook-memory-mb 25
+      # The hooks of a managed installation (`ostrom install`) name its launcher, which checks the selected payload
+      # before running it. Hashing the whole payload on every launch cost 388-514 ms on macOS (15/11, #211's binary);
+      # launch-cache.json skips the hash while the payload's file identity holds (cli#227). Budgets: the hook's
+      # own 15 ms through the launcher, 10 ms of overhead over the bare binary; a changed payload must be refused.
+      - name: Start-up through the launcher of a managed installation (15 ms median, 10 ms overhead)
+        run: >-
+          python3 scripts/measure-launcher.py --label linuxX64 --target linux-x64
+          --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe --max-hook-ms 15 --max-overhead-ms 10
       - name: End to end, the real binary with fake Claude Code and Codex against the contract's server
         run: python3 e2e/run.py --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
       # What a hook costs the agent at every tool call, median of 20 (e2e/perf.py): first starts, the hook in a session
@@ -585,6 +593,12 @@ jobs:
           --binary cli/build/bin/macosArm64/releaseExecutable/ostrom.kexe
           --sizes cli/build/bin/macosArm64/releaseExecutable/ostrom.kexe --max-size-mb 19
           --max-hook-ms 30 --max-hook-p95-ms 45 --max-version-p95-ms 60 --max-cold-ms 1500 --max-hook-memory-mb 25
+      # Through the launcher on a loaded Mac (15/11, load 83): 43 ms median against 23 bare, the overhead being the
+      # second start of the binary (execv); 1095 ms before cli#227. Budgets of about twice the slow runner, as above.
+      - name: Start-up through the launcher of a managed installation (60 ms median, 40 ms overhead)
+        run: >-
+          python3 scripts/measure-launcher.py --label macosArm64 --target macos-arm64
+          --binary cli/build/bin/macosArm64/releaseExecutable/ostrom.kexe --max-hook-ms 60 --max-overhead-ms 40
       # `ostrom` moves the device token to the Keychain: a keychain of the run's own, unlocked, without a time limit, so
       # that no question of the Keychain holds a session (the runner's login keychain may ask, and nobody answers)
       # Measured on 03/11 before cli#99 (run 41644529334): first starts 547 and 496 ms, the hook 23.4 and 31.8 ms, 1

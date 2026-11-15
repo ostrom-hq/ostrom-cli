@@ -6,9 +6,11 @@ package run.ostrom.cli.platform
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.CPointerVar
 import kotlinx.cinterop.IntVar
+import kotlinx.cinterop.LongVar
 import kotlinx.cinterop.alloc
 import kotlinx.cinterop.allocArray
 import kotlinx.cinterop.cstr
+import kotlinx.cinterop.get
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.ptr
 import kotlinx.cinterop.set
@@ -18,6 +20,7 @@ import okio.IOException
 import platform.posix.errno
 import platform.posix.execv
 import platform.posix.strerror
+import run.ostrom.cli.platform.interop.ostrom_install_identity
 import run.ostrom.cli.platform.interop.ostrom_install_lock
 import run.ostrom.cli.platform.interop.ostrom_install_private_path
 import run.ostrom.cli.platform.interop.ostrom_install_seal
@@ -54,6 +57,17 @@ internal actual fun flushInstallationDirectory(path: String) {
 
 internal actual fun isPrivateInstallationPath(path: String, directory: Boolean): Boolean =
     ostrom_install_private_path(path, if (directory) 1 else 0) == 1
+
+internal actual fun installationFileIdentity(path: String): FileIdentity? = memScoped {
+    val values = allocArray<LongVar>(IDENTITY_FIELDS)
+    if (ostrom_install_identity(path, values) != 0) return null
+    var next = 0
+    fun field() = values[next++]
+    FileIdentity(device = field(), inode = field(), size = field(), modified = field(), changed = field())
+}
+
+/** device, inode, size, modification and change times: what ostrom_install_identity writes. */
+private const val IDENTITY_FIELDS = 5
 
 /** Runs the payload in place of this process (see the expect declaration). */
 actual fun replaceProcess(path: String, arguments: List<String>): Int = memScoped {
