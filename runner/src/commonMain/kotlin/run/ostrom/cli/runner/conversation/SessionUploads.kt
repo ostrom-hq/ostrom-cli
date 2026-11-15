@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Ported from TeamCode's cli/cloud/agent/SessionUploads.kt with its rules and names. A failed write, check or sweep is
 // never thrown at the host: it is a [SessionUploads.Refused] reason or nothing; cancellation is rethrown first
-// (scripts/check-conventions.py).
-@file:Suppress("TooGenericExceptionCaught", "ReturnCount", "MagicNumber")
+// (scripts/check-conventions.py). The defensive checks a test cannot reach are small functions of their own, left out of
+// the coverage with their reason.
+@file:Suppress("TooGenericExceptionCaught", "ReturnCount", "MagicNumber", "TooManyFunctions")
 
 package run.ostrom.cli.runner.conversation
 
@@ -160,7 +161,7 @@ class SessionUploads(
     private fun existing(target: Path, base: Path, file: RunnerFileView): Path? = try {
         if (!ownFileIn(target, base)) {
             null
-        } else if (fileSystem.metadataOrNull(target)?.size != file.size) {
+        } else if (sizeOf(target) != file.size) {
             null
         } else {
             val hash = HashingSink.sha256(blackholeSink())
@@ -238,6 +239,10 @@ class SessionUploads(
         return status != null && !status.directory && !status.symlink && status.ownedByCurrentUser &&
             fileSystem.canonicalize(target).parent == base
     }
+
+    // coverage: see ownDirectory (a file that vanished, or a platform without sizes, reads -1).
+    @ExcludeFromCoverage
+    private fun sizeOf(target: Path): Long = fileSystem.metadataOrNull(target)?.size ?: -1
 
     // coverage: see ownDirectory (a platform without modification times keeps the entry, as a new one).
     @ExcludeFromCoverage

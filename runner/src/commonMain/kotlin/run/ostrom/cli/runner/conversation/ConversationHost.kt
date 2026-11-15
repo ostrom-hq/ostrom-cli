@@ -313,16 +313,14 @@ class ConversationHost(
 
     override suspend fun stop() {
         stopping = true
-        try {
-            agent?.let { it.process.stop(1_000) }
-            reader?.cancel()
-            lock.withLock { cancelAllDeadlines() }
-        } finally {
-            // Files stay until the session ends (a week at most): a pause, a host restart or a resume keeps them, so
-            // the resumed conversation can read them again. A fenced execution never removes them, since the execution
-            // that fenced it may run on this device and use the same directory.
-            if (ended && !fenced) uploads?.clear()
-        }
+        // Files stay until the session ends (a week at most): a pause, a host restart or a resume keeps them, so the
+        // resumed conversation can read them again. A fenced execution never removes them, since the execution that
+        // fenced it may run on this device and use the same directory. Removed first, so that a failing stop of the
+        // agent never keeps them.
+        if (ended && !fenced) uploads?.clear()
+        agent?.let { it.process.stop(1_000) }
+        reader?.cancel()
+        lock.withLock { cancelAllDeadlines() }
     }
 
     @Suppress("LoopWithTooManyJumpStatements") // TeamCode's loop: retry a failed poll, skip an empty batch.
@@ -547,7 +545,7 @@ class ConversationHost(
         }
         // Not offered to this execution any more (acknowledged, expired): retrying cannot help.
         error.statusCode == 404 -> Attachment.Refused(SessionUploads.NOT_FOUND)
-        error.statusCode in 400..499 -> Attachment.Refused(SessionUploads.DOWNLOAD_FAILED)
+        error.statusCode / 100 == 4 -> Attachment.Refused(SessionUploads.DOWNLOAD_FAILED)
         else -> null
     }
 
