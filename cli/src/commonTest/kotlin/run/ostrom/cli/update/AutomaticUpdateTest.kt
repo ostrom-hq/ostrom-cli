@@ -271,7 +271,13 @@ class AutomaticUpdateTest {
         assertEquals("$ROOT/$label.xml", windows.registration)
         assertEquals("/home/dev/.config/systemd/user/$label.timer", settings.registration)
         assertFalse(settings.enabled)
-        val xdg = variables("HOME" to "/home/dev", "XDG_CONFIG_HOME" to "/home/dev/cfg")
+        // a Linux user's environment, whatever system runs the test (Windows keeps the configuration in %APPDATA%)
+        val xdg = object : Environment {
+            private val values = mapOf("HOME" to "/home/dev", "XDG_CONFIG_HOME" to "/home/dev/cfg")
+            override fun get(name: String): String? = values[name]
+            override val operatingSystem = OperatingSystem.LINUX
+            override val architecture = "x64"
+        }
         val linux = automaticUpdateSettings(policy.paths, platform, xdg)
         assertEquals("/home/dev/cfg/systemd/user/${linux.label}.timer", linux.registration)
         assertEquals("/home/dev/cfg/ostrom", linux.configuration)
