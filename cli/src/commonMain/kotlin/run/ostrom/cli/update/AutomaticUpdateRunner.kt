@@ -76,9 +76,7 @@ internal class AutomaticUpdateRunner(
         val outcome = if (deferred) AutomaticUpdateResult.DEFERRED else AutomaticUpdateResult.FAILED
         return AutomaticUpdateResult(started, outcome, diagnostic = diagnostic)
     }
-
-    private companion object {
-        const val TIMEOUT_MILLIS = 15 * 60_000L
-        val DEFERRING = setOf(InstallationStore.WRITER_BUSY, InstallationStore.BUSY, SESSION_RUNNING)
-    }
 }
+
+private const val TIMEOUT_MILLIS = 15 * 60_000L
+private val DEFERRING = setOf(InstallationStore.WRITER_BUSY, InstallationStore.BUSY, SESSION_RUNNING)

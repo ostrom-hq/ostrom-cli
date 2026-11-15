@@ -46,13 +46,11 @@ internal class AutomaticUpdateManager(
             }
         }
     }
-
-    private companion object {
-        const val ON = "on"
-        const val OFF = "off"
-        val OPERATIONS = setOf(ON, OFF, "uninstall")
-    }
 }
+
+private const val ON = "on"
+private const val OFF = "off"
+private val OPERATIONS = setOf(ON, OFF, "uninstall")
 
 /** Another attempt holds the worker's lock. */
 internal const val WORKER_BUSY = "automatic_worker_busy"
