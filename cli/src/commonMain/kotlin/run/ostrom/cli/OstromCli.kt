@@ -54,6 +54,7 @@ import run.ostrom.cli.help.colourLevel
 import run.ostrom.cli.launcher.Agent
 import run.ostrom.cli.platform.ConfigKey
 import run.ostrom.cli.platform.SecretStoreException
+import run.ostrom.cli.remote.remoteCommand
 import run.ostrom.cli.service.serviceCommand
 import run.ostrom.cli.telemetry.UsageStatistics
 import kotlinx.coroutines.runBlocking
@@ -73,6 +74,8 @@ class OstromCli(
     private val dependencies: CliDependencies,
     /** `ostrom service`, which a test builds with fake OS tools. */
     private val service: (CliDependencies) -> CliktCommand = ::serviceCommand,
+    /** `ostrom remote`, which a test builds with a fake machine. */
+    private val remote: (CliDependencies) -> CliktCommand = { remoteCommand(it) },
 ) {
     /**
      * Parses [args], runs the command and returns the process exit code. Help and errors are written to the console;
@@ -215,6 +218,7 @@ class OstromCli(
             DoctorCommand(dependencies),
             TelemetryCommand(dependencies),
             service(dependencies),
+            remote(dependencies),
             VersionCommand(dependencies),
             ImportTeamCodeCommand(dependencies),
         ) + setupCommands(dependencies)

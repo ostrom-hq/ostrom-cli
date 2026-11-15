@@ -155,11 +155,13 @@ jobs:
       # capacity) took linuxX64 from 17.82 MB on main to 18.17 and ostrom.exe from 19.81 to 20.25 (run 43683335873).
       # 20 MB (Windows 22) from 15/11: the conversation commands (cli#231: cloud logs, send, interrupt, answer) took
       # linuxX64 to 19.10 MB and ostrom.exe to 21.01 (run 43736468928).
+      # 21 MB (Windows 23) from 15/11: ostrom remote (cli#232: the remote commands, the conversation host and the relay
+      # wired into the CLI, the detached host) adds about 0.9 MB (1.3 on Windows) over cli#231.
       - name: Start-up (15 ms median, 20 ms p95, 40 ms for a git push), first start, memory and binary sizes
         run: >-
           python3 scripts/measure.py --label linuxX64 --max-push-ms 40
           --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
-          --sizes cli/build/bin/*/releaseExecutable/ostrom.* --max-size-mb 20 --size-budget mingwX64=22
+          --sizes cli/build/bin/*/releaseExecutable/ostrom.* --max-size-mb 21 --size-budget mingwX64=23
           --max-hook-p95-ms 20 --max-version-p95-ms 30 --max-cold-ms 300 --max-hook-memory-mb 25
       # The hooks of a managed installation (`ostrom install`) name its launcher, which checks the selected payload
       # before running it. Hashing the whole payload on every launch cost 388-514 ms on macOS (15/11, #211's binary);
@@ -180,7 +182,7 @@ jobs:
       - name: Hook cost in a session (median of 20)
         run: >-
           python3 e2e/perf.py --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe --label linuxX64
-          --max-hook-ms 20 --max-cold-version-ms 500 --max-cold-hook-ms 500 --max-size-mb 20
+          --max-hook-ms 20 --max-cold-version-ms 500 --max-cold-hook-ms 500 --max-size-mb 21
           --max-burst-requests 0.1 --max-spaced-requests 0.5 --max-spaced-ms 20 --max-installed-ms 20
       - name: End to end, init, invite, members, policy and harness against the contract's server
         run: python3 e2e/setup_e2e.py --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
@@ -591,12 +593,12 @@ jobs:
       # on Linux.
       # The macOS binary was 19.10 MB at e44ba027 (ostrom ui, #224: the Desktop manifest and installer), over the former
       # 19 MB; the macosArm64 tests, which stopped the job before this step on main, hid it. Budget 20 MB, 21 from
-      # 15/11 with the conversation commands (cli#231), which took linuxX64 above 19 MB.
+      # 15/11 with the conversation commands (cli#231), which took linuxX64 above 19 MB; 22 with ostrom remote (cli#232).
       - name: Start-up, first start, memory and size budgets
         run: >-
           python3 scripts/measure.py --label macosArm64
           --binary cli/build/bin/macosArm64/releaseExecutable/ostrom.kexe
-          --sizes cli/build/bin/macosArm64/releaseExecutable/ostrom.kexe --max-size-mb 21
+          --sizes cli/build/bin/macosArm64/releaseExecutable/ostrom.kexe --max-size-mb 22
           --max-hook-ms 30 --max-hook-p95-ms 45 --max-version-p95-ms 60 --max-cold-ms 1500 --max-hook-memory-mb 25
       # Through the launcher on a loaded Mac (15/11, load 83): 43 ms median against 23 bare, the overhead being the
       # second start of the binary (execv); 1095 ms before cli#227. Budgets of about twice the slow runner, as above.

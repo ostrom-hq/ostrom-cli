@@ -105,6 +105,8 @@ interface RunnerAgent {
  * @param uploads Where the files of a message are written for the agent; null (or one [SessionUploads.prepare]
  *   refuses) announces no file support, so the server rejects such messages (`files_unsupported`) instead of
  *   delivering their text alone.
+ * @param permissionMode A remote session's mode on its host's files ([RemotePermissionModes]); null in a cloud pod,
+ *   which is its own sandbox and always bypasses.
  */
 @Suppress("LongParameterList") // The host's collaborators, injected so that `ostrom remote host` reuses it.
 class ConversationHost(
@@ -122,6 +124,7 @@ class ConversationHost(
     private val initialMessage: String? = null,
     private val activity: () -> Unit = {},
     private val uploads: SessionUploads? = null,
+    private val permissionMode: String? = null,
 ) : RunnerAgent {
     override var fenced: Boolean = false
         private set
@@ -230,6 +233,7 @@ class ConversationHost(
             liveText = view.liveText,
             backgroundTasks = view.backgroundTasks,
             owner = view.owner,
+            permissionMode = permissionMode,
         ).also { settings = it }
     }
 

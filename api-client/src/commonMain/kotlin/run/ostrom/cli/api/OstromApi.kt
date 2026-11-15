@@ -156,13 +156,25 @@ private const val CONNECT_TIMEOUT_MILLIS = 5_000L
 /** How long a call may take unless it says otherwise. */
 const val REQUEST_TIMEOUT_MILLIS = 10_000L
 
-/** An HTTP client that never throws on a status and gives up after 10 s (connection 5 s). */
-fun defaultHttpClient(): HttpClient = HttpClient {
+/**
+ * An HTTP client that never throws on a status and gives up after [requestTimeoutMillis] (10 s unless said;
+ * connection 5 s).
+ */
+fun defaultHttpClient(requestTimeoutMillis: Long = REQUEST_TIMEOUT_MILLIS): HttpClient = HttpClient {
     expectSuccess = false
     // a redirect would resend the device or agent token to wherever it points: a 3xx is an answer, never followed
     followRedirects = false
     install(HttpTimeout) {
         connectTimeoutMillis = CONNECT_TIMEOUT_MILLIS
-        requestTimeoutMillis = REQUEST_TIMEOUT_MILLIS
+        this.requestTimeoutMillis = requestTimeoutMillis
     }
 }
+
+/** How long a long poll of the runner channel may take: the server holds one up to 20 s. */
+private const val LONG_POLL_TIMEOUT_MILLIS = 60_000L
+
+/**
+ * An HTTP client for a remote session's host on the runner channel: never throws on a status, follows no redirect
+ * (the owner's sign-in goes with every call), and lets a long poll of the inputs last ([LONG_POLL_TIMEOUT_MILLIS]).
+ */
+fun longPollHttpClient(): HttpClient = defaultHttpClient(LONG_POLL_TIMEOUT_MILLIS)

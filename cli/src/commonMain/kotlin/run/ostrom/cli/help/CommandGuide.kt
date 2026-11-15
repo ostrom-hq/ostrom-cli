@@ -416,6 +416,28 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
         "ostrom github unlink" to "remove your link",
         "ostrom github unlink --member mem_7d1a" to "remove a member's link (admin)",
     ),
+    "remote" to guide(
+        "cloud-sessions",
+        "ostrom remote start ~/code/api" to "a session hosted here, followed from the console or the app",
+        "ostrom remote list" to "the remote sessions of this device",
+    ),
+    "remote start" to guide(
+        "cloud-sessions",
+        "ostrom remote start" to "host a session in this directory until Ctrl-C pauses it",
+        "ostrom remote start ~/code/api --detach --message 'fix the build'" to
+            "in the background, with a first message",
+    ),
+    "remote list" to guide(
+        "cloud-sessions",
+        "ostrom remote list" to "the remote sessions this device hosts",
+        "ostrom remote list --all-devices --json" to "those of all your devices, for a script",
+    ),
+    "remote resume" to guide(
+        "cloud-sessions",
+        "ostrom remote resume 9f3c --detach" to "host it again, in the background",
+    ),
+    "remote stop" to guide("cloud-sessions", "ostrom remote stop 9f3c" to "pause it: the agent finishes its turn"),
+    "remote host" to guide("cloud-sessions", "ostrom remote host 9f3c" to "the host itself, in the foreground"),
     "cloud" to guide(
         "cloud-sessions",
         "ostrom cloud list" to "your cloud sessions",

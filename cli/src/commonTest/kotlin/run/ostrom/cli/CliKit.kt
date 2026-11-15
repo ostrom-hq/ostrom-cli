@@ -32,6 +32,7 @@ import run.ostrom.cli.platform.SecretBackend
 import run.ostrom.cli.platform.SecretStore
 import run.ostrom.cli.platform.StandardInput
 import run.ostrom.cli.platform.terminalSafe
+import run.ostrom.cli.remote.remoteCommand
 import run.ostrom.cli.service.serviceCommand
 import run.ostrom.cli.update.AgentSessionsImpl
 import run.ostrom.cli.service.ServiceStep
@@ -176,7 +177,7 @@ open class CliKit {
     /** Asserts that stdout contains [text], showing all of it otherwise. */
     protected fun assertOut(text: String) = assertTrue(console.out.contains(text), console.out.toString())
 
-    @Suppress("LongParameterList") // one default per dependency a test replaces
+    @Suppress("LongParameterList", "LongMethod") // one default per dependency a test replaces, all wired here
     internal fun cli(
         environment: Map<String, String> = mapOf("HOME" to "/home/maya"),
         installed: Set<String> = setOf("git", "claude"),
@@ -189,8 +190,10 @@ open class CliKit {
         cliVersion: String = BuildInfo.VERSION,
         service: (CliDependencies) -> CliktCommand = ::serviceCommand,
         serviceStep: ServiceStep = ServiceStep.None,
+        remote: (CliDependencies) -> CliktCommand = { remoteCommand(it) { error("no remote host in this test") } },
     ) = OstromCli(
         service = service,
+        remote = remote,
         dependencies = CliDependencies(
             console = console,
             environment = FakeEnvironment(environment, operatingSystem),

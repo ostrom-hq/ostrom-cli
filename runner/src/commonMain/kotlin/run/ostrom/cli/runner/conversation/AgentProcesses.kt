@@ -4,6 +4,7 @@ package run.ostrom.cli.runner.conversation
 import kotlinx.io.Buffer
 import kotlinx.io.indexOf
 import kotlinx.io.readByteArray
+import run.ostrom.cli.runner.ProcessStarter
 import run.ostrom.cli.runner.RemoteTerminalStarter
 import run.ostrom.cli.runner.Terminal
 import kotlin.concurrent.Volatile
@@ -127,13 +128,14 @@ class TerminalAgentProcess(private val terminal: Terminal) : AgentProcess {
 }
 
 /**
- * Starts agent processes in the agent's container, through its host ([RemoteTerminalStarter.process]), with the
- * agent's environment changed by each start's overrides (null removes a variable), as TeamCode's `RemoteProcesses`.
+ * Starts agent processes without a terminal, with the agent's environment changed by each start's overrides (null
+ * removes a variable), as TeamCode's `RemoteProcesses`: in a pod's agent container through its host
+ * ([RemoteTerminalStarter.process]), or on a member's device for a remote session's host ([localAgentProcesses]).
  *
- * @param starter The runner's connection to the agent host.
+ * @param starter Starts the programs.
  * @param environment The agent's environment.
  */
-class ExecProcesses(private val starter: RemoteTerminalStarter, private val environment: Map<String, String>) {
+class ExecProcesses(private val starter: ProcessStarter, private val environment: Map<String, String>) {
     /**
      * Starts a process.
      *
@@ -147,7 +149,7 @@ class ExecProcesses(private val starter: RemoteTerminalStarter, private val envi
         val removed = overrides.filterValues { it == null }.keys
         val set = overrides.mapNotNull { (name, value) -> value?.let { name to it } }.toMap()
         val variables = environment.filterKeys { it !in removed } + set
-        val terminal = starter.process(EXEC_SCRIPT, listOf(command.command) + command.arguments, variables, directory)
+        val terminal = starter.start(EXEC_SCRIPT, listOf(command.command) + command.arguments, variables, directory)
         return TerminalAgentProcess(terminal)
     }
 
