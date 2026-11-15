@@ -86,7 +86,7 @@ interface DeliveryApi {
 class HttpDeliveryApi(private val client: HttpClient, private val config: RunnerConfig) : DeliveryApi {
     override suspend fun manifest(kind: String): JsonObject? {
         val response = client.post("${config.serverUrl}/api/v1/cloud/runner/$kind") {
-            bearerAuth(config.token)
+            bearerAuth(config.bearer())
             contentType(ContentType.Application.Json)
             setBody(execution().toString())
         }
@@ -99,7 +99,7 @@ class HttpDeliveryApi(private val client: HttpClient, private val config: Runner
 
     override suspend fun artifact(kind: String, name: String, version: String): JsonObject {
         val response = client.post("${config.serverUrl}/api/v1/cloud/runner/$kind/artifact") {
-            bearerAuth(config.token)
+            bearerAuth(config.bearer())
             contentType(ContentType.Application.Json)
             val item = mapOf("name" to JsonPrimitive(name), "version" to JsonPrimitive(version))
             setBody(JsonObject(execution() + item).toString())

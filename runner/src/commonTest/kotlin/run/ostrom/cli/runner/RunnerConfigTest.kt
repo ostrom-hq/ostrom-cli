@@ -211,6 +211,39 @@ class RunnerConfigTest {
     }
 
     @Test
+    fun onKubernetesEveryCallCarriesThePodsProjectedTokenReadAgain() = runTest {
+        // The kubelet rotates the projected token: each call reads the file again (TeamCode's runner).
+        var podToken = "eyJ.first.sig"
+        val reads = mutableListOf<String>()
+        val config = RunnerConfig.from(base + ("OSTROM_POD_TOKEN_FILE" to "/var/run/ostrom/pod/token")) { path ->
+            reads += path
+            if (path == "/var/run/ostrom/pod/token") podToken else "ostrom_runner_secret"
+        }
+        assertEquals("/var/run/ostrom/pod/token", config.podTokenFile)
+        assertTrue("OSTROM_POD_TOKEN_FILE" in RunnerConfig.PRIVATE_VARIABLES)
+        val presented = mutableListOf<String?>()
+        val client = HttpClient(MockEngine { request ->
+            presented += request.headers[HttpHeaders.Authorization]
+            val json = headersOf(HttpHeaders.ContentType, "application/json")
+            respond("""{"instruction":"run","state":"running"}""", HttpStatusCode.OK, json)
+        }) { expectSuccess = false }
+        val api = HttpServerApi(client, config, this)
+        api.heartbeat(ready = true, stopped = false, lastModelRequestAt = null)
+        podToken = "eyJ.rotated.sig\n"
+        api.heartbeat(ready = true, stopped = false, lastModelRequestAt = null)
+        assertEquals(listOf<String?>("Bearer eyJ.first.sig", "Bearer eyJ.rotated.sig"), presented)
+        assertEquals(2, reads.count { it == "/var/run/ostrom/pod/token" })
+        // An empty or unreadable file (mid-rotation) falls back to the runner token.
+        podToken = " "
+        assertEquals("ostrom_runner_secret", config.bearer())
+        val failing = config.copy(readPodToken = { error("gone") })
+        assertEquals("ostrom_runner_secret", failing.bearer())
+        // Without the variable (Docker, registered runners, or the server not reviewing pods): the runner token.
+        assertEquals("t", RunnerConfig.from(base) { "t" }.bearer())
+        assertFalse("eyJ" in config.toString())
+    }
+
+    @Test
     fun theLaunchIsOpenedWithTheRunnerTokenOrRefused() = runTest {
         val bodies = mutableListOf<String>()
         var status = HttpStatusCode.Created

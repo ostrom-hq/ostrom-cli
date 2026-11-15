@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli.runner
 
+import kotlinx.coroutines.CancellationException
 import kotlin.uuid.Uuid
 
 /**
@@ -29,6 +30,9 @@ import kotlin.uuid.Uuid
  *   same directory.
  * @property binary The `ostrom` binary every container of the session runs (the init container copied it there): git's
  *   credential helper in the agent's container runs it too.
+ * @property podTokenFile The pod's projected service-account token (`OSTROM_POD_TOKEN_FILE`), on Kubernetes when the
+ *   server reviews it (TokenReview); the kubelet rotates it, so it is read again for every call ([bearer]).
+ * @property readPodToken Reads [podTokenFile]; a failed or empty read falls back to the runner token.
  */
 data class RunnerConfig(
     val serverUrl: String,
@@ -48,7 +52,29 @@ data class RunnerConfig(
     val stateSocket: String = DEFAULT_STATE_SOCKET,
     val gitHubConfigDirectory: String = DEFAULT_GITHUB_CONFIG_DIRECTORY,
     val binary: String = BINARY,
+    val podTokenFile: String? = null,
+    val readPodToken: (String) -> String = { "" },
 ) {
+    /**
+     * The credential of a call to the server: the pod's projected token when the server mounted one (TeamCode's runner
+     * reads it for every call), the runner token otherwise.
+     *
+     * @return The bearer token.
+     */
+    @Suppress("TooGenericExceptionCaught") // Any failed read of the file falls back, whatever the platform throws.
+    fun bearer(): String {
+        val file = podTokenFile ?: return token
+        val podToken = try {
+            readPodToken(file).trim()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            // Mid-rotation or unreadable: the runner token still authenticates the call.
+            ""
+        }
+        return podToken.ifEmpty { token }
+    }
+
     /** Whether the agent runs under a launch: every agent but the plain shell. */
     val governed: Boolean get() = agent != null && agent != SHELL_AGENT
 
@@ -62,6 +88,7 @@ data class RunnerConfig(
         val PRIVATE_VARIABLES = setOf(
             "OSTROM_RUNNER_TOKEN",
             "OSTROM_RUNNER_TOKEN_FILE",
+            "OSTROM_POD_TOKEN_FILE",
             "OSTROM_AGENT_PROMPT",
             "OSTROM_AGENT_PROMPT_FILE",
         )
@@ -107,6 +134,8 @@ data class RunnerConfig(
                 credentialSocket = optional(CREDENTIAL_VARIABLE) ?: DEFAULT_CREDENTIAL_SOCKET,
                 stateSocket = optional(STATE_VARIABLE) ?: DEFAULT_STATE_SOCKET,
                 gitHubConfigDirectory = optional("OSTROM_GH_CONFIG_DIR") ?: DEFAULT_GITHUB_CONFIG_DIRECTORY,
+                podTokenFile = optional("OSTROM_POD_TOKEN_FILE"),
+                readPodToken = readFile,
             )
         }
 
