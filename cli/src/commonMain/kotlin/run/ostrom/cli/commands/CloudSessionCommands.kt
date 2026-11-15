@@ -66,8 +66,10 @@ internal const val NO_PROFILES_MEMBER =
 private val MEMBER_REFERENCE = Regex("[A-Za-z0-9._-]{1,64}")
 
 /**
- * `--member ID|LOGIN`, as TeamCode's: an owner or an admin acts on that member's cloud sessions (`Ostrom-On-Behalf-Of`,
- * `runners.cloud.onbehalf.v1`); the creation's owner, the session's owner for a pause, a resume or a deletion.
+ * `--member ID|LOGIN`, as TeamCode's: an owner or an admin names the member a cloud session write is for
+ * (`Ostrom-On-Behalf-Of`, `runners.cloud.onbehalf.v1`). A creation makes that member the owner; a pause, a resume, a
+ * deletion or a transfer write stays on the caller's own session or transfer and is only attributed to that member
+ * (TeamCode's `visible()`, ostrom-server#650).
  */
 internal fun CliktCommand.memberOption() =
     option("--member", help = "Act for this member (id or login): owners and admins only")
