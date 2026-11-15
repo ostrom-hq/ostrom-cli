@@ -38,7 +38,7 @@ class ServiceCommandTest : CliKit() {
         if (signedIn) signIn((scratch.home / ".config" / "ostrom").toString())
         val platform = ServicePlatform(os, scratch.launcher, if (os == "windows") "S-1-5-21-123-456-789-1001" else userId, "maya", scratch.home.toString())
         val manager = ServiceManager(runner, { "C:\\Windows" }, {})
-        return cli(environment = environment, api = serverOf(emptyMap()), executable = executable, service = { ServiceCommand(it, manager, { platform }, { cloud }) })
+        return cli(environment = environment, api = serverOf(emptyMap()), executable = executable, service = { ServiceCommand(it, manager, { platform }, { cloud }, { _, report, _ -> report("Daemon ran.") }) })
             .run(arrayOf("service") + args)
     }
 

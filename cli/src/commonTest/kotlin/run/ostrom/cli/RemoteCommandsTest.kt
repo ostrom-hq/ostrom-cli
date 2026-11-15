@@ -6,9 +6,11 @@ import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.content.TextContent
 import io.ktor.http.headersOf
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import okio.FileSystem
 import okio.IOException
 import okio.Path.Companion.toPath
 import run.ostrom.cli.api.OstromApi
@@ -26,6 +28,7 @@ import run.ostrom.cli.remote.RemoteSessions
 import run.ostrom.cli.remote.remoteCommand
 import run.ostrom.cli.runner.ProcessStarter
 import run.ostrom.cli.runner.Terminal
+import run.ostrom.cli.runner.conversation.SessionUploads
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -33,6 +36,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.uuid.Uuid
 
 /**
  * `ostrom remote start|list|resume|stop|host`, as TeamCode's `RemoteCommandsTest`: the commands against a fake server,
@@ -71,6 +75,12 @@ class RemoteCommandsTest : SetupKit() {
 
     // The runner channel, over the HTTP client of the host.
     private val runnerCalls = mutableListOf<String>()
+
+    /** The bodies of the host's input polls, which say what it accepts. */
+    private val polls = mutableListOf<String>()
+
+    /** The session's uploads; none by default, so message files are off. */
+    private var uploads: (String) -> SessionUploads = { throw IOException("no temporary directory") }
     private var launch: () -> Pair<Int, String> = { 200 to """{"launchId":"L1","agentToken":"agent-token"}""" }
     private var agentView = 200 to """{"kind":"claude","conversation":"none"}"""
     private var instruction: () -> String = { "stop" }
@@ -79,6 +89,7 @@ class RemoteCommandsTest : SetupKit() {
         MockEngine { request ->
             val route = request.url.encodedPath.removePrefix("/api/v1/cloud/runner/")
             runnerCalls += route
+            if (route == "inputs") polls += (request.body as? TextContent)?.text.orEmpty()
             val (status, body) = when (route) {
                 "launch" -> launch()
                 "agent" -> agentView
@@ -146,6 +157,7 @@ class RemoteCommandsTest : SetupKit() {
         signalPollMillis = 5,
         startPollMillis = 1_000,
         startMillis = 3_000,
+        uploads = uploads,
     )
 
     private fun remote(
@@ -341,6 +353,57 @@ class RemoteCommandsTest : SetupKit() {
         answer(host, 200 to """{"orgId":"o1"}""")
         assertEquals(ExitCode.UNREACHABLE.code, remote("host", id))
         assertErr("ostrom: the server opened no execution for this host.")
+    }
+
+    @Test
+    fun aHostTheDaemonStartedRunsTheExecutionItOpened() {
+        record()
+        assertEquals(64, remote("host", id, "--accepted-epoch", "4"))
+        assertErr("ostrom: use --accepted-epoch with --org.")
+        answer("GET $session", 200 to """{"id":"$id","name":"paywall","epoch":4,"host":{"permissionMode":"ask"}}""")
+        assertEquals(0, remote("host", id, "--accepted-epoch", "4", "--org", "acme"))
+        assertErr("Hosting session $id (epoch 4) for this device's daemon, in /work/acme.")
+        assertErr("Paused: the host checkpointed")
+        assertTrue(sent().none { it == host }, "The daemon opened the execution")
+        answer("GET $session", 200 to """{"id":"$id"}""")
+        assertEquals(0, remote("host", id, "--accepted-epoch", "5", "--org", "acme"))
+        answer("GET $session", 404 to """{"error":{"type":"session_not_found","message":"gone"}}""")
+        assertTrue(remote("host", id, "--accepted-epoch", "6", "--org", "acme") != 0)
+        assertTrue(sent().none { it == host })
+    }
+
+    @Test
+    fun aHostAcceptsMessageFilesOnlyWithAnUploadsDirectoryOfThisUser() {
+        record()
+        hosting()
+        assertEquals(0, remote("host", id))
+        assertErr("Message files are off for this session: no uploads directory.")
+        assertTrue(polls.isNotEmpty() && polls.all { "\"acceptsFiles\":false" in it }, polls.toString())
+        // In this user's temporary directory, never the session's: files on, the directory kept over a pause.
+        val temporary = FileSystem.SYSTEM_TEMPORARY_DIRECTORY / "ostrom-remote-test-${Uuid.random()}"
+        try {
+            uploads = { SessionUploads.remote(it, "1000", temporary) }
+            polls.clear()
+            console.err.clear()
+            assertEquals(0, remote("host", id))
+            assertFalse("Message files are off" in console.err, console.err.toString())
+            assertTrue(polls.isNotEmpty() && polls.all { "\"acceptsFiles\":true" in it }, polls.toString())
+            assertTrue(FileSystem.SYSTEM.exists(temporary / "ostrom-1000" / id), "Kept while the session is paused")
+        } finally {
+            FileSystem.SYSTEM.deleteRecursively(temporary)
+        }
+    }
+
+    @Test
+    fun startHostsTheSessionItselfWhenTheDeviceListCannotBeRead() {
+        fileSystem.createDirectories("/work/acme".toPath())
+        answer(create, 201 to """{"id":"$id"}""")
+        hosting()
+        answer("GET /api/v1/devices", 503 to """{"error":{"type":"unavailable","message":"down"}}""")
+        val features = arrayOf("runners.cloud.v1", "runners.cloud.remote.v1", "runners.cloud.remote.daemon.v1")
+        assertEquals(0, remote("start", features = features))
+        assertTrue("GET /api/v1/devices" in sent())
+        assertErr("Paused: the host checkpointed")
     }
 
     @Test

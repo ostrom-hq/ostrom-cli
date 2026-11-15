@@ -5,7 +5,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okio.FileSystem
@@ -30,21 +29,6 @@ private const val STOP_MARKER_BYTES = 64L
 private const val LOG_LINES = 128
 private const val LOG_LINE_CHARACTERS = 240
 private const val LOG_QUEUE = 64
-private const val STOP_POLL_MILLIS = 250L
-
-/**
- * What the local service runs while it holds its lock. The device daemon (remote sessions hosted on this device) and
- * the persistent relay start here, in later slices; until then the service only waits for its stop request.
- *
- * @param report Writes a line to `service.log` (at most 240 characters; never a credential or a response body).
- * @param stopRequested True once the service manager (or `service stop`) asked it to stop: return then, after
- * finishing what it hosts.
- */
-@Suppress("UnusedParameter") // the daemon of a later slice reads the settings
-internal suspend fun runDaemon(settings: ServiceSettings, report: (String) -> Unit, stopRequested: () -> Boolean) {
-    report("Nothing to host yet; waiting to be stopped.")
-    while (!stopRequested()) delay(STOP_POLL_MILLIS)
-}
 
 /**
  * The local service. One per configuration: `daemon.lock` is held for the whole run, and a second instance exits before
@@ -54,7 +38,7 @@ internal suspend fun runDaemon(settings: ServiceSettings, report: (String) -> Un
 internal suspend fun serve(
     settings: ServiceSettings,
     onBusy: () -> Unit = {},
-    daemon: suspend (ServiceSettings, (String) -> Unit, () -> Boolean) -> Unit = ::runDaemon,
+    daemon: ServiceDaemon,
     signalled: () -> Boolean = ::serviceStopRequested,
 ) = coroutineScope {
     installServiceSignalHandlers()
@@ -68,7 +52,7 @@ internal suspend fun serve(
 
 private suspend fun serveLocked(
     settings: ServiceSettings,
-    daemon: suspend (ServiceSettings, (String) -> Unit, () -> Boolean) -> Unit,
+    daemon: ServiceDaemon,
     stop: () -> Boolean,
 ) = coroutineScope {
     val logs = Channel<String>(LOG_QUEUE)

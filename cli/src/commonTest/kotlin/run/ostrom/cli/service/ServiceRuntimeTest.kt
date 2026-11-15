@@ -9,6 +9,7 @@ package run.ostrom.cli.service
 import com.github.ajalt.clikt.core.CliktError
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.yield
 import okio.FileSystem
@@ -99,19 +100,10 @@ class ServiceRuntimeTest {
     }
 
     @Test
-    fun withNothingToHostTheDaemonWaitsForTheStopRequest() = serviceScratch {
-        val reports = mutableListOf<String>()
-        var polls = 0
-        runDaemon(ServiceSettings("a".repeat(32), "/opt/ostrom", "/tmp/config.toml", "/tmp/reg", "linux", "501"), reports::add) { ++polls > 3 }
-        assertEquals(4, polls)
-        assertEquals(1, reports.size)
-    }
-
-    @Test
     fun withTheDefaultsTheServiceRunsUntilItIsCancelled() = serviceScratch { scratch ->
         val settings = scratch.install(scratch.settings("linux"))
         assertFalse(stopRequested(settings), "no signal on the test's JVM")
-        val running = launch { serve(settings) }
+        val running = launch { serve(settings, daemon = { _, _, stop -> while (!stop()) delay(1_000) }) }
         testScheduler.advanceTimeBy(1_000)
         running.cancelAndJoin()
         assertTrue("Service started." in log(settings))
