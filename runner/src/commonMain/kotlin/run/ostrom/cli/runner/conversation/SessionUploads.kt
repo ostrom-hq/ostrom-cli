@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Ported from TeamCode's cli/cloud/agent/SessionUploads.kt with its rules and names. A failed write, check or sweep is
 // never thrown at the host: it is a [SessionUploads.Refused] reason or nothing; cancellation is rethrown first
-// (scripts/check-conventions.py). The defensive checks a test cannot reach are small functions of their own, left out of
-// the coverage with their reason.
+// (scripts/check-conventions.py). The defensive checks a test cannot reach are small functions of their own, left out
+// of the coverage with their reason.
 @file:Suppress("TooGenericExceptionCaught", "ReturnCount", "MagicNumber", "TooManyFunctions")
 
 package run.ostrom.cli.runner.conversation
