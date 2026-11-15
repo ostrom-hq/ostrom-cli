@@ -252,6 +252,27 @@ class CloudConversationCommandsTest : SetupKit() {
     }
 
     @Test
+    fun dataOfAnotherShapeStillReads() {
+        fun line(type: String, data: String) =
+            event(1, type, OstromJson.parseToJsonElement(data) as JsonObject).render()
+        assertEquals("00:00:00 #1 > ", line(CloudEventTypes.USER_MESSAGE, """{"text":5}"""))
+        assertEquals("00:00:00 #1 > ", line(CloudEventTypes.USER_MESSAGE, """{"text":{}}"""))
+        assertEquals("00:00:00 #1 > ", line(CloudEventTypes.USER_MESSAGE, "{}"))
+        assertEquals("00:00:00 #1 -- turn update --", line(CloudEventTypes.TURN, """{"costMicros":"abc"}"""))
+        assertEquals("00:00:00 #1 -- turn update --", line(CloudEventTypes.TURN, """{"costMicros":{}}"""))
+        assertEquals("00:00:00 #1 [status] k=null", line(CloudEventTypes.STATUS, """{"k":null}"""))
+        assertEquals("00:00:00 #1 [tasks] none running", line(CloudEventTypes.TASKS, """{"tasks":"x"}"""))
+        assertEquals("00:00:00 #1 [tasks] none running", line(CloudEventTypes.TASKS, """{"tasks":["x"]}"""))
+        val options = """{"requestId":"r","question":true,""" +
+            """"input":{"questions":[{"options":["x",{},{"label":null}]}]}}"""
+        assertTrue(
+            line(CloudEventTypes.PERMISSION_REQUEST, options).endsWith("(0: \"\" / 1: \"\" / 2: \"\")"),
+            line(CloudEventTypes.PERMISSION_REQUEST, options),
+        )
+        assertEquals("a  x", "a\ud83d\u0007x".printable(), "A high surrogate without its pair is hidden")
+    }
+
+    @Test
     fun logsSkipLiveDeltas() {
         val delta = event(3, CloudEventTypes.AGENT_MESSAGE_DELTA, buildJsonObject { put("text", "Half") })
         assertNull(delta.printed(), "logs print the final message only")
@@ -309,10 +330,22 @@ class CloudConversationCommandsTest : SetupKit() {
         )
         assertEquals(0, run(empty, "cloud", "logs", "cs1", "--tail", "0"))
         assertEquals("", console.out.toString())
+        val all = served + mapOf(
+            "$events?after=0&limit=200" to (200 to page(user, delta, agent, last = 3)),
+            "$events?after=0&limit=1" to (200 to page(user, last = 3)),
+            "$events?before=4&limit=200" to (200 to page(user, delta, agent, last = 3)),
+            "$events?after=1&limit=200" to (200 to page(delta, agent, last = 3)),
+        )
+        assertEquals(0, run(all, "cloud", "logs", "cs1", "--after", "0"))
+        assertEquals("10:00:01 #1 > Hi\n10:00:03 #3 Hello\n", console.out.toString(), "A delta is not printed")
+        console.out.clear()
+        assertEquals(0, run(all, "cloud", "logs", "cs1", "--tail", "2", "--json"))
+        assertEquals(2, console.out.lines().count { it.isNotEmpty() }, "--json counts deltas in --tail")
     }
 
     @Test
     fun logsRefuseABadTailAServerWithoutConversationsAndAnUnreadablePage() {
+        assertEquals(64, run(served, "cloud", "logs", "cs1", "--tail", "-1"))
         assertEquals(64, run(served, "cloud", "logs", "cs1", "--tail", "10001"))
         assertErr("Use --tail between 0 and 10000.")
         assertEquals(69, run(mapOf(capabilities("runners.cloud.v1")), "cloud", "logs", "cs1"))
@@ -336,7 +369,7 @@ class CloudConversationCommandsTest : SetupKit() {
         onSleep = {
             when (++turn) {
                 1 -> live["$events?after=1&limit=200"] = 503 to "{}"
-                3 -> live["$events?after=1&limit=200"] = 200 to page(first, second, last = 2)
+                3 -> live["$events?after=1&limit=200"] = 200 to page(first, second, last = 2, nextAfter = 2)
                 4 -> live["GET /api/v1/cloud/sessions/cs1"] = 200 to """{"id":"cs1","status":"terminated"}"""
             }
         }
@@ -346,9 +379,9 @@ class CloudConversationCommandsTest : SetupKit() {
         assertErr("Disconnected; reconnecting from event 1.")
         assertErr("The session has ended.")
         assertEquals(
-            listOf(2_000L, 2_000L, 4_000L) + List(5) { 2_000L },
+            listOf(2_000L, 2_000L, 4_000L) + List(4) { 2_000L },
             waits,
-            "Backoff after failures, two seconds otherwise; the session is read every fifth empty page",
+            "Backoff after failures, a page with more at once, 2 s otherwise; the session every fifth empty page",
         )
     }
 
@@ -358,10 +391,13 @@ class CloudConversationCommandsTest : SetupKit() {
         val live = served.toMutableMap()
         live["$events?after=1&limit=200"] = 200 to page(old, last = 1, nextAfter = 2)
         live["GET /api/v1/cloud/sessions/cs1"] = 200 to """{"id":"cs1","status":"terminated"}"""
-        onSleep = { live["$events?after=1&limit=200"] = 200 to page(last = 1) }
+        var turn = 0
+        onSleep = {
+            live["$events?after=1&limit=200"] = 200 to if (++turn == 1) page(old, last = 1) else page(last = 1)
+        }
         assertEquals(0, runLive(live, "cloud", "logs", "cs1", "--after", "1", "-f"))
-        assertEquals(listOf(2_000L), waits, "The same page is asked for again after the pause only")
-        assertEquals(4, sent().count { it.startsWith(events) })
+        assertEquals(listOf(2_000L, 2_000L), waits, "The same page is asked for again after the pause only")
+        assertEquals(5, sent().count { it.startsWith(events) })
     }
 
     @Test

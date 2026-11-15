@@ -62,7 +62,18 @@ internal const val NO_CLOUD_PERMISSIONS =
 private fun CliDependencies.conversationAccess(server: String?, org: String?): OrgAccess =
     cloudAccess(server, org, ServerFeatures.RUNNERS_CLOUD_CONVERSATION, NO_CLOUD_CONVERSATION)
 
-private fun JsonObject.str(name: String) = (this[name] as? JsonPrimitive)?.takeIf { it.isString }?.content
+private fun JsonObject.str(name: String): String? {
+    val value = this[name] as? JsonPrimitive
+    return if (value != null && value.isString) value.content else null
+}
+
+/** [name]'s string, or [absent]. */
+private fun JsonObject.str(name: String, absent: String): String = str(name) ?: absent
+
+/** [value] put through [shown], or "" when absent: `a?.let { … } ?: ""` without a branch no value can take. */
+private inline fun ifPresent(value: String?, shown: (String) -> String): String =
+    if (value == null) "" else shown(value)
+
 private fun JsonElement?.isTrue() = (this as? JsonPrimitive)?.booleanOrNull == true
 private fun String.preview(limit: Int) =
     replace('\n', ' ').let { if (it.length > limit) it.take(limit - 1) + "…" else it }
@@ -75,11 +86,12 @@ private fun questions(input: JsonElement?): String =
     ((input as? JsonObject)?.get("questions") as? JsonArray).orEmpty().withIndex().joinToString("") { (index, item) ->
         val question = item as? JsonObject ?: JsonObject(emptyMap())
         val options = (question["options"] as? JsonArray).orEmpty().mapIndexed { option, label ->
-            "$option: ${(((label as? JsonObject)?.get("label") as? JsonPrimitive)?.contentOrNull ?: "").quoted()}"
+            val text = ((label as? JsonObject)?.get("label") as? JsonPrimitive)?.contentOrNull
+            "$option: ${(text ?: "").quoted()}"
         }
         val several = question["multiSelect"].isTrue()
         val listed = if (options.isEmpty()) "" else " (${options.joinToString(" / ").printable()})"
-        val asked = (question.str("question") ?: "").quoted().printable()
+        val asked = question.str("question", "").quoted().printable()
         "\n    ? $index: $asked$listed" + if (several) " several" else ""
     }
 
@@ -97,27 +109,29 @@ private fun clockOf(at: String) = if (at.length >= TIME_END) at.substring(TIME_S
 @Suppress("CyclomaticComplexMethod") // one branch per event type, as TeamCode's
 internal fun CloudEvent.render(): String {
     val body = when (type) {
-        CloudEventTypes.USER_MESSAGE -> "> " + (data.str("text") ?: "")
-        CloudEventTypes.AGENT_MESSAGE -> data.str("text") ?: ""
+        CloudEventTypes.USER_MESSAGE -> "> " + data.str("text", "")
+        CloudEventTypes.AGENT_MESSAGE -> data.str("text", "")
         CloudEventTypes.TOOL_CALL ->
-            "[tool] ${data.str("name") ?: "tool"} ${data["input"]?.toString()?.preview(TOOL_INPUT) ?: ""}".trimEnd()
+            ("[tool] ${data.str("name", "tool")} " + ifPresent(data["input"]?.toString()) { it.preview(TOOL_INPUT) })
+                .trimEnd()
         CloudEventTypes.TOOL_RESULT -> "[result${if (data["isError"].isTrue()) ", error" else ""}] " +
-            (data.str("output") ?: "").preview(TOOL_OUTPUT)
+            data.str("output", "").preview(TOOL_OUTPUT)
         CloudEventTypes.TURN -> {
-            val cost = (data["costMicros"] as? JsonPrimitive)?.longOrNull?.let(::dollars)?.let { ", $it" } ?: ""
-            "-- turn ${data.str("phase") ?: "update"}$cost --"
+            val micros = (data["costMicros"] as? JsonPrimitive)?.longOrNull
+            val cost = ifPresent(if (micros == null) null else dollars(micros)) { ", $it" }
+            "-- turn ${data.str("phase", "update")}$cost --"
         }
         CloudEventTypes.STATUS -> "[status] " + data.entries.joinToString(", ") { (key, value) ->
-            "$key=${(value as? JsonPrimitive)?.contentOrNull ?: value}"
+            "$key=${(value as? JsonPrimitive)?.contentOrNull ?: value.toString()}"
         }
         CloudEventTypes.ERROR ->
-            "[error] ${data.str("code") ?: "error"}: ${data.str("message") ?: ""}".trimEnd(' ', ':')
+            "[error] ${data.str("code", "error")}: ${data.str("message", "")}".trimEnd(' ', ':')
         CloudEventTypes.INPUT -> inputLine()
         CloudEventTypes.PERMISSION_REQUEST -> permissionLine()
         CloudEventTypes.PERMISSION_EXPIRED ->
-            "[expired ${data.str("requestId") ?: ""}] ${data.str("message") ?: EXPIRED}".printable()
+            "[expired ${data.str("requestId", "")}] ${data.str("message", EXPIRED)}".printable()
         CloudEventTypes.TASKS -> (data["tasks"] as? JsonArray).orEmpty()
-            .mapNotNull { (it as? JsonObject)?.str("description")?.preview(TASK_DESCRIPTION) }
+            .mapNotNull { (it as? JsonObject)?.str("description") }.map { it.preview(TASK_DESCRIPTION) }
             .let { if (it.isEmpty()) "[tasks] none running" else "[tasks] ${it.size} running: ${it.joinToString()}" }
         else -> "[$type] $data"
     }
@@ -127,18 +141,18 @@ internal fun CloudEvent.render(): String {
 }
 
 private fun CloudEvent.inputLine(): String {
-    val reason = data.str("reason")?.let { ": $it" } ?: ""
-    val id = data.str("inputId")?.take(INPUT_ID) ?: ""
-    val head = "[${data.str("kind") ?: "message"} $id ${data.str("status") ?: ""}$reason]"
+    val reason = ifPresent(data.str("reason")) { ": $it" }
+    val id = data.str("inputId", "").take(INPUT_ID)
+    val head = "[${data.str("kind", "message")} $id ${data.str("status", "")}$reason]"
     // A permission answer says which request it answered, how, and who decided.
-    val answered = data.str("requestId")?.let { request ->
-        val by = data.str("authorId")?.printable() ?: "?"
+    val answered = ifPresent(data.str("requestId")) { request ->
+        val by = data.str("authorId", "?").printable()
         if (data.str("status") == CloudInputStatuses.CONSUMED) {
-            " ${data.str("behavior") ?: "answer"} ${request.printable()} by $by"
+            " ${data.str("behavior", "answer")} ${request.printable()} by $by"
         } else {
             " (an answer to ${request.printable()} by $by, not applied)"
         }
-    } ?: ""
+    }
     return head + answered
 }
 
@@ -150,10 +164,11 @@ private fun CloudEvent.permissionLine(): String {
     val input = if (question && data["input"] != null) {
         ""
     } else {
-        data["input"]?.toString() ?: data.str("inputPreview")?.let { "$it… $CUT" } ?: ""
+        val whole = data["input"]
+        if (whole != null) whole.toString() else ifPresent(data.str("inputPreview")) { "$it… $CUT" }
     }
-    val head = "[${if (question) "question" else "permission"} ${data.str("requestId")?.printable() ?: ""}] "
-    return head + "${data.str("toolName") ?: "tool"} $input".printable().trimEnd() +
+    val head = "[${if (question) "question" else "permission"} ${data.str("requestId", "").printable()}] "
+    return head + "${data.str("toolName", "tool")} $input".printable().trimEnd() +
         if (question) questions(data["input"]) else ""
 }
 
@@ -340,7 +355,7 @@ private suspend fun OrgAccess.drain(id: String, from: Long, print: (CloudEvent) 
 /** What a refusal of the transcript says (401, 403, 404: asking again would not help), or null to ask again. */
 private fun refusedTranscript(answer: ServerAnswer.Failed): String? =
     if (answer.status in REFUSALS) {
-        "The server refused the transcript (HTTP ${answer.status}${answer.type?.let { ", $it" } ?: ""})."
+        "The server refused the transcript (HTTP ${answer.status}${ifPresent(answer.type) { ", $it" }})."
     } else {
         null
     }
@@ -349,7 +364,7 @@ private fun refusedTranscript(answer: ServerAnswer.Failed): String? =
 private suspend fun ended(access: OrgAccess, id: String): Boolean {
     val answer = access.server.get(cloudSessionPath(id), access.signed.token)
     if (answer is ServerAnswer.Failed) refusedTranscript(answer)?.let { throw stopWith(ExitCode.REFUSED, it) }
-    return (answer as? ServerAnswer.Ok)?.body?.text("status") in ENDED
+    return answer is ServerAnswer.Ok && answer.body.text("status") in ENDED
 }
 
 /** Decodes an input the server answered. */
@@ -504,8 +519,8 @@ internal class CloudAnswerCommand(private val dependencies: CliDependencies) : C
 
     private fun indexed(value: String, usage: String): Pair<Int, String> {
         val split = value.indexOf('=')
-        val question = value.take(split.coerceAtLeast(0)).trim().toIntOrNull()?.takeIf { split > 0 && it >= 0 }
-            ?: throw UsageError("Use $usage with a question index from 0.")
+        val question = if (split > 0) value.take(split).trim().toIntOrNull() else null
+        if (question == null || question < 0) throw UsageError("Use $usage with a question index from 0.")
         return question to value.drop(split + 1)
     }
 }
