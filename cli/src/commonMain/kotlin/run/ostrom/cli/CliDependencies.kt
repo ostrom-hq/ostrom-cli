@@ -186,7 +186,7 @@ class CliDependencies(
     }
 
     /** The path of `config.toml` in the CLI folder [directory]. */
-    fun configFile(directory: String): String = (directory.toPath() / "config.toml").toString()
+    fun configFile(directory: String): String = configFileIn(directory)
 
     /** The real wiring. */
     companion object {
@@ -398,3 +398,6 @@ internal class KeptOpen(private val api: OstromApi) : OstromApi by api {
 @ExcludeFromCoverage
 internal fun hiddenLine(): String? =
     com.github.ajalt.mordant.terminal.Terminal().readLineOrNull(hideInput = true)
+
+/** The path of `config.toml` in the CLI folder [directory]. */
+internal fun configFileIn(directory: String): String = (directory.toPath() / "config.toml").toString()

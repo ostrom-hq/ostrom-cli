@@ -12,6 +12,8 @@ import run.ostrom.cli.hooks.runtime.GateTexts
 import run.ostrom.cli.hooks.runtime.HookReplies
 import run.ostrom.cli.platform.ConsoleImpl
 import run.ostrom.cli.platform.EnvironmentImpl
+import run.ostrom.cli.platform.FileStoreImpl
+import run.ostrom.cli.platform.stderrIsTerminal
 import run.ostrom.cli.platform.ProcessCaptureImpl
 import run.ostrom.cli.platform.SystemInstallationFiles
 import run.ostrom.cli.platform.currentExecutable
@@ -40,6 +42,11 @@ fun main(args: Array<String>) {
         ?.let(::exitProcess)
     // `ostrom update` asks a new binary, before putting it in place, whether it runs here as that version and API
     installationProbeExit(args.asList(), BuildInfo.VERSION, ServerFeatures.SUPPORTED_API_VERSIONS)?.let(::exitProcess)
+    // `ostrom --version` is measured at start-up (scripts/measure.py): answered before the command tree is built
+    val usage = { QuickVersion.usageState(environment, FileStoreImpl(), BuildInfo.POSTHOG_KEY) { _, _ -> } }
+    if (QuickVersion.answer(args.asList(), environment, usage, ::stderrIsTerminal, ConsoleImpl()::out)) {
+        exitProcess(0)
+    }
     if (args.firstOrNull() == "hook" && args.getOrNull(1) !in HELP) {
         if (args.getOrNull(1) == HookKind.GATE.command) {
             // a crash no catch sees (a stack overflow, an abort) refuses the tool too: any other code lets it run.
