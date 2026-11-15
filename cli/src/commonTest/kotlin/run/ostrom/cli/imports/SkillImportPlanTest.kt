@@ -80,7 +80,8 @@ class SkillImportPlanTest {
     @Test
     fun eachSkillAndHookCarriesTheVersionItDelivers() {
         val parts = parts()
-        val (review, notes, old, empty) = parts.skills
+        val (review, notes, old) = parts.skills
+        val empty = parts.skills[3]
         assertEquals("1.0.0", review.text("pinnedVersion"))
         assertEquals(listOf("1.0.0"), review.list("versions").map { it.jsonObject.text("version") })
         assertEquals("1", review["omittedVersions"].toString())

@@ -235,12 +235,14 @@ class ImportTeamCodeUseCase(
         val actions = (COUNTS + "revive_at_cutover").associateWith { action ->
             lines.count { it.text("action") == action }
         }
-        return objectOf(
-            "items" to lines,
-            *COUNTS.map { it to actions[it] }.toTypedArray(),
-            REVIVE to actions["revive_at_cutover"],
-            PENDING to lines.count { it.text("refreshOwnership") == "pending_handover" },
-            ACCESS_ONLY to lines.count { it.text("refreshOwnership") == "access_only" },
+        val counts = COUNTS.associateWith { JsonPrimitive(actions.getValue(it)) }
+        return JsonObject(
+            objectOf(
+                "items" to lines,
+                REVIVE to actions["revive_at_cutover"],
+                PENDING to lines.count { it.text("refreshOwnership") == "pending_handover" },
+                ACCESS_ONLY to lines.count { it.text("refreshOwnership") == "access_only" },
+            ) + counts,
         )
     }
 

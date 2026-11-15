@@ -11,13 +11,13 @@ import kotlinx.serialization.json.JsonObject
 // never printed nor written to disk.
 
 /**
- * The catalog's parts of the body.
+ * The catalog's parts of the body: the skills, hooks and environment variants an import sends.
  *
  * @property environment `variables`, `variableAssignments` and `variableExclusions`.
  * @property skills One object per skill, with its files.
  * @property hooks One object per hook, with its files.
  */
-internal class CatalogParts(val environment: JsonObject, val skills: List<JsonObject>, val hooks: List<JsonObject>)
+internal class SkillImportPlan(val environment: JsonObject, val skills: List<JsonObject>, val hooks: List<JsonObject>)
 
 /**
  * The skills, hooks and environment variants of [catalog]. Each skill and hook carries one version: the one TeamCode
@@ -34,7 +34,7 @@ internal fun catalogParts(
     files: TeamCodeFiles,
     memberMap: Map<String, String>,
     open: (envelope: String, context: String, what: String) -> String,
-): CatalogParts {
+): SkillImportPlan {
     val environment = objectOf(
         "variables" to catalog.variables.map { variable(it, open) },
         "variableAssignments" to catalog.variableAssignments.filter { it["member_id"] in memberMap }.map {
@@ -55,7 +55,7 @@ internal fun catalogParts(
     val hooks = Delivered(catalog.hooks, catalog.hookVersions, "hook_id")
     val skillFiles = read(files, "skill_files", skills.chosenIds)
     val hookFiles = read(files, "hook_files", hooks.chosenIds)
-    return CatalogParts(
+    return SkillImportPlan(
         environment,
         catalog.skills.map { row ->
             val version = skills.chosen[row["id"]]
@@ -73,28 +73,29 @@ internal fun catalogParts(
                 "decisions" to decisions(catalog.skillAssignments, "skill_id", row),
             )
         },
-        catalog.hooks.map { row ->
-            objectOf(
-                "id" to row["id"],
-                "name" to row["name"],
-                "allMembers" to (row["all_members"] == "1"),
-                "pinnedVersion" to hooks.pinned[row["id"]],
-                "versions" to listOfNotNull(hooks.chosen[row["id"]]).map {
-                    objectOf(
-                        "version" to it["version"],
-                        "events" to "${it["events"]}".split(',').filter(String::isNotEmpty),
-                        "matcher" to it["matcher"],
-                        "command" to it["command"],
-                        "timeoutSeconds" to "${it["timeout_seconds"]}".toIntOrNull(),
-                        "files" to filesOf(hookFiles, it),
-                    )
-                },
-                "omittedVersions" to hooks.omitted(row),
-                "decisions" to decisions(catalog.hookAssignments, "hook_id", row),
-            )
-        },
+        catalog.hooks.map { hook(it, hooks, hookFiles, catalog.hookAssignments) },
     )
 }
+
+private fun hook(row: Row, hooks: Delivered, files: Map<String, List<TeamCodeFile>>, assignments: List<Row>) =
+    objectOf(
+        "id" to row["id"],
+        "name" to row["name"],
+        "allMembers" to (row["all_members"] == "1"),
+        "pinnedVersion" to hooks.pinned[row["id"]],
+        "versions" to listOfNotNull(hooks.chosen[row["id"]]).map {
+            objectOf(
+                "version" to it["version"],
+                "events" to "${it["events"]}".split(',').filter(String::isNotEmpty),
+                "matcher" to it["matcher"],
+                "command" to it["command"],
+                "timeoutSeconds" to "${it["timeout_seconds"]}".toIntOrNull(),
+                "files" to filesOf(files, it),
+            )
+        },
+        "omittedVersions" to hooks.omitted(row),
+        "decisions" to decisions(assignments, "hook_id", row),
+    )
 
 /**
  * The bodies of an import: [base] with as many skills and hooks as fit in [limit] characters, then as many bodies of
@@ -105,7 +106,7 @@ internal fun catalogParts(
 internal fun batches(
     base: JsonObject,
     carry: JsonObject,
-    parts: CatalogParts,
+    parts: SkillImportPlan,
     limit: Int,
 ): List<JsonObject> {
     val items = parts.skills.map { "skills" to it } + parts.hooks.map { "hooks" to it }
