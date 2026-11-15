@@ -23,6 +23,7 @@ internal class AutomationOptions(
     val workflow: String? = null,
     val inputs: List<Pair<String, String>>? = null,
     val repository: String? = null,
+    val profile: String? = null,
     val agent: String? = null,
     val model: String? = null,
     val effort: String? = null,
@@ -41,6 +42,7 @@ internal object Clear {
     const val MODEL = "model"
     const val EFFORT = "effort"
     const val SAMPLE = "sample-payload"
+    const val PROFILE = "profile"
 }
 
 private const val NEEDS_TRIGGER = "An automation needs a trigger: --cron EXPR with --timezone ZONE, or --webhook."
@@ -149,6 +151,7 @@ private fun workflowAction(old: JsonObject?, given: AutomationOptions, workflowI
         "workflowId" to workflowId,
         "inputs" to inputs,
         "repository" to (given.repository ?: old.str("repository")),
+        "profileId" to profileOf(old, given),
         "agent" to (given.agent ?: old.str("agent").takeIf { same }),
         "maxRuntimeMinutes" to (given.maxRuntimeMinutes ?: old.int("maxRuntimeMinutes").takeIf { same }),
     )
@@ -167,5 +170,13 @@ private fun cloudAction(old: JsonObject?, given: AutomationOptions): JsonObject 
         "effort" to (if (Clear.EFFORT in given.clears) null else given.effort ?: kept.str("effort")),
         "maxRuntimeMinutes" to (given.maxRuntimeMinutes ?: kept.int("maxRuntimeMinutes")),
         "repository" to (given.repository ?: old.str("repository")),
+        "profileId" to profileOf(old, given),
     )
+}
+
+/** The cloud profile, the saved one unless given or cleared; it is the automation's, whatever its action. */
+private fun profileOf(old: JsonObject?, given: AutomationOptions): String? {
+    val cleared = Clear.PROFILE in given.clears
+    if (given.profile != null && cleared) refuse("--profile and --clear-profile say opposite things.")
+    return if (cleared) null else given.profile ?: old.str("profileId")
 }

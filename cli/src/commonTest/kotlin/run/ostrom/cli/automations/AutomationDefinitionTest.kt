@@ -36,7 +36,7 @@ class AutomationDefinitionTest {
             AutomationOptions(
                 name = "Nightly", cron = "0 3 * * *", timezone = "Europe/Paris", catchup = "one", graceMinutes = 30,
                 prompt = "Triage", agent = "claude", model = "opus", effort = "high", maxRuntimeMinutes = 45,
-                repository = "acme/web", overlap = "skip", maxRunsPerDay = 10,
+                repository = "acme/web", profile = "p-1", overlap = "skip", maxRunsPerDay = 10,
             ),
             null,
         )
@@ -45,7 +45,7 @@ class AutomationDefinitionTest {
                 """{"name":"Nightly","trigger":{"kind":"cron","cron":"0 3 * * *","timezone":"Europe/Paris",
                 "catchup":"one","catchupGraceMinutes":30},
                 "action":{"prompt":"Triage","agent":"claude","model":"opus","effort":"high","maxRuntimeMinutes":45,
-                "repository":"acme/web"},"overlap":"skip","maxRunsPerDay":10}""",
+                "repository":"acme/web","profileId":"p-1"},"overlap":"skip","maxRunsPerDay":10}""",
             ),
             body,
         )
@@ -96,6 +96,12 @@ class AutomationDefinitionTest {
         )
         assertEquals("Day", renamed["name"].toString().trim('"'))
         assertTrue("\"cron\":\"0 4 * * *\"" in renamed.toString() && "\"version\":4" in renamed.toString())
+        val profiled = definitionOf(cronCloud, AutomationOptions(profile = "p-2"), null)
+        assertTrue("\"profileId\":\"p-2\"" in profiled["action"].toString())
+        val kept = definitionOf(profiled, AutomationOptions(workflow = "w2"), "w2")
+        assertTrue("\"profileId\":\"p-2\"" in kept["action"].toString(), "The profile is the automation's")
+        val unprofiled = definitionOf(profiled, AutomationOptions(clears = setOf(Clear.PROFILE)), null)
+        assertTrue("profileId" !in unprofiled["action"].toString())
         val cleared = definitionOf(cronCloud, AutomationOptions(clears = setOf(Clear.MODEL, Clear.EFFORT)), null)
         assertTrue("model" !in cleared["action"].toString() && "effort" !in cleared["action"].toString())
         val keptHook = definitionOf(webhookWorkflow, AutomationOptions(), null)
@@ -179,6 +185,8 @@ class AutomationDefinitionTest {
         assertTrue("--model and --clear-model" in refused(cronCloud, noModel))
         val noEffort = AutomationOptions(effort = "e", clears = setOf(Clear.EFFORT))
         assertTrue("--effort and --clear-effort" in refused(cronCloud, noEffort))
+        val noProfile = AutomationOptions(profile = "p", clears = setOf(Clear.PROFILE))
+        assertTrue("--profile and --clear-profile" in refused(cronCloud, noProfile))
         for (opts in listOf(base.changed(prompt = "p"), base.changed(model = "m"), base.changed(effort = "e"))) {
             assertTrue("for a cloud action" in refused(null, opts.changed(workflow = "w"), "w1"))
         }

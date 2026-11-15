@@ -13,3 +13,9 @@ internal fun inputMap(pairs: List<Pair<String, String>>): Map<String, String> {
         ?.let { refuse("Input $it is given twice: pass --input $it=... once.") }
     return pairs.toMap()
 }
+
+/** [value] trimmed when it names a cloud profile (not blank), else a refusal. */
+internal fun requireProfile(value: String): String {
+    if (value.isBlank()) refuse("--profile needs a cloud profile's id.")
+    return value.trim()
+}
