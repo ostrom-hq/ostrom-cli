@@ -46,7 +46,8 @@ class CloudTransferCommandsTest : SetupKit() {
     @Test
     fun theSessionAndTheRecipientAreChosenFromLists() {
         val sessions = """{"items":[{"id":"cs9","status":"terminated"},""" +
-            """{"id":"cs1","name":"Fix CI","status":"paused","agent":"claude"}]}"""
+            """{"id":"cs7","status":"paused","transferId":"ct0"},""" +
+            """{"id":"cs1","name":"Fix CI","status":"paused","agent":"claude"}],"next":"cs0"}"""
         val members = """{"recipients":[{"id":"m1","login":"maya","administrator":false},""" +
             """{"id":"m2","login":"noor","administrator":true}]}"""
         val chosen = routes(
@@ -66,6 +67,9 @@ class CloudTransferCommandsTest : SetupKit() {
         typed += "7"
         assertEquals(64, run(chosen, "cloud", "transfer"))
         assertErr("no choice \"7\"")
+        typed += "x"
+        assertEquals(64, run(chosen, "cloud", "transfer"))
+        assertErr("no choice \"x\"")
     }
 
     @Test
@@ -124,6 +128,30 @@ class CloudTransferCommandsTest : SetupKit() {
         assertErr("no state \"odd\"")
         val all = routes("GET /api/v1/cloud/transfers?limit=50" to (200 to """{"items":[]}"""))
         assertEquals(0, run(all, "cloud", "transfers", "list"))
+    }
+
+    @Test
+    fun aSparseTransferGetsQuestionMarksAndOnlyOffersExpire() {
+        val sparse = """{"id":"ct3","state":"accepted","expiresAt":"2026-11-16T10:00:00Z"}"""
+        val rows = routes("GET /api/v1/cloud/transfers?limit=50" to (200 to """{"items":[{},$sparse]}"""))
+        assertEquals(0, run(rows, "cloud", "transfers", "list"))
+        assertEquals("?\t?\t?\t? -> ?\tupdated ?\nct3\taccepted\t?\t? -> ?\tupdated ?\n", console.out.toString())
+        console.out.clear()
+        val done = """{"id":"ct4","state":"completed","completedAt":"2026-11-15T11:00:00Z"}"""
+        val shown = routes("GET /api/v1/cloud/transfers/ct4" to (200 to done))
+        assertEquals(0, run(shown, "cloud", "transfers", "show", "ct4"))
+        assertTrue(console.out.contains("Completed:    2026-11-15T11:00:00Z\n"), console.out.toString())
+    }
+
+    @Test
+    fun theListStopsAtFiveHundred() {
+        val page = """{"items":[${List(50) { offered }.joinToString(",")}],"next":"c1"}"""
+        val endless = routes(
+            "GET /api/v1/cloud/transfers?limit=50" to (200 to page),
+            "GET /api/v1/cloud/transfers?before=c1&limit=50" to (200 to page),
+        )
+        assertEquals(0, run(endless, "cloud", "transfers", "list"))
+        assertEquals(500, console.out.toString().lines().count { it.isNotEmpty() })
     }
 
     @Test

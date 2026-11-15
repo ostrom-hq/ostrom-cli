@@ -41,10 +41,6 @@ private val TRANSFERABLE = setOf("running", "pausing", "paused", "resuming")
 /** The most transfers `transfers list` prints. */
 private const val MAX_LISTED = 500
 
-/** The sessions a picker shows at most, and the pages of the session list it reads to find them. */
-private const val PICKED = 20
-private const val SESSION_PAGES = 10
-
 /** The page size of the transfers list (the contract's cap). */
 private const val PAGE = 50
 
@@ -53,18 +49,26 @@ private fun CliDependencies.transferAccess(server: String?, org: String?): OrgAc
 
 private fun transferPath(id: String) = "$TRANSFERS/${segment(id)}"
 
+/** When an offer lapses; null for any other state, whose expiry no longer matters. */
+private fun JsonObject.offerExpiry(): String? {
+    val at = text("expiresAt")
+    return if (at != null && text("state") == CloudTransferStates.OFFERED) at else null
+}
+
+private fun JsonObject.field(key: String): String = text(key) ?: "?"
+
 /** `ct_1  offered  cs_1  m1 -> m2  expires 2026-...`: one row of the transfers list, as TeamCode's. */
 internal fun JsonObject.transferLine(): String {
     val failure = child("failure")?.text("code")
-    val timing = text("expiresAt")?.takeIf { text("state") == CloudTransferStates.OFFERED }?.let { "expires $it" }
-        ?: "updated ${text("updatedAt") ?: "?"}"
+    val expiry = offerExpiry()
+    val timing = if (expiry == null) "updated ${field("updatedAt")}" else "expires $expiry"
     return listOf(
-        text("id") ?: "?",
-        text("state") ?: "?",
-        text("sessionId") ?: "?",
-        "${text("fromMemberId") ?: "?"} -> ${text("toMemberId") ?: "?"}",
+        field("id"),
+        field("state"),
+        field("sessionId"),
+        "${field("fromMemberId")} -> ${field("toMemberId")}",
         timing,
-    ).joinToString("\t") + (failure?.let { "\t$it" } ?: "")
+    ).joinToString("\t") + failure?.let { "\t$it" }.orEmpty()
 }
 
 /** Said on every acceptance: what the recipient takes over runs with the recipient's credentials. */
@@ -116,14 +120,13 @@ internal class CloudTransferCommand(private val dependencies: CliDependencies) :
     private fun pickSession(access: OrgAccess): String {
         val sessions = mutableListOf<JsonObject>()
         var before: String? = null
-        var pages = 0
         do {
-            val path = before?.let { "$CLOUD_SESSIONS?before=${segment(it)}" } ?: CLOUD_SESSIONS
+            val path = if (before == null) CLOUD_SESSIONS else "$CLOUD_SESSIONS?before=${segment(before)}"
             val page = access.read(path, "No cloud sessions.")
             sessions += page.list("items").filterIsInstance<JsonObject>()
                 .filter { it.text("status") in TRANSFERABLE && it.text("transferId") == null }
             before = page.text("next")
-        } while (before != null && sessions.size < PICKED && ++pages < SESSION_PAGES)
+        } while (before != null && sessions.isEmpty())
         if (sessions.isEmpty()) {
             throw stopWith(
                 ExitCode.NOT_FOUND,
@@ -134,7 +137,7 @@ internal class CloudTransferCommand(private val dependencies: CliDependencies) :
             val name = it.text("name") ?: it.text("id")
             "$name  ${it.text("status")} · ${it.text("agent") ?: "-"} · ${it.text("id")}"
         }
-        return sessions[choose("Which session do you transfer?", labels, "SESSION")].text("id") ?: "?"
+        return sessions[choose("Which session do you transfer?", labels, "SESSION")].field("id")
     }
 
     private fun pickRecipient(access: OrgAccess, sessionId: String): String {
@@ -145,9 +148,9 @@ internal class CloudTransferCommand(private val dependencies: CliDependencies) :
         if (others.isEmpty()) throw stopWith(ExitCode.NOT_FOUND, "ostrom: no other member can receive a session.")
         val labels = others.map {
             val admin = if (it.booleanField("administrator") == true) "administrator · " else ""
-            "${it.text("login") ?: "?"}  $admin${it.text("id")}"
+            "${it.field("login")}  $admin${it.text("id")}"
         }
-        return others[choose("Who receives it?", labels, "--to")].text("id") ?: "?"
+        return others[choose("Who receives it?", labels, "--to")].field("id")
     }
 
     /** The index of the line [labels] the person typed the number of; without a terminal, [flag] is asked for. */
@@ -249,8 +252,8 @@ private class CloudTransfersShowCommand(private val dependencies: CliDependencie
             "Requested by" to initiated,
             "Decided by" to decided,
             "Then" to if (t.booleanField("resume") == true) "resume for the recipient" else "stay paused",
-            "Expires" to t.text("expiresAt")?.takeIf { t.text("state") == CloudTransferStates.OFFERED },
-            "Completed" to t.text("completedAt")?.let { it + (t["atEpoch"]?.let { n -> " after epoch $n" } ?: "") },
+            "Expires" to t.offerExpiry(),
+            "Completed" to t.text("completedAt")?.let { it + t["atEpoch"]?.let { n -> " after epoch $n" }.orEmpty() },
             "Failure" to failure
         )
         rows.forEach { (label, value) ->
@@ -280,7 +283,8 @@ private class CloudTransfersAcceptCommand(private val dependencies: CliDependenc
 
     override fun run() {
         val access = dependencies.transferAccess(server, org)
-        val body = JsonObject(resume?.let { mapOf("resume" to JsonPrimitive(it)) } ?: emptyMap())
+        val choice = resume
+        val body = JsonObject(if (choice == null) emptyMap() else mapOf("resume" to JsonPrimitive(choice)))
         val accepted = access.write("POST", "${transferPath(id)}/accept", body, "No transfer $id.")
         dependencies.console.let { if (json) it.data("$accepted\n") else it.out(accepted.transferLine() + "\n") }
         dependencies.console.err(ACCEPTED_WORKSPACE_NOTICE + "\n")
