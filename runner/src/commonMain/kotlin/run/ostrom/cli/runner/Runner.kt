@@ -6,7 +6,6 @@
 package run.ostrom.cli.runner
 
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
@@ -21,7 +20,6 @@ import run.ostrom.cli.runner.conversation.RunnerAgent
 import kotlin.concurrent.Volatile
 import kotlin.time.Clock
 import kotlin.time.Duration
-import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 import kotlin.uuid.Uuid
@@ -283,75 +281,9 @@ class Runner(
             done
         }
 
-    /**
-     * A conversation's lifecycle (TeamCode's `RunnerLoop` with its agent): the agent runs beside the heartbeats; a
-     * stop drains it first (the turn finishes or is interrupted, the transcript is flushed), heartbeating meanwhile,
-     * then reports it stopped. A run instruction while draining cancels the drain. The agent's input poll, which sees
-     * a pause first, and the end of the drain start the next heartbeat at once.
-     *
-     * @return The exit code: 0 after a stop, 1 when the execution ended or was fenced.
-     */
-    @Suppress("NestedBlockDepth") // The heartbeat loop and its three instructions.
-    private suspend fun converse(agent: RunnerAgent): Int = coroutineScope {
-        val wake = Channel<Unit>(Channel.CONFLATED)
-        agent.onInstructionChange { wake.trySend(Unit) }
-        val running = launch { agent.run() }
-        running.invokeOnCompletion { wake.trySend(Unit) }
-        var draining: Deferred<Boolean>? = null
-        try {
-            while (!agent.fenced) {
-                val instruction = try {
-                    ask(background || agent.backgroundWork)
-                } catch (error: ExecutionEndedException) {
-                    log("execution ended: ${error.message}")
-                    return@coroutineScope 1
-                }
-                if (instruction == Instruction.STOP) {
-                    val drain = draining ?: async { agent.drain(clock.now().plus(PAUSE_DRAIN).toEpochMilliseconds()) }
-                        .also {
-                            log("stopping: draining the agent")
-                            it.invokeOnCompletion { wake.trySend(Unit) }
-                            draining = it
-                        }
-                    if (drain.isCompleted) {
-                        log("stopping")
-                        stopped(ready = true)
-                        return@coroutineScope 0
-                    }
-                } else if (instruction == Instruction.RUN) {
-                    draining?.let {
-                        it.cancel()
-                        draining = null
-                        agent.resumeAfterDrain()
-                    }
-                }
-                withTimeoutOrNull(heartbeatInterval) { wake.receive() }
-            }
-            log("execution fenced")
-            1
-        } finally {
-            withContext(NonCancellable) { agent.stop() }
-            running.cancel()
-        }
-    }
-
-    /**
-     * One heartbeat of a ready runner.
-     *
-     * @return The instruction, or null when the server could not be reached.
-     *
-     * @throws ExecutionEndedException When the server ended the execution.
-     */
-    private suspend fun ask(background: Boolean): Instruction? = try {
-        server.heartbeat(ready = true, stopped = false, lastModelRequestAt = lastOutputAt?.toString(), background)
-    } catch (error: CancellationException) {
-        throw error
-    } catch (error: ExecutionEndedException) {
-        throw error
-    } catch (error: Exception) {
-        log("heartbeat failed: ${error::class.simpleName}")
-        null
-    }
+    /** A conversation's lifecycle, the one a remote session's host runs too ([ConversationLoop]). */
+    private suspend fun converse(agent: RunnerAgent): Int =
+        ConversationLoop(server, clock, log, heartbeatInterval, { lastOutputAt }, { background }).run(agent)
 
     /**
      * Starts the agent's inference relay ([relayed]), asks which of Ostrom's MCP servers the agent gets
@@ -589,9 +521,6 @@ fun interface ConversationStarter {
         activity: () -> Unit,
     ): RunnerAgent
 }
-
-/** How long a conversation's agent may drain once told to stop: the server's pause deadline (ostrom-server). */
-private val PAUSE_DRAIN = 2.minutes
 
 /** The legacy clone's variables, left out once the runner prepared the workspace. */
 private val REPOSITORY_VARIABLES = setOf("OSTROM_REPOSITORY_URL", "OSTROM_REPOSITORY_REF")

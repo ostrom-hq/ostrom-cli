@@ -125,6 +125,7 @@ class OstromApiTest {
     fun theDefaultClientIsBuiltWithoutCallingAnythingAndClosed() {
         OstromApiImpl("https://ostrom.example", "ostrom/0.1.0").close()
         defaultHttpClient().close()
+        longPollHttpClient().close()
         // A client without a connection of its own (a fake) closes as a no-op.
         object : OstromApi {
             override suspend fun get(path: String) = ServerResponse(200, "", 0)

@@ -166,3 +166,19 @@ fun defaultHttpClient(): HttpClient = HttpClient {
         requestTimeoutMillis = REQUEST_TIMEOUT_MILLIS
     }
 }
+
+/** How long a long poll of the runner channel may take: the server holds one up to 20 s. */
+private const val LONG_POLL_TIMEOUT_MILLIS = 60_000L
+
+/**
+ * An HTTP client for a remote session's host on the runner channel: never throws on a status, follows no redirect
+ * (the owner's sign-in goes with every call), and lets a long poll of the inputs last ([LONG_POLL_TIMEOUT_MILLIS]).
+ */
+fun longPollHttpClient(): HttpClient = HttpClient {
+    expectSuccess = false
+    followRedirects = false
+    install(HttpTimeout) {
+        connectTimeoutMillis = CONNECT_TIMEOUT_MILLIS
+        requestTimeoutMillis = LONG_POLL_TIMEOUT_MILLIS
+    }
+}

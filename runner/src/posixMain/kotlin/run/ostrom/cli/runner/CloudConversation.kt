@@ -16,7 +16,7 @@ import run.ostrom.cli.runner.conversation.SessionUploads
  */
 internal fun conversation(client: HttpClient, config: RunnerConfig, terminals: RemoteTerminalStarter) =
     ConversationStarter { agentEnvironment, directory, first, activity ->
-        val processes = ExecProcesses(terminals, agentEnvironment)
+        val processes = ExecProcesses(terminals::process, agentEnvironment)
         val channel = HttpAgentChannel(client, config.serverUrl, config::bearer, config.sessionId.toString(),
             config.epoch)
         ConversationHost(

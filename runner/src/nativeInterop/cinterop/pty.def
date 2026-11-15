@@ -22,6 +22,20 @@ linkerOpts.linux = -lutil
 #endif
 #endif
 
+#ifdef __APPLE__
+#include <crt_externs.h>
+#endif
+
+/* This process's environment block (NAME=value strings, NULL-terminated): a remote session's agent inherits it. */
+static inline char **ostrom_environment(void) {
+#ifdef __APPLE__
+    return *_NSGetEnviron();
+#else
+    extern char **environ;
+    return environ;
+#endif
+}
+
 /*
  * In the child, before exec: closes every descriptor above stderr, so that a script never inherits the host's own
  * (its connection to the runner, a socket of the runtime) whether or not they were opened close-on-exec.

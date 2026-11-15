@@ -279,6 +279,42 @@ static inline int ostrom_spawn_detached(const char *file, char *const argv[]) {
     return spawned == 0 ? 0 : -1;
 }
 
+/*
+ * Starts `file` in a session of its own (no controlling terminal: the terminal's signals and its closing never reach
+ * it), stdin from /dev/null, stdout and stderr appended to `log` (opened 0600 when created), and returns its pid, or
+ * -1 when it could not be started. Never waited for here: ostrom_detached_exit reads its end.
+ */
+static inline int ostrom_spawn_logged(const char *file, char *const argv[], const char *log) {
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
+    posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, log, O_WRONLY | O_APPEND | O_CREAT, 0600);
+    posix_spawn_file_actions_adddup2(&actions, STDOUT_FILENO, STDERR_FILENO);
+    posix_spawnattr_t attributes;
+    posix_spawnattr_init(&attributes);
+#ifdef POSIX_SPAWN_SETSID
+    posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETSID);
+#else
+    posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP);
+    posix_spawnattr_setpgroup(&attributes, 0);
+#endif
+    pid_t pid;
+    int spawned = posix_spawnp(&pid, file, &actions, &attributes, argv, OSTROM_ENVIRON);
+    posix_spawn_file_actions_destroy(&actions);
+    posix_spawnattr_destroy(&attributes);
+    return spawned == 0 ? (int)pid : -1;
+}
+
+/* The exit code of a child of ostrom_spawn_logged once it ended (128 + the signal when one ended it), else -1. */
+static inline int ostrom_detached_exit(int pid) {
+    int status = 0;
+    pid_t ended = waitpid((pid_t)pid, &status, WNOHANG);
+    if (ended != (pid_t)pid) return -1;
+    if (WIFEXITED(status)) return WEXITSTATUS(status);
+    if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
+    return -1;
+}
+
 /* Waits until `fd` is ready for `events` or the deadline; 1 ready, 0 deadline, -1 error. */
 static inline int ostrom_wait_fd(int fd, short events, const struct timespec *start, int timeout_ms) {
     for (;;) {

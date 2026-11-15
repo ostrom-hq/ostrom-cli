@@ -107,7 +107,7 @@ class AgentProcessesTest {
     @Test
     fun anExecStartRunsTheCommandInTheAgentsEnvironmentWithItsOverrides() = runTest {
         val pipe = Pipe()
-        val processes = ExecProcesses(RemoteTerminalStarter({ pipe }), mapOf("HOME" to "/home", "DROP" to "x"))
+        val processes = ExecProcesses(RemoteTerminalStarter({ pipe })::process, mapOf("HOME" to "/home", "DROP" to "x"))
         processes.start(AgentCommand("claude", listOf("-p")), mapOf("DROP" to null, "ADD" to "1"), "/workspace")
         assertEquals(
             AgentFrame.Start(
