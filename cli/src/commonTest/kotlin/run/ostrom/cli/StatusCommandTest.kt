@@ -18,6 +18,11 @@ class StatusCommandTest : SetupKit() {
     private val pack = "GET /api/v1/packages/current?repo=acme"
     private val version = BuildInfo.VERSION
 
+    private companion object {
+        const val NOT_SERVED = "unavailable from this server or credential (ostrom login again if your token is older)"
+        const val NO_CAPACITY = """"queue":null,"budget":null,"pacing":null,"accounts":null,"unavailable":{}"""
+    }
+
     /** `ostrom status args` against [routes], in the git repository whose top is [top] (null: outside one). */
     private fun status(
         routes: Map<String, Pair<Int, String>>,
@@ -51,6 +56,10 @@ class StatusCommandTest : SetupKit() {
             "Signed in   @maya-k · Acme (ostrom.example) · admin\n" +
                 "Repository  acme · harness p2026-3\n" +
                 "Waiting     2 requests need your yes (ostrom inbox)\n" +
+                "Queue       $NOT_SERVED\n" +
+                "Budget      $NOT_SERVED\n" +
+                "Pacing      $NOT_SERVED\n" +
+                "Accounts    $NOT_SERVED\n" +
                 "This device ostrom $version · key a1b2c3d4 pinned\n",
             console.out.toString(),
         )
@@ -62,7 +71,9 @@ class StatusCommandTest : SetupKit() {
         assertEquals(
             """{"login":"maya-k","organization":"Acme","role":"admin","server":"https://ostrom.example",""" +
                 """"repository":"acme","harness":"p2026-3","waiting":2,"waitingComplete":true,""" +
-                """"version":"$version","pinnedKey":"a1b2c3d4"}""" + "\n",
+                """"version":"$version","pinnedKey":"a1b2c3d4",""" +
+                """"queue":null,"budget":null,"pacing":null,"accounts":null,"unavailable":{"queue":"not_served",""" +
+                """"budget":"not_served","pacing":"not_served","accounts":"not_served"}}""" + "\n",
             console.out.toString(),
         )
     }
@@ -82,7 +93,7 @@ class StatusCommandTest : SetupKit() {
         assertEquals(
             """{"login":"maya","organization":null,"role":null,"server":"https://ostrom.example",""" +
                 """"repository":null,"harness":null,"waiting":null,"waitingComplete":null,""" +
-                """"version":"$version","pinnedKey":null}""" + "\n",
+                """"version":"$version","pinnedKey":null,$NO_CAPACITY}""" + "\n",
             console.out.toString(),
         )
         for ((body, login) in listOf("""{"dev":{"login":"maya-k"}}""" to "maya-k", """{"dev":{}}""" to "maya")) {
@@ -198,7 +209,7 @@ class StatusCommandTest : SetupKit() {
         assertEquals(
             """{"login":"maya","organization":null,"role":null,"server":"https://ostrom.example",""" +
                 """"repository":null,"harness":null,"waiting":null,"waitingComplete":null,""" +
-                """"version":"$version","pinnedKey":"a1b2c3d4"}""" + "\n",
+                """"version":"$version","pinnedKey":"a1b2c3d4",$NO_CAPACITY}""" + "\n",
             console.out.toString(),
         )
     }

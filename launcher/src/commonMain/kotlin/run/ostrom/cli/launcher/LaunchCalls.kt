@@ -56,6 +56,12 @@ const val SESSIONS_ACTIVITY = "sessions.activity.v1"
 const val SESSIONS_LABELS = "sessions.labels.v1"
 
 /**
+ * The feature key of the capacity controller (`ServerFeatures.CAPACITY_PACING` of ostrom-core): the hooks give the
+ * agent the session's capacity advice. The CLI's tests check that the two are the same.
+ */
+const val CAPACITY_PACING = "capacity.pacing.v1"
+
+/**
  * The hooks a session runs besides Ostrom's own.
  *
  * @property waitsWake The server holds the Stop hook for a wait's answer ([WAITS_WAKE]), for Claude Code only.
@@ -68,6 +74,8 @@ const val SESSIONS_LABELS = "sessions.labels.v1"
  * `ostrom-artifacts` MCP server is connected and the agent's own artifact tools are turned off.
  * @property activity The hooks report whether the agent works or waits for a person ([SESSIONS_ACTIVITY], not
  * `--no-activity`), for Claude Code and Codex.
+ * @property guidance The hooks give the agent the session's capacity advice ([CAPACITY_PACING], not `--no-guidance`),
+ * for Claude Code and Codex.
  */
 @Suppress("LongParameterList") // one flag per hook family the server serves
 internal class LaunchHooks(
@@ -78,6 +86,7 @@ internal class LaunchHooks(
     val memory: Boolean,
     val artifacts: Boolean = false,
     val activity: Boolean = false,
+    val guidance: Boolean = false,
 )
 
 /**
@@ -298,6 +307,8 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
                 artifacts = publishes,
                 // Claude Code's and Codex's adapters install the hooks; the other agents have none to report with
                 activity = request.activity && SESSIONS_ACTIVITY in served,
+                // the same two agents read the advice as their hooks' additional context (TeamCode's)
+                guidance = request.guidance && CAPACITY_PACING in served,
             )
             LaunchReads(pack, read, servers, inference.await(), launchHooks, given.variables)
         }

@@ -100,6 +100,9 @@ open class CliKit {
     protected val clouds = mutableListOf<Pair<CloudStart, CloudSite>>()
     protected val attached = mutableListOf<Pair<String, CloudSite>>()
     protected val waits = mutableListOf<Long>()
+
+    /** What a wait does besides being recorded: a test ends a loop that waits forever by throwing from it. */
+    protected var onSleep: (Long) -> Unit = {}
     protected val typed = ArrayDeque<String>()
 
     /** What is typed without echo (a secret). */
@@ -199,7 +202,10 @@ open class CliKit {
             executable = executable,
             temporaryDirectory = "/tmp",
             agents = AgentRunner { request, site -> 7.also { launches += request to site } },
-            sleep = { waits += it },
+            sleep = {
+                waits += it
+                onSleep(it)
+            },
             readLine = { typed.removeFirstOrNull() },
             readSecret = { hidden.removeFirstOrNull() },
             openUrl = { url -> browser.also { opened += url } },

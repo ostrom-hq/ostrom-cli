@@ -11,6 +11,9 @@ import com.github.ajalt.clikt.core.parse
 import com.github.ajalt.clikt.core.subcommands
 import run.ostrom.cli.api.STATISTICS_TIMEOUT_MILLIS
 import run.ostrom.cli.commands.AgentCommand
+import run.ostrom.cli.commands.AgentsCommand
+import run.ostrom.cli.commands.AgentsHintCommand
+import run.ostrom.cli.commands.AgentsWatchCommand
 import run.ostrom.cli.commands.ApproveCommand
 import run.ostrom.cli.commands.AttachCommand
 import run.ostrom.cli.commands.CompletionCommand
@@ -191,6 +194,7 @@ class OstromCli(private val dependencies: CliDependencies) {
             VerifyCommand(dependencies),
             SessionsCommand().subcommands(SessionsListCommand(dependencies), SessionsShowCommand(dependencies)),
             StatusCommand(dependencies),
+            AgentsCommand().subcommands(AgentsWatchCommand(dependencies), AgentsHintCommand(dependencies)),
             AttachCommand(dependencies),
             LoginCommand(dependencies),
             WhoAmICommand(dependencies),
