@@ -5,6 +5,10 @@ package run.ostrom.cli
 
 import okio.ByteString.Companion.toByteString
 import okio.Path.Companion.toPath
+import run.ostrom.cli.api.OstromApi
+import run.ostrom.cli.api.ServerRequest
+import run.ostrom.cli.api.ServerResponse
+import run.ostrom.cli.api.ServerUnreachableException
 import run.ostrom.cli.commands.CloudFileTypes
 import run.ostrom.cli.commands.FILES_OFF
 import run.ostrom.cli.commands.NO_FILES
@@ -161,6 +165,38 @@ class CloudSendFilesTest : SetupKit() {
         assertEquals(1, keys.toSet().size, "Every retry carries the same key: $keys")
         assertEquals(listOf(1_000L, 2_000L, 4_000L), waits)
         assertErr("Uploading /work/shot.png failed; retrying.")
+    }
+
+    @Test
+    fun anUploadIsRetriedWhenTheServerWasNotReached() {
+        file("/work/a&b.png", png)
+        val uploaded = upload("a%26b.png") to (201 to stored("f1", "a&b.png", png))
+        val routes = served + mapOf(orgs(acme), send to (202 to input), uploaded)
+        var unreached = 1
+        val api: (String) -> OstromApi = { url ->
+            val real = serverOf(routes)(url)
+            object : OstromApi {
+                override suspend fun get(path: String) = send(ServerRequest("GET", path))
+                override suspend fun send(request: ServerRequest): ServerResponse {
+                    if (request.bytes != null && unreached-- > 0) {
+                        throw ServerUnreachableException(url, Exception("reset"))
+                    }
+                    return real.send(request)
+                }
+            }
+        }
+        signIn("/home/maya/.config/ostrom")
+        val args = arrayOf("cloud", "send", "cs1", "x", "--file", "/work/a&b.png")
+        assertEquals(0, cli(environment = withServer, api = api).run(args))
+        assertEquals(listOf(1_000L), waits)
+        assertEquals("""{"text":"x","fileIds":["f1"]}""", bodyOf(send))
+    }
+
+    @Test
+    fun aTypeWithoutALabelIsNamedByItsType() {
+        file("/work/doc.pdf", png)
+        assertEquals(64, sendWith(mapOf(policy to (200 to policyOf(types = "\"image/heic\""))), "/work/doc.pdf"))
+        assertErr("/work/doc.pdf is not a type the organization takes (image/heic).")
     }
 
     @Test

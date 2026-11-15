@@ -34,9 +34,12 @@ internal object CloudFileTypes {
         "application/json" to "JSON",
     )
 
-    /** The type of [name] by its extension (any case), or null for an extension this list does not know. */
+    /**
+     * The type of [name] by its extension (any case), or null for an extension this list does not know. A name without
+     * a dot has the extension "", which no type has (TeamCode's `it != name` guard can never be false).
+     */
     fun forName(name: String): String? =
-        name.substringAfterLast('.', "").takeIf { it.isNotEmpty() && it != name }?.lowercase()?.let(byExtension::get)
+        byExtension[name.substringAfterLast('.', "").lowercase()]
 
     /** Whether [bytes] are text the server takes: valid UTF-8 without a NUL byte. */
     fun isText(bytes: ByteArray): Boolean = 0.toByte() !in bytes &&

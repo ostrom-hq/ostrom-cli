@@ -27,7 +27,7 @@ internal fun CliDependencies.readLocalFile(typed: String, policy: CloudFilePolic
     kindRefusal(shown, metadata)?.let(::refuseFile)
     val guessed = CloudFileTypes.forName(path.name)
     if (guessed != null && guessed !in policy.types) refuseFile(notTaken(shown, policy) + ".")
-    val bytes = readAtMost(path, policy.maxFileBytes) ?: refuseFile("$shown cannot be read.")
+    val bytes = readAtMost(path, policy.maxFileBytes, shown)
     if (bytes.isEmpty()) refuseFile("$shown is empty.")
     if (bytes.size > policy.maxFileBytes) refuseFile(tooLarge(shown, policy))
     val untyped = guessed == null && !(CloudFileTypes.isText(bytes) && "text/plain" in policy.types)
@@ -69,17 +69,17 @@ private fun kindRefusal(shown: String, metadata: FileMetadata): String? = when {
     else -> null
 }
 
-/** At most [max] + 1 bytes of [path] (one more tells a file above [max]), or null when it cannot be read. */
+/** At most [max] + 1 bytes of [path] (one more tells a file above [max]); stops when it cannot be read. */
 // Excluded: the fake file system of the tests never fails a read.
 @ExcludeFromCoverage
-private fun CliDependencies.readAtMost(path: Path, max: Long): ByteArray? = try {
+private fun CliDependencies.readAtMost(path: Path, max: Long, shown: String): ByteArray = try {
     fileSystem.source(path).buffer().use { source ->
         val read = Buffer()
         while (read.size <= max && source.read(read, CHUNK) != -1L) Unit
         read.readByteArray(minOf(read.size, max + 1))
     }
 } catch (_: IOException) {
-    null
+    refuseFile("$shown cannot be read.")
 }
 
 private const val CHUNK = 64L * 1024
