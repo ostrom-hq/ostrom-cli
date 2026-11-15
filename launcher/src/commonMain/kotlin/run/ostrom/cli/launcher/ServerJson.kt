@@ -13,7 +13,9 @@ import kotlinx.serialization.json.JsonObject
  * @property timeoutMillis How long the whole call may take.
  * @property idempotencyKey Sent as `Idempotency-Key`, or null.
  * @property onBehalfOf The member a cloud session write acts for, sent as `Ostrom-On-Behalf-Of`, or null.
+ * @property bytes A raw body sent instead of [body] (a cloud session's file), or null.
  */
+@Suppress("ArrayInDataClass") // a call is never compared: the bytes are only sent
 data class ServerCall(
     val method: String,
     val path: String,
@@ -22,6 +24,7 @@ data class ServerCall(
     val timeoutMillis: Long,
     val idempotencyKey: String? = null,
     val onBehalfOf: String? = null,
+    val bytes: ByteArray? = null,
 )
 
 /**
@@ -75,8 +78,24 @@ class ServerJson(private val transport: ServerTransport) {
         timeoutMillis: Long,
         idempotencyKey: String? = null,
         onBehalfOf: String? = null,
-    ): ServerAnswer {
-        val call = ServerCall(method, path, body?.toString(), token, timeoutMillis, idempotencyKey, onBehalfOf)
+    ): ServerAnswer =
+        answer(ServerCall(method, path, body?.toString(), token, timeoutMillis, idempotencyKey, onBehalfOf))
+
+    /**
+     * `POST` [bytes] as they are to [path] (`application/octet-stream`): a file uploaded to a cloud session.
+     *
+     * @param idempotencyKey Sent as `Idempotency-Key`: a retry of the same bytes gets the first answer.
+     */
+    suspend fun upload(
+        path: String,
+        bytes: ByteArray,
+        token: String?,
+        timeoutMillis: Long,
+        idempotencyKey: String?,
+    ): ServerAnswer =
+        answer(ServerCall("POST", path, null, token, timeoutMillis, idempotencyKey, bytes = bytes))
+
+    private suspend fun answer(call: ServerCall): ServerAnswer {
         val reply = transport.send(call)
         val status = reply.status
         val json = parseObject(reply.body)

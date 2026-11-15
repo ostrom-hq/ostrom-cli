@@ -388,6 +388,7 @@ internal suspend fun CliDependencies.sendWithRetry(
         if (answer is ServerAnswer.Ok) return inputOf(answer.body)
         val status = (answer as ServerAnswer.Failed).status
         if (status in REFUSED_SENDS) {
+            if (request.fileIds.isNotEmpty()) filesRefusal(answer.type)?.let { throw stopWith(ExitCode.USAGE, it) }
             throw answer.refusal(access.signed.serverUrl, "No cloud session $id.")
         }
         console.err("Sending failed; retrying.\n")
@@ -399,17 +400,17 @@ internal suspend fun CliDependencies.sendWithRetry(
 }
 
 /**
- * The message `cloud send` sends.
- *
- * `send --file` (`runners.cloud.files.v1`) comes with the files step: it uploads each file first and passes their ids
- * as [fileIds] (at most five), with which the text may be empty.
+ * The message `cloud send` sends. `send --file` (`runners.cloud.files.v1`) uploads each file first and passes their
+ * ids as [fileIds] (at most five), with which the text may be empty.
  */
 internal fun messageRequest(text: String, wake: Boolean, fileIds: List<String> = emptyList()) =
     SendCloudMessageRequest(text, wake = wake, fileIds = fileIds)
 
 /**
- * `ostrom cloud send SESSION TEXT|- [--no-wake] [--idempotency-key KEY] [--wait] [--json]`: a message to the agent; a
- * paused session wakes up unless `--no-wake`.
+ * `ostrom cloud send SESSION TEXT|- [--file PATH]... [--no-wake] [--idempotency-key KEY] [--wait] [--json]`: a
+ * message to the agent; a paused session wakes up unless `--no-wake`. Each `--file` is uploaded first
+ * (`runners.cloud.files.v1`, TeamCode's `/attach` of `cloud attach`) and goes with the message; the text may then be
+ * empty.
  */
 internal class CloudSendCommand(private val dependencies: CliDependencies) : CliktCommand(name = "send") {
     override fun help(context: Context) = "Send a message to a session. A paused session wakes up unless --no-wake " +
@@ -426,6 +427,10 @@ internal class CloudSendCommand(private val dependencies: CliDependencies) : Cli
         help = "Retrying with the same key never sends twice. Defaults to a random key.",
     )
     private val wait by option("--wait", help = "Wait until the agent consumed the message (or it was rejected)").flag()
+    private val files by option(
+        "--file",
+        help = "Send this file with the message: an image, a PDF or UTF-8 text (repeatable, 5 at most)",
+    ).multiple()
     private val org by orgOption()
     private val server by serverFlag()
     private val json by jsonFlag()
@@ -433,8 +438,9 @@ internal class CloudSendCommand(private val dependencies: CliDependencies) : Cli
     override fun run() {
         val access = dependencies.conversationAccess(server, org)
         val message = if (text == "-") generateSequence(dependencies.readLine).joinToString("\n") else text
-        val request = messageRequest(message, wake = !noWake)
         val input = runBlocking {
+            val fileIds = dependencies.uploadFiles(access, session, files)
+            val request = messageRequest(message, wake = !noWake, fileIds = fileIds)
             var input = dependencies.sendWithRetry(access, session, request, idempotencyKey ?: Uuid.random().toString())
             val path = "${cloudSessionPath(session)}/messages/${segment(input.id)}"
             while (wait && input.status in PENDING) {

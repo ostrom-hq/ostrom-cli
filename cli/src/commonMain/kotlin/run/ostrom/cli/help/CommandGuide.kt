@@ -503,6 +503,7 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
         "cloud-sessions",
         "ostrom cloud send ses_41b2 \"Run the tests\"" to "a message to the agent (a paused session wakes up)",
         "ostrom cloud send ses_41b2 - --wait < notes.md" to "from stdin, waiting until the agent read it",
+        "ostrom cloud send ses_41b2 \"What fails here?\" --file shot.png" to "with a file the agent reads",
     ),
     "cloud interrupt" to guide("cloud-sessions", "ostrom cloud interrupt ses_41b2" to "stop the agent's current turn"),
     "cloud answer" to guide(

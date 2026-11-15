@@ -14,6 +14,7 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
+import io.ktor.http.content.ByteArrayContent
 import io.ktor.http.content.TextContent
 import kotlinx.io.IOException
 import kotlin.coroutines.cancellation.CancellationException
@@ -32,7 +33,9 @@ data class ServerResponse(val status: Int, val body: String, val millis: Long)
  * @property timeoutMillis How long the whole call may take.
  * @property org The organisation the call acts in, sent as `Ostrom-Org`; null to let the server resolve the only
  * membership (or the organisation the token is bound to).
+ * @property bytes A raw body, sent as `application/octet-stream` instead of [body] (a cloud session's file), or null.
  */
+@Suppress("ArrayInDataClass") // a request is never compared: the bytes are only sent
 data class ServerRequest(
     val method: String,
     val path: String,
@@ -42,6 +45,7 @@ data class ServerRequest(
     val org: String? = null,
     val idempotencyKey: String? = null,
     val onBehalfOf: String? = null,
+    val bytes: ByteArray? = null,
 )
 
 /** The header naming the organisation a call acts in (`OstromOrg` parameter of the contract). */
@@ -134,7 +138,11 @@ class OstromApiImpl(
                 if (request.org != null) header(ORG_HEADER, request.org)
                 if (request.idempotencyKey != null) header(IDEMPOTENCY_HEADER, request.idempotencyKey)
                 if (request.onBehalfOf != null) header(ON_BEHALF_HEADER, request.onBehalfOf)
-                if (request.body != null) setBody(TextContent(request.body, ContentType.Application.Json))
+                when {
+                    request.bytes != null ->
+                        setBody(ByteArrayContent(request.bytes, ContentType.Application.OctetStream))
+                    request.body != null -> setBody(TextContent(request.body, ContentType.Application.Json))
+                }
                 timeout { requestTimeoutMillis = request.timeoutMillis }
             }
             return ServerResponse(response.status.value, response.bodyAsText(), start.elapsedNow().inWholeMilliseconds)
