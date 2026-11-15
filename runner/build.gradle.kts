@@ -24,6 +24,8 @@ kotlin {
         linuxTest.get().kotlin.srcDir("src/posixTest/kotlin")
         commonMain.dependencies {
             implementation(projects.platform)
+            // The agent's model calls go through the relay of a local launch (TeamCode's runner proxy).
+            implementation(projects.relay)
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.engine.defaults)
             implementation(libs.ktor.network)

@@ -116,7 +116,8 @@ private fun runner(socket: String, environment: Map<String, String>): Nothing {
             val runner = Runner(config, server, terminals, environment, Clock.System, ::log,
                 prepare = preparer(config, server, terminals, gitHub), variables = variables, deliveries = deliveries,
                 servers = HttpCloudServers(client, config.serverUrl),
-                answers = HttpWaitAnswers(client, config.serverUrl))
+                answers = HttpWaitAnswers(client, config.serverUrl),
+                inference = RelayInferenceProxy.inPod(config, HttpInferenceApi(client, config), environment, ::log))
             // The agent's hooks report its background work there, as its uid: the agent socket's directory.
             val stateJob = launch {
                 // A report is the end of a turn (the `Stop` hook): the one-time wait secrets it had are dropped.

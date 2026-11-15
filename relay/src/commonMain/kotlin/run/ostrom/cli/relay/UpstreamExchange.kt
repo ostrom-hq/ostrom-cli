@@ -104,9 +104,12 @@ internal fun unreachableBody(cause: String): String = buildJsonObject {
     }
 }.toString()
 
-/** The launch's identity upstream. The agent's own `Authorization`, keys and cookies are never copied. */
-internal fun HttpRequestBuilder.identify(config: RelayConfig) {
-    bearerAuth(config.agentToken)
+/**
+ * The launch's identity upstream, under [bearer] (the launch's agent token unless a model call has its own credential).
+ * The agent's own `Authorization`, keys and cookies are never copied.
+ */
+internal fun HttpRequestBuilder.identify(config: RelayConfig, bearer: String = config.agentToken) {
+    bearerAuth(bearer)
     header(LAUNCH_HEADER, config.launchId)
     header(HttpHeaders.UserAgent, config.userAgent)
 }
