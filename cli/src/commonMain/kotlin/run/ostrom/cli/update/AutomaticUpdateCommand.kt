@@ -79,6 +79,11 @@ internal class AutomaticUpdateCommand(
     } catch (failure: IOException) {
         say("✗ ostrom could not read or write its automatic updates: ${failure.message}")
         ExitCode.CANNOT_WRITE.code
+    } catch (_: IllegalArgumentException) {
+        // settings recorded for another user or system, or a CLI folder or home that is not an absolute path
+        val (code, text) = automaticRefusal(AutomaticUpdateStore.SETTINGS_INVALID)
+        say(text)
+        code.code
     }
 
     private fun describe(result: AutomaticUpdateResult): String =

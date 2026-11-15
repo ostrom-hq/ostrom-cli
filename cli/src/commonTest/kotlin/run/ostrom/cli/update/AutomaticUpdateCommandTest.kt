@@ -165,6 +165,10 @@ class AutomaticUpdateCommandTest {
         assertEquals(ExitCode.USAGE.code, command(root = "relative").attempt())
         val root = command(platform = AutomaticUpdatePlatform(LINUX, ROOT_USER))
         assertEquals(ExitCode.REFUSED.code, root.configure("on"))
+        assertEquals(0, command().configure("on"))
+        said.clear()
+        assertEquals(ExitCode.FAILED.code, command(platform = AutomaticUpdatePlatform(LINUX, "1001")).attempt())
+        assertEquals(automaticRefusal(AutomaticUpdateStore.SETTINGS_INVALID).second, said.single(), "another user's")
     }
 
     @Test

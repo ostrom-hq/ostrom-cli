@@ -266,7 +266,9 @@ ostrom manages only the exact definitions it recorded: one changed by hand is re
   install, update or attempt is running, or an agent's session; `automatic_worker_busy` when another attempt holds the
   worker's lock) or `FAILED`, with a diagnostic code and never a remote body. `ostrom update --automatic status`
   shows it.
-- Never for root. With any non-empty `OSTROM_DISABLE_AUTOUPDATE`, an attempt does nothing, and the status says so.
+- Never for root. With any non-empty `OSTROM_DISABLE_AUTOUPDATE` in the job's own environment, an attempt does
+  nothing, and the status says so when it is set where you run it; a variable exported in a shell does not reach the
+  job: turn it off with `ostrom update --automatic off`.
 
 ## Signing the binaries themselves
 
