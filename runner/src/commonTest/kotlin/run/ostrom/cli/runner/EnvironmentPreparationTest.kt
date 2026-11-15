@@ -80,7 +80,13 @@ class EnvironmentPreparationTest {
     private fun environment(
         spec: CloudEnvironment = recipe,
         variables: Map<String, String> = mapOf("API_KEY" to "s3cret-value"),
-    ) = RunnerEnvironment(spec, GitIdentity("octo", "1+octo@users.noreply.github.com"), variables)
+        untrusted: Boolean = false,
+    ) = RunnerEnvironment(
+        spec,
+        GitIdentity("octo", "1+octo@users.noreply.github.com"),
+        variables,
+        untrustedWorkspace = untrusted,
+    )
 
     private fun preparation(
         server: ServerApi,
@@ -161,6 +167,48 @@ class EnvironmentPreparationTest {
             listOf("configuring_git", "fetching_repositories", "running_setup"),
             server.reports.map { it.first },
         )
+    }
+
+    @Test
+    fun anUntrustedWorkspaceHasTheAgentHomeAndTheGitConfigurationResetBeforeAnythingRuns() = runTest {
+        val marker = "/workspace/.ostrom/setup/create-0-${"npm ci".encodeUtf8().sha256().hex().take(16)}.done"
+        val server = FakeServer(mutableListOf({ environment(untrusted = true) }))
+        val existing = mutableSetOf("/workspace/api/.git", "/workspace/web/.git", "/workspace/api", marker)
+        val commands = FakeCommands(existing)
+        assertEquals(PreparationOutcome.Prepared("/workspace/api"), preparation(server, commands).run())
+
+        val lines = commands.runs.map { it.line }
+        val quarantine = "/workspace/.ostrom/quarantine"
+        val home = "/bin/sh -c ${EnvironmentPreparation.RESET_HOME} sh /workspace/.home $quarantine/agent-home"
+        assertEquals(home, lines.first(), "before the identity and every other command")
+        val api = "/bin/sh -c ${EnvironmentPreparation.RESET_REPOSITORY} sh $quarantine/repository-0 " +
+            "https://github.com/acme/api.git"
+        assertTrue(api in lines)
+        assertEquals("/workspace/api", commands.runs.single { it.line == api }.directory)
+        assertTrue(lines.indexOf(api) < lines.indexOf("$git fetch --prune origin"))
+        assertEquals(
+            listOf(
+                "securing_workspace",
+                "configuring_git",
+                "securing_workspace",
+                "fetching_repositories",
+                "securing_workspace",
+                "fetching_repositories",
+                "running_setup",
+            ),
+            server.reports.map { it.first },
+        )
+    }
+
+    @Test
+    fun aFailedResetIsReportedAsTheWorkspaceStep() = runTest {
+        val server = FakeServer(mutableListOf({ environment(untrusted = true) }))
+        val commands = FakeCommands(mutableSetOf("/workspace/api/.git")) { if ("repository-0" in it.line) 3 else 0 }
+        assertEquals(PreparationOutcome.Failed, preparation(server, commands).run())
+        assertEquals(PreparationFailure("workspace", 0, 3), server.reports.last().second)
+        val homeServer = FakeServer(mutableListOf({ environment(untrusted = true) }))
+        preparation(homeServer, FakeCommands(exit = { 1 })).run()
+        assertEquals(PreparationFailure("workspace", null, 1), homeServer.reports.last().second)
     }
 
     @Test

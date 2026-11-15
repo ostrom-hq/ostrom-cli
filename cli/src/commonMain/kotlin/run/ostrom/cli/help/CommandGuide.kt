@@ -379,6 +379,32 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
     "cloud pause" to guide("cloud-sessions", "ostrom cloud pause ses_41b2" to "pause it: the agent finishes its turn"),
     "cloud resume" to guide("cloud-sessions", "ostrom cloud resume ses_41b2" to "resume it"),
     "cloud delete" to guide("cloud-sessions", "ostrom cloud delete ses_41b2 --yes" to "delete it and its workspace"),
+    "cloud transfer" to guide(
+        "cloud-sessions",
+        "ostrom cloud transfer ses_41b2 --to maya" to "give the session to Maya (she accepts, or at once for an admin)",
+        "ostrom cloud transfer" to "pick the session and the member from lists",
+    ),
+    "cloud transfers" to guide(
+        "cloud-sessions",
+        "ostrom cloud transfers list" to "your incoming and outgoing transfers",
+    ),
+    "cloud transfers list" to guide(
+        "cloud-sessions",
+        "ostrom cloud transfers list --incoming --state offered" to "the offers waiting for you",
+    ),
+    "cloud transfers show" to guide("cloud-sessions", "ostrom cloud transfers show ctr_7a1" to "one transfer"),
+    "cloud transfers accept" to guide(
+        "cloud-sessions",
+        "ostrom cloud transfers accept ctr_7a1 --resume" to "take the session and resume it once it is yours",
+    ),
+    "cloud transfers decline" to guide(
+        "cloud-sessions",
+        "ostrom cloud transfers decline ctr_7a1" to "refuse the offer",
+    ),
+    "cloud transfers cancel" to guide(
+        "cloud-sessions",
+        "ostrom cloud transfers cancel ctr_7a1" to "withdraw your offer",
+    ),
     "cloud attach" to guide(
         "cloud-sessions",
         "ostrom cloud attach ses_41b2" to "attach again to a cloud session that kept running",

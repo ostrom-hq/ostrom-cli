@@ -171,6 +171,16 @@ class EnvironmentPreparation(
         suspend fun succeeds(vararg arguments: String) =
             commands.run(arguments.toList(), workspace, environment, secrets()) == 0
 
+        val quarantine = "$state/$QUARANTINE_DIRECTORY"
+        if (prepared.untrustedWorkspace) {
+            // Before anything runs with this owner's credentials: the settings, hooks, MCP servers, shell profiles and
+            // Git configuration the former owner left in the agent's home never run as the new owner.
+            phase("securing_workspace")
+            // The runner always gives the agent a HOME; without one the preparation stops as a runner error.
+            val home = this.environment.getValue("HOME")
+            run("workspace", null, workspace, listOf("/bin/sh", "-c", RESET_HOME, "sh", home, "$quarantine/agent-home"))
+        }
+
         phase("configuring_git")
         run("git_identity", null, workspace, listOf("/bin/sh", "-c", MAKE_DIRECTORIES, "sh", "$state/setup"))
         run("git_identity", null, workspace, listOf("git", "config", "--global", "user.name", prepared.git.name))
@@ -179,6 +189,12 @@ class EnvironmentPreparation(
         for ((index, repository) in spec.repositories.withIndex()) {
             val target = "$workspace/${repository.directory}"
             if (succeeds("test", "-e", "$target/.git") || succeeds("test", "-L", "$target/.git")) {
+                if (prepared.untrustedWorkspace) {
+                    phase("securing_workspace")
+                    val aside = "$quarantine/repository-$index"
+                    val reset = listOf("/bin/sh", "-c", RESET_REPOSITORY, "sh", aside, repository.url)
+                    run("workspace", index, target, reset)
+                }
                 phase("fetching_repositories")
                 run("fetch", index, target, git + listOf("fetch", "--prune", "origin"))
                 continue
@@ -298,6 +314,53 @@ class EnvironmentPreparation(
          */
         fun steers(name: String): Boolean =
             !NAME.matches(name) || name in RESERVED || RESERVED_PREFIXES.any(name::startsWith)
+
+        /** Below the state directory: what an untrusted workspace's reset moved aside, replaced at the next reset. */
+        private const val QUARANTINE_DIRECTORY = "quarantine"
+
+        /** The agent's conversation transcripts, kept across a reset of its home: data the agent reads, never runs. */
+        private val KEPT_AGENT_DATA = listOf(".claude/projects", ".codex/sessions")
+
+        /**
+         * `$1` the agent's home, `$2` its quarantine: the previous quarantine is removed, the home moved there whole
+         * (a link is moved, never followed) and recreated empty, then the transcripts are moved back when they are
+         * plain directories.
+         */
+        internal val RESET_HOME = "home=\$1; q=\$2; " +
+            "rm -rf -- \"\$q\" && mkdir -p -- \"\$(dirname -- \"\$q\")\" || exit 1; " +
+            "if [ -e \"\$home\" ] || [ -L \"\$home\" ]; then mv -- \"\$home\" \"\$q\" || exit 1; fi; " +
+            "mkdir -p -- \"\$home\" || exit 1; " +
+            "for keep in ${KEPT_AGENT_DATA.joinToString(" ")}; do parent=\${keep%/*}; " +
+            "if [ -d \"\$q/\$keep\" ] && [ ! -L \"\$q/\$keep\" ] && [ ! -L \"\$q/\$parent\" ]; then " +
+            "mkdir -p -- \"\$home/\$parent\" && mv -- \"\$q/\$keep\" \"\$home/\$keep\" || exit 1; fi; done"
+
+        /**
+         * In a repository, `$1` its quarantine, `$2` the recipe's URL. `.git` must be a plain directory without
+         * `commondir` (exit 3 otherwise). Its `config`, `config.worktree` and `hooks` move to the quarantine; a new
+         * `config` keeps the repository format and extensions and the branches' `origin` tracking, with `origin` set
+         * to the recipe's URL and the standard refspec. Reading the old file with `--file` follows no `include`.
+         */
+        internal const val RESET_REPOSITORY = "q=\$1; url=\$2; " +
+            "{ [ -d .git ] && [ ! -L .git ] && [ ! -e .git/commondir ] && [ ! -L .git/commondir ]; } || exit 3; " +
+            "rm -rf -- \"\$q\" && mkdir -p -- \"\$q\" || exit 1; " +
+            "for f in config config.worktree hooks; do if [ -e \".git/\$f\" ] || [ -L \".git/\$f\" ]; then " +
+            "mv -- \".git/\$f\" \"\$q/\$f\" || exit 1; fi; done; " +
+            "old=\$q/config; { [ -f \"\$old\" ] && [ ! -L \"\$old\" ]; } || old=/dev/null; new=.git/config; " +
+            "v=\$(git config --file \"\$old\" --get core.repositoryformatversion) || v=0; " +
+            "case \"\$v\" in 0|1) ;; *) v=0 ;; esac; " +
+            "git config --file \"\$new\" core.repositoryformatversion \"\$v\" && " +
+            "git config --file \"\$new\" core.bare false && " +
+            "git config --file \"\$new\" core.logallrefupdates true && " +
+            "git config --file \"\$new\" remote.origin.url \"\$url\" && " +
+            "git config --file \"\$new\" remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*' || exit 1; " +
+            "git config --file \"\$old\" --get-regexp '^extensions\\.' | while read -r key value; do " +
+            "case \"\$key\$value\" in *[!A-Za-z0-9._-]*) exit 1 ;; esac; " +
+            "git config --file \"\$new\" \"\$key\" \"\$value\" || exit 1; done || exit 1; " +
+            "git config --file \"\$old\" --get-regexp '^branch\\..*\\.(remote|merge)\$' | " +
+            "while read -r key value; do " +
+            "case \"\$value\" in origin|refs/heads/*) ;; *) continue ;; esac; " +
+            "case \"\$key\$value\" in *[!A-Za-z0-9._/-]*) continue ;; esac; " +
+            "git config --file \"\$new\" --add \"\$key\" \"\$value\" || exit 1; done || exit 1"
 
         /** `$1` the setup markers' directory: the agent's home and the markers' directory exist. */
         private const val MAKE_DIRECTORIES = "mkdir -p -- \"\$HOME\" \"\$1\""

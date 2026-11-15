@@ -154,4 +154,65 @@ class PreparationProcessTest {
             assertEquals("created\n", files.read("$workspace/repo/created.txt".toPath()) { readUtf8() })
         }
     }
+    @Test
+    fun anUntrustedWorkspaceKeepsOnlyTheTranscriptsAndTheRepositoriesConfigurationOfTheRecipe() = runBlocking {
+        withTimeout(60.seconds) {
+            files.createDirectories(workspace.toPath())
+            val origin = "$root/origin"
+            assertEquals(
+                0,
+                shell(
+                    "git init -q -b main origin && cd origin && " +
+                        "git -c user.name=t -c user.email=t@t commit -q --allow-empty -m init",
+                ),
+            )
+            val recipe = CloudEnvironment(
+                repositories = listOf(CloudRepository("file://$origin", "repo", ref = "main", branch = "task")),
+            )
+            val identity = GitIdentity("octo", "octo@example.com")
+            val commands = commands()
+            fun preparation(server: Server) = EnvironmentPreparation(
+                server,
+                commands,
+                environment,
+                workspace,
+                "/bin/false",
+                token = { null },
+                protocols = setOf("https", "file"),
+            )
+            assertEquals(
+                PreparationOutcome.Prepared(workspace),
+                preparation(Server(RunnerEnvironment(recipe, identity))).run(),
+            )
+            // What the former owner left behind.
+            val home = "$workspace/.home"
+            assertEquals(
+                0,
+                shell(
+                    "mkdir -p \"$home/.claude/projects/p\" && echo '{}' > \"$home/.claude/settings.json\" && " +
+                        "echo t > \"$home/.claude/projects/p/t.jsonl\" && " +
+                        "git config core.sshCommand evil && git config branch.task.remote origin && " +
+                        "git config branch.task.merge refs/heads/task && git config alias.x '!evil' && " +
+                        "echo '#!/bin/sh' > .git/hooks/post-checkout",
+                    "$workspace/repo",
+                ),
+            )
+            val server = Server(RunnerEnvironment(recipe, identity, untrustedWorkspace = true))
+            assertEquals(PreparationOutcome.Prepared(workspace), preparation(server).run())
+
+            assertEquals(
+                listOf("securing_workspace", "configuring_git", "securing_workspace", "fetching_repositories"),
+                server.reports.map { it.first },
+            )
+            assertFalse(files.exists("$home/.claude/settings.json".toPath()))
+            assertTrue(files.exists("$home/.claude/projects/p/t.jsonl".toPath()), "the transcripts are kept")
+            assertTrue(files.exists("$workspace/.ostrom/quarantine/agent-home/.claude/settings.json".toPath()))
+            assertTrue(files.exists("$workspace/.ostrom/quarantine/repository-0/hooks/post-checkout".toPath()))
+            assertEquals(1, shell("git config core.sshCommand", "$workspace/repo"))
+            assertEquals(1, shell("git config alias.x", "$workspace/repo"))
+            assertEquals(0, shell("test \"\$(git config remote.origin.url)\" = file://$origin", "$workspace/repo"))
+            assertEquals(0, shell("test \"\$(git config branch.task.merge)\" = refs/heads/task", "$workspace/repo"))
+            assertFalse(files.exists("$workspace/repo/.git/hooks/post-checkout".toPath()))
+        }
+    }
 }
