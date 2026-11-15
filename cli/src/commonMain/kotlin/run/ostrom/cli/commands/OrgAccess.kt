@@ -107,6 +107,7 @@ internal class OrgAccess(
      *
      * An [idempotencyKey] goes as `Idempotency-Key`: the server answers a retry with the first write's result.
      */
+    @Suppress("LongParameterList") // one parameter per part of the call, as ServerJson.call
     fun write(
         method: String,
         path: String,

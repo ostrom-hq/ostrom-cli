@@ -93,13 +93,19 @@ internal class CloudCreateCommand(private val dependencies: CliDependencies) : C
         )
     }
 
+    /** The create's `Idempotency-Key`: `--idempotency-key`, checked, or a random one. */
+    private fun key(): String {
+        val key = idempotencyKey ?: Uuid.random().toString()
+        if (!IDEMPOTENCY_KEY.matches(key)) throw UsageError("--idempotency-key is 1 to 128 of A-Z a-z 0-9 . _ : -")
+        return key
+    }
+
     override fun run() {
         val initial = message?.let { if (it == "-") generateSequence(dependencies.readLine).joinToString("\n") else it }
         if (initial != null && initial.isBlank()) throw stopWith(ExitCode.USAGE, "ostrom: the --message text is empty.")
         if (branch != null && repositories.isEmpty()) throw UsageError("Use --branch with --repo.")
         if (profile?.isBlank() == true) throw UsageError("Name the profile: --profile ID|NAME.")
-        val key = idempotencyKey ?: Uuid.random().toString()
-        if (!IDEMPOTENCY_KEY.matches(key)) throw UsageError("--idempotency-key is 1 to 128 of A-Z a-z 0-9 . _ : -")
+        val key = key()
         val environment = recipe()
         val access = dependencies.orgAccess(server, org)
         val signed = access.signed
