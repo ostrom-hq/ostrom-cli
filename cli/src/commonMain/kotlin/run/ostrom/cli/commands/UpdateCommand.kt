@@ -35,6 +35,11 @@ internal class UpdateCommand(private val dependencies: CliDependencies) : CliktC
         help = "Turn the daily update notice on or off for this device, or show it",
     ).choice("on", "off", "status")
 
+    val noService by option(
+        "--no-service",
+        help = "Do not check the local service (this device's daemon); OSTROM_NO_SERVICE does the same",
+    ).flag()
+
     val automatic by option(
         "--automatic",
         help = "Turn the hourly automatic update of this managed installation on or off, show it, or remove it",
@@ -83,7 +88,13 @@ internal class UpdateCommand(private val dependencies: CliDependencies) : CliktC
             val api = apiVersionOf(dependencies)
             if (rollback) updates.rollback(request, api) else updates.update(request, api)
         }
-        throw ProgramResult(code)
+        throw ProgramResult(withServiceStep(code))
+    }
+
+    /** [code], once the service step has said what it did: the update is done and kept, whatever the step says. */
+    private fun withServiceStep(code: Int): Int {
+        if (code == ExitCode.OK.code && !check) dependencies.reportServiceStep(noService)
+        return code
     }
 
     /** True when automatic updates are asked for, alone; refuses them mixed with another operation. */

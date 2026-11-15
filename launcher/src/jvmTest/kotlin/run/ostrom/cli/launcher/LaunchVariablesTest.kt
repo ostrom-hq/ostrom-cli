@@ -20,6 +20,8 @@ class LaunchVariablesTest {
                 .flatMap { main -> main.walkTopDown().filter { it.extension == "kt" }.toList() }
         }.flatMap { file -> named.findAll(file.readText()).map { it.groupValues[1] } }.toSet()
         assertTrue(LaunchVariables.HOOK_DIALECT in read, "the sources are found from ${File(".").absolutePath}")
-        assertEquals(emptySet(), read - LaunchVariables.ALL.toSet())
+        // the cloud runner's sockets, which the CLI only looks for to know it runs in a runner pod
+        val runnerSockets = setOf("OSTROM_AGENT_SOCKET", "OSTROM_CREDENTIAL_SOCKET")
+        assertEquals(emptySet(), read - LaunchVariables.ALL.toSet() - runnerSockets)
     }
 }

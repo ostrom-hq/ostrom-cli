@@ -136,5 +136,13 @@ object LaunchVariables {
         "OSTROM_INFERENCE",
         "OSTROM_ARTIFACTS",
         "OSTROM_ALIVE_MS",
+        // the local service: its opt-out, and what the boot registration scripts of Windows are given
+        "OSTROM_NO_SERVICE",
+        "OSTROM_SERVICE_TASK",
+        "OSTROM_SERVICE_OPERATION",
+        "OSTROM_SERVICE_REGISTRATION",
+        "OSTROM_SERVICE_USER",
+        "OSTROM_SERVICE_EXECUTABLE",
+        "OSTROM_SERVICE_ARGUMENTS",
     )
 }

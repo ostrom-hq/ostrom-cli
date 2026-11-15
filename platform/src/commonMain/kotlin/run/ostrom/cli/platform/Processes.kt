@@ -61,7 +61,7 @@ fun windowsCommandLine(arguments: List<String>): String = arguments.joinToString
 private const val NEEDS_QUOTES = " \t\n\""
 
 /** [argument] between quotes, its quotes and the backslashes before them escaped. */
-private fun quoteWindowsArgument(argument: String): String =
+fun quoteWindowsArgument(argument: String): String =
     buildString {
         append('"')
         var backslashes = 0
