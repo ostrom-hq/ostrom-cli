@@ -14,8 +14,6 @@ import com.github.ajalt.clikt.parameters.types.choice
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.longOrNull
 import run.ostrom.cli.CliDependencies
 import run.ostrom.cli.ExitCode
 import run.ostrom.cli.commands.CLOUD_SESSIONS
@@ -309,9 +307,9 @@ internal fun remoteLine(session: JsonObject, record: RemoteSessionRecord?, showD
         session.text("agent") ?: "-",
         if (host?.flag("online") == true) "online" else "offline",
         if (showDevice) host?.text("deviceName") ?: "removed device" else null,
-        record?.directory ?: host?.text("directoryName") ?: "-",
+        if (record != null) record.directory else host?.text("directoryName") ?: "-",
     ).joinToString("\t")
 }
 
 /** The session's current epoch, 0 before its first execution. */
-private fun JsonObject.epoch(): Long = (this["epoch"] as? JsonPrimitive)?.longOrNull ?: 0
+private fun JsonObject.epoch(): Long = epochOf(this) ?: 0

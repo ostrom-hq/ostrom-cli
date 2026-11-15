@@ -256,6 +256,7 @@ class RemoteCommandsTest : SetupKit() {
         answer(create, 201 to """{"id":"$id","epoch":0}""")
         answer(
             "GET $session",
+            503 to "{}",
             200 to """{"id":"$id","epoch":0,"host":{"online":false}}""",
             200 to """{"id":"$id","epoch":1,"host":{"online":true}}""",
         )
@@ -266,7 +267,7 @@ class RemoteCommandsTest : SetupKit() {
             detached.single(),
         )
         assertTrue(fileSystem.exists(log.toPath()), "The log exists before the child opens it")
-        assertEquals(listOf(1_000L), waits, "The epoch it had before is not the background host's")
+        assertEquals(listOf(1_000L, 1_000L), waits, "The epoch it had before is not the background host's")
         assertErr("The host runs in the background (log: $log).")
         assertErr("Hosted in the background. ostrom remote stop $id pauses it.")
         assertTrue(runnerCalls.isEmpty(), "Nothing hosted in this process")
@@ -302,6 +303,10 @@ class RemoteCommandsTest : SetupKit() {
         answer("GET $session", 200 to """{"id":"$id","desiredStatus":"running","host":{"online":false}}""")
         hosting()
         assertEquals(0, remote("resume", id))
+        answer("GET $session", 200 to """{"id":"$id","desiredStatus":"paused","host":{"online":true}}""")
+        assertEquals(0, remote("resume", id), "A host still draining its pause is taken over")
+        answer("GET $session", 200 to """{"id":"$id","desiredStatus":"running"}""")
+        assertEquals(0, remote("resume", id))
         assertErr("Follow it from Ostrom's console or app. Ctrl-C pauses it; ostrom remote resume $id resumes it.")
         assertErr("Paused: the host checkpointed")
     }
@@ -326,6 +331,9 @@ class RemoteCommandsTest : SetupKit() {
         waits.clear()
         assertTrue(remote("host", id) != 0)
         assertEquals(44, waits.size)
+        answer(host, 200 to """{"orgId":"o1","epoch":6,"session":{}}""")
+        assertEquals(0, remote("host", id))
+        assertErr("Hosting the session (epoch 6) in /work/acme.")
         answer(host, 200 to """{"orgId":"o1"}""")
         assertEquals(ExitCode.UNREACHABLE.code, remote("host", id))
         assertErr("ostrom: the server opened no execution for this host.")
@@ -447,7 +455,7 @@ class RemoteCommandsTest : SetupKit() {
         record(sessionId = ended)
         answer("GET /api/v1/devices", 200 to """{"items":[{"id":"d0"},{"id":"d1","current":true}]}""")
         val list = "GET /api/v1/cloud/sessions?kind=remote"
-        answer(list, 200 to """{"items":[${item(id)},${item("other", device = "d2")}],"next":"other"}""")
+        answer(list, 200 to """{"items":[${item(id)},${item("other", device = "d2")},{}],"next":"other"}""")
         answer("$list&before=other", 200 to """{"items":[${item(ended, status = "terminated")}]}""")
         assertEquals(0, remote("list"))
         assertEquals("$id\trunning\tn\tclaude\tonline\t/work/acme\n", console.out.toString())
@@ -456,7 +464,8 @@ class RemoteCommandsTest : SetupKit() {
         console.out.clear()
         assertEquals(0, remote("list", "--all-devices"))
         assertEquals(
-            "$id\trunning\tn\tclaude\tonline\tLaptop\t/work/acme\nother\trunning\tn\tclaude\tonline\tLaptop\tapi\n",
+            "$id\trunning\tn\tclaude\tonline\tLaptop\t/work/acme\nother\trunning\tn\tclaude\tonline\tLaptop\tapi\n" +
+                "?\t\t-\t-\toffline\tremoved device\t-\n",
             console.out.toString(),
         )
         console.out.clear()
@@ -467,6 +476,7 @@ class RemoteCommandsTest : SetupKit() {
     @Test
     fun listSaysWhenNothingRunsAndStopsAtFiveHundred() {
         val list = "GET /api/v1/cloud/sessions?kind=remote"
+        answer("GET /api/v1/devices", 200 to """{"items":[{"id":"d0"}]}""")
         answer(list, 200 to """{"items":[]}""")
         assertEquals(0, remote("list"))
         assertErr("No remote session on this device; start one with ostrom remote start.")

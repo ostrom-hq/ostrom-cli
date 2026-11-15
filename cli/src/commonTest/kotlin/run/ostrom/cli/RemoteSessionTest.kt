@@ -149,5 +149,7 @@ class RemoteSessionTest {
         assertFalse(hosted(session("""{"epoch":2,"host":{"online":false}}"""), previousEpoch = 1))
         assertFalse(hosted(session("""{"epoch":2}"""), previousEpoch = 1))
         assertFalse(hosted(session("{}"), previousEpoch = -1))
+        assertTrue(hosted(session("""{"epoch":"two","host":{"online":true}}"""), previousEpoch = -1), "Read as 0")
+        assertFalse(hosted(session("""{"epoch":{},"host":{"online":true}}"""), previousEpoch = 0))
     }
 }

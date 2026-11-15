@@ -81,10 +81,10 @@ internal class RemoteHostPorts(
     val detach: (List<String>, String) -> DetachedProcess,
     val installSignals: () -> Unit,
     val stopRequested: () -> Boolean,
-    val heartbeat: Duration = 15.seconds,
-    val signalPollMillis: Long = 100,
-    val startPollMillis: Long = 1_000,
-    val startMillis: Long = 30_000,
+    val heartbeat: Duration,
+    val signalPollMillis: Long,
+    val startPollMillis: Long,
+    val startMillis: Long,
 )
 
 /** The real ports: POSIX processes, the platform's HTTP engine, the relay module, the OS's signals. */
@@ -98,6 +98,10 @@ internal fun systemRemoteHostPorts(): RemoteHostPorts = RemoteHostPorts(
     detach = ::startDetachedProcess,
     installSignals = ::installServiceSignalHandlers,
     stopRequested = ::serviceStopRequested,
+    heartbeat = 15.seconds,
+    signalPollMillis = 100,
+    startPollMillis = 1_000,
+    startMillis = 30_000,
 )
 
 /** The execution the host opened (`POST /cloud/sessions/{id}/host`, the contract's `CloudHost`). */
@@ -312,9 +316,10 @@ internal suspend fun takeSession(
 
 private fun JsonObject.hosted(): HostedSession {
     val session = child("session")
-    val epoch = (this["epoch"] as? JsonPrimitive)?.longOrNull
+    val epoch = epochOf(this)
         ?: throw stopWith(ExitCode.UNREACHABLE, "ostrom: the server opened no execution for this host.")
-    return HostedSession(epoch, session?.text("name") ?: "the session", session?.child("host")?.text("permissionMode"))
+    val name = session?.text("name") ?: "the session"
+    return HostedSession(epoch, name, session?.child("host")?.text("permissionMode"))
 }
 
 /**
@@ -368,9 +373,12 @@ private fun hostCommand(dependencies: CliDependencies, access: OrgAccess, record
 
 /** The background host took the session: a newer epoch, and its execution registered and heartbeating. */
 internal fun hosted(session: JsonObject, previousEpoch: Long): Boolean {
-    val epoch = (session["epoch"] as? JsonPrimitive)?.longOrNull ?: 0
+    val epoch = epochOf(session) ?: 0
     return epoch > previousEpoch && session.child("host")?.flag("online") == true
 }
+
+/** A session's or a host's epoch, when the server gave one. */
+internal fun epochOf(json: JsonObject): Long? = (json["epoch"] as? JsonPrimitive)?.longOrNull
 
 /** What the host says when another host took the session, or the server ended this execution. */
 internal const val FENCED = "This host no longer runs the session: another host took it, or the server ended this " +

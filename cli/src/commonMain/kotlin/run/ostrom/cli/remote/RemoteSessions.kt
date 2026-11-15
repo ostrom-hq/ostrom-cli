@@ -104,12 +104,12 @@ internal fun remoteDirectory(
     home: String?,
     windows: Boolean,
 ): Path {
-    val path = try {
-        fileSystem.canonicalize(cwd.toPath() / value)
+    val (path, isDirectory) = try {
+        fileSystem.canonicalize(cwd.toPath() / value).let { it to fileSystem.metadata(it).isDirectory }
     } catch (_: IOException) {
         throw stopWith(ExitCode.NOT_FOUND, "ostrom: $value does not exist.")
     }
-    if (fileSystem.metadataOrNull(path)?.isDirectory != true) {
+    if (!isDirectory) {
         throw stopWith(ExitCode.USAGE, "ostrom: $path is not a directory.")
     }
     val canonicalHome = home?.let {
@@ -128,7 +128,7 @@ internal fun refuseDirectory(path: Path, home: Path?, windows: Boolean) {
     fun same(a: String, b: String) = if (windows) a.equals(b, ignoreCase = true) else a == b
     val text = path.toString().trimEnd('/', '\\')
     val isHome = home != null && same(text, home.toString().trimEnd('/', '\\'))
-    if (path.parent == null || path.name.isEmpty() || isHome) {
+    if (path.parent == null || isHome) {
         throw stopWith(ExitCode.USAGE, "ostrom: choose a project directory: a session may not run in $path itself.")
     }
     val system = if (windows) WINDOWS_SYSTEM else POSIX_SYSTEM
