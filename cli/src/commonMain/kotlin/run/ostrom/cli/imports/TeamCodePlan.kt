@@ -27,9 +27,16 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
      * its tokens. One such row is said and skipped, never sent: the server would refuse the whole import for it.
      *
      * @param memberMap TeamCode member id to Ostrom member id.
+     * @param files Reads the files of the skill and hook versions sent.
+     * @param limit The most characters of one body: past it, skills and hooks go in more bodies ([PlannedImport.more]).
      * @throws TeamCodeReadException When a secret does not open with the key (another key file, or another team).
      */
-    fun request(tables: TeamCodeTables, memberMap: Map<String, String>): PlannedImport {
+    fun request(
+        tables: TeamCodeTables,
+        memberMap: Map<String, String>,
+        files: TeamCodeFiles = TeamCodeFiles { _, _ -> emptyMap() },
+        limit: Int = BODY_LIMIT,
+    ): PlannedImport {
         val policies = tables.policies.associateBy { it["variant_id"] }
         val skipped = mutableListOf<String>()
         val left = mutableSetOf<String?>()
@@ -67,7 +74,13 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
             "memberMap" to memberMap,
         )
         // a TeamCode before workflows and automations adds nothing; one with them adds TeamCode's rows as they are
-        return PlannedImport(JsonObject(body + workflowParts(tables, skipped)), skipped)
+        val catalog = catalogParts(tables.catalog, files, memberMap) { envelope, context, what ->
+            open(envelope, "variant:$team:$context", what)
+        }
+        val base = JsonObject(body + workflowParts(tables, skipped) + catalog.environment)
+        val carry = objectOf("members" to body["members"], "memberMap" to body["memberMap"])
+        val bodies = batches(base, carry, catalog, limit)
+        return PlannedImport(bodies.first(), skipped, bodies.drop(1))
     }
 
     private fun unsupported(variant: Row) = "MCP server ${variant["target"]} (${variant["name"]}): its command " +
@@ -195,6 +208,9 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
 
         private val MODES = mapOf("allowlist" to "allow", "allow" to "allow", "denylist" to "deny", "deny" to "deny")
 
+        /** The import route reads at most 8 MiB: a body stays under 7 million characters. */
+        const val BODY_LIMIT: Int = 7_000_000
+
         private const val INCOMPLETE = "no provider, account id, tokens or expiry in TeamCode: it could never sign in."
 
         /** The registry an MCP host installs a stdio server's package from, by the command TeamCode runs. */
@@ -229,5 +245,6 @@ class TeamCodePlan(private val key: TeamCodeKey, private val team: String) {
  *
  * @property body `TeamCodeImportRequest`.
  * @property skipped One line per row left out.
+ * @property more The skills and hooks that did not fit in [body], in more bodies imported after it.
  */
-data class PlannedImport(val body: JsonObject, val skipped: List<String>)
+data class PlannedImport(val body: JsonObject, val skipped: List<String>, val more: List<JsonObject> = emptyList())

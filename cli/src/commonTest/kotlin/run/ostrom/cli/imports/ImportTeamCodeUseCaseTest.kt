@@ -6,6 +6,7 @@ import run.ostrom.cli.launcher.ServerJson
 import run.ostrom.cli.launcher.ServerReply
 import run.ostrom.cli.launcher.ServerTransport
 import run.ostrom.cli.launcher.child
+import run.ostrom.cli.launcher.list
 import run.ostrom.cli.launcher.parseObject
 import run.ostrom.cli.platform.CaptureResult
 import kotlinx.coroutines.test.runTest
@@ -63,6 +64,66 @@ class ImportTeamCodeUseCaseTest {
         val body = checkNotNull(parseObject(calls.last().body))
         assertEquals(parseObject("""{"m1":"u-1"}"""), body.child("memberMap"), "by e-mail, whatever its case")
         assertTrue("sk-shared" !in said.toString(), "no secret is printed")
+    }
+
+    @Test
+    fun skillsThatDoNotFitGoInMoreBodiesAndTheirReportsAreOne() = runTest {
+        val schema = columns(
+            "members" to listOf("id", "username", "email", "team_id"),
+            "variants" to listOf("id", "target", "name", "binding", "config", "team_id", "kind"),
+            "variant_assignments" to listOf("member_id", "variant_id", "team_id", "kind"),
+            "mcp_tool_policies" to listOf("variant_id", "mode", "tools", "team_id"),
+            "accounts" to ACCOUNT_COLUMNS + "team_id",
+            "skills" to listOf("id", "name", "pinned_version_id", "retired_at", "team_id"),
+            "skill_versions" to listOf("id", "skill_id", "version", "published_at", "retired_at"),
+        )
+        val tables = batch("members", listOf("id", "username", "email"), listOf("m1", "maya", "maya@acme.example")) +
+            batch(
+                "skills",
+                listOf("id", "name", "pinned_version_id", "retired_at"),
+                listOf("s1", "review", "sv1", null),
+                listOf("s2", "notes", "sv2", null),
+            ) + batch(
+                "skill_versions",
+                listOf("id", "skill_id", "version", "published_at", "retired_at"),
+                listOf("sv1", "s1", "1", "1", null),
+                listOf("sv2", "s2", "1", "1", null),
+            )
+        val files = batch(
+            "files",
+            listOf("version_id", "path", "mode", "size"),
+            listOf("sv1", "SKILL.md", "file", "1"),
+            listOf("sv2", "SKILL.md", "file", "1"),
+        )
+        val content = batch("piece", listOf("version_id", "path", "content"), listOf("sv1", "SKILL.md", "eA=="))
+        val content2 = batch("piece", listOf("version_id", "path", "content"), listOf("sv2", "SKILL.md", "eQ=="))
+        val mysql = FakeMysql(
+            schema,
+            CaptureResult.Exited(0, tables),
+            CaptureResult.Exited(0, files),
+            CaptureResult.Exited(0, content + content2),
+        )
+        replies["POST /api/v1/import/teamcode?dryRun=true"] = ServerReply(
+            200,
+            """{"items":[{"kind":"setting","name":"agentPrefix","action":"planned"},""" +
+                """{"kind":"skill","name":"s","action":"planned"},""" +
+                """{"kind":"account","name":"a","action":"revive_at_cutover","refreshOwnership":"access_only"},""" +
+                """{"kind":"account","name":"b","action":"created","refreshOwnership":"pending_handover"}],""" +
+                """"created":9}""",
+        )
+        val database = TeamCodeDatabase(mysql)
+        val useCase = ImportTeamCodeUseCase(database, server, "ost_console", { false }, { said.append(it) }) {
+            said.append(it)
+        }
+        val request = ImportTeamCodeRequest("mysql://ro@db/teamcode", Sealed.KEY, "default", false, bodyLimit = 1)
+        assertEquals(0, useCase(request))
+        val imports = calls.filter { it.method == "POST" }
+        assertEquals(3, imports.size, "the import, then one body per skill")
+        val bodies = imports.map { checkNotNull(parseObject(it.body)) }
+        assertEquals(listOf(0, 1, 1), bodies.map { it.list("skills").size })
+        // one report: the MCP prefix once, the counts recounted from the lines
+        assertEquals(1, said.lines().count { "agentPrefix" in it }, said.toString())
+        assertTrue("3 created, 0 updated, 0 unchanged, 0 skipped, 3 to revive at the cutover." in said, said.toString())
     }
 
     @Test

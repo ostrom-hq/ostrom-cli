@@ -35,7 +35,8 @@ class TeamCodePlanTest {
             "accounts":[{"provider":"claude","providerAccountId":"acc-1","label":"Team Max",
               "email":"ops@acme.example","accessToken":"at","refreshToken":"rt",
               "expiresAt":"2026-10-29T00:00:00Z","disabled":false}],
-            "memberMap":{"m1":"u-1"}}""",
+            "memberMap":{"m1":"u-1"},
+            "variables":[],"variableAssignments":[],"variableExclusions":[],"skills":[],"hooks":[]}""",
         )
         assertEquals(expected, request)
     }
