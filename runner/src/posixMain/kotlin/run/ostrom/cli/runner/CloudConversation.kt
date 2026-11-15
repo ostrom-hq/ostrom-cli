@@ -10,12 +10,13 @@ import run.ostrom.cli.runner.conversation.HttpAgentChannel
 
 /**
  * The headless agent of a `conversation` session: started in the agent's container without a terminal, relayed to the
- * server's runner channel with the runner token, its conversation kept in the agent's home.
+ * server's runner channel with the runner's credential ([RunnerConfig.bearer]), its conversation kept in the agent's
+ * home.
  */
 internal fun conversation(client: HttpClient, config: RunnerConfig, terminals: RemoteTerminalStarter) =
     ConversationStarter { agentEnvironment, directory, first, activity ->
         val processes = ExecProcesses(terminals, agentEnvironment)
-        val channel = HttpAgentChannel(client, config.serverUrl, { config.token }, config.sessionId.toString(),
+        val channel = HttpAgentChannel(client, config.serverUrl, config::bearer, config.sessionId.toString(),
             config.epoch)
         ConversationHost(
             channel = channel,

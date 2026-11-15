@@ -333,11 +333,10 @@ private val KNOWN_VARIABLES = listOf(
     "OSTROM_RUNNER_ID", "OSTROM_RUNNER_KEY", "OSTROM_RUNNER_KEY_FILE", "OSTROM_RUNNER_INTERVAL_SECONDS",
     "OSTROM_DOCKER_API_URL", "OSTROM_DOCKER_NETWORK", "OSTROM_RUNNER_SESSION_IMAGE", "OSTROM_CREDENTIAL_SOCKET",
     "OSTROM_GH_CONFIG_DIR", "OSTROM_AGENT_STATE_SOCKET", "OSTROM_POD_TOKEN_FILE",
+    "OSTROM_SESSION_MODE",
 )
 
 internal const val CONNECT_TIMEOUT_MILLIS = 10_000L
-
-/** The version the runner tells Codex's app-server (`clientInfo`), the runner channel's. */
 
 /** The longest the first GitHub token may take before the agent starts without it. */
 private val GITHUB_FIRST_TIMEOUT = 10.seconds

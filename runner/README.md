@@ -333,7 +333,7 @@ for another agent than Claude Code, and on a Docker delivery, whose containers d
 
 A session in `conversation` mode has no terminal: its agent runs headless, as TeamCode's cloud agent host runs it, and
 the runner relays it to the server's runner channel (`POST /api/v1/cloud/runner/agent|events|inputs|inputs/ack`, with
-the runner token). The runner reads the mode from `OSTROM_SESSION_MODE`; absent or `terminal`, it relays a terminal as
+the runner's credential, as its other calls). The runner reads the mode from `OSTROM_SESSION_MODE`; absent or `terminal`, it relays a terminal as
 before, and so it does when the server answers `409 terminal_session`.
 
 - **Exec mode of the agent host.** The runner asks the agent's container for a process without a PTY

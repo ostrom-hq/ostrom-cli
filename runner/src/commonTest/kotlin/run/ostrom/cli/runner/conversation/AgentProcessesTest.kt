@@ -4,6 +4,7 @@ package run.ostrom.cli.runner.conversation
 import io.ktor.utils.io.ByteChannel
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.ByteWriteChannel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.test.runTest
@@ -171,6 +172,12 @@ class AgentProcessesTest {
             Answering(emptyList())
         }, "/workspace")
         default.clear()
+        val unreachable = ContainerAgentStateStore({ _, _, _ -> throw IOException("no host") }, "/workspace")
+        assertNull(unreachable.read(), "An unreachable host keeps no conversation")
+        unreachable.write(AgentState("claude", "2.1", "c3"))
+        assertFailsWith<CancellationException> {
+            ContainerAgentStateStore({ _, _, _ -> throw CancellationException("stop") }, "/workspace").clear()
+        }
     }
 
     @Test

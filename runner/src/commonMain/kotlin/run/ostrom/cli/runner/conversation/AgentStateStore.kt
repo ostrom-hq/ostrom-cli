@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli.runner.conversation
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okio.FileSystem
@@ -118,8 +119,16 @@ class ContainerAgentStateStore(
         run(CLEAR, emptyMap())
     }
 
+    // A process that cannot start (the agent's host unreachable) reads as no conversation and keeps none: the
+    // conversation goes on, the next execution starts a new one.
     private suspend fun run(script: String, variables: Map<String, String?>): List<String> {
-        val process = start(AgentCommand("sh", listOf("-c", script)), variables + (FILE_VARIABLE to path), directory)
+        val process = try {
+            start(AgentCommand("sh", listOf("-c", script)), variables + (FILE_VARIABLE to path), directory)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            return emptyList()
+        }
         val lines = mutableListOf<String>()
         while (true) lines += process.readLine() ?: break
         process.stop(GRACE_MILLIS)

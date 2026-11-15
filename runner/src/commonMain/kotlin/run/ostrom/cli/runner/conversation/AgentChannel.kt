@@ -155,12 +155,12 @@ interface AgentChannel {
 }
 
 /**
- * [AgentChannel] over HTTP with the execution's runner token (`/api/v1/cloud/runner/agent|events|inputs|inputs/ack`).
+ * [AgentChannel] over HTTP with the execution's credential (`/api/v1/cloud/runner/agent|events|inputs|inputs/ack`).
  * A refusal is a [RunnerChannelException] with the error's `type`.
  *
  * @param client The HTTP client (`expectSuccess = false`).
  * @param serverUrl The server.
- * @param token The runner token, read at each call.
+ * @param token The runner's credential (the pod's token or the runner token), read at each call.
  * @param sessionId The session.
  * @param epoch The execution.
  */
