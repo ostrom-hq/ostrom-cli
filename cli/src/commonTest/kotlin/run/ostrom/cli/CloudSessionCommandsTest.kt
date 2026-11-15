@@ -157,5 +157,9 @@ class CloudSessionCommandsTest : SetupKit() {
             "\"effectiveMemberId\":\"m1\"},\"name\"")
         assertEquals(0, run(routes(show to (200 to own)), "cloud", "show", "cs1"))
         assertFalse(console.out.contains("Created by"), console.out.toString())
+        console.out.clear()
+        val unnamed = session.replace("\"name\"", "\"owner\":\"m1\",\"createdBy\":{},\"name\"")
+        assertEquals(0, run(routes(show to (200 to unnamed)), "cloud", "show", "cs1"))
+        assertFalse(console.out.contains("Created by"), console.out.toString())
     }
 }
