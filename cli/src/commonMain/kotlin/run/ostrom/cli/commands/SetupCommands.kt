@@ -65,6 +65,7 @@ internal fun setupCommands(dependencies: CliDependencies): List<CliktCommand> = 
 private fun cloudCommand(dependencies: CliDependencies) = CloudCommand().subcommands(
     CloudCreateCommand(dependencies),
     CloudListCommand(dependencies),
+    CloudProfilesCommand(dependencies),
     CloudShowCommand(dependencies),
     CloudChangeCommand(dependencies, "pause", "Pause a cloud session: the agent finishes its turn, then stops"),
     CloudChangeCommand(dependencies, "resume", "Resume a paused cloud session"),

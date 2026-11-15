@@ -454,6 +454,12 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
         "cloud-sessions",
         "ostrom cloud list" to "your cloud sessions, newest first",
         "ostrom cloud list --status paused" to "only the paused ones",
+        "ostrom cloud list --member maya" to "Maya's sessions (--all for everyone's; the server may refuse)",
+    ),
+    "cloud profiles" to guide(
+        "cloud-sessions",
+        "ostrom cloud profiles" to "the profiles you can create sessions from",
+        "ostrom cloud profiles --member maya" to "the ones Maya can use (owners and admins)",
     ),
     "cloud show" to guide("cloud-sessions", "ostrom cloud show ses_41b2" to "one cloud session"),
     "cloud pause" to guide("cloud-sessions", "ostrom cloud pause ses_41b2" to "pause it: the agent finishes its turn"),
@@ -463,6 +469,7 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
         "cloud-sessions",
         "ostrom cloud transfer ses_41b2 --to maya" to "give the session to Maya (she accepts, or at once for an admin)",
         "ostrom cloud transfer" to "pick the session and the member from lists",
+        "ostrom cloud transfer ses_41b2 --to noor --member maya" to "transfer Maya's session for her (administrators)",
     ),
     "cloud transfers" to guide(
         "cloud-sessions",
@@ -476,6 +483,7 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
     "cloud transfers accept" to guide(
         "cloud-sessions",
         "ostrom cloud transfers accept ctr_7a1 --resume" to "take the session and resume it once it is yours",
+        "ostrom cloud transfers accept ctr_7a1 --member maya" to "accept it for Maya (administrators)",
     ),
     "cloud transfers decline" to guide(
         "cloud-sessions",

@@ -45,6 +45,23 @@ internal const val RUNNERS_CLOUD_ON_BEHALF = "runners.cloud.onbehalf.v1"
 internal const val NO_ON_BEHALF =
     "This Ostrom server does not act on behalf of another member: run the command without --member."
 
+/** `ServerFeatures.RUNNERS_CLOUD_ON_BEHALF_WRITES` of ostrom-core#300: the transfer writes act on behalf too. */
+internal const val RUNNERS_CLOUD_ON_BEHALF_WRITES = "runners.cloud.onbehalf.writes.v1"
+
+/** `ServerFeatures.RUNNERS_CLOUD_PROFILES_MEMBER` of ostrom-core#300: `GET cloud/profiles?member=`. */
+internal const val RUNNERS_CLOUD_PROFILES_MEMBER = "runners.cloud.profiles.member.v1"
+
+/** `ServerFeatures.RUNNERS_CLOUD_SESSIONS_OWNER` of ostrom-core#300: `GET cloud/sessions?owner=`. */
+internal const val RUNNERS_CLOUD_SESSIONS_OWNER = "runners.cloud.sessions.owner.v1"
+
+/** What `--member` says to a server whose cloud list would ignore `owner` and list the caller's own sessions. */
+internal const val NO_SESSIONS_OWNER =
+    "This Ostrom server cannot list another member's sessions; update it, or run the command without --member or --all."
+
+/** What `--member` says to a server whose profile list would ignore `member`. */
+internal const val NO_PROFILES_MEMBER =
+    "This Ostrom server cannot list another member's profiles; update it, or run the command without --member."
+
 /** A member named by id or login (`OnBehalfOf.PATTERN` of ostrom-core#291). */
 private val MEMBER_REFERENCE = Regex("[A-Za-z0-9._-]{1,64}")
 
@@ -66,10 +83,14 @@ internal fun checkMember(member: String?) {
  * The checked `--member`, or null: a server without `runners.cloud.onbehalf.v1` would ignore the header and act on
  * the caller's own sessions, so the command stops before any write.
  */
-internal fun CliDependencies.onBehalfOf(access: OrgAccess, member: String?): String? {
+internal fun CliDependencies.onBehalfOf(
+    access: OrgAccess,
+    member: String?,
+    feature: String = RUNNERS_CLOUD_ON_BEHALF,
+): String? {
     if (member == null) return null
     checkMember(member)
-    requireFeature(access.signed.serverUrl, access.signed.token, RUNNERS_CLOUD_ON_BEHALF, NO_ON_BEHALF)
+    requireFeature(access.signed.serverUrl, access.signed.token, feature, NO_ON_BEHALF)
     return member
 }
 
@@ -82,20 +103,42 @@ internal fun JsonObject.cloudLine(now: Long): String = listOf(
     age(text("createdAt"), now),
 ).joinToString("  ")
 
-/** `ostrom cloud list [--status S] [--before ID] [--json]`: your cloud sessions, newest first. */
+/**
+ * `ostrom cloud list [--status S] [--before ID] [--member ID|LOGIN | --all] [--json]`: your cloud sessions, newest
+ * first. `--member` and `--all` list another member's, or every member's (`owner=`, `runners.cloud.sessions.owner.v1`,
+ * as TeamCode's `CloudList`); the server answers 403 for anyone but the caller, and its message is let through.
+ */
 internal class CloudListCommand(private val dependencies: CliDependencies) : CliktCommand(name = "list") {
     override fun help(context: Context) = "List your cloud sessions, newest first: id, agent, status, repository, age"
 
     private val status by option("--status", help = "Only the sessions in this status")
         .choice(STATUSES.associateWith { it })
     private val before by option("--before", help = "The id the previous page ended with (printed when more exist)")
+    private val member by option("--member", help = "Another member's sessions (id or login)")
+    private val all by option("--all", help = "Every member's sessions").flag()
     private val org by orgOption()
     private val server by serverFlag()
     private val json by jsonFlag()
 
     override fun run() {
+        if (all && member != null) throw stopWith(ExitCode.USAGE, "ostrom: Use --all or --member, not both.")
+        checkMember(member)
         val access = dependencies.cloudAccess(server, org)
-        val query = listOfNotNull(status?.let { "status=$it" }, before?.let { "before=${segment(it)}" })
+        // An older server ignores `owner` and would list the caller's own sessions as if they were the member's.
+        val owner = if (all) "all" else member
+        if (owner != null) {
+            dependencies.requireFeature(
+                access.signed.serverUrl,
+                access.signed.token,
+                RUNNERS_CLOUD_SESSIONS_OWNER,
+                NO_SESSIONS_OWNER,
+            )
+        }
+        val query = listOfNotNull(
+            status?.let { "status=$it" },
+            before?.let { "before=${segment(it)}" },
+            owner?.let { "owner=${segment(it)}" },
+        )
         val path = if (query.isEmpty()) CLOUD_SESSIONS else "$CLOUD_SESSIONS?" + query.joinToString("&")
         val page = access.read(path, "No cloud sessions on ${access.signed.serverUrl}.")
         val items = page.list("items").filterIsInstance<JsonObject>()

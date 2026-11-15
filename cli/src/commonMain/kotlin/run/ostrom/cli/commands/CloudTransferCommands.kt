@@ -98,12 +98,15 @@ internal class CloudTransferCommand(private val dependencies: CliDependencies) :
         "--idempotency-key",
         help = "Defaults to a random key; reuse one to retry safely",
     )
+    private val member by memberOption()
     private val org by orgOption()
     private val server by serverFlag()
     private val json by jsonFlag()
 
     override fun run() {
+        checkMember(member)
         val access = dependencies.transferAccess(server, org)
+        val onBehalfOf = dependencies.onBehalfOf(access, member, RUNNERS_CLOUD_ON_BEHALF_WRITES)
         val id = session ?: pickSession(access)
         val recipient = to ?: pickRecipient(access, id)
         val request = objectOf("toMemberId" to recipient, "resume" to resume)
@@ -113,6 +116,7 @@ internal class CloudTransferCommand(private val dependencies: CliDependencies) :
             request,
             "No cloud session $id.",
             idempotencyKey = idempotencyKey ?: Uuid.random().toString(),
+            onBehalfOf = onBehalfOf,
         )
         dependencies.console.let { if (json) it.data("$transfer\n") else it.out(transfer.transferLine() + "\n") }
     }
@@ -277,15 +281,24 @@ private class CloudTransfersAcceptCommand(private val dependencies: CliDependenc
     private val resume by option(
         help = "Resume the session for you once it is yours, or not (default: what the offer asked for)",
     ).switch("--resume" to true, "--no-resume" to false)
+    private val member by memberOption()
     private val org by orgOption()
     private val server by serverFlag()
     private val json by jsonFlag()
 
     override fun run() {
+        checkMember(member)
         val access = dependencies.transferAccess(server, org)
+        val onBehalfOf = dependencies.onBehalfOf(access, member, RUNNERS_CLOUD_ON_BEHALF_WRITES)
         val choice = resume
         val body = JsonObject(if (choice == null) emptyMap() else mapOf("resume" to JsonPrimitive(choice)))
-        val accepted = access.write("POST", "${transferPath(id)}/accept", body, "No transfer $id.")
+        val accepted = access.write(
+            "POST",
+            "${transferPath(id)}/accept",
+            body,
+            "No transfer $id.",
+            onBehalfOf = onBehalfOf,
+        )
         dependencies.console.let { if (json) it.data("$accepted\n") else it.out(accepted.transferLine() + "\n") }
         dependencies.console.err(ACCEPTED_WORKSPACE_NOTICE + "\n")
     }
@@ -296,13 +309,22 @@ private class CloudTransfersDeclineCommand(private val dependencies: CliDependen
     override fun help(context: Context) = "Decline a session offered to you"
 
     private val id by argument("transfer", help = "The transfer's id")
+    private val member by memberOption()
     private val org by orgOption()
     private val server by serverFlag()
     private val json by jsonFlag()
 
     override fun run() {
+        checkMember(member)
         val access = dependencies.transferAccess(server, org)
-        val declined = access.write("POST", "${transferPath(id)}/decline", null, "No transfer $id.")
+        val onBehalfOf = dependencies.onBehalfOf(access, member, RUNNERS_CLOUD_ON_BEHALF_WRITES)
+        val declined = access.write(
+            "POST",
+            "${transferPath(id)}/decline",
+            null,
+            "No transfer $id.",
+            onBehalfOf = onBehalfOf,
+        )
         dependencies.console.let { if (json) it.data("$declined\n") else it.out(declined.transferLine() + "\n") }
     }
 }
@@ -313,13 +335,22 @@ private class CloudTransfersCancelCommand(private val dependencies: CliDependenc
         "Withdraw your offer, or (administrators) cancel a transfer before the owner change starts"
 
     private val id by argument("transfer", help = "The transfer's id")
+    private val member by memberOption()
     private val org by orgOption()
     private val server by serverFlag()
     private val json by jsonFlag()
 
     override fun run() {
+        checkMember(member)
         val access = dependencies.transferAccess(server, org)
-        val cancelled = access.write("POST", "${transferPath(id)}/cancel", null, "No transfer $id.")
+        val onBehalfOf = dependencies.onBehalfOf(access, member, RUNNERS_CLOUD_ON_BEHALF_WRITES)
+        val cancelled = access.write(
+            "POST",
+            "${transferPath(id)}/cancel",
+            null,
+            "No transfer $id.",
+            onBehalfOf = onBehalfOf,
+        )
         dependencies.console.let { if (json) it.data("$cancelled\n") else it.out(cancelled.transferLine() + "\n") }
     }
 }

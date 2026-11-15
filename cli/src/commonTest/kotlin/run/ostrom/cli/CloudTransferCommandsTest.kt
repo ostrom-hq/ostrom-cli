@@ -200,4 +200,37 @@ class CloudTransferCommandsTest : SetupKit() {
         assertEquals(0, run(routes(accept to (202 to offered)), "cloud", "transfers", "accept", "ct1", "--json"))
         assertEquals(66, run(routes(), "cloud", "transfers", "cancel", "ct9"))
     }
+
+    private val acting = mapOf(
+        capabilities("runners.cloud.v1", "runners.cloud.transfer.v1", "runners.cloud.onbehalf.writes.v1"),
+    )
+
+    @Test
+    fun memberActsForAnotherMemberOnEveryTransferWrite() {
+        val accept = "POST /api/v1/cloud/transfers/ct1/accept"
+        val decline = "POST /api/v1/cloud/transfers/ct1/decline"
+        val cancel = "POST /api/v1/cloud/transfers/ct1/cancel"
+        val answered = acting + listOf(post, accept, decline, cancel).associateWith { 202 to offered }
+        assertEquals(0, run(answered, "cloud", "transfer", "cs1", "--to", "m2", "--member", "ada"))
+        assertEquals(0, run(answered, "cloud", "transfers", "accept", "ct1", "--member", "ada"))
+        assertEquals(0, run(answered, "cloud", "transfers", "decline", "ct1", "--member", "ada"))
+        assertEquals(0, run(answered, "cloud", "transfers", "cancel", "ct1", "--member", "ada"))
+        assertEquals(0, run(answered, "cloud", "transfers", "cancel", "ct1"))
+        val members = requests.filter { it.second.method == "POST" }.map { it.second.onBehalfOf }
+        assertEquals(listOf("ada", "ada", "ada", "ada", null), members)
+    }
+
+    @Test
+    fun memberIsRefusedBeforeAnyWriteByAServerThatWouldIgnoreItOrWhenMalformed() {
+        val cancel = "POST /api/v1/cloud/transfers/ct1/cancel"
+        val cancelling = arrayOf("cloud", "transfers", "cancel", "ct1", "--member", "ada")
+        assertEquals(69, run(routes(cancel to (202 to offered)), *cancelling))
+        assertErr("does not act on behalf of another member")
+        val transferring = arrayOf("cloud", "transfer", "cs1", "--to", "m2", "--member", "ada")
+        assertEquals(69, run(routes(post to (202 to offered)), *transferring))
+        assertEquals(64, run(acting, "cloud", "transfers", "accept", "ct1", "--member", "a b"))
+        assertErr("--member is a member id or login")
+        assertEquals(64, run(acting, "cloud", "transfers", "decline", "ct1", "--member", "a b"))
+        assertTrue(sent().none { it.startsWith("POST") }, sent().toString())
+    }
 }

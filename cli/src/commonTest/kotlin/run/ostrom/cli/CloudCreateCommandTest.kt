@@ -182,4 +182,28 @@ class CloudCreateCommandTest : SetupKit() {
         assertErr("does not start sessions from a cloud profile")
         assertTrue(sent().none { it == create }, "nothing created")
     }
+
+    @Test
+    fun aProfileNameIsLookedUpInTheMembersListWhenTheServerListsItAndInTheCallersOtherwise() {
+        val memberList = "GET /api/v1/cloud/profiles?member=ada"
+        val base = arrayOf("runners.cloud.v1", "runners.cloud.profiles.v1", "runners.cloud.onbehalf.v1")
+        val options = arrayOf("cloud", "create", "--agent", "claude", "--profile", "backend", "--member", "ada")
+        val listsMembers = mapOf(capabilities(*base, "runners.cloud.profiles.member.v1"), listing(backend to "x"))
+        val memberProfiles = memberList to (200 to """{"profiles":[{"id":"$backend","name":"backend"}]}""")
+        assertEquals(0, run(routes(listsMembers + memberProfiles), *options))
+        assertEquals("""{"agent":"claude","profileId":"$backend"}""", bodyOf(create))
+        assertTrue(sent().contains(memberList) && !sent().contains(profiles), sent().toString())
+        val before = sent().size
+        // A server that cannot list another member's profiles: the caller's list, as TeamCode's.
+        val older = mapOf(capabilities(*base), listing(backend to "backend"))
+        assertEquals(0, run(routes(older), *options))
+        val second = sent().drop(before)
+        assertTrue(second.contains(profiles) && !second.contains(memberList), second.toString())
+        assertEquals("""{"agent":"claude","profileId":"$backend"}""", bodyOf(create))
+        // Capabilities that cannot be read: the caller's list too.
+        val unread = mapOf("GET /api/v1/capabilities" to (500 to "{}"), listing(backend to "backend"))
+        val third = sent().size
+        assertEquals(0, run(routes(unread), *options))
+        assertTrue(sent().drop(third).none { it == memberList }, sent().toString())
+    }
 }
