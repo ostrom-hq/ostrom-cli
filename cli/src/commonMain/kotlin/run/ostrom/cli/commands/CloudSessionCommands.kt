@@ -28,12 +28,15 @@ internal const val NO_CLOUD_SESSIONS = "This Ostrom server runs no cloud session
 private val STATUSES = listOf("creating", "running", "pausing", "paused", "resuming", "terminated", "failed")
 
 /** The organisation a cloud command acts in, once the server has said it runs cloud sessions. */
-private fun CliDependencies.cloudAccess(server: String?, org: String?): OrgAccess =
-    orgAccess(server, org).also {
-        requireFeature(it.signed.serverUrl, it.signed.token, ServerFeatures.RUNNERS_CLOUD, NO_CLOUD_SESSIONS)
-    }
+internal fun CliDependencies.cloudAccess(
+    server: String?,
+    org: String?,
+    feature: String = ServerFeatures.RUNNERS_CLOUD,
+    missing: String = NO_CLOUD_SESSIONS,
+): OrgAccess =
+    orgAccess(server, org).also { requireFeature(it.signed.serverUrl, it.signed.token, feature, missing) }
 
-private fun sessionPath(id: String) = "$CLOUD_SESSIONS/${segment(id)}"
+internal fun cloudSessionPath(id: String) = "$CLOUD_SESSIONS/${segment(id)}"
 
 /** `cs_1  claude  running  acme/api  5m`: one row of `ostrom cloud list`, its age from [now]. */
 internal fun JsonObject.cloudLine(now: Long): String = listOf(
@@ -84,7 +87,7 @@ internal class CloudShowCommand(private val dependencies: CliDependencies) : Cli
 
     override fun run() {
         val access = dependencies.cloudAccess(server, org)
-        val shown = access.read(sessionPath(session), "No cloud session $session.")
+        val shown = access.read(cloudSessionPath(session), "No cloud session $session.")
         if (json) {
             dependencies.console.data(shown.toString() + "\n")
             return
@@ -140,7 +143,7 @@ internal class CloudChangeCommand(
 
     override fun run() {
         val access = dependencies.cloudAccess(server, org)
-        val changed = access.write("POST", "${sessionPath(session)}/$action", null, "No cloud session $session.")
+        val changed = access.write("POST", "${cloudSessionPath(session)}/$action", null, "No cloud session $session.")
         dependencies.console.out(changed.cloudLine(dependencies.clock()) + "\n")
     }
 }
@@ -163,7 +166,7 @@ internal class CloudDeleteCommand(private val dependencies: CliDependencies) : C
             throw stopWith(ExitCode.USAGE, "ostrom: deleting $session and its workspace cannot be undone: add --yes.")
         }
         val access = dependencies.cloudAccess(server, org)
-        access.write("DELETE", sessionPath(session), null, "No cloud session $session.")
+        access.write("DELETE", cloudSessionPath(session), null, "No cloud session $session.")
         dependencies.console.out("Session $session is being deleted.\n")
     }
 }

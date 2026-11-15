@@ -69,6 +69,8 @@ private fun cloudCommand(dependencies: CliDependencies) = CloudCommand().subcomm
     CloudChangeCommand(dependencies, "pause", "Pause a cloud session: the agent finishes its turn, then stops"),
     CloudChangeCommand(dependencies, "resume", "Resume a paused cloud session"),
     CloudDeleteCommand(dependencies),
+    CloudTransferCommand(dependencies),
+    CloudTransfersCommand(dependencies),
     CloudGithubCommand(dependencies),
     AttachCommand(dependencies),
 )

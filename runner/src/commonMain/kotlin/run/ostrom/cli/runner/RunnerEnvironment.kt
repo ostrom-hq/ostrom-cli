@@ -62,6 +62,8 @@ data class GitIdentity(val name: String, val email: String)
  * @property git The owner's Git identity.
  * @property variables The owner's environment variables, by name.
  * @property unavailable The variables withheld, by name.
+ * @property untrustedWorkspace Another member's execution ran on the workspace since this owner's last ready one (a
+ *   transfer): the agent's settings and the repositories' Git configuration are reset before anything runs.
  */
 @Serializable
 class RunnerEnvironment(
@@ -69,10 +71,12 @@ class RunnerEnvironment(
     val git: GitIdentity,
     val variables: Map<String, String> = emptyMap(),
     val unavailable: List<String> = emptyList(),
+    val untrustedWorkspace: Boolean = false,
 ) {
     /** Names only, never a value. */
     override fun toString(): String =
-        "RunnerEnvironment(${environment.repositories.size} repositories, variables=${variables.keys.sorted()})"
+        "RunnerEnvironment(${environment.repositories.size} repositories, variables=${variables.keys.sorted()}, " +
+            "untrustedWorkspace=$untrustedWorkspace)"
 }
 
 /**
