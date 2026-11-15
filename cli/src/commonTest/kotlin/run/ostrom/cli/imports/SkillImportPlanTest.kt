@@ -144,6 +144,28 @@ class SkillImportPlanTest {
     }
 
     @Test
+    fun theLatestVersionGoesWhenNoneIsPinned() {
+        val unpinned = TeamCodeCatalogTables(
+            skills = listOf(mapOf("id" to "a", "name" to "a"), mapOf("id" to "b", "name" to "b")),
+            skillVersions = listOf(
+                mapOf("id" to "a1", "skill_id" to "a", "version" to "1", "published_at" to "5"),
+                mapOf("id" to "b1", "skill_id" to "b", "version" to "1", "published_at" to "1"),
+                mapOf("id" to "b2", "skill_id" to "b", "version" to "2", "published_at" to "3"),
+                mapOf("id" to "b3", "skill_id" to "b", "version" to "3", "published_at" to "2"),
+            ),
+            hooks = listOf(mapOf("id" to "h", "name" to "h")),
+            hookVersions = listOf(mapOf("id" to "h1", "hook_id" to "h", "version" to "1", "events" to "Stop,,")),
+        )
+        // a version whose files are not found goes without any: the server then says what it misses
+        val parts = catalogParts(unpinned, TeamCodeFiles { _, _ -> emptyMap() }, emptyMap(), open)
+        val sent = parts.skills.map { it.list("versions").single().jsonObject }
+        assertEquals(listOf("1", "2"), sent.map { it.text("version") })
+        assertEquals(emptyList(), sent.first().list("files"))
+        val hook = parts.hooks.single().list("versions").single().jsonObject
+        assertEquals(listOf("Stop"), hook.list("events").map { it.jsonPrimitive.content })
+    }
+
+    @Test
     fun skillsAndHooksThatDoNotFitGoInMoreBodies() {
         val parts = parts()
         val base = objectOf("members" to emptyList<String>(), "accounts" to listOf("a"))

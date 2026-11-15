@@ -170,9 +170,11 @@ class TeamCodeDatabase(
                 content.append(part["content"])
             }
         }
-        // every column read is NOT NULL in TeamCode, and every file has its pieces
+        // every column read is NOT NULL in TeamCode; a file without its pieces went while it was read
         return listed.groupBy({ "${it["version_id"]}" }) {
-            TeamCodeFile("${it["path"]}", "${it["mode"]}", contents[it["version_id"] to it["path"]].toString())
+            val content = contents[it["version_id"] to it["path"]]
+                ?: throw TeamCodeReadException("$table: ${it["path"]} went while it was read, read again")
+            TeamCodeFile("${it["path"]}", "${it["mode"]}", "$content")
         }
     }
 
@@ -182,7 +184,8 @@ class TeamCodeDatabase(
         var used = piece + 1 // the first piece, even of an empty file, opens a read
         for (file in files) {
             val size = "${file["size"]}".toIntOrNull() ?: 0
-            for (offset in 0 until maxOf(size, 1) step piece) {
+            var offset = 0
+            do {
                 val length = minOf(piece, size - offset)
                 if (used + length > piece) {
                     calls += mutableListOf<Pair<Row, Int>>()
@@ -190,7 +193,8 @@ class TeamCodeDatabase(
                 }
                 calls.last() += file to offset
                 used += length
-            }
+                offset += piece
+            } while (offset < size)
         }
         return calls
     }

@@ -4,6 +4,7 @@ package run.ostrom.cli.imports
 import run.ostrom.cli.platform.CaptureResult
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class TeamCodeCatalogDatabaseTest {
@@ -97,6 +98,19 @@ class TeamCodeCatalogDatabaseTest {
         assertTrue("SUBSTRING(`content`, 4, 3)" in scripts[3], scripts[3])
         assertTrue("REPLACE(TO_BASE64(" in scripts[1] && "CHAR(10)" in scripts[1])
         assertEquals(5, mysql.commands.size)
+    }
+
+    @Test
+    fun noFileIsReadWhenNoneIsListedAndOneThatWentStopsTheRead() {
+        val none = FakeMysql(CaptureResult.Exited(0, ""))
+        assertEquals(emptyMap(), TeamCodeDatabase(none).files(url, "hook_files", listOf("hv1")))
+        assertEquals(1, none.commands.size)
+        val listing = batch("files", listOf("version_id", "path", "mode", "size"), listOf("hv1", "run.sh", "file", "2"))
+        val gone = FakeMysql(CaptureResult.Exited(0, listing), CaptureResult.Exited(0, ""))
+        val message = assertFailsWith<TeamCodeReadException> {
+            TeamCodeDatabase(gone).files(url, "hook_files", listOf("hv1"))
+        }.message
+        assertEquals("hook_files: run.sh went while it was read, read again", message)
     }
 
     private fun piece(header: List<String>, version: String, path: String, content: String) =
