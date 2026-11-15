@@ -191,6 +191,40 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
         "ostrom install --bundle ./release" to "install offline from a signed release folder",
         "ostrom install --no-path" to "without linking ~/.local/bin/ostrom",
     ),
+    "service" to guide(
+        "install",
+        "ostrom service install" to "keep the local service running, started at login",
+        "ostrom service status" to "installed, running, and signed in",
+        "ostrom service install --at-boot" to "start before login (asks for OS authorization)",
+    ),
+    "service print" to guide(
+        "install",
+        "ostrom service print" to "the OS registration, without installing it",
+        "ostrom service print --at-boot" to "the one for startup before login",
+    ),
+    "service install" to guide(
+        "install",
+        "ostrom service install" to "register the service, start it now, and start it at every login",
+        "ostrom service install --at-boot" to "start before login; needs OS authorization",
+    ),
+    "service start" to guide("install", "ostrom service start" to "start the installed service"),
+    "service stop" to guide("install", "ostrom service stop" to "stop it; it finishes what it hosts first"),
+    "service restart" to guide("install", "ostrom service restart" to "stop it, wait for it, start it again"),
+    "service status" to guide("install", "ostrom service status" to "installed, running, and signed in"),
+    "service logs" to guide("install", "ostrom service logs" to "the service's log, at most 128 lines"),
+    "service uninstall" to guide(
+        "install",
+        "ostrom service uninstall" to "remove the registration; your login and logs stay",
+    ),
+    "service automatic" to guide(
+        "install",
+        "ostrom service automatic" to "whether install and update set the service up",
+        "ostrom service automatic off" to "keep it as it is",
+    ),
+    "service serve" to guide(
+        "install",
+        "ostrom service serve --config ~/.config/ostrom/config.toml" to "what the OS service manager runs",
+    ),
     "update" to guide(
         "install",
         "ostrom update" to "install the latest signed version",

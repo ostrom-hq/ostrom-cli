@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli
 
+import com.github.ajalt.clikt.core.CliktCommand
 import run.ostrom.cli.api.Download
 import run.ostrom.cli.api.OstromApi
 import run.ostrom.cli.api.ServerRequest
@@ -31,6 +32,7 @@ import run.ostrom.cli.platform.SecretBackend
 import run.ostrom.cli.platform.SecretStore
 import run.ostrom.cli.platform.StandardInput
 import run.ostrom.cli.platform.terminalSafe
+import run.ostrom.cli.service.serviceCommand
 import run.ostrom.cli.update.AgentSessionsImpl
 import run.ostrom.cli.update.Installations
 import run.ostrom.cli.update.ReleaseTrust
@@ -180,8 +182,10 @@ open class CliKit {
         capture: ProcessCapture = FakeMysql(),
         secrets: () -> SecretStore = storeIn(SecretBackend.KEYCHAIN),
         postHogKey: String = "",
+        service: (CliDependencies) -> CliktCommand = ::serviceCommand,
     ) = OstromCli(
-        CliDependencies(
+        service = service,
+        dependencies = CliDependencies(
             console = console,
             environment = FakeEnvironment(environment, operatingSystem),
             files = FileStoreImpl(fileSystem),

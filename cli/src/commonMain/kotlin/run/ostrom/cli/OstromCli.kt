@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli
 
+import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.CliktError
 import com.github.ajalt.clikt.core.Context
 import com.github.ajalt.clikt.core.ContextCliktError
@@ -49,6 +50,7 @@ import run.ostrom.cli.help.colourLevel
 import run.ostrom.cli.launcher.Agent
 import run.ostrom.cli.platform.ConfigKey
 import run.ostrom.cli.platform.SecretStoreException
+import run.ostrom.cli.service.serviceCommand
 import run.ostrom.cli.telemetry.UsageStatistics
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
@@ -63,7 +65,11 @@ import kotlin.time.TimeSource
 private val QUIET_COMMANDS = UsageStatistics.NOT_MEASURED + setOf(OstromCli.UPDATE_COMMAND, OstromCli.HELP_COMMAND)
 
 /** The `ostrom` command tree (spec CLI.md § 2.1) and the mapping of every outcome to an exit code (§ 2.3). */
-class OstromCli(private val dependencies: CliDependencies) {
+class OstromCli(
+    private val dependencies: CliDependencies,
+    /** `ostrom service`, which a test builds with fake OS tools. */
+    private val service: (CliDependencies) -> CliktCommand = ::serviceCommand,
+) {
     /**
      * Parses [args], runs the command and returns the process exit code. Help and errors are written to the console;
      * a usage error exits with 64. When the user turned usage statistics on, one anonymous event follows, bounded to
@@ -202,6 +208,7 @@ class OstromCli(private val dependencies: CliDependencies) {
             ConfigCommand(dependencies),
             DoctorCommand(dependencies),
             TelemetryCommand(dependencies),
+            service(dependencies),
             VersionCommand(dependencies),
             ImportTeamCodeCommand(dependencies),
         ) + setupCommands(dependencies)
