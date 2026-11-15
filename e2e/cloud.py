@@ -13,8 +13,9 @@ Every state is read back from the server.
 With --cloud-machine-image, the session runs on a machine of the organisation instead (the server's `registered`
 driver): the owner registers a runner (`POST /api/v1/runners`), `ostrom cloud machine` starts on this machine's Docker
 with its key, and once it is online the session must be placed on it, read from the API (`runnerId` of the session),
-never from the screen. The image holds `ostrom` at /usr/local/bin and is TeamCode's template image: the machine runs
-it, and pins it as the only session image and the only image the session's `ostrom` is delivered from.
+never from the screen. The image holds `ostrom` at /usr/local/bin (the runner image): the machine runs it and pins it as
+the only image the session's `ostrom` is delivered from. It pins --cloud-session-image (the server's session image,
+ostrom-session) as the only image the session's containers run; without it, the machine's image is both.
 
 The server must run cloud sessions somewhere: ostrom-server's cli-journey.yml gives it a runtime driver (the Docker of
 the CI's machine, as its console-journey.yml) and says so with --cloud-sessions; without it, the step is skipped and
@@ -43,7 +44,8 @@ INTERRUPT = b"\x03"
 # a shell reading a command: the end of bash's prompt (the session's script leaves one when the agent ends, or starts
 # one again when Ctrl-C ended the script too, ostrom-server runner/RunnerConfig.kt, SessionScript)
 PROMPT = b"$ "
-# a session's image is on the machine already; its three containers start in about a minute, the CLI waits up to 10
+# a session's images are on the machine already (a registered machine pulls its session image first, machine_online);
+# its three containers start in about a minute, the CLI waits up to 10
 START_S = 420
 OUTPUT_S = 120
 STOP_S = 180
@@ -140,10 +142,16 @@ class Cloud:
                 print("  skip  the server runs no cloud session here (--cloud-sessions not given)", flush=True)
             return
         image = getattr(j.options, "cloud_machine_image", None)
+        session_image = getattr(j.options, "cloud_session_image", None)
+        # a session image means a registered machine: never silently the single-image leg, nor an empty pin
+        if session_image is not None and not j.check(bool(image and session_image),
+                                                     "--cloud-session-image comes with --cloud-machine-image, "
+                                                     "both non-empty"):
+            return
         if not j.needs(*ROUTES, *(RUNNER_ROUTES if image else ()), on_main=True, org=True):
             return
         try:
-            if (not image or self.machine_online(image)) and self.started() and self.attached():
+            if (not image or self.machine_online(image, session_image or image)) and self.started() and self.attached():
                 self.stopped()
         finally:
             for left in self.terminals:
@@ -159,8 +167,10 @@ class Cloud:
             if self.machine:
                 self.machine_removed()
 
-    def machine_online(self, image):
-        """The owner registers a runner and `ostrom cloud machine` starts with its key: True once it is online."""
+    def machine_online(self, image, session_image):
+        """The owner registers a runner and `ostrom cloud machine` starts with its key: True once it is online.
+
+        It runs [image] and delivers `ostrom` from it; the session's containers run [session_image]."""
         j = self.journey
         renew = getattr(j, "recent_sign_in", None) or j.sign_in
         console = renew(self.maya["email"])
@@ -173,11 +183,18 @@ class Cloud:
                        f"the owner registers a machine ({status}): {str(body.get('id'))}"):
             return False
         self.machine = {"id": body["id"], "container": f"ostrom-machine-{body['id'][:8]}", "console": console}
+        if session_image != image:
+            # pulled before the session starts, so that START_S measures the start, not a cold pull
+            pulled = subprocess.run(["docker", "pull", "--quiet", session_image], capture_output=True, text=True,
+                                    check=False)
+            if not j.check(pulled.returncode == 0, f"the session image {session_image} is pulled "
+                                                   f"({pulled.returncode}): {pulled.stderr.strip()[-200:]}"):
+                return False
         started = subprocess.run(
             ["docker", "run", "-d", "--name", self.machine["container"], "--network", "host",
              "-e", f"OSTROM_SERVER_URL={j.server}", "-e", f"OSTROM_RUNNER_ID={body['id']}", "-e", "OSTROM_RUNNER_KEY",
              "-e", "OSTROM_RUNNER_INTERVAL_SECONDS=5", "-e", f"OSTROM_DOCKER_API_URL={DOCKER_API_URL}",
-             "-e", f"OSTROM_RUNNER_SESSION_IMAGE={image}", "-e", f"OSTROM_RUNNER_DELIVERY_IMAGE={image}",
+             "-e", f"OSTROM_RUNNER_SESSION_IMAGE={session_image}", "-e", f"OSTROM_RUNNER_DELIVERY_IMAGE={image}",
              "--entrypoint", MACHINE_BINARY, image, "cloud", "machine"],
             env={**os.environ, "OSTROM_RUNNER_KEY": body["token"]}, capture_output=True, text=True, check=False)
         if not j.check(started.returncode == 0, f"ostrom cloud machine starts with its key ({started.returncode}): "
