@@ -22,7 +22,6 @@ import run.ostrom.cli.platform.ExcludeFromCoverage
 import run.ostrom.cli.platform.setEnvironmentVariable
 import run.ostrom.cli.platform.startDetachedProcess
 import run.ostrom.cli.remote.RemoteSessions
-import run.ostrom.cli.runner.conversation.localAgentProcesses
 import run.ostrom.cli.service.CLOUD_RUNNER_REFUSAL
 import run.ostrom.cli.service.ServiceSettings
 import run.ostrom.cli.service.insideCloudRunner
@@ -30,23 +29,20 @@ import run.ostrom.cli.service.insideCloudRunner
 /**
  * What the daemon needs of this machine, replaced by fakes in tests.
  *
- * @property hosting Whether this platform hosts remote sessions (not Windows in this version).
  * @property detach Starts `ostrom remote host` in the background, its output appended to a log.
  * @property setPath Sets this process's `PATH`, which the hosts it starts inherit.
  * @property timing The daemon's waits.
  */
 internal class DaemonPorts(
-    val hosting: Boolean,
     val detach: (List<String>, String) -> DetachedProcess,
     val setPath: (String) -> Unit,
     val timing: DaemonTiming = DaemonTiming(),
 )
 
-/** The real ports: this platform's agent processes, `posix_spawn`, the process environment. */
+/** The real ports: this platform's detached processes, the process environment. */
 // coverage: the OS wiring of the daemon; each port is tested where it lives (runner, platform).
 @ExcludeFromCoverage
 internal fun systemDaemonPorts(): DaemonPorts = DaemonPorts(
-    hosting = localAgentProcesses() != null,
     detach = ::startDetachedProcess,
     setPath = { setEnvironmentVariable("PATH", it) },
 )
@@ -55,7 +51,7 @@ internal fun systemDaemonPorts(): DaemonPorts = DaemonPorts(
  * The daemon inside the local service, until [stopRequested] (TeamCode's `runDaemon`): it waits for a sign-in and a
  * server that starts sessions on devices ([DAEMON_CAPABILITY]), then runs [DeviceDaemon] with hosts started from the
  * service's stable executable (the launcher of a managed installation, so a host started after an update runs the new
- * version). Where it cannot run (a cloud runner, another configuration than the CLI's, Windows), it says why and waits
+ * version). Where it cannot run (a cloud runner, another configuration than the CLI's), it says why and waits
  * for the stop.
  */
 @Suppress("ReturnCount") // TeamCode's runDaemon: each refusal returns
@@ -71,7 +67,6 @@ internal suspend fun runDaemon(
         // Folders, records and hosts all read the CLI's own configuration: a service for another one hosts nothing.
         settings.config != dependencies.configFile(dependencies.directory()) ->
             "This service uses another configuration than the CLI's (${settings.config}); the daemon stays offline."
-        !ports.hosting -> "This version hosts remote sessions on macOS and Linux only; the daemon stays offline."
         else -> null
     }
     if (refusal != null) {

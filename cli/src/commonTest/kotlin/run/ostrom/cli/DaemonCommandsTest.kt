@@ -6,6 +6,7 @@
 
 package run.ostrom.cli
 
+import okio.IOException
 import okio.Path.Companion.toPath
 import run.ostrom.cli.api.OstromApi
 import run.ostrom.cli.api.ServerRequest
@@ -78,12 +79,12 @@ class DaemonCommandsTest : SetupKit() {
         return ServerResponse(status, reply.body, 1)
     }
 
-    private fun ports(hosting: Boolean = true) = RemoteHostPorts(
-        processes = ProcessStarter { _, _, _, _ -> error("no agent in this test") }.takeIf { hosting },
+    private fun ports() = RemoteHostPorts(
+        processes = ProcessStarter { _, _, _, _ -> error("no agent in this test") },
         environment = { emptyMap() },
         http = { error("no host in this test") },
         relays = { error("no relay in this test") },
-        detach = { _, _ -> error("no background host in this test") },
+        detach = { _, _ -> throw IOException("no background host in this test") },
         installSignals = {},
         stopRequested = { false },
         heartbeat = 1.seconds,
@@ -93,10 +94,10 @@ class DaemonCommandsTest : SetupKit() {
         uploads = { error("no uploads in this test") },
     )
 
-    private fun ostrom(vararg args: String, signedIn: Boolean = true, hosting: Boolean = true): Int {
+    private fun ostrom(vararg args: String, signedIn: Boolean = true): Int {
         if (signedIn) signIn("/home/maya/.config/ostrom")
         val command = cli(environment = withServer + ("PATH" to "/usr/bin"), api = api, remote = {
-            remoteCommand(it) { ports(hosting) }
+            remoteCommand(it) { ports() }
         })
         return command.run(arrayOf(*args))
     }
@@ -251,8 +252,6 @@ class DaemonCommandsTest : SetupKit() {
         assertEquals(64, ostrom("remote", "resumable", "--limit", "0"))
         assertErr("ostrom: --limit is between 1 and 50.")
         assertEquals(64, ostrom("remote", "resumable", "/home/maya"))
-        assertEquals(1, ostrom("remote", "resumable", "project", hosting = false))
-        assertErr("which hosts sessions on macOS and Linux only.")
         fake = FakeDaemonServer(daemonCapability = false)
         assertEquals(1, ostrom("remote", "resumable", "project"))
         assertErr("This server does not continue a conversation of a device")
@@ -348,12 +347,12 @@ class DaemonCommandsTest : SetupKit() {
         assertEquals(1, fake.events.count { it == "resume 5e55i0n-1" })
         assertEquals(0, ostrom("remote", "resume", "5e55i0n-1"))
         assertErr("Session 5e55i0n-1 is already hosted on this device.")
-        // Its daemon gone offline, this terminal hosts it: here, a platform that hosts none.
+        // Its daemon gone offline, this terminal hosts it: here, a background host that cannot start.
         fake.daemonOnline = false
         session.online = false
         session.desiredStatus = "paused"
-        assertTrue(ostrom("remote", "resume", "5e55i0n-1", "--detach", hosting = false) != 0)
-        assertErr("this version hosts remote sessions on macOS and Linux only")
+        assertTrue(ostrom("remote", "resume", "5e55i0n-1", "--detach") != 0)
+        assertErr("the host of 5e55i0n-1 could not start in the background.")
         assertEquals(1, fake.events.count { it == "resume 5e55i0n-1" }, "Not put back in the daemon's queue")
     }
 
@@ -380,8 +379,7 @@ class DaemonCommandsTest : SetupKit() {
     private val detached = mutableListOf<List<String>>()
     private val paths = mutableListOf<String>()
 
-    private fun daemonPorts(hosting: Boolean = true) = DaemonPorts(
-        hosting = hosting,
+    private fun daemonPorts() = DaemonPorts(
         detach = { command, _ ->
             detached += command
             val id = command[3]
@@ -397,12 +395,11 @@ class DaemonCommandsTest : SetupKit() {
     private fun daemonReports(
         dependencies: CliDependencies = dependencies(),
         settings: ServiceSettings = settings(),
-        hosting: Boolean = true,
         stop: (Int) -> Boolean,
     ) = runTest {
         val said = mutableListOf<String>()
         var asked = 0
-        runDaemon(dependencies, settings, said::add, { stop(++asked) }, daemonPorts(hosting))
+        runDaemon(dependencies, settings, said::add, { stop(++asked) }, daemonPorts())
         reports = said
     }
 
@@ -412,8 +409,6 @@ class DaemonCommandsTest : SetupKit() {
         assertEquals(listOf(CLOUD_RUNNER_REFUSAL), reports)
         daemonReports(settings = settings("/elsewhere/config.toml"), stop = { it > 2 })
         assertEquals(listOf("This service uses another configuration than the CLI's (/elsewhere/config.toml); the daemon stays offline."), reports)
-        daemonReports(hosting = false, stop = { it > 2 })
-        assertEquals(listOf("This version hosts remote sessions on macOS and Linux only; the daemon stays offline."), reports)
         assertTrue(fake.calls.isEmpty())
     }
 

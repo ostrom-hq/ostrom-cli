@@ -256,6 +256,58 @@ static inline int ostrom_spawn_detached_w(const unsigned short *command_line) {
     return 0;
 }
 
+/*
+ * Starts a process that outlives this one and its console (TeamCode's teamcode_windows_spawn_detached): no console of
+ * its own, a new process group, out of this process's job where the job allows it, stdin on NUL and stdout and stderr
+ * appended to `log` (created privately by the caller beforehand). Returns the process handle, or NULL.
+ */
+static inline void *ostrom_spawn_logged_w(const unsigned short *application, unsigned short *command_line,
+                                          const unsigned short *log) {
+    SECURITY_ATTRIBUTES inheritable = { sizeof(SECURITY_ATTRIBUTES), NULL, TRUE };
+    HANDLE input = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &inheritable, OPEN_EXISTING, 0, NULL);
+    HANDLE output = CreateFileW((LPCWSTR)log, FILE_APPEND_DATA | SYNCHRONIZE, FILE_SHARE_READ | FILE_SHARE_WRITE, &inheritable,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+    HANDLE handles[2] = { input, output };
+    STARTUPINFOEXW startup;
+    PROCESS_INFORMATION process;
+    SIZE_T size = 0;
+    int initialized = 0, started = 0;
+    DWORD flags = CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP;
+    ZeroMemory(&startup, sizeof startup);
+    ZeroMemory(&process, sizeof process);
+    if (input == INVALID_HANDLE_VALUE || output == INVALID_HANDLE_VALUE) goto cleanup;
+    startup.StartupInfo.cb = sizeof(startup);
+    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    startup.StartupInfo.hStdInput = input;
+    startup.StartupInfo.hStdOutput = output;
+    startup.StartupInfo.hStdError = output;
+    InitializeProcThreadAttributeList(NULL, 1, 0, &size);
+    startup.lpAttributeList = (LPPROC_THREAD_ATTRIBUTE_LIST)malloc(size);
+    if (!startup.lpAttributeList || !InitializeProcThreadAttributeList(startup.lpAttributeList, 1, 0, &size)) goto cleanup;
+    initialized = 1;
+    if (!UpdateProcThreadAttribute(startup.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, handles, sizeof(handles), NULL, NULL)) goto cleanup;
+    /* A job that forbids breaking away keeps the child: it still runs without a console. */
+    started = CreateProcessW((LPCWSTR)application, (LPWSTR)command_line, NULL, NULL, TRUE, flags | CREATE_BREAKAWAY_FROM_JOB, NULL,
+            NULL, &startup.StartupInfo, &process)
+        || CreateProcessW((LPCWSTR)application, (LPWSTR)command_line, NULL, NULL, TRUE, flags, NULL, NULL, &startup.StartupInfo,
+            &process);
+cleanup:
+    if (process.hThread) CloseHandle(process.hThread);
+    if (initialized) DeleteProcThreadAttributeList(startup.lpAttributeList);
+    free(startup.lpAttributeList);
+    if (input != INVALID_HANDLE_VALUE) CloseHandle(input);
+    if (output != INVALID_HANDLE_VALUE) CloseHandle(output);
+    return started ? (void *)process.hProcess : NULL;
+}
+
+/* 1 and *code once the process of ostrom_spawn_logged_w ended, 0 while it runs, -1 when its state cannot be read. */
+static inline int ostrom_detached_poll_w(void *process, unsigned long *code) {
+    DWORD status = WaitForSingleObject((HANDLE)process, 0);
+    if (status == WAIT_TIMEOUT) return 0;
+    if (status != WAIT_OBJECT_0 || !GetExitCodeProcess((HANDLE)process, code)) return -1;
+    return 1;
+}
+
 /* Waits until `s` is ready for `events` or the deadline; 1 ready, 0 deadline, -1 error. */
 static inline int ostrom_wait_socket(SOCKET s, short events, ULONGLONG start, int timeout_ms) {
     ULONGLONG elapsed = GetTickCount64() - start;

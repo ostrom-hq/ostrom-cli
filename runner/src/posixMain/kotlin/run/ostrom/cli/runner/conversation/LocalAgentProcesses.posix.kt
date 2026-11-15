@@ -11,7 +11,7 @@ import run.ostrom.cli.runner.PtyTerminal
 import run.ostrom.cli.runner.pty.ostrom_environment
 
 /** The pod's exec starter, on this device: pipes, and a session of its own (`setsid`) the terminal's Ctrl-C misses. */
-actual fun localAgentProcesses(): ProcessStarter? = PtyTerminal.Exec
+actual fun localAgentProcesses(): ProcessStarter = PtyTerminal.Exec
 
 /** `environ`, read once per call. */
 actual fun processEnvironment(): Map<String, String> {

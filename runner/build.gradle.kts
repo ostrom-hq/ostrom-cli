@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // The cloud runner: the hidden `ostrom cloud runner|agent-supervisor|check-host|credential|machine` processes of a cloud
-// session's containers (runner/README.md). Its PTY shim is POSIX; on Windows the commands only say they run on Linux.
+// session's containers (runner/README.md). Its PTY shim is POSIX; on Windows the commands only say they run on Linux,
+// and a remote session's agent runs on pipes (windows.def).
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 import org.jetbrains.kotlin.konan.target.Family
 
@@ -10,10 +11,10 @@ plugins {
 
 kotlin {
     targets.withType<KotlinNativeTarget>().configureEach {
-        if (konanTarget.family != Family.MINGW) {
-            compilations.getByName("main").cinterops.create("pty") {
-                definitionFile.set(project.file("src/nativeInterop/cinterop/pty.def"))
-            }
+        // The PTY shim on macOS and Linux; on Windows, the agent of a remote session on pipes in a job object.
+        val shim = if (konanTarget.family == Family.MINGW) "windows" else "pty"
+        compilations.getByName("main").cinterops.create(shim) {
+            definitionFile.set(project.file("src/nativeInterop/cinterop/$shim.def"))
         }
     }
     sourceSets {

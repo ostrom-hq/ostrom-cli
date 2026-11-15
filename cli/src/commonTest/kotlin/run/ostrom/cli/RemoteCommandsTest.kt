@@ -18,7 +18,6 @@ import run.ostrom.cli.api.ServerRequest
 import run.ostrom.cli.api.ServerResponse
 import run.ostrom.cli.platform.DetachedProcess
 import run.ostrom.cli.platform.FileStoreImpl
-import run.ostrom.cli.platform.OperatingSystem
 import run.ostrom.cli.relay.LocalRelay
 import run.ostrom.cli.relay.LocalRelayStarter
 import run.ostrom.cli.relay.RelayConfig
@@ -128,7 +127,7 @@ class RemoteCommandsTest : SetupKit() {
         VersionTerminal()
     }
 
-    private fun ports(processes: ProcessStarter? = this.processes, stop: () -> Boolean = { false }) = RemoteHostPorts(
+    private fun ports(processes: ProcessStarter = this.processes, stop: () -> Boolean = { false }) = RemoteHostPorts(
         processes = processes,
         environment = { mapOf("PATH" to "/usr/bin", "OSTROM_TOKEN" to "secret", "ANTHROPIC_API_KEY" to "own-key") },
         http = ::http,
@@ -254,10 +253,6 @@ class RemoteCommandsTest : SetupKit() {
         fileSystem.createDirectories("/work/acme".toPath())
         assertEquals(66, remote("start", "gone"))
         assertErr("ostrom: gone does not exist.")
-        operatingSystem = OperatingSystem.WINDOWS
-        assertEquals(70, remote("start", ports = ports(processes = null)))
-        assertErr("this version hosts remote sessions on macOS and Linux only")
-        operatingSystem = OperatingSystem.LINUX
         assertEquals(69, remote("start", features = arrayOf("runners.cloud.v1")))
         assertErr("runs no remote session (runners.cloud.remote.v1)")
         answer(create, 201 to """{"status":"creating"}""")
@@ -304,7 +299,6 @@ class RemoteCommandsTest : SetupKit() {
         assertErr("ostrom: the host of $id could not start in the background.")
         assertEquals(1, remote("resume", id, "--detach", executable = null))
         assertErr("ostrom: this binary's path is unknown: run ostrom remote host.")
-        assertEquals(70, remote("resume", id, "--detach", ports = ports(processes = null)))
     }
 
     @Test
@@ -411,7 +405,6 @@ class RemoteCommandsTest : SetupKit() {
         record(sessionId = "not-a-uuid")
         assertEquals(64, remote("host", "not-a-uuid"))
         assertErr("ostrom: not-a-uuid is not a session id.")
-        assertEquals(70, remote("host", "not-a-uuid", ports = ports(processes = null)))
     }
 
     @Test

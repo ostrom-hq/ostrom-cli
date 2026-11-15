@@ -197,12 +197,13 @@ class DeviceDaemonEdgesTest {
         val offline = LocalResume.Unavailable(LocalResumeReasons.DAEMON_OFFLINE)
         f.server.lostDaemon = true
         assertNull(daemonDevice(server, features), "A daemon that stopped answering")
-        assertEquals(offline, localResumeTarget(server, features, hosting = true))
+        assertEquals(offline, localResumeTarget(server, features))
         f.server.daemonOnline = true
         f.server.currentDevice = false
         assertNull(daemonDevice(server, features), "The list names no device as this one")
-        assertEquals(offline, localResumeTarget(server, features, hosting = true))
+        assertEquals(offline, localResumeTarget(server, features))
         assertEquals("This device cannot continue a conversation (other).", localResumeRefusal("other"))
+        assertTrue(localResumeRefusal(LocalResumeReasons.PLATFORM_UNSUPPORTED).endsWith("run ostrom update."))
     }
 
     @Test

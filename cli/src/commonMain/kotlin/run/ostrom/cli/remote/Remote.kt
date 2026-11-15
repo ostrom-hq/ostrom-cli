@@ -114,7 +114,6 @@ internal class RemoteContext(val dependencies: CliDependencies, ports: () -> Rem
     fun host(access: OrgAccess, record: RemoteSessionRecord, previousEpoch: Long, detach: Boolean): Int = runBlocking {
         val sessions = sessions()
         if (detach) {
-            requireHosting(ports)
             startBackgroundHost(dependencies, access, record, sessions, previousEpoch, ports, ::report)
             report("Hosted in the background. ostrom remote stop ${record.sessionId} pauses it.")
             ExitCode.OK.code
@@ -223,7 +222,6 @@ private class RemoteStart(private val context: RemoteContext) : CliktCommand(nam
             environment.homeDirectory,
             windows,
         )
-        requireHosting(context.ports)
         val access = context.access(server, org)
         if (bypass) context.report("Warning: the agent acts on your files without asking for permission.")
         val body = objectOf(
@@ -267,7 +265,7 @@ private class RemoteStart(private val context: RemoteContext) : CliktCommand(nam
     }
 
     private suspend fun resumeDevice(server: DaemonServer, features: List<String>): String =
-        when (val target = localResumeTarget(server, features, hosting = true)) {
+        when (val target = localResumeTarget(server, features)) {
             is LocalResume.Ready -> target.deviceId
             is LocalResume.Unavailable ->
                 throw stopWith(ExitCode.FAILED, "ostrom: ${localResumeRefusal(target.reason)}")

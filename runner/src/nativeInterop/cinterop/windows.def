@@ -1,0 +1,129 @@
+package = run.ostrom.cli.runner.windows
+linkerOpts = -lkernel32
+---
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0A00
+#endif
+#include <windows.h>
+#include <stdlib.h>
+
+/*
+ * A remote session's agent on Windows (TeamCode's teamcode_windows_spawn_piped and teamcode_windows_agent_*): stdin and
+ * stdout are anonymous pipes (the parent's ends are not inherited), stderr is NUL (agent diagnostics may hold prompts
+ * and are never kept). The child runs in a private job object that owns it and its descendants, without a console window
+ * (the daemon has no console either, and the terminal's Ctrl+C reaches the host only). Ownership of the pipe handles
+ * stays here: the caller closes them with ostrom_agent_close_input and everything with ostrom_agent_close.
+ */
+typedef struct {
+    HANDLE process;
+    HANDLE job;
+    HANDLE input;  /* parent's write end of the child's stdin */
+    HANDLE output; /* parent's read end of the child's stdout */
+} ostrom_agent;
+
+static inline void *ostrom_agent_spawn(const unsigned short *application, unsigned short *command_line,
+        const unsigned short *environment, const unsigned short *directory) {
+    SECURITY_ATTRIBUTES inheritable = { sizeof(SECURITY_ATTRIBUTES), NULL, TRUE };
+    HANDLE child_in = NULL, parent_in = NULL, child_out = NULL, parent_out = NULL, nul = INVALID_HANDLE_VALUE;
+    STARTUPINFOEXW startup = {0};
+    PROCESS_INFORMATION process = {0};
+    SIZE_T size = 0;
+    int initialized = 0;
+    ostrom_agent *agent = NULL;
+    HANDLE job = CreateJobObjectW(NULL, NULL);
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits = {0};
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if (!job || !SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits))) goto cleanup;
+    /* A 1 MiB buffer: one JSON line of the agent protocol is written in a single call without waiting for the child. */
+    if (!CreatePipe(&child_in, &parent_in, &inheritable, 1 << 20)) goto cleanup;
+    if (!CreatePipe(&parent_out, &child_out, &inheritable, 1 << 20)) goto cleanup;
+    if (!SetHandleInformation(parent_in, HANDLE_FLAG_INHERIT, 0) || !SetHandleInformation(parent_out, HANDLE_FLAG_INHERIT, 0)) goto cleanup;
+    nul = CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &inheritable, OPEN_EXISTING, 0, NULL);
+    if (nul == INVALID_HANDLE_VALUE) goto cleanup;
+    HANDLE handles[3] = { child_in, child_out, nul };
+    startup.StartupInfo.cb = sizeof(startup);
+    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    startup.StartupInfo.hStdInput = child_in;
+    startup.StartupInfo.hStdOutput = child_out;
+    startup.StartupInfo.hStdError = nul;
+    InitializeProcThreadAttributeList(NULL, 1, 0, &size);
+    startup.lpAttributeList = (LPPROC_THREAD_ATTRIBUTE_LIST)malloc(size);
+    if (!startup.lpAttributeList || !InitializeProcThreadAttributeList(startup.lpAttributeList, 1, 0, &size)) goto cleanup;
+    initialized = 1;
+    if (!UpdateProcThreadAttribute(startup.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, handles, sizeof(handles), NULL, NULL)) goto cleanup;
+    if (!CreateProcessW((LPCWSTR)application, (LPWSTR)command_line, NULL, NULL, TRUE,
+        CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED | CREATE_NO_WINDOW, (void *)environment,
+        (LPCWSTR)directory, &startup.StartupInfo, &process)) goto cleanup;
+    if (!AssignProcessToJobObject(job, process.hProcess)) goto cleanup;
+    agent = (ostrom_agent *)calloc(1, sizeof(ostrom_agent));
+    if (!agent) goto cleanup;
+    if (ResumeThread(process.hThread) == (DWORD)-1) { free(agent); agent = NULL; goto cleanup; }
+    agent->process = process.hProcess;
+    agent->job = job;
+    agent->input = parent_in; parent_in = NULL;
+    agent->output = parent_out; parent_out = NULL;
+cleanup:
+    if (!agent && process.hProcess) { TerminateProcess(process.hProcess, 130); CloseHandle(process.hProcess); }
+    if (!agent && job) CloseHandle(job);
+    if (process.hThread) CloseHandle(process.hThread);
+    if (initialized) DeleteProcThreadAttributeList(startup.lpAttributeList);
+    free(startup.lpAttributeList);
+    /* The child's own ends are closed here whatever happened, so the parent sees end of stream when the child exits. */
+    if (child_in) CloseHandle(child_in);
+    if (child_out) CloseHandle(child_out);
+    if (nul != INVALID_HANDLE_VALUE) CloseHandle(nul);
+    if (parent_in) CloseHandle(parent_in);
+    if (parent_out) CloseHandle(parent_out);
+    return agent;
+}
+
+/* Bytes read (> 0), 0 when nothing is available yet, -1 at end of stream or on error. Never blocks. */
+static inline int ostrom_agent_read(void *process, void *buffer, int capacity) {
+    ostrom_agent *agent = (ostrom_agent *)process;
+    if (!agent->output) return -1;
+    DWORD available = 0;
+    if (!PeekNamedPipe(agent->output, NULL, 0, NULL, &available, NULL)) return -1;
+    if (available == 0) return 0;
+    if (available > (DWORD)capacity) available = (DWORD)capacity;
+    DWORD count = 0;
+    if (!ReadFile(agent->output, buffer, available, &count, NULL)) return -1;
+    return (int)count;
+}
+
+/* Bytes written, or -1 when the child no longer reads. Blocks while the 1 MiB pipe is full: call it off the main dispatcher. */
+static inline int ostrom_agent_write(void *process, const void *buffer, int length) {
+    ostrom_agent *agent = (ostrom_agent *)process;
+    if (!agent->input) return -1;
+    DWORD count = 0;
+    if (!WriteFile(agent->input, buffer, (DWORD)length, &count, NULL)) return -1;
+    return (int)count;
+}
+
+static inline void ostrom_agent_close_input(void *process) {
+    ostrom_agent *agent = (ostrom_agent *)process;
+    if (agent->input) { CloseHandle(agent->input); agent->input = NULL; }
+}
+
+/* 1 and *code once the child exited, 0 while it runs, -1 when its state cannot be read. */
+static inline int ostrom_agent_poll(void *process, unsigned long *code) {
+    ostrom_agent *agent = (ostrom_agent *)process;
+    DWORD status = WaitForSingleObject(agent->process, 0);
+    if (status == WAIT_TIMEOUT) return 0;
+    if (status != WAIT_OBJECT_0 || !GetExitCodeProcess(agent->process, code)) return -1;
+    return 1;
+}
+
+/* Ends the child and its descendants (exit code 130), which breaks both pipes. */
+static inline void ostrom_agent_terminate(void *process) {
+    TerminateJobObject(((ostrom_agent *)process)->job, 130);
+}
+
+/* Releases the process, its job and whatever pipe end is still open. */
+static inline void ostrom_agent_close(void *process) {
+    ostrom_agent *agent = (ostrom_agent *)process;
+    ostrom_agent_close_input(process);
+    if (agent->output) CloseHandle(agent->output);
+    CloseHandle(agent->process);
+    CloseHandle(agent->job);
+    free(agent);
+}

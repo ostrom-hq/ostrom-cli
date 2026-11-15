@@ -50,16 +50,15 @@ internal sealed interface LocalResume {
 
 /**
  * A session continuing a conversation of this device goes through its daemon, never through a host the command
- * starts itself: the daemon checks the conversation against the folder and has its host fork it. So this platform must
- * host sessions ([hosting]), the server must announce `runners.cloud.remote.resume.v1`, and the daemon must be online
- * here and have announced [DaemonFeatures.RESUME].
+ * starts itself: the daemon checks the conversation against the folder and has its host fork it. So the server must
+ * announce `runners.cloud.remote.resume.v1`, and the daemon must be online here and have announced
+ * [DaemonFeatures.RESUME]. It is the same on every platform.
  */
-internal suspend fun localResumeTarget(server: DaemonServer, features: List<String>, hosting: Boolean): LocalResume {
+internal suspend fun localResumeTarget(server: DaemonServer, features: List<String>): LocalResume {
     val serverSupports = DAEMON_CAPABILITY in features && RESUME_CAPABILITY in features
-    val device = if (hosting && serverSupports) withOnlineDaemon(server) else null
+    val device = if (serverSupports) withOnlineDaemon(server) else null
     val daemon = device?.daemon
     return when {
-        !hosting -> LocalResume.Unavailable(LocalResumeReasons.PLATFORM_UNSUPPORTED)
         !serverSupports -> LocalResume.Unavailable(LocalResumeReasons.SERVER_UNSUPPORTED)
         daemon == null -> LocalResume.Unavailable(LocalResumeReasons.DAEMON_OFFLINE)
         DaemonFeatures.RESUME !in daemon.features -> LocalResume.Unavailable(LocalResumeReasons.DAEMON_TOO_OLD)
@@ -88,8 +87,10 @@ internal fun localResumables(
 internal fun localResumeRefusal(reason: String): String = when (reason) {
     LocalResumeReasons.SERVER_UNSUPPORTED ->
         "This server does not continue a conversation of a device ($RESUME_CAPABILITY): ask your admin to update it."
+    // Said by an older version that did not host sessions on Windows; no current CLI reports it.
     LocalResumeReasons.PLATFORM_UNSUPPORTED ->
-        "Continuing a conversation goes through this device's daemon, which hosts sessions on macOS and Linux only."
+        "Continuing a conversation goes through this device's daemon, which does not host sessions on this " +
+            "platform: run ostrom update."
     LocalResumeReasons.DAEMON_OFFLINE ->
         "Continuing a conversation goes through this device's daemon, which is not running: start it with ostrom " +
             "service install."
