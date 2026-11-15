@@ -5,7 +5,6 @@ package run.ostrom.cli.ui
 import run.ostrom.cli.platform.OperatingSystem
 import run.ostrom.cli.update.SemVer
 import okio.FileSystem
-import okio.IOException
 import okio.Path
 import okio.Path.Companion.toPath
 import okio.buffer
@@ -16,7 +15,7 @@ internal data class DesktopInstallation(val root: Path, val version: String?, va
     /** Whether this app can be used with a CLI of [cliVersion]: the same version or a newer one. */
     @Suppress("ReturnCount")
     fun usableWith(cliVersion: String): Boolean {
-        val own = version?.let { SemVer.of(it) } ?: return false
+        val own = SemVer.of(version.orEmpty()) ?: return false
         val wanted = SemVer.of(cliVersion) ?: return false
         return own >= wanted
     }
@@ -35,11 +34,11 @@ internal class DesktopLocations(
     private val env: (String) -> String?,
     private val fs: FileSystem,
 ) {
-    private val home: Path? = (if (os == OperatingSystem.WINDOWS) env("USERPROFILE") ?: env("HOME") else env("HOME"))
-        ?.toPath()?.takeIf { it.isAbsolute }
+    private fun absolute(value: String?): Path? = value.orEmpty().toPath().takeIf { it.isAbsolute }
 
-    private val dataHome: Path? = env("XDG_DATA_HOME")?.toPath()?.takeIf { it.isAbsolute }
-        ?: home?.resolve(".local")?.resolve("share")
+    private val home: Path? = absolute(env("USERPROFILE").takeIf { os == OperatingSystem.WINDOWS } ?: env("HOME"))
+
+    private val dataHome: Path? = absolute(env("XDG_DATA_HOME")) ?: home?.resolve(".local/share")
 
     /** macOS: the folder the app is installed in. */
     val applications: Path? get() = home?.resolve("Applications")
@@ -47,11 +46,8 @@ internal class DesktopLocations(
     /** Linux: the folder holding one folder per version and the `current` link. */
     val linuxRoot: Path? get() = dataHome?.resolve("ostrom-desktop")
 
-    /** Linux: the menu entry `ostrom ui` writes. */
-    val linuxDesktopEntry: Path? get() = dataHome?.resolve("applications")?.resolve("ostrom-desktop.desktop")
-
     /** Windows: the per-user installer's folder. */
-    val windowsRoot: Path? get() = env("LOCALAPPDATA")?.toPath()?.takeIf { it.isAbsolute }?.resolve("Ostrom App")
+    val windowsRoot: Path? get() = absolute(env("LOCALAPPDATA"))?.resolve("Ostrom App")
 
     fun candidates(): List<Path> = when (os) {
         OperatingSystem.MACOS -> listOfNotNull(applications?.resolve(APP), "/Applications".toPath().resolve(APP))
@@ -74,22 +70,22 @@ internal class DesktopLocations(
     /** The installation at [root], when its launcher exists. */
     fun at(root: Path): DesktopInstallation? {
         val executable = executable(root)
-        if (fs.metadataOrNull(executable)?.isRegularFile != true) return null
-        return DesktopInstallation(root, readVersion(versionFile(root)), executable)
+        if (!fs.exists(executable)) return null
+        return DesktopInstallation(root, versionAt(root), executable)
     }
 
     /** Every installed app, in [candidates] order. */
     fun installed(): List<DesktopInstallation> = candidates().mapNotNull(::at)
 
-    private fun readVersion(file: Path): String? = try {
-        val metadata = fs.metadataOrNull(file)
-        if (metadata?.isRegularFile != true || (metadata.size ?: 0) > MAX_VERSION_BYTES) {
-            null
-        } else {
-            fs.source(file).buffer().use { it.readUtf8() }.trim().takeIf { SemVer.of(it) != null }
+    /** The version the app at [root] reports (at most [MAX_VERSION_BYTES] bytes are read), or null. */
+    fun versionAt(root: Path): String? {
+        val file = versionFile(root)
+        if (!fs.exists(file)) return null
+        val text = fs.source(file).buffer().use {
+            it.request(MAX_VERSION_BYTES + 1L)
+            it.readUtf8(minOf(it.buffer.size, MAX_VERSION_BYTES + 1L))
         }
-    } catch (_: IOException) {
-        null
+        return text.trim().takeIf { SemVer.of(it) != null }
     }
 
     companion object {

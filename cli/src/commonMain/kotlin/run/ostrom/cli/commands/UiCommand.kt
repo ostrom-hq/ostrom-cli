@@ -7,12 +7,10 @@ import com.github.ajalt.clikt.core.Context
 import com.github.ajalt.clikt.core.PrintMessage
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
-import run.ostrom.cli.BuildInfo
 import run.ostrom.cli.CliDependencies
 import run.ostrom.cli.ExitCode
 import run.ostrom.cli.platform.CaptureResult
 import run.ostrom.cli.platform.OperatingSystem
-import run.ostrom.cli.platform.restrictToOwner
 import run.ostrom.cli.platform.secureRandomBytes
 import run.ostrom.cli.ui.BundleDesktopSource
 import run.ostrom.cli.ui.DesktopFailure
@@ -84,10 +82,10 @@ internal class UiCommand(private val dependencies: CliDependencies) : CliktComma
             macosTeamId = DesktopPublisher.MACOS_TEAM_ID,
             fs = files,
             random = { Buffer().write(secureRandomBytes(RANDOM_BYTES)).readByteString().hex() },
-            restrict = { restrictToOwner(it.toString(), executable = true) },
+            restrict = { dependencies.restrictToOwner(it.toString()) },
             report = { console.out("$it\n") },
         )
-        val ui = DesktopUi(BuildInfo.VERSION, locations, installer, { console.out("$it\n") }) { question ->
+        val ui = DesktopUi(dependencies.cliVersion, locations, installer, { console.out("$it\n") }) { question ->
             if (yes) {
                 true
             } else {
@@ -113,7 +111,7 @@ internal class UiCommand(private val dependencies: CliDependencies) : CliktComma
     private fun launch(os: OperatingSystem, app: DesktopInstallation) {
         val command = desktopLaunchCommand(os, app)
         val started = if (os == OperatingSystem.MACOS) {
-            (dependencies.capture.capture(command, OPEN_MILLIS) as? CaptureResult.Exited)?.code == 0
+            dependencies.capture.capture(command, OPEN_MILLIS).let { it is CaptureResult.Exited && it.code == 0 }
         } else {
             dependencies.capture.detach(command)
         }

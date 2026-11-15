@@ -186,6 +186,7 @@ open class CliKit {
         capture: ProcessCapture = FakeMysql(),
         secrets: () -> SecretStore = storeIn(SecretBackend.KEYCHAIN),
         postHogKey: String = "",
+        cliVersion: String = BuildInfo.VERSION,
         service: (CliDependencies) -> CliktCommand = ::serviceCommand,
         serviceStep: ServiceStep = ServiceStep.None,
     ) = OstromCli(
@@ -250,6 +251,8 @@ open class CliKit {
             fileSystem = fileSystem,
             downloads = { url, _ -> (releases[url] ?: Download.Missing(404)).also { releaseUrls += url } },
             releaseTrust = ReleaseTrust(ReleaseVectors.KEY_PEM),
+            cliVersion = cliVersion,
+            restrictToOwner = {},
         ),
     )
 

@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+@file:Suppress("MaxLineLength") // assertions on messages read better on one line
+
 package run.ostrom.cli.ui
 
 import run.ostrom.cli.ExitCode
@@ -7,6 +9,9 @@ import run.ostrom.cli.platform.OperatingSystem
 import run.ostrom.cli.update.ReleaseTrust
 import run.ostrom.cli.update.ReleaseVectors
 import kotlinx.coroutines.runBlocking
+import okio.FileSystem
+import okio.ForwardingFileSystem
+import okio.IOException
 import okio.Path
 import okio.Path.Companion.toPath
 import okio.fakefilesystem.FakeFileSystem
@@ -19,7 +24,38 @@ import kotlin.test.assertTrue
 
 /** The desktop manifest's checks and the installer's steps on each system, with the programs it runs faked. */
 class DesktopInstallerTest {
-    private val fs = FakeFileSystem().also { it.allowSymlinks = true }
+    private val fake = FakeFileSystem().also { it.allowSymlinks = true }
+    private var failDeletes = false
+    private var failMovesTo: String? = null
+    private var failDirectory: String? = null
+    private var failList = false
+
+    /** The fake file system, where a rename over a link replaces it (as on a real one) and failures can be asked for. */
+    private val fs: FileSystem = object : ForwardingFileSystem(fake) {
+        override fun atomicMove(source: Path, target: Path) {
+            if (target.name == failMovesTo) {
+                failMovesTo = null
+                throw IOException("cannot move")
+            }
+            if (target.name == "current" && metadataOrNull(target) != null) delete(target)
+            super.atomicMove(source, target)
+        }
+
+        override fun deleteRecursively(fileOrDirectory: Path, mustExist: Boolean) {
+            if (failDeletes) throw IOException("cannot delete")
+            super.deleteRecursively(fileOrDirectory, mustExist)
+        }
+
+        override fun list(dir: Path): List<Path> {
+            if (failList) throw IOException("cannot list")
+            return super.list(dir)
+        }
+
+        override fun createDirectory(dir: Path, mustCreate: Boolean) {
+            if (dir.name.startsWith(failDirectory ?: "\u0000")) throw IOException("cannot create")
+            super.createDirectory(dir, mustCreate)
+        }
+    }
     private val trust = ReleaseTrust(ReleaseVectors.KEY_PEM)
     private val verifier = DesktopManifestVerifier(trust)
     private val commands = mutableListOf<List<String>>()
@@ -29,8 +65,10 @@ class DesktopInstallerTest {
     private var manifest = "DESKTOP"
     private var versionInPackage = "1.2.3"
     private var exits = mutableMapOf<String, Int>()
+    private var createApp = true
+    private var extra: String? = null
 
-    private val env = mapOf("HOME" to "/home/maya", "LOCALAPPDATA" to "/win/Local")
+    private var env = mapOf("HOME" to "/home/maya", "LOCALAPPDATA" to "/win/Local")
 
     private fun source() = object : DesktopSource {
         override suspend fun metadata(version: String) =
@@ -55,6 +93,7 @@ class DesktopInstallerTest {
         fs.write(version) { writeUtf8("$versionInPackage\n") }
     }
 
+    @Suppress("CyclomaticComplexMethod") // one fake program per system
     private fun installer(os: OperatingSystem, teamId: String? = "ABCDE12345"): DesktopInstaller {
         val places = locations(os)
         val target = when (os) {
@@ -69,9 +108,15 @@ class DesktopInstallerTest {
                 val code = exits[command.first()] ?: 0
                 if (code == 0 || code == 3010) {
                     when (command.first()) {
-                        "ditto" -> app(places, command.last().toPath() / "Ostrom.app")
-                        "tar" -> app(places, command[command.indexOf("-C") + 1].toPath() / "Ostrom")
-                        "msiexec.exe" -> app(places, places.windowsRoot!!)
+                        "ditto" -> command.last().toPath().let { into ->
+                            if (createApp) app(places, into / "Ostrom.app") else fs.createDirectories(into / "Ostrom.app")
+                            extra?.let { fs.write(into / it) {} }
+                        }
+                        "tar" -> command[command.indexOf("-C") + 1].toPath().let { into ->
+                            if (createApp) app(places, into / "Ostrom") else fs.createDirectories(into / "Ostrom")
+                            extra?.let { fs.write(into / it) {} }
+                        }
+                        "msiexec.exe" -> if (createApp) app(places, places.windowsRoot!!)
                     }
                 }
                 code
@@ -351,6 +396,9 @@ class DesktopInstallerTest {
         assertNull(ui.prepare())
         val update = questions.last()
         assertTrue(update.startsWith("Ostrom Desktop 1.0.0 is older than this CLI. Update it to 1.2.3"), update)
+        fs.write(places.versionFile("/opt/ostrom".toPath())) { writeUtf8("garbage") }
+        assertNull(ui.prepare())
+        assertTrue(questions.last().contains("(unknown version) is older"), questions.last())
         answer = true
         val installed = assertNotNull(ui.prepare())
         assertEquals("1.2.3", installed.version)
@@ -360,5 +408,212 @@ class DesktopInstallerTest {
         assertEquals("1.2.3", ui.prepare()?.version)
         assertEquals(emptyList(), questions)
         assertEquals(emptyList(), commands)
+    }
+
+    private fun stagedChanged(os: OperatingSystem, change: (DesktopLocations, StagedDesktop) -> Unit) = failure {
+        val installer = installer(os)
+        val staged = installer.stage(installer.release("1.2.3"))
+        change(locations(os), staged)
+        try {
+            installer.activate(staged)
+        } finally {
+            installer.discard(staged)
+        }
+    }
+
+    @Test
+    fun aFirstInstallationThatFailsAfterTheMoveLeavesNothingBehind() {
+        val refused = stagedChanged(OperatingSystem.MACOS) { places, staged ->
+            fs.write(places.versionFile(staged.directory / "Ostrom.app")) { writeUtf8("9.9.9\n") }
+        }
+        assertEquals(ExitCode.FAILED, refused.code)
+        val applications = "/home/maya/Applications".toPath()
+        assertEquals(emptyList(), fs.list(applications).filter { it.name == "Ostrom.app" })
+    }
+
+    @Test
+    fun aMoveThatFailsIsReportedAndThePreviousAppIsPutBack() {
+        val places = locations(OperatingSystem.MACOS)
+        versionInPackage = "1.0.0"
+        app(places, places.applications!! / "Ostrom.app")
+        versionInPackage = "1.2.3"
+        val refused = stagedChanged(OperatingSystem.MACOS) { _, _ -> failMovesTo = "Ostrom.app" }
+        assertEquals(ExitCode.CANNOT_WRITE, refused.code)
+        assertEquals("1.0.0", places.at(places.applications!! / "Ostrom.app")?.version)
+    }
+
+    @Test
+    fun anInstallerThatLeavesNoAppIsReported() {
+        createApp = false
+        val refused = failure { installer(OperatingSystem.WINDOWS).let { it.install(it.release("1.2.3")) } }
+        assertEquals(ExitCode.FAILED, refused.code)
+    }
+
+    @Test
+    fun aPackageOfAnotherShapeIsRefused() {
+        extra = "other.txt"
+        assertEquals(ExitCode.SIGNATURE_REFUSED, failure { installer(OperatingSystem.MACOS).let { it.install(it.release("1.2.3")) } }.code)
+        assertEquals(ExitCode.SIGNATURE_REFUSED, failure { installer(OperatingSystem.LINUX).let { it.install(it.release("1.2.3")) } }.code)
+        extra = null
+        createApp = false
+        assertEquals(ExitCode.SIGNATURE_REFUSED, failure { installer(OperatingSystem.MACOS).let { it.install(it.release("1.2.3")) } }.code)
+        assertEquals(ExitCode.SIGNATURE_REFUSED, failure { installer(OperatingSystem.LINUX).let { it.install(it.release("1.2.3")) } }.code)
+    }
+
+    @Test
+    fun withoutAHomeFolderNothingIsInstalled() {
+        env = emptyMap()
+        for (os in OperatingSystem.entries) {
+            val refused = failure { installer(os).let { it.install(it.release("1.2.3")) } }
+            assertEquals(ExitCode.CANNOT_WRITE, refused.code, os.name)
+        }
+        assertEquals(emptyList(), OperatingSystem.entries.flatMap { locations(it).candidates() }.filter { it.toString().startsWith("/home") })
+    }
+
+    @Test
+    fun aFolderThatCannotBeMadePrivateStopsTheStage() {
+        failDirectory = "ostrom-desktop-"
+        val refused = failure { installer(OperatingSystem.LINUX).let { it.install(it.release("1.2.3")) } }
+        assertEquals(ExitCode.CANNOT_WRITE, refused.code)
+    }
+
+    @Test
+    fun aStageThatCannotBeRemovedDoesNotMaskTheResult() = runBlocking {
+        val installer = installer(OperatingSystem.LINUX)
+        val staged = installer.stage(installer.release("1.2.3"))
+        failDeletes = true
+        installer.discard(staged)
+        failDeletes = false
+        assertTrue(fs.exists(staged.directory))
+    }
+
+    @Test
+    fun theLinuxInstallationKeepsThePreviousVersionAndOtherFiles() = runBlocking {
+        val root = "/home/maya/.local/share/ostrom-desktop".toPath()
+        for (old in listOf("1.0.0", "1.1.0", "notes")) fs.createDirectories(root / old / "bin")
+        fs.createSymlink(root / "current", "1.1.0".toPath())
+        val installer = installer(OperatingSystem.LINUX)
+        installer.install(installer.release("1.2.3"))
+        assertEquals(listOf("1.1.0", "1.2.3", "current", "notes"), fs.list(root).map { it.name }.sorted())
+    }
+
+    @Test
+    fun theMenuEntryQuotesWhatTheDesktopEntryFormatReads() {
+        val entry = linuxDesktopEntry("/home/a b/\"x\"/\$y/`z`".toPath())
+        assertTrue(entry.contains("Exec=\"/home/a b/\\\"x\\\"/\\\$y/\\`z\\`/current/bin/Ostrom\""), entry)
+        assertFailsWith<IllegalArgumentException> { linuxDesktopEntry("/home/a\nb".toPath()) }
+        assertFailsWith<IllegalArgumentException> { DesktopInstaller.developerIdRequirement("short") }
+        assertEquals("less than 1 MB", DesktopInstaller.megabytes(999_999))
+        assertEquals("about 3 MB", DesktopInstaller.megabytes(2_600_000))
+    }
+
+    @Test
+    fun locationsFollowTheEnvironmentOfEachSystem() {
+        val windows = DesktopLocations(OperatingSystem.WINDOWS, mapOf("USERPROFILE" to "C:/Users/maya", "LOCALAPPDATA" to "relative")::get, fs)
+        assertEquals(emptyList(), windows.candidates())
+        val fallback = DesktopLocations(OperatingSystem.WINDOWS, mapOf("HOME" to "/h")::get, fs)
+        assertEquals("/h/Applications".toPath(), fallback.applications)
+        val xdg = DesktopLocations(OperatingSystem.LINUX, mapOf("HOME" to "/h", "XDG_DATA_HOME" to "/data")::get, fs)
+        assertEquals("/data/ostrom-desktop".toPath(), xdg.linuxRoot)
+        val relative = DesktopLocations(OperatingSystem.LINUX, mapOf("HOME" to "h", "XDG_DATA_HOME" to "data")::get, fs)
+        assertNull(relative.linuxRoot)
+        val mac = DesktopLocations(OperatingSystem.MACOS, emptyMap<String, String>()::get, fs)
+        assertEquals(listOf("/Applications/Ostrom.app"), mac.candidates().map { it.toString() })
+        assertTrue(!DesktopInstallation("/x".toPath(), "1.0.0", "/x/y".toPath()).usableWith("bad"))
+        // a version file that is too large or a link is not a version
+        val places = locations(OperatingSystem.LINUX)
+        versionInPackage = "1.0.0"
+        app(places, "/opt/ostrom".toPath())
+        fs.write(places.versionFile("/opt/ostrom".toPath())) { writeUtf8("1".repeat(200)) }
+        assertNull(places.installed().single().version)
+    }
+
+    @Test
+    fun theOnlineSourceNamesEveryRefusal() = runBlocking {
+        val refusals = listOf<(String) -> Download>(
+            { throw run.ostrom.cli.api.ServerUnreachableException(it, IOException("down")) },
+            { throw run.ostrom.cli.api.ReleaseDownloadException("release_rate_limited", "slow down") },
+            { throw run.ostrom.cli.api.ReleaseDownloadException("release_redirect_invalid") },
+        )
+        val codes = refusals.map { refuse ->
+            val online = OnlineDesktopSource({ url, _ -> refuse(url) }, "https://r.example", fs)
+            failure { online.metadata("1.2.3") }.also { assertNotNull(it.text) }.code
+        }
+        assertEquals(listOf(ExitCode.UNREACHABLE, ExitCode.FAILED, ExitCode.FAILED), codes)
+    }
+
+    @Test
+    fun aBundleRefusesLinksAndOversizedFiles() = runBlocking {
+        val dir = "/bundle".toPath()
+        fs.createDirectories(dir)
+        val bundle = BundleDesktopSource(dir, fs)
+        fs.write(dir / DesktopFormat.MANIFEST) { writeUtf8("x".repeat(17 * 1024)) }
+        assertEquals(ExitCode.NOT_FOUND, failure { bundle.metadata("1.2.3") }.code)
+        fs.write(dir / "real") { writeUtf8("x") }
+        fs.delete(dir / DesktopFormat.MANIFEST)
+        fs.createSymlink(dir / DesktopFormat.MANIFEST, "real".toPath())
+        assertEquals(ExitCode.NOT_FOUND, failure { bundle.metadata("1.2.3") }.code)
+        val asset = DesktopAsset("linked", "0".repeat(64), 1)
+        fs.createSymlink(dir / "linked", "real".toPath())
+        assertEquals(ExitCode.NOT_FOUND, failure { bundle.download("1.2.3", asset, "/tmp/x".toPath()) }.code)
+        assertEquals(ExitCode.NOT_FOUND, failure { bundle.download("1.2.3", DesktopAsset("absent", "0".repeat(64), 1), "/tmp/x".toPath()) }.code)
+    }
+
+    @Test
+    fun theManifestIsReadFieldByField() {
+        fun manifest(
+            version: String = "\"1.2.3\"",
+            schema: String = "1",
+            product: String = "\"desktop\"",
+            tag: String = "\"1.2.3\"",
+            asset: String = "{\"fileName\":\"ostrom-desktop-1.2.3-linux-x64.tar.gz\",\"sha256\":\"${"a".repeat(64)}\",\"size\":5}",
+            extra: String = "",
+        ) = "{\"version\":$version,\"schemaVersion\":$schema,\"product\":$product,\"tag\":$tag," +
+            "\"assets\":{\"linux-x64\":$asset$extra}}"
+        val refused = listOf(
+            "not json",
+            manifest(version = "\"nope\""),
+            manifest(version = "5"),
+            manifest(schema = "2"),
+            manifest(schema = "\"1\""),
+            "{\"version\":\"1.2.3\",\"product\":\"desktop\",\"tag\":\"1.2.3\",\"assets\":{}}",
+            manifest(asset = "{\"fileName\":\"ostrom-desktop-1.2.3-linux-x64.tar.gz\",\"sha256\":\"${"a".repeat(64)}\",\"size\":\"5\"}"),
+            manifest(product = "\"cli\""),
+            manifest(tag = "\"1.2.4\""),
+            "{\"version\":\"1.2.3\",\"schemaVersion\":1,\"product\":\"desktop\",\"tag\":\"1.2.3\"}",
+            manifest(asset = "5"),
+            manifest(asset = "{\"sha256\":\"${"a".repeat(64)}\",\"size\":5}"),
+            manifest(asset = "{\"fileName\":\"evil\",\"sha256\":\"${"a".repeat(64)}\",\"size\":5}"),
+            manifest(asset = "{\"fileName\":\"ostrom-desktop-1.2.3-linux-x64.tar.gz\",\"size\":5}"),
+            manifest(asset = "{\"fileName\":\"ostrom-desktop-1.2.3-linux-x64.tar.gz\",\"sha256\":\"XYZ\",\"size\":5}"),
+            manifest(asset = "{\"fileName\":\"ostrom-desktop-1.2.3-linux-x64.tar.gz\",\"sha256\":\"${"a".repeat(64)}\"}"),
+            manifest(asset = "{\"fileName\":\"ostrom-desktop-1.2.3-linux-x64.tar.gz\",\"sha256\":\"${"a".repeat(64)}\",\"size\":0}"),
+            manifest(asset = "{\"fileName\":\"ostrom-desktop-1.2.3-linux-x64.tar.gz\",\"sha256\":\"${"a".repeat(64)}\",\"size\":999999999999}"),
+        )
+        for (text in refused) {
+            assertEquals(ExitCode.FAILED, assertFailsWith<DesktopFailure>(text) { verifier.parse(text, "k") }.code, text)
+        }
+        val ok = verifier.parse(manifest(extra = ",\"plan9-mips\":5"), "k")
+        assertEquals(setOf("linux-x64"), ok.assets.keys)
+    }
+
+    @Test
+    fun anIoFailureWhileUnpackingCleansUpAndIsPassedOn() {
+        failList = true
+        val thrown = runBlocking { assertFailsWith<IOException> { installer(OperatingSystem.LINUX).let { it.install(it.release("1.2.3")) } } }
+        failList = false
+        assertEquals("cannot list", thrown.message)
+        assertEquals(emptyList(), fs.list("/home/maya/.local/share/ostrom-desktop".toPath()))
+    }
+
+    @Test
+    fun installingTheSameVersionAgainReplacesItAndRelinksCurrent() = runBlocking {
+        val installer = installer(OperatingSystem.LINUX)
+        installer.install(installer.release("1.2.3"))
+        val root = "/home/maya/.local/share/ostrom-desktop".toPath()
+        fs.delete(root / "current")
+        fs.createDirectory(root / "current")
+        installer.install(installer.release("1.2.3"))
+        assertEquals(listOf("1.2.3", "current"), fs.list(root).map { it.name }.sorted())
     }
 }

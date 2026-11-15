@@ -86,8 +86,7 @@ internal class BundleDesktopSource(private val directory: Path, private val fs: 
 
     override suspend fun download(version: String, asset: DesktopAsset, destination: Path) {
         val source = directory / asset.fileName
-        val metadata = fs.metadataOrNull(source)
-        if (metadata?.isRegularFile != true || metadata.symlinkTarget != null || metadata.size != asset.size) {
+        if (regularSize(source) != asset.size) {
             throw DesktopFailure(
                 ExitCode.NOT_FOUND,
                 "✗ ${asset.fileName} is not a file of the bundle, or not the signed length.",
@@ -96,11 +95,13 @@ internal class BundleDesktopSource(private val directory: Path, private val fs: 
         fs.copy(source, destination)
     }
 
+    /** The size of [file] when it is a regular file (okio never follows a link, so a link is not one), else null. */
+    private fun regularSize(file: Path): Long? = fs.metadataOrNull(file)?.takeIf { it.isRegularFile }?.size
+
     private fun read(name: String, limit: Long): ByteArray {
         val file = directory / name
-        val metadata = fs.metadataOrNull(file)
-        val tooBig = (metadata?.size ?: Long.MAX_VALUE) > limit
-        if (metadata?.isRegularFile != true || metadata.symlinkTarget != null || tooBig) {
+        val size = regularSize(file)
+        if (size == null || size > limit) {
             throw DesktopFailure(ExitCode.NOT_FOUND, "✗ $file is not a file of the release (links are refused).")
         }
         return fs.read(file) { readByteArray() }
@@ -190,20 +191,31 @@ internal class DesktopInstaller(
         fs.createDirectories(temporary)
         val download = temporary / "$WINDOWS_STAGE${random()}"
         makePrivate(download, "desktop_staging_unavailable")
-        var kept = false
-        try {
+        val staged = cleaning(download) {
             val file = download / desktop.asset.fileName
             report("Downloading Ostrom Desktop ${desktop.version} (${megabytes(desktop.asset.size)})…")
             source.download(desktop.version, desktop.asset, file)
             checkPackage(file, desktop.asset)
-            return when (os) {
+            when (os) {
                 OperatingSystem.MACOS -> stageMacos(file, desktop.version)
-                OperatingSystem.WINDOWS -> StagedDesktop(desktop.version, download).also { kept = true }
+                OperatingSystem.WINDOWS -> StagedDesktop(desktop.version, download)
                 OperatingSystem.LINUX -> stageLinux(file, desktop.version)
             }
-        } finally {
-            if (!kept) deleteQuietly(download)
         }
+        // Windows keeps the checked package for msiexec; the others only needed it to unpack
+        if (os != OperatingSystem.WINDOWS) deleteQuietly(download)
+        return staged
+    }
+
+    /** Runs [block]; when it fails, removes [directory] and lets the failure through. */
+    private suspend fun <T> cleaning(directory: Path, block: suspend () -> T): T = try {
+        block()
+    } catch (failure: DesktopFailure) {
+        deleteQuietly(directory)
+        throw failure
+    } catch (failure: IOException) {
+        deleteQuietly(directory)
+        throw failure
     }
 
     /** Puts [staged] in place of the installed app (which must not be running) and returns it as installed. */
@@ -218,16 +230,10 @@ internal class DesktopInstaller(
 
     /** The exact length and SHA-256 the signed manifest gives, checked before the package is opened. */
     private fun checkPackage(file: Path, asset: DesktopAsset) {
-        val metadata = fs.metadataOrNull(file)
-        val hash = try {
-            HashingSource.sha256(fs.source(file)).use { source ->
-                source.buffer().readAll(blackholeSink())
-                source.hash.hex()
-            }
-        } catch (_: IOException) {
-            ""
+        val (size, hash) = HashingSource.sha256(fs.source(file)).use { source ->
+            source.buffer().readAll(blackholeSink()) to source.hash.hex()
         }
-        if (metadata?.isRegularFile != true || metadata.size != asset.size || hash != asset.sha256) {
+        if (size != asset.size || hash != asset.sha256) {
             throw DesktopFailure(
                 ExitCode.SIGNATURE_REFUSED,
                 "✗ The download does not match its signed checksum. Nothing was changed.",
@@ -235,19 +241,18 @@ internal class DesktopInstaller(
         }
     }
 
-    private fun stageMacos(zip: Path, version: String): StagedDesktop {
-        val applications = locations.applications ?: throw unknownHome()
+    private suspend fun stageMacos(zip: Path, version: String): StagedDesktop {
+        val applications = home(locations.applications)
         fs.createDirectories(applications)
         // Next to the app it replaces, on the same volume, so that putting it in place is a rename.
         val unpacked = applications / "$MACOS_STAGE${random()}"
         makePrivate(unpacked, "desktop_staging_unavailable")
-        var done = false
-        try {
+        return cleaning(unpacked) {
             ran(listOf("ditto", "-x", "-k", zip.toString(), unpacked.toString()), EXTRACT_MILLIS, "extract the package")
             val app = unpacked / DesktopLocations.APP
-            if (fs.list(unpacked) != listOf(app) || fs.metadataOrNull(app)?.isDirectory != true) throw layout()
+            if (fs.list(unpacked) != listOf(app)) throw layout()
             report("Checking the signature of Ostrom Desktop $version…")
-            val requirement = "=${developerIdRequirement(requireNotNull(macosTeamId))}"
+            val requirement = "=${developerIdRequirement(macosTeamId!!)}"
             val verify = listOf("codesign", "--verify", "--deep", "--strict", "-R", requirement, app.toString())
             if (run(verify, CODESIGN_MILLIS) != 0) {
                 throw DesktopFailure(
@@ -256,17 +261,15 @@ internal class DesktopInstaller(
                 )
             }
             expectVersion(app, version)
-            return StagedDesktop(version, unpacked).also { done = true }
-        } finally {
-            if (!done) deleteQuietly(unpacked)
+            StagedDesktop(version, unpacked)
         }
     }
 
     private fun activateMacos(staged: StagedDesktop): DesktopInstallation {
-        val applications = locations.applications ?: throw unknownHome()
+        val applications = home(locations.applications)
         val destination = applications / DesktopLocations.APP
         val kept = staged.directory / "previous.app"
-        val hadPrevious = fs.metadataOrNull(destination) != null
+        val hadPrevious = fs.exists(destination)
         return swapped(hadPrevious, destination, kept) {
             fs.atomicMove(staged.directory / DesktopLocations.APP, destination)
             installed(destination, staged.version)
@@ -274,7 +277,7 @@ internal class DesktopInstaller(
     }
 
     private fun activateWindows(staged: StagedDesktop): DesktopInstallation {
-        val root = locations.windowsRoot ?: throw unknownHome()
+        val root = home(locations.windowsRoot)
         val msi = staged.directory / DesktopFormat.fileName(staged.version, target)
         // Per-user package: no administrator rights; 3010 = installed, restart suggested. No window: the CLI has no
         // person to click. Its verbose log is kept in the temporary folder, and its wait is bounded.
@@ -292,31 +295,27 @@ internal class DesktopInstaller(
         return installed(root, staged.version)
     }
 
-    private fun stageLinux(archive: Path, version: String): StagedDesktop {
-        val root = locations.linuxRoot ?: throw unknownHome()
+    private suspend fun stageLinux(archive: Path, version: String): StagedDesktop {
+        val root = home(locations.linuxRoot)
         fs.createDirectories(root)
         val unpacked = root / "$LINUX_STAGE${random()}"
         makePrivate(unpacked, "desktop_staging_unavailable")
-        var done = false
-        try {
+        return cleaning(unpacked) {
             val extract = listOf("tar", "-xzf", archive.toString(), "-C", unpacked.toString(), "--no-same-owner")
             ran(extract, EXTRACT_MILLIS, "extract the package")
             val app = unpacked / LINUX_APP
-            val launcher = fs.metadataOrNull(locations.executable(app))?.isRegularFile == true
-            if (fs.list(unpacked) != listOf(app) || !launcher) throw layout()
+            if (fs.list(unpacked) != listOf(app) || !fs.exists(locations.executable(app))) throw layout()
             expectVersion(app, version)
-            return StagedDesktop(version, unpacked).also { done = true }
-        } finally {
-            if (!done) deleteQuietly(unpacked)
+            StagedDesktop(version, unpacked)
         }
     }
 
     private fun activateLinux(staged: StagedDesktop): DesktopInstallation {
-        val root = locations.linuxRoot ?: throw unknownHome()
+        val root = home(locations.linuxRoot)
         val version = staged.version
         val destination = root / version
         val kept = staged.directory / "previous"
-        val hadPrevious = fs.metadataOrNull(destination) != null
+        val hadPrevious = fs.exists(destination)
         return swapped(hadPrevious, destination, kept) { linkCurrent(staged, root, destination) }
     }
 
@@ -333,10 +332,11 @@ internal class DesktopInstaller(
             val kept = entry.name == "current" || entry.name == version || entry.name == previous
             if (!kept && SemVer.of(entry.name) != null) deleteQuietly(entry)
         }
-        locations.linuxDesktopEntry?.let { entry ->
-            entry.parent?.let(fs::createDirectories)
-            fs.write(entry) { writeUtf8(linuxDesktopEntry(root)) }
-        }
+        // the root is `<data home>/ostrom-desktop`: the menu entry goes in `<data home>/applications`
+        @Suppress("UnsafeCallOnNullableType")
+        val entry = root.parent!! / "applications" / "ostrom-desktop.desktop"
+        fs.createDirectories(entry.parent!!)
+        fs.write(entry) { writeUtf8(linuxDesktopEntry(root)) }
         return installed(current, version)
     }
 
@@ -358,13 +358,8 @@ internal class DesktopInstaller(
         }
 
     private fun restore(hadPrevious: Boolean, destination: Path, kept: Path) {
-        if (!hadPrevious || fs.metadataOrNull(kept) == null) return
         deleteQuietly(destination)
-        try {
-            fs.atomicMove(kept, destination)
-        } catch (_: IOException) {
-            // the previous app stays in the stage folder, named in the message of the failure
-        }
+        if (hadPrevious) fs.atomicMove(kept, destination)
     }
 
     private fun ran(command: List<String>, timeoutMillis: Int, what: String) {
@@ -391,7 +386,7 @@ internal class DesktopInstaller(
     }
 
     private fun expectVersion(root: Path, version: String) {
-        if (locations.at(root)?.version != version) {
+        if (locations.versionAt(root) != version) {
             throw DesktopFailure(
                 ExitCode.SIGNATURE_REFUSED,
                 "✗ The package holds another version than the signed $version. Nothing was changed.",
@@ -403,7 +398,7 @@ internal class DesktopInstaller(
         locations.at(root)?.takeIf { it.version == version }
             ?: throw DesktopFailure(ExitCode.FAILED, "✗ The installed app does not report version $version.")
 
-    private fun unknownHome() = DesktopFailure(
+    private fun home(folder: Path?): Path = folder ?: throw DesktopFailure(
         ExitCode.CANNOT_WRITE,
         "ostrom cannot tell where to install the desktop app: no home folder.",
     )

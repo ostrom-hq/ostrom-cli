@@ -58,6 +58,7 @@ import run.ostrom.cli.platform.ProcessCapture
 import run.ostrom.cli.platform.ProcessCaptureImpl
 import run.ostrom.cli.platform.ProcessLauncherImpl
 import run.ostrom.cli.platform.currentUserId
+import run.ostrom.cli.platform.restrictToOwner
 import run.ostrom.cli.platform.RawTerminalImpl
 import run.ostrom.cli.platform.SecretStore
 import run.ostrom.cli.platform.SystemInstallationFiles
@@ -126,6 +127,8 @@ import kotlin.time.TimeSource
  * @property fileSystem Where `ostrom ui` installs the desktop app.
  * @property downloads Fetches the desktop manifest and package of `ostrom ui`.
  * @property releaseTrust The roots (and floor) the desktop manifest is authenticated with.
+ * @property restrictToOwner Makes a folder `ostrom ui` made the owner's alone.
+ * @property cliVersion The version of this binary, which `ostrom ui` installs the desktop app of.
  */
 @Suppress("LongParameterList") // The composition root: one parameter per dependency, each replaced in tests.
 class CliDependencies(
@@ -163,6 +166,8 @@ class CliDependencies(
     val fileSystem: FileSystem = FileSystem.SYSTEM,
     val downloads: Downloads = DownloadsImpl("ostrom/${BuildInfo.VERSION}"),
     val releaseTrust: ReleaseTrust = ReleaseTrust(floor = BuildInfo.FLOOR),
+    val cliVersion: String = BuildInfo.VERSION,
+    val restrictToOwner: (String) -> Unit = { restrictToOwner(it, executable = true) },
 ) {
     /** The opt-in usage statistics. */
     val usage: UsageStatistics by lazy {

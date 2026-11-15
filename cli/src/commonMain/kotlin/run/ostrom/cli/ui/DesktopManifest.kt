@@ -52,16 +52,22 @@ internal class VerifiedDesktop(val version: String, val keyId: String, val asset
  * the CLI's `latest.json` cannot stand in for it, and every package must be named as the release names it.
  */
 internal class DesktopManifestVerifier(private val trust: ReleaseTrust) {
-    @Suppress("ThrowsCount", "CyclomaticComplexMethod") // each field of the manifest is checked, or it is unreadable
+    @Suppress("ThrowsCount")
     fun verify(manifest: ByteArray, signature: ByteArray): VerifiedDesktop {
         val keyId = trust.verify(manifest, signature.decodeToString())
             ?: throw DesktopFailure(
                 ExitCode.SIGNATURE_REFUSED,
                 "✗ The desktop manifest's signature matches none of the trusted roots.",
             )
-        val body = parseObject(manifest.decodeToString()) ?: throw unreadable()
+        return parse(manifest.decodeToString(), keyId)
+    }
+
+    /** The manifest [text], once its signature matched the root [keyId]: its version and the packages it signs. */
+    @Suppress("ThrowsCount", "CyclomaticComplexMethod") // each field of the manifest is checked, or it is unreadable
+    internal fun parse(text: String, keyId: String): VerifiedDesktop {
+        val body = parseObject(text) ?: throw unreadable()
         val version = body.text("version")?.takeIf { SemVer.of(it) != null } ?: throw unreadable()
-        val schema = (body["schemaVersion"] as? JsonPrimitive)?.longOrNull
+        val schema = (body["schemaVersion"] as? JsonPrimitive)?.takeIf { !it.isString }?.longOrNull
         val own = schema == 1L && body.text("product") == DesktopFormat.PRODUCT && body.text("tag") == version
         if (!own) throw unreadable()
         val assets = body.child("assets") ?: throw unreadable()
@@ -70,7 +76,7 @@ internal class DesktopManifestVerifier(private val trust: ReleaseTrust) {
             val entry = assets.child(target) ?: throw unreadable()
             val name = entry.text("fileName")
             val sha256 = entry.text("sha256")
-            val size = (entry["size"] as? JsonPrimitive)?.longOrNull
+            val size = (entry["size"] as? JsonPrimitive)?.takeIf { !it.isString }?.longOrNull
             val valid = name == DesktopFormat.fileName(version, target) &&
                 sha256 != null && DesktopFormat.validSha256(sha256) && size != null &&
                 size in 1..DesktopFormat.MAX_PACKAGE_BYTES
