@@ -31,6 +31,17 @@ class ServerJsonTest {
     }
 
     @Test
+    fun anUploadSendsItsBytesUnderItsKey() = runTest {
+        fake["POST /f"] = 201 to """{"id":"f1"}"""
+        assertEquals(ServerAnswer.Ok(objectOf("id" to "f1")), server.upload("/f", byteArrayOf(7), "t", 9, "key-2"))
+        val sent = fake.sent("POST /f").single()
+        assertEquals(listOf<Byte>(7), sent.bytes?.toList())
+        assertEquals(null, sent.body)
+        assertEquals("key-2", sent.idempotencyKey)
+        assertEquals(9L, sent.timeoutMillis)
+    }
+
+    @Test
     fun aCallCanActOnAMembersBehalf() = runTest {
         fake["POST /b"] = 202 to "{}"
         server.call("POST", "/b", null, "t", 5, onBehalfOf = "ada")

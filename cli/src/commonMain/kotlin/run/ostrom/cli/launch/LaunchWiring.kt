@@ -32,6 +32,7 @@ class ApiServerTransport(private val api: OstromApi, private val org: String? = 
                 org,
                 call.idempotencyKey,
                 call.onBehalfOf,
+                call.bytes,
             ),
         )
         ServerReply(response.status, response.body)

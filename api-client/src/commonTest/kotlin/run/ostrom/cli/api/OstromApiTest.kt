@@ -10,6 +10,7 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.content.ByteArrayContent
 import io.ktor.http.content.TextContent
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.test.Test
@@ -74,6 +75,18 @@ class OstromApiTest {
         }
         val api = OstromApiImpl("https://ostrom.example", "ostrom/0.1.0", HttpClient(engine) { install(HttpTimeout) })
         val request = ServerRequest("POST", "/api/v1/waits", "{}", "t0k", idempotencyKey = "key-1")
+        assertEquals(201, api.send(request).status)
+    }
+
+    @Test
+    fun aFileGoesAsItsRawBytes() = runTest {
+        val engine = MockEngine { request ->
+            assertEquals(ContentType.Application.OctetStream, request.body.contentType)
+            assertEquals(listOf<Byte>(1, 2, 3), (request.body as ByteArrayContent).bytes().toList())
+            respond("{}", HttpStatusCode.Created)
+        }
+        val api = OstromApiImpl("https://ostrom.example", "ostrom/0.1.0", HttpClient(engine) { install(HttpTimeout) })
+        val request = ServerRequest("POST", "/api/v1/cloud/sessions/cs1/files?name=a", bytes = byteArrayOf(1, 2, 3))
         assertEquals(201, api.send(request).status)
     }
 
