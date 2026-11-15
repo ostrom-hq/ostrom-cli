@@ -315,8 +315,8 @@ the token, never from the call.
 ## The agent's models through the runner's relay (`runners.cloud.inference.v1`)
 
 TeamCode's inference from the pod. In a Kubernetes pod, once the launch is open and the agent is Claude Code, the
-runner asks `POST /api/v1/cloud/runner/inference` for the execution's credential: a one-hour agent token of that
-launch, limited to inference, kept in the runner's memory only (`RunnerInference`). It is renewed after a third of its
+runner asks `POST /api/v1/cloud/runner/inference` for the execution's credential: an agent token of that launch
+(`agent:session`, like the launch's own token), lasting one hour, kept in the runner's memory only (`RunnerInference`). It is renewed after a third of its
 lifetime, measured on the runner's clock; while a renewal is in flight the current one is served, and one is never
 offered in its last five minutes. The runner starts the relay of a local launch (`relay`, inference only) on the pod's
 loopback, which the agent's container shares, and starts Claude Code as `ostrom run` does: `ANTHROPIC_BASE_URL` on the
