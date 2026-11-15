@@ -132,6 +132,58 @@ static inline int ostrom_pipe_spawn(const char *file, char *const argv[], char *
     return pid;
 }
 
+/*
+ * Starts `file` with `argv` and `envp` in a new session, without a terminal, in `dir`: stdin and stdout are two pipes,
+ * whose ends are returned in *in (write end) and *out (read end), both close-on-exec; stderr is the caller's. A
+ * conversation's agent: its stream-json or JSON-RPC lines never mix with its diagnostics. Everything between fork and
+ * exec runs here, in C. Returns the child's pid, or -1.
+ */
+static inline int ostrom_exec_spawn(const char *file, char *const argv[], char *const envp[], const char *dir,
+                                    int *in, int *out) {
+    int input[2];
+    int output[2];
+    if (pipe(input) != 0) return -1;
+    if (pipe(output) != 0) {
+        close(input[0]);
+        close(input[1]);
+        return -1;
+    }
+    fcntl(input[1], F_SETFD, FD_CLOEXEC);
+    fcntl(output[0], F_SETFD, FD_CLOEXEC);
+    pid_t pid = fork();
+    if (pid == 0) {
+        sigset_t none;
+        sigemptyset(&none);
+        sigprocmask(SIG_SETMASK, &none, NULL);
+        signal(SIGPIPE, SIG_DFL);
+        signal(SIGINT, SIG_DFL);
+        signal(SIGQUIT, SIG_DFL);
+        signal(SIGTERM, SIG_DFL);
+        signal(SIGCHLD, SIG_DFL);
+        setsid();
+        dup2(input[0], 0);
+        dup2(output[1], 1);
+        close(input[1]);
+        close(output[0]);
+        if (input[0] > 2) close(input[0]);
+        if (output[1] > 2) close(output[1]);
+        ostrom_close_inherited();
+        if (dir != NULL && chdir(dir) != 0) _exit(126);
+        execve(file, argv, envp);
+        _exit(127);
+    }
+    close(input[0]);
+    close(output[1]);
+    if (pid < 0) {
+        close(input[1]);
+        close(output[0]);
+        return -1;
+    }
+    *in = input[1];
+    *out = output[0];
+    return pid;
+}
+
 /* Whether the process ended, without collecting its exit (WNOWAIT): its pid stays its own until waitpid. 1 when it
  * ended or is not a child of this process, 0 while it runs. */
 static inline int ostrom_exited(pid_t pid) {

@@ -65,7 +65,11 @@ actual fun runCloudProcess(command: String, args: List<String>): Nothing {
         CloudProcess.ENVIRONMENT -> environmentScript(args)
         CloudProcess.INSTALL_SKILLS, CloudProcess.INSTALL_HOOKS -> install(command, args, environment)
         // Terminals on a PTY; the preparation's commands on pipes, their log written as the agent's uid.
-        CloudProcess.AGENT_SUPERVISOR -> host(socket, AgentHost(PtyTerminal, commands = PtyTerminal.Commands))
+        // A conversation's agent without a terminal, its stdin and stdout on pipes.
+        CloudProcess.AGENT_SUPERVISOR -> host(
+            socket,
+            AgentHost(PtyTerminal, commands = PtyTerminal.Commands, processes = PtyTerminal.Exec),
+        )
         CloudProcess.CHECK_HOST -> checkHost(
             environment["OSTROM_CHECK_HOST_SOCKET"]?.takeIf { it.isNotBlank() }
                 ?: RunnerConfig.DEFAULT_CHECK_HOST_SOCKET,
@@ -117,7 +121,8 @@ private fun runner(socket: String, environment: Map<String, String>): Nothing {
                 prepare = preparer(config, server, terminals, gitHub), variables = variables, deliveries = deliveries,
                 servers = HttpCloudServers(client, config.serverUrl),
                 answers = HttpWaitAnswers(client, config.serverUrl),
-                inference = RelayInferenceProxy.inPod(config, HttpInferenceApi(client, config), environment, ::log))
+                inference = RelayInferenceProxy.inPod(config, HttpInferenceApi(client, config), environment, ::log),
+                conversation = conversation(client, config, terminals))
             // The agent's hooks report its background work there, as its uid: the agent socket's directory.
             val stateJob = launch {
                 // A report is the end of a turn (the `Stop` hook): the one-time wait secrets it had are dropped.
@@ -331,6 +336,8 @@ private val KNOWN_VARIABLES = listOf(
 )
 
 internal const val CONNECT_TIMEOUT_MILLIS = 10_000L
+
+/** The version the runner tells Codex's app-server (`clientInfo`), the runner channel's. */
 
 /** The longest the first GitHub token may take before the agent starts without it. */
 private val GITHUB_FIRST_TIMEOUT = 10.seconds

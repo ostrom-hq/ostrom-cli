@@ -33,6 +33,8 @@ import kotlin.uuid.Uuid
  * @property podTokenFile The pod's projected service-account token (`OSTROM_POD_TOKEN_FILE`), on Kubernetes when the
  *   server reviews it (TokenReview); the kubelet rotates it, so it is read again for every call ([bearer]).
  * @property readPodToken Reads [podTokenFile]; a failed or empty read falls back to the runner token.
+ * @property mode The session's mode (`OSTROM_SESSION_MODE`): [CONVERSATION_MODE] runs the agent headless and relays
+ *   it to the server's runner channel; anything else (`terminal`, or nothing) relays a terminal.
  */
 data class RunnerConfig(
     val serverUrl: String,
@@ -54,6 +56,7 @@ data class RunnerConfig(
     val binary: String = BINARY,
     val podTokenFile: String? = null,
     val readPodToken: (String) -> String = { "" },
+    val mode: String = TERMINAL_MODE,
 ) {
     /**
      * The credential of a call to the server: the pod's projected token when the server mounted one (TeamCode's runner
@@ -78,9 +81,12 @@ data class RunnerConfig(
     /** Whether the agent runs under a launch: every agent but the plain shell. */
     val governed: Boolean get() = agent != null && agent != SHELL_AGENT
 
+    /** Whether the session is a conversation: its agent runs headless, without a terminal. */
+    val conversation: Boolean get() = mode == CONVERSATION_MODE
+
     /** The token never appears in logs. */
     override fun toString(): String =
-        "RunnerConfig(serverUrl=$serverUrl, sessionId=$sessionId, epoch=$epoch, agent=$agentCommand)"
+        "RunnerConfig(serverUrl=$serverUrl, sessionId=$sessionId, epoch=$epoch, agent=$agentCommand, mode=$mode)"
 
     /** Constants and readers of the enclosing type. */
     companion object {
@@ -103,6 +109,7 @@ data class RunnerConfig(
          *
          * @throws IllegalArgumentException When a variable is missing or malformed.
          */
+        @Suppress("CyclomaticComplexMethod") // One reading per variable, each with its default.
         fun from(environment: Map<String, String>, readFile: (String) -> String): RunnerConfig {
             fun optional(name: String) = environment[name]?.takeIf { it.isNotBlank() }
             fun required(name: String) = requireNotNull(optional(name)) { "$name is required." }
@@ -136,10 +143,17 @@ data class RunnerConfig(
                 gitHubConfigDirectory = optional("OSTROM_GH_CONFIG_DIR") ?: DEFAULT_GITHUB_CONFIG_DIRECTORY,
                 podTokenFile = optional("OSTROM_POD_TOKEN_FILE"),
                 readPodToken = readFile,
+                mode = optional("OSTROM_SESSION_MODE") ?: TERMINAL_MODE,
             )
         }
 
         const val DEFAULT_WORKSPACE = "/workspace"
+
+        /** A session whose agent runs in a terminal, the default. */
+        const val TERMINAL_MODE = "terminal"
+
+        /** A session whose agent runs headless, relayed to the server's runner channel. */
+        const val CONVERSATION_MODE = "conversation"
 
         /** The agent kind of a plain shell, which no launch governs. */
         const val SHELL_AGENT = "shell"

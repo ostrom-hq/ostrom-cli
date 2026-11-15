@@ -20,14 +20,17 @@ import kotlin.time.Duration.Companion.seconds
  * under the agent's uid, and never sees the runner token. For each connection of the runner it starts the terminal
  * the runner asks for, sends its output back, and passes on keystrokes, sizes and the stop.
  *
- * A preparation command ([AgentFrame.Start.log]) runs without a terminal: the host masks its output, appends it to
- * the preparation log as the agent's uid, and sends back the masked lines.
+ * A conversation's agent ([AgentFrame.Start.exec]) runs without a terminal, its stdin and stdout relayed as the
+ * terminal's bytes are. A preparation command ([AgentFrame.Start.log]) runs without a terminal: the host masks its
+ * output, appends it to the preparation log as the agent's uid, and sends back the masked lines.
  *
  * @param terminals Starts terminals (a real PTY in the pod).
  * @param drain How long a stopped terminal may take to drain its output before the connection ends.
  * @param commands Starts preparation commands (pipes, stdin from `/dev/null`, in the pod).
  * @param files Where the preparation logs are written.
  * @param logBytes The bytes each preparation log keeps.
+ * @param processes Starts a conversation's agent without a terminal ([AgentFrame.Start.exec]); none answers an exec
+ *   start with its end at once.
  */
 class AgentHost(
     private val terminals: TerminalStarter,
@@ -35,6 +38,7 @@ class AgentHost(
     private val commands: TerminalStarter = terminals,
     private val files: FileSystem = FileSystem.SYSTEM,
     private val logBytes: Long = PreparationLogFile.MAX_BYTES,
+    private val processes: ProcessStarter? = null,
 ) {
     /**
      * Serves one connection: a [AgentFrame.Start] first, then the terminal until it ends or the runner leaves. The
@@ -46,8 +50,17 @@ class AgentHost(
     suspend fun serve(input: ByteReadChannel, output: ByteWriteChannel) {
         val start = AgentFrames.read(input) as? AgentFrame.Start ?: return
         val log = start.log
-        val starter = if (log == null) terminals else commands
-        val terminal = starter.start(start.script, start.environment, start.directory)
+        val terminal = when {
+            start.exec -> {
+                val exec = processes ?: run {
+                    AgentFrames.write(output, AgentFrame.Exit(null))
+                    return
+                }
+                exec.start(start.script, start.arguments, start.environment, start.directory)
+            }
+            log == null -> terminals.start(start.script, start.environment, start.directory)
+            else -> commands.start(start.script, start.environment, start.directory)
+        }
         try {
             coroutineScope {
                 val pump = launch {

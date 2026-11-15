@@ -55,6 +55,26 @@ interface TerminalStarter {
     suspend fun start(script: String, environment: Map<String, String>, directory: String): Terminal
 }
 
+/** Starts programs without a terminal: a conversation's agent, its stdin and stdout on pipes (S2-49). */
+fun interface ProcessStarter {
+    /**
+     * Starts `sh -c script` with [arguments] as its positional parameters.
+     *
+     * @param script The shell script.
+     * @param arguments Its positional parameters (`$1`…).
+     * @param environment Its environment.
+     * @param directory Its working directory.
+     *
+     * @return The program, as a terminal whose input is its stdin and whose output is its stdout.
+     */
+    suspend fun start(
+        script: String,
+        arguments: List<String>,
+        environment: Map<String, String>,
+        directory: String,
+    ): Terminal
+}
+
 /** What the server tells the runner after a heartbeat. */
 enum class Instruction { RUN, STOP }
 
