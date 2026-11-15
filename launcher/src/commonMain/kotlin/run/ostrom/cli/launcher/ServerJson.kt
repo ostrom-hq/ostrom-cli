@@ -12,6 +12,7 @@ import kotlinx.serialization.json.JsonObject
  * @property token The bearer token: the device token, or the launch's agent token.
  * @property timeoutMillis How long the whole call may take.
  * @property idempotencyKey Sent as `Idempotency-Key`, or null.
+ * @property onBehalfOf The member a cloud session write acts for, sent as `Ostrom-On-Behalf-Of`, or null.
  */
 data class ServerCall(
     val method: String,
@@ -20,6 +21,7 @@ data class ServerCall(
     val token: String?,
     val timeoutMillis: Long,
     val idempotencyKey: String? = null,
+    val onBehalfOf: String? = null,
 )
 
 /**
@@ -62,6 +64,7 @@ class ServerJson(private val transport: ServerTransport) {
      * @param body The JSON body, or null.
      * @param token The bearer token: the device token, or the launch's agent token.
      * @param idempotencyKey Sent as `Idempotency-Key`, or null.
+     * @param onBehalfOf Sent as `Ostrom-On-Behalf-Of`, or null.
      */
     @Suppress("LongParameterList") // one parameter per part of the call
     suspend fun call(
@@ -71,8 +74,10 @@ class ServerJson(private val transport: ServerTransport) {
         token: String?,
         timeoutMillis: Long,
         idempotencyKey: String? = null,
+        onBehalfOf: String? = null,
     ): ServerAnswer {
-        val reply = transport.send(ServerCall(method, path, body?.toString(), token, timeoutMillis, idempotencyKey))
+        val call = ServerCall(method, path, body?.toString(), token, timeoutMillis, idempotencyKey, onBehalfOf)
+        val reply = transport.send(call)
         val status = reply.status
         val json = parseObject(reply.body)
         return when {

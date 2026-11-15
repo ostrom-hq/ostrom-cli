@@ -42,14 +42,15 @@ private val CLOUD_AGENT_KINDS = listOf("claude", "codex", "opencode", "gemini", 
 
 /**
  * `ostrom cloud create --agent A [--profile ID|NAME] [--image REF] [--name N] [--model M] [--message TEXT|-]
- * [--repo [PATH=]URL[#REF]]… [--branch B] [--workdir DIR] [--idempotency-key K] [--json]`, as TeamCode's
+ * [--repo [PATH=]URL[#REF]]… [--branch B] [--workdir DIR] [--idempotency-key K] [--member M] [--json]`, as TeamCode's
  * `teamcode cloud create`: creates a cloud session without attaching to it (`ostrom attach ID` does), and prints it.
  * `--profile` and `--image` are sent only to a server that announces `runners.cloud.profiles.v1`; without
  * `--profile`, the server takes the one profile the caller may use (TeamCode requires it). `--repo`, `--branch` and
  * `--workdir` are the session's preparation recipe (the contract's `CloudEnvironment`), sent only to a server that
  * announces `runners.cloud.environment.v1`: an older one would ignore it and clone nothing. A random
  * `Idempotency-Key` goes with every create, `--idempotency-key` when given, so a retry with the same key never
- * creates a second session (`runners.cloud.idempotency.v1`).
+ * creates a second session (`runners.cloud.idempotency.v1`). `--member` creates it for that member, its owner
+ * (`Ostrom-On-Behalf-Of`, `runners.cloud.onbehalf.v1`, an owner's or an admin's): it starts without GitHub access.
  */
 internal class CloudCreateCommand(private val dependencies: CliDependencies) : CliktCommand(name = "create") {
     override fun help(context: Context) = "Create a cloud session without attaching to it (ostrom attach does)"
@@ -77,6 +78,7 @@ internal class CloudCreateCommand(private val dependencies: CliDependencies) : C
         "--idempotency-key",
         help = "Defaults to a random key; reuse one to retry without creating a second session",
     )
+    private val member by memberOption()
     private val org by orgOption()
     private val server by serverFlag()
     private val json by jsonFlag()
@@ -110,6 +112,7 @@ internal class CloudCreateCommand(private val dependencies: CliDependencies) : C
         val access = dependencies.orgAccess(server, org)
         val signed = access.signed
         dependencies.requireFeature(signed.serverUrl, signed.token, ServerFeatures.RUNNERS_CLOUD, NO_CLOUD_SESSIONS)
+        val onBehalfOf = dependencies.onBehalfOf(access, member)
         // An older server ignores unknown fields: never let it drop the recipe silently.
         if (environment != null) {
             dependencies.requireFeature(
@@ -134,7 +137,8 @@ internal class CloudCreateCommand(private val dependencies: CliDependencies) : C
         )
         // A server older than runners.cloud.idempotency.v1 ignores the key: the create is as before.
         val notFound = "No cloud sessions on ${signed.serverUrl}."
-        val session = access.write("POST", CLOUD_SESSIONS, body, notFound, idempotencyKey = key)
+        val session =
+            access.write("POST", CLOUD_SESSIONS, body, notFound, idempotencyKey = key, onBehalfOf = onBehalfOf)
         dependencies.console.out(if (json) "$session\n" else session.cloudLine(dependencies.clock()) + "\n")
     }
 }

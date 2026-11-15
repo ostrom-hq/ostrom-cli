@@ -119,4 +119,43 @@ class CloudSessionCommandsTest : SetupKit() {
         assertEquals(69, run(mapOf(capabilities()), "cloud", "list"))
         assertErr("This Ostrom server runs no cloud session: ask your admin to update it.")
     }
+
+    @Test
+    fun anAdminPausesResumesAndDeletesAMembersSessionWithMember() {
+        val onBehalf = mapOf(capabilities("runners.cloud.v1", "runners.cloud.onbehalf.v1"))
+        val pause = "POST /api/v1/cloud/sessions/cs1/pause"
+        val resume = "POST /api/v1/cloud/sessions/cs1/resume"
+        val delete = "DELETE /api/v1/cloud/sessions/cs1"
+        val answered = onBehalf + listOf(pause, resume, delete).associateWith { 202 to paused }
+        assertEquals(0, run(answered, "cloud", "pause", "cs1", "--member", "ada"))
+        assertEquals(0, run(answered, "cloud", "resume", "cs1", "--member", "ada"))
+        assertEquals(0, run(answered, "cloud", "delete", "cs1", "--yes", "--member", "ada"))
+        assertEquals(0, run(answered, "cloud", "pause", "cs1"))
+        val members = requests.filter { it.second.method != "GET" }.map { it.second.onBehalfOf }
+        assertEquals(listOf("ada", "ada", "ada", null), members)
+    }
+
+    @Test
+    fun memberIsRefusedBeforeAnyWriteByAServerThatWouldIgnoreItOrWhenMalformed() {
+        val pause = "POST /api/v1/cloud/sessions/cs1/pause"
+        assertEquals(69, run(routes(pause to (202 to paused)), "cloud", "pause", "cs1", "--member", "ada"))
+        assertErr("does not act on behalf of another member: run the command without --member.")
+        assertEquals(64, run(routes(pause to (202 to paused)), "cloud", "delete", "cs1", "--yes", "--member", "a b"))
+        assertErr("--member is a member id or login")
+        assertTrue(calls().isEmpty(), calls().toString())
+    }
+
+    @Test
+    fun aSessionCreatedOnItsOwnersBehalfSaysWhoCreatedIt() {
+        val show = "GET /api/v1/cloud/sessions/cs1"
+        val delegated = session.replace("\"name\"", "\"owner\":\"m1\",\"createdBy\":{\"initiatorId\":\"m0\"," +
+            "\"credentialId\":\"k1\",\"effectiveMemberId\":\"m1\"},\"name\"")
+        assertEquals(0, run(routes(show to (200 to delegated)), "cloud", "show", "cs1"))
+        assertTrue(console.out.contains("Created by   m0\n"), console.out.toString())
+        console.out.clear()
+        val own = session.replace("\"name\"", "\"owner\":\"m1\",\"createdBy\":{\"initiatorId\":\"m1\"," +
+            "\"effectiveMemberId\":\"m1\"},\"name\"")
+        assertEquals(0, run(routes(show to (200 to own)), "cloud", "show", "cs1"))
+        assertFalse(console.out.contains("Created by"), console.out.toString())
+    }
 }
