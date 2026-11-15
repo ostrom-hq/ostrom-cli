@@ -145,6 +145,7 @@ class WorkflowsCommandsTest : SetupKit() {
         val pages = routes(list to (200 to endless), "$list?after=again" to (200 to endless))
         assertEquals(0, run(pages, "workflows", "list"))
         assertEquals(MAX_WORKFLOW_PAGES, calls().size)
+        assertErr("! More workflows exist than ostrom lists: see the others on the console.\n")
     }
 
     @Test

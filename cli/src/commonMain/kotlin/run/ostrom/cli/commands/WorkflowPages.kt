@@ -14,7 +14,7 @@ internal const val MAX_WORKFLOW_PAGES = 21
  *
  * @param path The list, with its query (`?repo=` or none).
  * @param notFound What a 404 says.
- * @return The workflows, oldest first.
+ * @return The workflows, oldest first; past [MAX_WORKFLOW_PAGES] reads, those read, and a warning on stderr.
  */
 internal fun OrgAccess.allWorkflows(path: String, notFound: String): List<JsonObject> {
     val items = mutableListOf<JsonObject>()
@@ -28,5 +28,6 @@ internal fun OrgAccess.allWorkflows(path: String, notFound: String): List<JsonOb
         after = body.text("next")
         pages++
     } while (after != null && pages < MAX_WORKFLOW_PAGES)
+    if (after != null) terminal.err("! More workflows exist than ostrom lists: see the others on the console.\n")
     return items
 }
