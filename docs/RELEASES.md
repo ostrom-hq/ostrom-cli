@@ -222,10 +222,11 @@ instead, as the installers did before `ostrom install`; never needs root), `OSTR
 binary, no line in a shell profile or the user PATH).
 
 Once the archive is checked, the installers hand over to it: they download the release's `latest.json` and
-`latest.json.sig` next to the archive and run the unpacked binary as `ostrom install --bundle <that folder> --version
-<version>`, which checks the Ed25519 signature again and makes the managed installation below. The managed installation never edits a shell profile. A release older
-than `ostrom install`, or `OSTROM_INSTALL_DIR`, installs the single binary in `~/.ostrom/bin` (or that folder) as
-before; a single binary already in `~/.ostrom/bin` is left in place, and the installer says to remove it.
+`latest.json.sig` next to the archive and run the unpacked binary as
+`ostrom install --bundle <that folder> --version <version>`, which checks the Ed25519 signature again and makes the
+managed installation below; it never edits a shell profile. With `OSTROM_INSTALL_DIR` (not together with
+`OSTROM_INSTALL_ROOT`), the single binary is put in that folder instead. A single binary already in `~/.ostrom/bin`
+is left in place, and the installer says to remove it.
 
 Both installers check the signature of `SHA256SUMS` before the archive's checksum. `install.sh` does it with `cosign`
 or, without it, `openssl`. With neither, it installs nothing: the checksum alone comes from the same place as the

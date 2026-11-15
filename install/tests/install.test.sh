@@ -35,17 +35,14 @@ esac
 
 # --- the fake release -------------------------------------------------------
 site="$tmp/site"
-# A release's binary: it prints its version; a managed one (third argument) also has `install`, which records what
-# it was asked into $HOME/install.args and the files of its bundle into $HOME/bundle.files (OSTROM_FAKE_INSTALL_EXIT:
-# its exit status). An older one has no `install` command.
-mk_release() { # <version> <target> [managed]
+# A release's binary: it prints its version, and its `install` records what it was asked into $HOME/install.args and
+# the files of its bundle into $HOME/bundle.files (OSTROM_FAKE_INSTALL_EXIT: its exit status).
+mk_release() { # <version> <target>
   v="$1"; t="$2"
   d="$site/download/$v"; mkdir -p "$d" "$tmp/pkg-$v"
-  if [ "${3:-}" = managed ]; then
-    cat > "$tmp/pkg-$v/ostrom" <<FAKE
+  cat > "$tmp/pkg-$v/ostrom" <<FAKE
 #!/bin/sh
 if [ "\$1" = install ]; then
-  [ "\$2" != --help ] || exit 0
   printf '%s\\n' "\$@" > "\$HOME/install.args"
   ls "\$3" > "\$HOME/bundle.files"
   echo "fake ostrom $v install"
@@ -53,11 +50,7 @@ if [ "\$1" = install ]; then
 fi
 echo "ostrom $v"
 FAKE
-    printf '{"version":"%s"}\n' "$v" > "$d/latest.json"; printf 'signed\n' > "$d/latest.json.sig"
-  else
-    printf '#!/bin/sh\n[ "$1" != install ] || { echo "no such command: install" >&2; exit 1; }\necho "ostrom %s"\n' \
-      "$v" > "$tmp/pkg-$v/ostrom"
-  fi
+  printf '{"version":"%s"}\n' "$v" > "$d/latest.json"; printf 'signed\n' > "$d/latest.json.sig"
   chmod +x "$tmp/pkg-$v/ostrom"
   printf 'Apache\n' > "$tmp/pkg-$v/LICENSE"
   tar -czf "$d/ostrom-$v-$t.tar.gz" -C "$tmp/pkg-$v" ostrom LICENSE
@@ -65,9 +58,9 @@ FAKE
   sign "$d/SHA256SUMS"
 }
 mk_release 1.2.3 "$host"
-mk_release 1.3.0 "$host" managed
-# a managed release whose latest.json.sig is missing
-mk_release 3.0.0 "$host" managed
+mk_release 1.3.0 "$host"
+# a release whose latest.json.sig is missing
+mk_release 3.0.0 "$host"
 rm "$site/download/3.0.0/latest.json.sig"
 mkdir -p "$site/latest/download"
 printf '{"version":"1.3.0","date":"2026-10-30T10:00:00Z","assets":{}}\n' > "$site/latest/download/latest.json"
@@ -110,50 +103,47 @@ run_installer() { # env assignments in "$@", HOME isolated per call
 runi() { run_installer env "$@"; }
 
 # --- cases ------------------------------------------------------------------
-if runi OSTROM_VERSION=1.2.3; then ok "pinned version installs"; else ko "pinned version installs"; cat "$tmp/out.log" >&2; fi
-assert_eq "binary installed in ~/.ostrom/bin" "ostrom 1.2.3" "$("$LAST_HOME/.ostrom/bin/ostrom")"
-assert_eq "binary is executable" yes "$([ -x "$LAST_HOME/.ostrom/bin/ostrom" ] && echo yes || echo no)"
-assert_contains "tells how to put it on PATH" "$(cat "$tmp/out.log")" '.ostrom/bin'
-assert_eq "no stray temp dirs left in HOME" 0 "$(find "$LAST_HOME" -name 'ostrom-install*' | wc -l | tr -d ' ')"
-
-runi OSTROM_VERSION=v1.2.3 && ok "leading v accepted" || ko "leading v accepted"
-
-if runi; then ok "latest resolves through latest.json"; else ko "latest resolves through latest.json"; cat "$tmp/out.log" >&2; fi
-assert_contains "latest 1.3.0 installs itself" "$(cat "$tmp/out.log")" 'fake ostrom 1.3.0 install'
-
-# the hand-over: a release with `ostrom install` installs itself from the checked files (a managed installation)
+# installed: the hand-over ran (a managed installation) or a single binary was put in place
+installed() { [ -e "$LAST_HOME/install.args" ] || [ -e "$LAST_HOME/.ostrom/bin/ostrom" ] && echo yes || echo no; }
 args() { tr '\n' ' ' < "$LAST_HOME/install.args" | sed 's/ $//'; }
-runi OSTROM_VERSION=1.3.0 && ok "a managed release installs" || { ko "a managed release installs"; cat "$tmp/out.log" >&2; }
-bundle=$(sed -n 3p "$LAST_HOME/install.args")
-assert_eq "handed over to ostrom install --bundle, with the version" "install --bundle $bundle --version 1.3.0" "$(args)"
+bundle_of() { sed -n 3p "$LAST_HOME/install.args"; }
+
+# the hand-over: the checked binary installs itself from the checked files (a managed installation)
+if runi OSTROM_VERSION=1.2.3; then ok "pinned version installs"; else ko "pinned version installs"; cat "$tmp/out.log" >&2; fi
+bundle=$(bundle_of)
+assert_eq "handed over to ostrom install --bundle, with the version" "install --bundle $bundle --version 1.2.3" "$(args)"
 assert_eq "the bundle holds the signed manifest and the checked archive" \
-  "latest.json latest.json.sig ostrom-1.3.0-$host.tar.gz" \
+  "latest.json latest.json.sig ostrom-1.2.3-$host.tar.gz" \
   "$(grep -E '^(latest\.json|latest\.json\.sig|ostrom-.*\.tar\.gz)$' "$LAST_HOME/bundle.files" | sort | tr '\n' ' ' | sed 's/ $//')"
+assert_contains "ostrom install's own output is shown" "$(cat "$tmp/out.log")" 'fake ostrom 1.2.3 install'
 assert_eq "no single binary in ~/.ostrom/bin" no "$([ -e "$LAST_HOME/.ostrom/bin" ] && echo yes || echo no)"
 assert_eq "no shell profile written by a managed install" 0 \
   "$(find "$LAST_HOME" -maxdepth 1 \( -name .profile -o -name .zshrc -o -name .bashrc \) | wc -l | tr -d ' ')"
 assert_eq "the bundle is removed afterwards" no "$([ -e "$bundle" ] && echo yes || echo no)"
+assert_eq "no stray temp dirs left in HOME" 0 "$(find "$LAST_HOME" -name 'ostrom-install*' | wc -l | tr -d ' ')"
 assert_contains "says to log in" "$(cat "$tmp/out.log")" 'ostrom login'
+
+runi OSTROM_VERSION=v1.2.3 && ok "leading v accepted" || ko "leading v accepted"
+assert_eq "the version is passed without its v" "install --bundle $(bundle_of) --version 1.2.3" "$(args)"
+
+if runi; then ok "latest resolves through latest.json"; else ko "latest resolves through latest.json"; cat "$tmp/out.log" >&2; fi
+assert_eq "latest is 1.3.0, handed over with its version" "install --bundle $(bundle_of) --version 1.3.0" "$(args)"
+
 runi OSTROM_VERSION=1.3.0 OSTROM_NO_MODIFY_PATH=1
-assert_eq "OSTROM_NO_MODIFY_PATH=1 is --no-path" "install --bundle $(sed -n 3p "$LAST_HOME/install.args") --version 1.3.0 --no-path" "$(args)"
-runi OSTROM_VERSION=1.3.0 OSTROM_INSTALL_ROOT="$tmp/managed-root"
-assert_eq "OSTROM_INSTALL_ROOT is --root" \
-  "install --bundle $(sed -n 3p "$LAST_HOME/install.args") --version 1.3.0 --root $tmp/managed-root" "$(args)"
+assert_eq "OSTROM_NO_MODIFY_PATH=1 is --no-path" "install --bundle $(bundle_of) --version 1.3.0 --no-path" "$(args)"
+runi OSTROM_VERSION=1.3.0 OSTROM_INSTALL_ROOT="$tmp/managed root" OSTROM_NO_MODIFY_PATH=1
+assert_eq "OSTROM_INSTALL_ROOT is --root, spaces kept" \
+  "install --bundle $(bundle_of) --version 1.3.0 --root $tmp/managed root --no-path" "$(args)"
 if runi OSTROM_VERSION=1.3.0 OSTROM_FAKE_INSTALL_EXIT=4; then ko "a refused hand-over must fail"; else
   status=$?; assert_eq "a refused hand-over fails with ostrom install's status" 4 "$status"; fi
-if runi OSTROM_VERSION=3.0.0; then ko "a managed release without latest.json.sig must be refused"; else
-  ok "a managed release without latest.json.sig is refused"; fi
+if runi OSTROM_VERSION=3.0.0; then ko "a release without latest.json.sig must be refused"; else
+  ok "a release without latest.json.sig is refused"; fi
 assert_contains "names the missing signature" "$(cat "$tmp/out.log")" 'latest.json.sig'
-assert_eq "nothing handed over without latest.json.sig" no "$([ -e "$LAST_HOME/install.args" ] && echo yes || echo no)"
-# OSTROM_INSTALL_DIR keeps the single binary, even for a managed release
-runi OSTROM_VERSION=1.3.0 OSTROM_INSTALL_DIR="$tmp/single/bin" && ok "OSTROM_INSTALL_DIR installs the single binary" \
-  || ko "OSTROM_INSTALL_DIR installs the single binary"
-assert_eq "single binary in OSTROM_INSTALL_DIR" "ostrom 1.3.0" "$("$tmp/single/bin/ostrom")"
-assert_eq "no hand-over with OSTROM_INSTALL_DIR" no "$([ -e "$LAST_HOME/install.args" ] && echo yes || echo no)"
-# an older release has no ostrom install: OSTROM_INSTALL_ROOT cannot be honoured
-if runi OSTROM_VERSION=1.2.3 OSTROM_INSTALL_ROOT="$tmp/managed-root"; then ko "OSTROM_INSTALL_ROOT with an older release must fail"
-else ok "OSTROM_INSTALL_ROOT with an older release fails"; fi
-assert_contains "says to unset it" "$(cat "$tmp/out.log")" 'OSTROM_INSTALL_ROOT'
+assert_eq "nothing handed over without latest.json.sig" no "$(installed)"
+if runi OSTROM_VERSION=1.3.0 OSTROM_INSTALL_ROOT="$tmp/r" OSTROM_INSTALL_DIR="$tmp/d"; then
+  ko "OSTROM_INSTALL_ROOT and OSTROM_INSTALL_DIR together must be refused"
+else ok "OSTROM_INSTALL_ROOT and OSTROM_INSTALL_DIR together are refused"; fi
+assert_eq "nothing installed with both" no "$(installed)"
 # a single binary left by an earlier installer is named, never removed
 HOME_N=$((HOME_N + 1)); old_home="$tmp/home-$HOME_N"; mkdir -p "$old_home/.ostrom/bin"
 printf 'old\n' > "$old_home/.ostrom/bin/ostrom"
@@ -161,29 +151,35 @@ HOME="$old_home" OSTROM_DOWNLOAD_BASE="$base" OSTROM_VERSION=1.3.0 sh "$installe
 assert_contains "names the older single binary" "$(cat "$tmp/out.log")" "$old_home/.ostrom/bin/ostrom"
 assert_eq "leaves the older single binary in place" old "$(cat "$old_home/.ostrom/bin/ostrom")"
 
+# OSTROM_INSTALL_DIR: the single binary, without a hand-over
 runi OSTROM_VERSION=1.2.3 OSTROM_INSTALL_DIR="$tmp/custom/bin" && ok "custom install dir" || ko "custom install dir"
 assert_eq "binary in the custom dir" "ostrom 1.2.3" "$("$tmp/custom/bin/ostrom")"
+assert_eq "binary is executable" yes "$([ -x "$tmp/custom/bin/ostrom" ] && echo yes || echo no)"
+assert_eq "no hand-over with OSTROM_INSTALL_DIR" no "$([ -e "$LAST_HOME/install.args" ] && echo yes || echo no)"
+assert_contains "tells how to put it on PATH" "$(cat "$tmp/out.log")" 'custom/bin'
 
-runi OSTROM_VERSION=1.2.3 OSTROM_NO_MODIFY_PATH=1 && ok "no-modify-path" || ko "no-modify-path"
+runi OSTROM_VERSION=1.2.3 OSTROM_INSTALL_DIR="$tmp/np/.ostrom/bin" OSTROM_NO_MODIFY_PATH=1 && ok "no-modify-path" \
+  || ko "no-modify-path"
 assert_eq "no profile written when asked not to" 0 "$(find "$LAST_HOME" -maxdepth 1 -name ".profile" -o -maxdepth 1 -name ".zshrc" -o -maxdepth 1 -name ".bashrc" | wc -l | tr -d " ")"
 
-runi OSTROM_VERSION=1.2.3 SHELL=/bin/zsh
+runi OSTROM_VERSION=1.2.3 OSTROM_INSTALL_DIR="$tmp/z/.ostrom/bin" SHELL=/bin/zsh
 assert_contains "zsh profile gets the PATH line" "$(cat "$LAST_HOME/.zshrc" 2>/dev/null)" '.ostrom/bin'
-runi OSTROM_VERSION=1.2.3 SHELL=/bin/bash
+runi OSTROM_VERSION=1.2.3 OSTROM_INSTALL_DIR="$tmp/b/.ostrom/bin" SHELL=/bin/bash
 assert_contains "bash profile gets the PATH line" "$(cat "$LAST_HOME/.bashrc" 2>/dev/null)" '.ostrom/bin'
 
 # the PATH line is added only once
-runi OSTROM_VERSION=1.2.3 SHELL=/bin/zsh
+runi OSTROM_VERSION=1.2.3 OSTROM_INSTALL_DIR="$tmp/once/.ostrom/bin" SHELL=/bin/zsh
 home1="$LAST_HOME"
-HOME="$home1" OSTROM_DOWNLOAD_BASE="$base" OSTROM_VERSION=1.2.3 SHELL=/bin/zsh sh "$installer" >/dev/null 2>&1
+HOME="$home1" OSTROM_DOWNLOAD_BASE="$base" OSTROM_VERSION=1.2.3 OSTROM_INSTALL_DIR="$tmp/once/.ostrom/bin" SHELL=/bin/zsh \
+  sh "$installer" >/dev/null 2>&1
 assert_eq "PATH line not duplicated" 1 "$(grep -c '.ostrom/bin' "$home1/.zshrc")"
 
 # integrity
 if runi OSTROM_VERSION=2.0.0; then ko "wrong checksum must be refused"; else ok "wrong checksum is refused"; fi
 assert_contains "says why" "$(cat "$tmp/out.log")" 'checksum'
-assert_eq "nothing installed after a wrong checksum" no "$([ -e "$LAST_HOME/.ostrom/bin/ostrom" ] && echo yes || echo no)"
+assert_eq "nothing installed after a wrong checksum" no "$(installed)"
 if runi OSTROM_VERSION=2.1.0; then ko "archive absent from SHA256SUMS must be refused"; else ok "archive absent from SHA256SUMS is refused"; fi
-assert_eq "nothing installed without a checksum line" no "$([ -e "$LAST_HOME/.ostrom/bin/ostrom" ] && echo yes || echo no)"
+assert_eq "nothing installed without a checksum line" no "$(installed)"
 if runi OSTROM_VERSION=2.2.0; then ko "swapped archive must be refused"; else ok "swapped archive is refused"; fi
 if runi OSTROM_VERSION=9.9.9; then ko "unknown version must fail"; else ok "unknown version fails"; fi
 if runi OSTROM_VERSION=1.2.3 OSTROM_TARGET=plan9-mips; then ko "unknown target must fail"; else ok "unsupported target fails"; fi
@@ -197,7 +193,7 @@ assert_contains "cosign verified the checksum file with the pinned key" "$(cat "
 assert_contains "cosign skips the transparency log" "$(cat "$tmp/cosign.calls")" '--insecure-ignore-tlog'
 stub2="$tmp/stub-bad"; mkdir -p "$stub2"; printf '#!/bin/sh\nexit 1\n' > "$stub2/cosign"; chmod +x "$stub2/cosign"
 if runi PATH="$stub2:$PATH" OSTROM_VERSION=1.2.3; then ko "failing cosign must refuse"; else ok "failing cosign refuses"; fi
-assert_eq "nothing installed after a bad signature" no "$([ -e "$LAST_HOME/.ostrom/bin/ostrom" ] && echo yes || echo no)"
+assert_eq "nothing installed after a bad signature" no "$(installed)"
 # no way around it: the former OSTROM_SKIP_COSIGN is not read any more
 if runi PATH="$stub2:$PATH" OSTROM_VERSION=1.2.3 OSTROM_SKIP_COSIGN=1; then ko "OSTROM_SKIP_COSIGN must not skip a failing cosign"; else ok "OSTROM_SKIP_COSIGN skips nothing"; fi
 
@@ -206,9 +202,9 @@ runi OSTROM_VERSION=1.2.3 && ok "a signed release installs" || ko "a signed rele
 assert_contains "says the signature was checked" "$(cat "$tmp/out.log")" 'Signature verified'
 if runi OSTROM_VERSION=2.3.0; then ko "a SHA256SUMS changed after signing must be refused"; else ok "a SHA256SUMS changed after signing is refused"; fi
 assert_contains "says the signature does not verify" "$(cat "$tmp/out.log")" 'signature'
-assert_eq "nothing installed after a bad signature (openssl)" no "$([ -e "$LAST_HOME/.ostrom/bin/ostrom" ] && echo yes || echo no)"
+assert_eq "nothing installed after a bad signature (openssl)" no "$(installed)"
 if runi OSTROM_VERSION=2.4.0; then ko "a release without its signature must be refused"; else ok "a release without its signature is refused"; fi
-assert_eq "nothing installed without a signature" no "$([ -e "$LAST_HOME/.ostrom/bin/ostrom" ] && echo yes || echo no)"
+assert_eq "nothing installed without a signature" no "$(installed)"
 if runi OSTROM_VERSION=2.3.0 OSTROM_SKIP_COSIGN=1; then ko "a bad signature must be refused whatever OSTROM_SKIP_COSIGN says"; else ok "a bad signature is refused whatever OSTROM_SKIP_COSIGN says"; fi
 
 # no verifier at all (neither cosign nor openssl on the PATH): the signature cannot be checked, so nothing is installed
@@ -221,9 +217,9 @@ served_before=$(grep -c 'GET ' "$tmp/server.log")
 if runi PATH="$bare" OSTROM_VERSION=1.2.3; then ko "without any verifier, refuses"; else ok "without any verifier, refuses"; fi
 assert_contains "says what to install" "$(cat "$tmp/out.log")" 'cosign or openssl'
 assert_eq "refuses before downloading anything" "$served_before" "$(grep -c 'GET ' "$tmp/server.log")"
-assert_eq "nothing installed without a verifier" no "$([ -e "$LAST_HOME/.ostrom/bin/ostrom" ] && echo yes || echo no)"
+assert_eq "nothing installed without a verifier" no "$(installed)"
 if runi PATH="$bare" OSTROM_VERSION=1.2.3 OSTROM_SKIP_COSIGN=1; then ko "OSTROM_SKIP_COSIGN must not install without a verifier"; else ok "OSTROM_SKIP_COSIGN does not install without a verifier"; fi
-assert_eq "nothing installed without a verifier, skip asked or not" no "$([ -e "$LAST_HOME/.ostrom/bin/ostrom" ] && echo yes || echo no)"
+assert_eq "nothing installed without a verifier, skip asked or not" no "$(installed)"
 
 # a download cut short runs nothing: the script only acts from its last line
 cut_at=$(grep -n 'mv -f' "$installer" | head -1 | cut -d: -f1)
@@ -231,7 +227,7 @@ head -n "$cut_at" "$installer" > "$tmp/truncated.sh"
 HOME_N=$((HOME_N + 1)); cut_home="$tmp/home-$HOME_N"; mkdir -p "$cut_home"
 served=$(grep -c 'GET ' "$tmp/server.log")
 HOME="$cut_home" OSTROM_DOWNLOAD_BASE="$base" OSTROM_VERSION=1.2.3 sh "$tmp/truncated.sh" > "$tmp/out.log" 2>&1
-assert_eq "a truncated installer installs nothing" no "$([ -e "$cut_home/.ostrom/bin/ostrom" ] && echo yes || echo no)"
+LAST_HOME="$cut_home"; assert_eq "a truncated installer installs nothing" no "$(installed)"
 assert_eq "a truncated installer downloads nothing" "$served" "$(grep -c 'GET ' "$tmp/server.log")"
 
 # never asks for root

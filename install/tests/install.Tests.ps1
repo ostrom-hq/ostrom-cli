@@ -21,7 +21,7 @@ BeforeAll {
     Set-Content -Path "$sums.sig" -Value ([Convert]::ToBase64String($signature)) -NoNewline
   }
 
-  # A managed release's ostrom.exe: a real program (C#, built with the .NET Framework's csc on Windows; a shell script
+  # The ostrom.exe of a release handed over to: a real program (C#, built with the .NET Framework's csc on Windows; a shell script
   # elsewhere) that prints its version and has `install`, which records its arguments into $OSTROM_FAKE_LOG.args and
   # the files of its bundle into $OSTROM_FAKE_LOG.files (OSTROM_FAKE_INSTALL_EXIT: its exit status).
   function New-FakeOstrom([string]$Path, [string]$Version) {
@@ -30,7 +30,6 @@ BeforeAll {
 using System; using System.IO; using System.Linq;
 class Fake { static int Main(string[] a) {
   if (a.Length > 0 && a[0] == "install") {
-    if (a.Length > 1 && a[1] == "--help") return 0;
     string log = Environment.GetEnvironmentVariable("OSTROM_FAKE_LOG");
     File.WriteAllLines(log + ".args", a);
     File.WriteAllLines(log + ".files", Directory.GetFiles(a[2]).Select(f => Path.GetFileName(f)).ToArray());
@@ -52,7 +51,6 @@ class Fake { static int Main(string[] a) {
       $script = @"
 #!/bin/sh
 if [ "`$1" = install ]; then
-  [ "`$2" != --help ] || exit 0
   printf '%s\n' "`$@" > "`$OSTROM_FAKE_LOG.args"
   ls "`$3" > "`$OSTROM_FAKE_LOG.files"
   echo "fake ostrom $Version install"
@@ -65,12 +63,14 @@ echo "fake ostrom $Version"
     }
   }
 
-  function New-Release([string]$Version, [switch]$Managed) {
+  # -Program: ostrom.exe is a real program (New-FakeOstrom), to hand over to; else a text file, enough for
+  # OSTROM_INSTALL_DIR, which only moves it.
+  function New-Release([string]$Version, [switch]$Program) {
     $dir = Join-Path $site "download\$Version"
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
     $pkg = Join-Path $root "pkg-$Version"
     New-Item -ItemType Directory -Force -Path $pkg | Out-Null
-    if ($Managed) {
+    if ($Program) {
       New-FakeOstrom (Join-Path $pkg 'ostrom.exe') $Version
       Set-Content -Path (Join-Path $dir 'latest.json') -Value "{`"version`":`"$Version`"}"
       Set-Content -Path (Join-Path $dir 'latest.json.sig') -Value 'signed'
@@ -88,9 +88,9 @@ echo "fake ostrom $Version"
 
   New-Release '1.2.3' | Out-Null
   New-Release '1.3.0' | Out-Null
-  New-Release '3.0.0' -Managed | Out-Null
-  # a managed release whose latest.json.sig is missing
-  $nosig = New-Release '3.1.0' -Managed
+  New-Release '3.0.0' -Program | Out-Null
+  # a release whose latest.json.sig is missing
+  $nosig = New-Release '3.1.0' -Program
   Remove-Item (Join-Path $nosig 'latest.json.sig')
   $bad = New-Release '2.0.0'
   Set-Content -Path (Join-Path $bad 'SHA256SUMS') -Value ('0' * 64 + '  ostrom-2.0.0-windows-x64.zip')
@@ -132,7 +132,7 @@ echo "fake ostrom $Version"
     return [pscustomobject]@{ Ok = $ok; Error = $err; Dest = $dest; Exe = (Join-Path $dest 'ostrom.exe') }
   }
 
-  # The installer with no OSTROM_INSTALL_DIR: a managed release hands over to its own `ostrom install`.
+  # The installer with no OSTROM_INSTALL_DIR: it hands over to the release's own `ostrom install`.
   function Invoke-HandOver([hashtable]$Env) {
     $log = Join-Path $root ("fake-" + [Guid]::NewGuid().ToString('N'))
     $profileDir = Join-Path $root ("profile-" + [Guid]::NewGuid().ToString('N'))
@@ -222,7 +222,7 @@ Describe 'install.ps1' {
     $p1363[33] | Should -Be 5
     { ConvertFrom-DerSignature ([byte[]](0x30, 0x02, 0x05, 0x00)) } | Should -Throw
   }
-  It 'hands a managed release over to ostrom install --bundle, with the version' {
+  It 'hands over to ostrom install --bundle, with the version' {
     $r = Invoke-HandOver @{ OSTROM_VERSION = '3.0.0' }
     $r.Ok | Should -BeTrue
     $r.Args.Count | Should -Be 5
@@ -237,7 +237,7 @@ Describe 'install.ps1' {
     Test-Path (Join-Path $r.Profile '.ostrom') | Should -BeFalse
   }
   It 'passes --no-path and --root' {
-    $root2 = Join-Path $root 'managed-root'
+    $root2 = Join-Path $root 'managed root'
     $r = Invoke-HandOver @{ OSTROM_VERSION = '3.0.0'; OSTROM_NO_MODIFY_PATH = '1'; OSTROM_INSTALL_ROOT = $root2 }
     $r.Ok | Should -BeTrue
     ($r.Args -join ' ') | Should -Be "install --bundle $($r.Args[2]) --version 3.0.0 --root $root2 --no-path"
@@ -247,23 +247,19 @@ Describe 'install.ps1' {
     $r.Ok | Should -BeFalse
     $r.Error | Should -Match 'exit 4'
   }
-  It 'refuses a managed release without latest.json.sig' {
+  It 'refuses a release without latest.json.sig' {
     $r = Invoke-HandOver @{ OSTROM_VERSION = '3.1.0' }
     $r.Ok | Should -BeFalse
     $r.Error | Should -Match 'latest.json.sig'
     $r.Args.Count | Should -Be 0
   }
-  It 'installs a release older than ostrom install as the single binary' {
-    $r = Invoke-HandOver @{ OSTROM_VERSION = '1.2.3'; OSTROM_NO_MODIFY_PATH = '1' }
-    $r.Ok | Should -BeTrue
-    Get-Content (Join-Path $r.Profile '.ostrom\bin\ostrom.exe') | Should -Be 'fake ostrom 1.2.3'
-  }
-  It 'refuses OSTROM_INSTALL_ROOT for a release older than ostrom install' {
-    $r = Invoke-HandOver @{ OSTROM_VERSION = '1.2.3'; OSTROM_INSTALL_ROOT = (Join-Path $root 'managed-root') }
+  It 'refuses OSTROM_INSTALL_ROOT and OSTROM_INSTALL_DIR together' {
+    $r = Invoke-HandOver @{ OSTROM_VERSION = '3.0.0'; OSTROM_INSTALL_ROOT = (Join-Path $root 'r'); OSTROM_INSTALL_DIR = (Join-Path $root 'd') }
     $r.Ok | Should -BeFalse
-    $r.Error | Should -Match 'OSTROM_INSTALL_ROOT'
+    $r.Error | Should -Match 'not both'
+    $r.Args.Count | Should -Be 0
   }
-  It 'keeps the single binary with OSTROM_INSTALL_DIR, even for a managed release' {
+  It 'installs the single binary with OSTROM_INSTALL_DIR, without a hand-over' {
     $r = Invoke-Installer @{ OSTROM_VERSION = '3.0.0' }
     $r.Ok | Should -BeTrue
     Test-Path $r.Exe | Should -BeTrue

@@ -19,8 +19,7 @@
 #
 # The checked binary then installs itself: `ostrom install --bundle` checks the Ed25519 signature of the release's
 # latest.json again and owns the managed installation (immutable launcher, one folder per version, atomic switch,
-# recovery). A release older than `ostrom install`, or
-# OSTROM_INSTALL_DIR, installs the single binary as before.
+# recovery). With OSTROM_INSTALL_DIR, the single binary is put in that folder instead.
 #
 # Everything runs from main, called on the last line: a download cut short runs nothing.
 set -eu
@@ -93,6 +92,8 @@ main() {
     *) fail "unsupported platform: $target (supported: linux-x64, linux-arm64, macos-arm64; on Windows use install.ps1)" ;;
   esac
   verifier
+  [ -z "${OSTROM_INSTALL_DIR:-}" ] || [ -z "${OSTROM_INSTALL_ROOT:-}" ] \
+    || fail "set OSTROM_INSTALL_ROOT (a managed installation) or OSTROM_INSTALL_DIR (the single binary), not both"
 
   work=$(mktemp -d "${TMPDIR:-/tmp}/ostrom-install.XXXXXX")
   trap 'rm -rf "$work"' EXIT INT TERM
@@ -126,12 +127,10 @@ main() {
   tar -xzf "$work/$archive" -C "$work/unpack" || fail "cannot unpack $archive"
   [ -f "$work/unpack/ostrom" ] || fail "$archive does not contain the ostrom binary"
   chmod 755 "$work/unpack/ostrom"
-  if [ -z "${OSTROM_INSTALL_DIR:-}" ] && "$work/unpack/ostrom" install --help >/dev/null 2>&1; then
-    hand_over "$rel" "$work" "$version" "$work/unpack/ostrom"
-  else
-    [ -z "${OSTROM_INSTALL_ROOT:-}" ] \
-      || fail "ostrom $version has no managed installation: unset OSTROM_INSTALL_ROOT, or set OSTROM_INSTALL_DIR"
+  if [ -n "${OSTROM_INSTALL_DIR:-}" ]; then
     install_binary "$work/unpack/ostrom"
+  else
+    hand_over "$rel" "$work" "$version" "$work/unpack/ostrom"
   fi
 }
 
@@ -139,12 +138,12 @@ hand_over() { # <release url> <work dir> <version> <binary>: the managed install
   fetch "$1/latest.json" "$2/latest.json" || fail "cannot download latest.json for $3 ($1): refusing to install"
   fetch "$1/latest.json.sig" "$2/latest.json.sig" \
     || fail "latest.json.sig could not be downloaded for $3: refusing to install"
-  binary="$4"
-  set -- install --bundle "$2" --version "$3"
-  [ -z "${OSTROM_INSTALL_ROOT:-}" ] || set -- "$@" --root "$OSTROM_INSTALL_ROOT"
+  # the command line replaces the arguments, once they are all read
+  if [ -n "${OSTROM_INSTALL_ROOT:-}" ]; then set -- "$4" install --bundle "$2" --version "$3" --root "$OSTROM_INSTALL_ROOT"
+  else set -- "$4" install --bundle "$2" --version "$3"; fi
   [ "${OSTROM_NO_MODIFY_PATH:-}" != "1" ] || set -- "$@" --no-path
   status=0
-  "$binary" "$@" || status=$?
+  "$@" || status=$?
   [ "$status" -eq 0 ] || { printf 'ostrom install: stopped (exit %s), see above\n' "$status" >&2; exit "$status"; }
   if [ -e "$LEGACY" ]; then
     say "An older ostrom is still at $LEGACY: remove it, and the line adding $(dirname "$LEGACY") to PATH in your"

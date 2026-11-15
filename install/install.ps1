@@ -13,8 +13,7 @@
 #
 # The checked ostrom.exe then installs itself: `ostrom install --bundle` checks the Ed25519 signature of the release's
 # latest.json again and owns the managed installation (immutable launcher, one folder per version, atomic switch,
-# recovery). A release older than `ostrom install`, or
-# OSTROM_INSTALL_DIR, installs the single ostrom.exe as before.
+# recovery). With OSTROM_INSTALL_DIR, the single ostrom.exe is put in that folder instead.
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
@@ -83,24 +82,6 @@ function Test-Signature([string]$Rel, [string]$Work) {
   Write-Host 'Signature verified.'
 }
 
-# Whether the ostrom.exe at $Exe has `ostrom install` (releases before it do not): `install --help` succeeds. Started
-# without the shell, so that a file that is not a program fails here instead of being opened.
-function Test-InstallCommand([string]$Exe) {
-  try {
-    $info = New-Object System.Diagnostics.ProcessStartInfo $Exe
-    $info.Arguments = 'install --help'
-    $info.UseShellExecute = $false
-    $info.RedirectStandardOutput = $true
-    $info.RedirectStandardError = $true
-    $process = [System.Diagnostics.Process]::Start($info)
-    $out = $process.StandardOutput.ReadToEndAsync()
-    $err = $process.StandardError.ReadToEndAsync()
-    $process.WaitForExit()
-    [void]$out.Result; [void]$err.Result
-    return $process.ExitCode -eq 0
-  } catch { return $false }
-}
-
 # The managed installation, done by the checked ostrom.exe from the files in $Work; throws when it stops.
 function Invoke-HandOver([string]$Rel, [string]$Work, [string]$Version, [string]$Exe) {
   try { Invoke-WebRequest -Uri "$Rel/latest.json" -OutFile (Join-Path $Work 'latest.json') -UseBasicParsing }
@@ -110,7 +91,7 @@ function Invoke-HandOver([string]$Rel, [string]$Work, [string]$Version, [string]
   $arguments = @('install', '--bundle', $Work, '--version', $Version)
   if ($env:OSTROM_INSTALL_ROOT) { $arguments += @('--root', $env:OSTROM_INSTALL_ROOT) }
   if ($env:OSTROM_NO_MODIFY_PATH -eq '1') { $arguments += '--no-path' }
-  & $Exe @arguments | Out-Host
+  & $Exe @arguments | ForEach-Object { Write-Host $_ }
   if ($LASTEXITCODE -ne 0) { throw "ostrom install: stopped (exit $LASTEXITCODE), see above" }
   $legacy = if ($env:USERPROFILE) { Join-Path $env:USERPROFILE '.ostrom\bin\ostrom.exe' }
   if ($legacy -and (Test-Path $legacy)) {
@@ -141,7 +122,10 @@ function Install-Binary([string]$Exe, [string]$InstallDir) {
 
 function Install-Ostrom {
   $base = if ($env:OSTROM_DOWNLOAD_BASE) { $env:OSTROM_DOWNLOAD_BASE.TrimEnd('/') } else { 'https://github.com/ostrom-hq/ostrom-cli/releases' }
-  $installDir = if ($env:OSTROM_INSTALL_DIR) { $env:OSTROM_INSTALL_DIR } else { Join-Path $env:USERPROFILE '.ostrom\bin' }
+  $installDir = $env:OSTROM_INSTALL_DIR
+  if ($installDir -and $env:OSTROM_INSTALL_ROOT) {
+    throw 'ostrom install: set OSTROM_INSTALL_ROOT (a managed installation) or OSTROM_INSTALL_DIR (the single ostrom.exe), not both'
+  }
 
   # Windows on ARM runs the x64 build under emulation; only 32-bit systems are unsupported.
   if (-not [Environment]::Is64BitOperatingSystem) {
@@ -178,14 +162,7 @@ function Install-Ostrom {
     Expand-Archive -Path (Join-Path $work $archive) -DestinationPath $unpack
     $exe = Join-Path $unpack 'ostrom.exe'
     if (-not (Test-Path $exe)) { throw "ostrom install: $archive does not contain ostrom.exe" }
-    if (-not $env:OSTROM_INSTALL_DIR -and (Test-InstallCommand $exe)) {
-      Invoke-HandOver $rel $work $version $exe
-    } else {
-      if ($env:OSTROM_INSTALL_ROOT) {
-        throw "ostrom install: ostrom $version has no managed installation: unset OSTROM_INSTALL_ROOT, or set OSTROM_INSTALL_DIR"
-      }
-      Install-Binary $exe $installDir
-    }
+    if ($env:OSTROM_INSTALL_DIR) { Install-Binary $exe $installDir } else { Invoke-HandOver $rel $work $version $exe }
   }
   finally {
     Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
