@@ -13,8 +13,8 @@ The same tools are served by two commands, both in the agent's own process tree,
 
 - `ostrom mcp --session <session-env.json> --server ostrom-memory` under `ostrom run`: it reaches Ostrom only through
   the launch's local relay, with the agent's relay capability ([The relay](#the-relay)).
-- `ostrom cloud mcp --server ostrom-memory` in a cloud session: it calls Ostrom directly with the launch's agent token
-  ([In a cloud session](#in-a-cloud-session)), as TeamCode's runner relay does with the session's execution
+- the binary's hidden `cloud mcp --server ostrom-memory` in a cloud session: it calls Ostrom directly with the launch's
+  agent token ([In a cloud session](#in-a-cloud-session)), as TeamCode's runner relay does with the session's execution
   credential.
 
 | Tool | What it does |
@@ -58,14 +58,14 @@ A cloud session (`ostrom run --cloud`, `ostrom cloud create`, the console) gets 
 runner asks, with the launch's agent token, `GET /api/v1/memory/index?limit=1`, and connects `ostrom-memory` only when
 it answers (a server without the memory, or an older one whose agent tokens lack `memory:use`, does not: the agent
 starts without the tools). Claude Code gets it in its `--mcp-config` and Codex as `-c mcp_servers.ostrom-memory`, each
-running `ostrom cloud mcp --server ostrom-memory` with `OSTROM_URL` and `OSTROM_AGENT_TOKEN`, plus TeamCode's
-sentence on what the memory is for ([runner/README.md](../runner/README.md), its MCP servers). The index is in the
-server's instructions as under `ostrom run`.
+running the binary's hidden `cloud mcp --server ostrom-memory` with `OSTROM_URL` and `OSTROM_AGENT_TOKEN`, plus
+TeamCode's sentence on what the memory is for ([runner/README.md](../runner/README.md), its MCP servers). The index is
+in the server's instructions as under `ostrom run`.
 
-There is no local relay there, so nothing sets `x-ostrom-origin` or a `sessionId`: the server reads both from the
-token. An agent token is always an agent's origin, and on a server that announces `runners.cloud.agent.v1`
-(ostrom-server#539, #547) a cloud session's launch token acts on its cloud session whatever a request names: a `team`
-entry an agent writes is proposed to that cloud session's owner, as a wait in that session. An older server refuses
-such a `team` write with `memory_proposal_session` (a tool error the agent reads; a `personal` entry still works). A
-person's routes (proposals, curation, reviews, superseded, restore) need a person and refuse the token. Gemini CLI and the
-other agents of a cloud session have no Ostrom MCP server yet, as the todo.
+There is no local relay there, so nothing sets `x-ostrom-origin` or a `sessionId`: the server reads both from the token.
+An agent token is always an agent's origin, and on a server that announces `runners.cloud.agent.v1` (ostrom-server#539,
+#547) a cloud session's launch token acts on its cloud session whatever a request names: a `team` entry an agent writes
+is proposed to that cloud session's owner, as a wait in that session. An older server refuses such a `team` write with
+`memory_proposal_session` (a tool error the agent reads; a `personal` entry still works). A person's routes (proposals,
+curation, reviews, superseded, restore) need a person and refuse the token. Gemini CLI and the other agents of a cloud
+session have no Ostrom MCP server yet, as the todo.
