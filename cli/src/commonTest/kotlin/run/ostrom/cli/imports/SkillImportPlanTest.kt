@@ -149,7 +149,8 @@ class SkillImportPlanTest {
             skills = listOf(mapOf("id" to "a", "name" to "a"), mapOf("id" to "b", "name" to "b")),
             skillVersions = listOf(
                 mapOf("id" to "a1", "skill_id" to "a", "version" to "1", "published_at" to "5"),
-                mapOf("id" to "b1", "skill_id" to "b", "version" to "1", "published_at" to "1"),
+                // a date that does not read comes first
+                mapOf("id" to "b1", "skill_id" to "b", "version" to "1", "published_at" to "?"),
                 mapOf("id" to "b2", "skill_id" to "b", "version" to "2", "published_at" to "3"),
                 mapOf("id" to "b3", "skill_id" to "b", "version" to "3", "published_at" to "2"),
             ),
