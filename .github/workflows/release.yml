@@ -406,8 +406,8 @@ jobs:
           file: docker/runner/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: ${{ env.PUBLISH == 'true' }}
-          # No `latest` here: ostrom-server's runner-image.yml keeps it (same Docker Hub repository) until that
-          # workflow is removed (runner slice 4); two repositories pushing one `latest` would race.
+          # No `latest` here yet: main's ci.yml moves it while the CLI has no release. With the first release,
+          # `latest` moves here (and leaves ci.yml), so that the servers' default is the newest signed release.
           tags: |
             ${{ env.IMAGE }}:${{ env.VERSION }}
           sbom: true
@@ -461,7 +461,7 @@ jobs:
           build-args: OSTROM_RUNNER_IMAGE=${{ env.RUNNER }}
           platforms: linux/amd64,linux/arm64
           push: true
-          # No `latest` yet, as the runner image's: both move here with runner slice 4.
+          # No `latest` yet, as the runner image's: main's ci.yml moves both until the first release, then here.
           tags: |
             ${{ env.IMAGE }}:${{ env.VERSION }}
           sbom: true
