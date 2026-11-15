@@ -11,10 +11,17 @@ import kotlinx.serialization.json.JsonObject
 /** The capacity lines of the text view, after the others: the queue, the budget, the advice, the accounts. */
 internal fun CapacityReport.text(): String = buildString {
     val nowMillis = nowMillis
-    appendLine("Queue       " + (queue?.let(::queueLine) ?: unavailable(unavailable["queue"])))
-    appendLine("Budget      " + (budget?.let { budgetLine(it, nowMillis) } ?: unavailable(unavailable["budget"])))
-    val advice = pacing?.let { pacingLine(it, nowMillis) } ?: if ("pacing" in unavailable) null else "none"
-    appendLine("Pacing      " + (advice ?: unavailable(unavailable["pacing"])))
+    val waiting = queue
+    val spent = budget
+    val paced = pacing
+    appendLine("Queue       " + if (waiting != null) queueLine(waiting) else unavailable(unavailable["queue"]))
+    appendLine("Budget      " + if (spent != null) budgetLine(spent, nowMillis) else unavailable(unavailable["budget"]))
+    val advice = when {
+        paced != null -> pacingLine(paced, nowMillis)
+        "pacing" in unavailable -> unavailable(unavailable["pacing"])
+        else -> "none"
+    }
+    appendLine("Pacing      $advice")
     val listed = accounts
     when {
         listed == null -> appendLine("Accounts    " + unavailable(unavailable["accounts"]))
@@ -99,7 +106,9 @@ private fun window(value: JsonObject?, nowMillis: Long): String {
 }
 
 private fun table(header: List<String>, rows: List<List<String>>): String {
-    val widths = header.indices.map { column -> (rows.map { it[column] } + header[column]).maxOf { it.length } }
+    val widths = header.indices.map { column ->
+        rows.fold(header[column].length) { width, row -> maxOf(width, row[column].length) }
+    }
     return (listOf(header) + rows).joinToString("\n") { row ->
         "  " + row.mapIndexed { i, cell -> if (i == row.lastIndex) cell else cell.padEnd(widths[i]) }.joinToString("  ")
     }

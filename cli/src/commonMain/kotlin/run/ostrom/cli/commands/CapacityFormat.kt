@@ -36,7 +36,7 @@ internal fun usd(micros: Long): String {
     return "\$${cents / CENTS_PER_DOLLAR}.${(cents % CENTS_PER_DOLLAR).toString().padStart(2, '0')}"
 }
 
-internal fun percent(ratio: Double?) = ratio?.let { "${(it * PERCENT).toInt().coerceAtLeast(0)}%" } ?: "-"
+internal fun percent(ratio: Double?) = if (ratio == null) "-" else "${(ratio * PERCENT).toInt().coerceAtLeast(0)}%"
 
 internal fun at(iso: String, nowMillis: Long): String {
     val millis = millisOf(iso) ?: return clean(iso)

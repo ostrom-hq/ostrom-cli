@@ -137,6 +137,7 @@ class StatusCapacityTest {
             parse("""{"windows":[{"utilization":0.5},{"window":"five_hour"}]}"""),
             parse("""{"label":"a\u0007b","status":"ready","cooldownUntil":"later"}"""),
             parse("""{"label":"A much longer label","provider":"claude","status":"ready"}"""),
+            parse("""{"label":"x","windows":[{"window":"seven_day","resetsAt":"soon"}]}"""),
         )
         val report = CapacityReport(parse("{}"), parse("{}"), parse("{}"), accounts, nowMillis = now)
         val text = report.text()
