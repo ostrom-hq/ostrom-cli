@@ -3,6 +3,7 @@ package run.ostrom.cli.update
 
 import run.ostrom.cli.api.Download
 import run.ostrom.cli.api.Downloads
+import run.ostrom.cli.api.ReleaseDownloadException
 import run.ostrom.cli.api.ServerUnreachableException
 import kotlinx.coroutines.test.runTest
 import okio.FileSystem
@@ -18,6 +19,8 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /** `ostrom update`: a signed manifest, a checked archive, a swap that keeps the previous binary. */
+private class CurlIllegalStateException(message: String) : IllegalStateException(message)
+
 class SelfUpdateTest {
     private val fake = FakeFileSystem()
     private val said = mutableListOf<String>()
@@ -379,6 +382,28 @@ class SelfUpdateTest {
         routes[latest] = { throw ServerUnreachableException(latest, Exception("refused")) }
         assertEquals(69, updater().update(request()))
         assertEquals("ostrom's releases are unreachable at https://releases.example/. Check your network.", said.last())
+        val dns = CurlIllegalStateException("Could not resolve host")
+        routes[latest] = { throw ServerUnreachableException(latest, dns) }
+        assertEquals(69, updater().update(request()))
+        assertEquals(
+            "ostrom's releases are unreachable at https://releases.example/ (the name could not be resolved (DNS)). " +
+                "Check your network.",
+            said.last(),
+        )
+        routes[latest] = { throw ReleaseDownloadException("release_rate_limited", "GitHub API rate limit reached") }
+        assertEquals(1, updater().update(request()))
+        assertEquals("✗ $latest was refused: GitHub API rate limit reached.", said.last())
+        val refusals = mapOf(
+            "release_redirect_invalid" to "it redirected somewhere a release is never served from",
+            "release_encoding_invalid" to "it came compressed or encoded",
+            "release_size_invalid" to "its size is not the one announced",
+            "other_code" to "other_code",
+        )
+        for ((code, text) in refusals) {
+            routes[latest] = { throw ReleaseDownloadException(code) }
+            assertEquals(1, updater().update(request()))
+            assertEquals("✗ $latest was refused: $text.", said.last())
+        }
         routes[latest] = { Download.Missing(500) }
         assertEquals(69, updater().update(request()))
         assertEquals("No release at $latest (HTTP 500).", said.last())

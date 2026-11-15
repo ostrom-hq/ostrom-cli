@@ -4,6 +4,7 @@ package run.ostrom.cli.update
 import run.ostrom.cli.ExitCode
 import run.ostrom.cli.api.Download
 import run.ostrom.cli.api.Downloads
+import run.ostrom.cli.api.ReleaseDownloadException
 import run.ostrom.cli.api.ServerUnreachableException
 import run.ostrom.cli.launcher.child
 import run.ostrom.cli.launcher.parseObject
@@ -47,6 +48,7 @@ private class NoRelease(text: String) : Stop(ExitCode.NOT_FOUND, text)
 
 /** Stops [SelfUpdate] with [code], saying [text]. */
 private fun stop(code: ExitCode, text: String): Nothing = throw Stop(code, text)
+
 
 /** A release manifest that does not read as one. */
 private fun unreadable(): Nothing = stop(ExitCode.FAILED, "✗ The release manifest cannot be read. $UNCHANGED")
@@ -334,8 +336,11 @@ class SelfUpdate(
     private suspend fun fetch(url: String, maxBytes: Long, request: UpdateRequest): ByteArray {
         val answer = try {
             downloads.fetch(url, maxBytes)
-        } catch (_: ServerUnreachableException) {
-            stop(ExitCode.UNREACHABLE, "ostrom's releases are unreachable at ${request.releases}. $CHECK_NETWORK")
+        } catch (e: ServerUnreachableException) {
+            val why = e.family?.let { " (${it.cause})" }.orEmpty()
+            stop(ExitCode.UNREACHABLE, "ostrom's releases are unreachable at ${request.releases}$why. $CHECK_NETWORK")
+        } catch (e: ReleaseDownloadException) {
+            stop(ExitCode.FAILED, "✗ $url was refused: ${e.detail ?: refusal(e.code)}.")
         }
         return when (answer) {
             is Download.Bytes -> answer.bytes
@@ -353,6 +358,14 @@ class SelfUpdate(
         const val MAX_SIGNATURE_BYTES = 2048L
         const val MAX_BINARY_BYTES = 256L * 1024 * 1024
         const val NOT_FOUND = 404
+        /** Why a release answer was refused, for the person reading. */
+        fun refusal(code: String): String = when (code) {
+            "release_redirect_invalid" -> "it redirected somewhere a release is never served from"
+            "release_encoding_invalid" -> "it came compressed or encoded"
+            "release_size_invalid" -> "its size is not the one announced"
+            else -> code
+        }
+
         const val CHECK_NETWORK = "Check your network."
         const val REINSTALL = "Install the version you want with ostrom update --version."
     }
