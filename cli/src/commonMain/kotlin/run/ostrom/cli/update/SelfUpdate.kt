@@ -49,6 +49,14 @@ private class NoRelease(text: String) : Stop(ExitCode.NOT_FOUND, text)
 /** Stops [SelfUpdate] with [code], saying [text]. */
 private fun stop(code: ExitCode, text: String): Nothing = throw Stop(code, text)
 
+/** Why a release answer was refused, for the person reading. */
+private fun refusal(code: String): String = when (code) {
+    "release_redirect_invalid" -> "it redirected somewhere a release is never served from"
+    "release_encoding_invalid" -> "it came compressed or encoded"
+    "release_size_invalid" -> "its size is not the one announced"
+    else -> code
+}
+
 /** A release manifest that does not read as one. */
 private fun unreadable(): Nothing = stop(ExitCode.FAILED, "✗ The release manifest cannot be read. $UNCHANGED")
 
@@ -339,7 +347,7 @@ class SelfUpdate(
             val why = e.family?.let { " (${it.cause})" }.orEmpty()
             stop(ExitCode.UNREACHABLE, "ostrom's releases are unreachable at ${request.releases}$why. $CHECK_NETWORK")
         } catch (e: ReleaseDownloadException) {
-            stop(ExitCode.FAILED, "✗ $url was refused: ${e.detail ?: REFUSALS[e.code] ?: e.code}.")
+            stop(ExitCode.FAILED, "✗ $url was refused: ${e.detail ?: refusal(e.code)}.")
         }
         return when (answer) {
             is Download.Bytes -> answer.bytes
@@ -357,11 +365,6 @@ class SelfUpdate(
         const val MAX_SIGNATURE_BYTES = 2048L
         const val MAX_BINARY_BYTES = 256L * 1024 * 1024
         const val NOT_FOUND = 404
-        val REFUSALS = mapOf(
-            "release_redirect_invalid" to "it redirected somewhere a release is never served from",
-            "release_encoding_invalid" to "it came compressed or encoded",
-            "release_size_invalid" to "its size is not the one announced",
-        )
         const val CHECK_NETWORK = "Check your network."
         const val REINSTALL = "Install the version you want with ostrom update --version."
     }

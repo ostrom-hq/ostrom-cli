@@ -98,7 +98,8 @@ private sealed interface Step {
 
 private fun parsed(value: String): Url? = try {
     Url(value)
-} catch (_: IllegalArgumentException) {
+} catch (_: IllegalStateException) {
+    // ktor's URLParserException
     null
 }
 

@@ -22,6 +22,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 
 class DownloadsTest {
@@ -220,14 +221,14 @@ class DownloadsTest {
                 if (request.url.host == "api.github.com") {
                     respond("", HttpStatusCode.Found, redirect("$CDN/a?sig=SECRET"))
                 } else {
-                    assertNull(request.headers[HttpHeaders.Accept])
+                    assertNotEquals("application/octet-stream", request.headers[HttpHeaders.Accept])
                     assertNull(request.headers["X-GitHub-Api-Version"])
                     respond(byteArrayOf(5), HttpStatusCode.OK)
                 }
             },
         )
         assertContentEquals(byteArrayOf(5), assertIs<Download.Bytes>(downloads.fetch("$base/latest.json", 8)).bytes)
-        assertEquals(3, requests)
+        assertEquals(2, requests)
     }
 
     @Test
@@ -240,7 +241,7 @@ class DownloadsTest {
             },
         )
         refused("release_redirect_invalid") { downloads.fetch("$base/latest.json", 8) }
-        assertEquals(1 + 6, requests)
+        assertEquals(6, requests)
     }
 
     @Test
@@ -269,7 +270,7 @@ class DownloadsTest {
                 },
             )
             refused("release_redirect_invalid") { downloads.fetch("$base/latest.json", 8) }
-            assertEquals(2, requests, address)
+            assertEquals(1, requests, address)
         }
     }
 

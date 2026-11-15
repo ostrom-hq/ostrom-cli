@@ -54,7 +54,7 @@ class NetworkFailuresTest {
             WinHttpIllegalStateException("Error 12002") to NetworkFailure.TIMEOUT,
             WinHttpIllegalStateException("Error 12175") to NetworkFailure.TLS,
             WinHttpIllegalStateException("the web proxy refused") to NetworkFailure.PROXY,
-            WinHttpIllegalStateException("Error 12007x") to NetworkFailure.OTHER,
+            WinHttpIllegalStateException("Error 120071") to NetworkFailure.OTHER,
             // a port number is not an engine code, and a host name saying tls is not a TLS failure
             CurlIllegalStateException("https://releases.example:12002/ failed") to NetworkFailure.OTHER,
             curl("https://tls.example.com: Could not connect to server") to NetworkFailure.REFUSED,
