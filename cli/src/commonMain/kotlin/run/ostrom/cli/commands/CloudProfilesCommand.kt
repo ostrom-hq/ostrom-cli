@@ -48,11 +48,14 @@ internal class CloudProfilesCommand(private val dependencies: CliDependencies) :
         val access = dependencies.cloudAccess(server, org)
         val signed = access.signed
         dependencies.requireFeature(signed.serverUrl, signed.token, RUNNERS_CLOUD_PROFILES, NO_PROFILES)
-        if (member != null) {
+        val named = member
+        val path = if (named == null) {
+            CLOUD_PROFILES
+        } else {
             val feature = RUNNERS_CLOUD_PROFILES_MEMBER
             dependencies.requireFeature(signed.serverUrl, signed.token, feature, NO_PROFILES_MEMBER)
+            "$CLOUD_PROFILES?member=${segment(named)}"
         }
-        val path = member?.let { "$CLOUD_PROFILES?member=${segment(it)}" } ?: CLOUD_PROFILES
         val profiles = access.read(path, "No cloud profiles on ${signed.serverUrl}.")
             .list("profiles").filterIsInstance<JsonObject>()
         val console = dependencies.console

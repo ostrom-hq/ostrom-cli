@@ -200,5 +200,10 @@ class CloudCreateCommandTest : SetupKit() {
         val second = sent().drop(before)
         assertTrue(second.contains(profiles) && !second.contains(memberList), second.toString())
         assertEquals("""{"agent":"claude","profileId":"$backend"}""", bodyOf(create))
+        // Capabilities that cannot be read: the caller's list too.
+        val unread = mapOf("GET /api/v1/capabilities" to (500 to "{}"), listing(backend to "backend"))
+        val third = sent().size
+        assertEquals(0, run(routes(unread), *options))
+        assertTrue(sent().drop(third).none { it == memberList }, sent().toString())
     }
 }

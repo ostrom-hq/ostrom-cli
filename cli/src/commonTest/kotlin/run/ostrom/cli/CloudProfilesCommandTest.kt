@@ -20,17 +20,19 @@ class CloudProfilesCommandTest : SetupKit() {
 
     @Test
     fun eachProfileIsOneLineAndJsonIsTheArray() {
-        val profiles = """{"profiles":[$backend,$bare,{}]}"""
+        // Anything the server leaves out or sends in another shape prints as unknown, never fails the list.
+        val odd = """{"version":"3","spec":{}},{"version":{}},{"version":1.5}"""
+        val profiles = """{"profiles":[$backend,$bare,{},$odd]}"""
         assertEquals(0, run(served + (list to (200 to profiles)), "cloud", "profiles"))
         assertEquals(
             "p1\tbackend\tv3\teu-1/agents\tteam/api:1\tclaude 2.1\n" +
                 "p2\tweb\tv1\tc2/dev\tteam/web:1\t-\n" +
-                "?\t?\tv?\t?/?\t-\t-\n",
+                "?\t?\tv?\t?/?\t-\t-\n".repeat(4),
             console.out.toString(),
         )
         console.out.clear()
         assertEquals(0, run(served + (list to (200 to profiles)), "cloud", "profiles", "--json"))
-        assertEquals("[$backend,$bare,{}]\n", console.out.toString())
+        assertEquals("[$backend,$bare,{},$odd]\n", console.out.toString())
     }
 
     @Test
