@@ -7,12 +7,18 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.client.request.HttpRequestData
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.content.TextContent
 import io.ktor.http.headersOf
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import run.ostrom.cli.CliKit
 import run.ostrom.cli.runner.ServerHttp
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class CloudMcpTest : CliKit() {
@@ -64,6 +70,28 @@ class CloudMcpTest : CliKit() {
         val index = sent.single()
         assertEquals("/api/v1/memory/index", index.url.encodedPath)
         assertEquals("Bearer agent-token", index.headers[HttpHeaders.Authorization])
+    }
+
+    @Test
+    fun aTeamEntryIsWrittenWithTheAgentTokenAloneTheServerBindingItsSessionAndOrigin() {
+        val call = """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memory_write","arguments":""" +
+            """{"scope":"team","title":"Deploys","summary":"How we deploy.","content":"Tag, then CI."}}}"""
+        val entry = """{"id":"m-1","scope":"team","status":"proposed","title":"Deploys","summary":"How we deploy.",""" +
+            """"content":"Tag, then CI.","tags":[],"refs":[],"version":1,"origin":"agent","authorId":"u-1",""" +
+            """"createdAt":"2026-11-15T00:00:00Z","updatedAt":"2026-11-15T00:00:00Z"}"""
+        val initialize = """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"""
+        assertEquals(0, serve(agent, listOf("--server", "ostrom-memory"), initialize, call, answer = entry))
+        val write = sent.single { it.method.value == "POST" }
+        assertEquals("https://ostrom.example/api/v1/memory", write.url.toString())
+        assertEquals("Bearer agent-token", write.headers[HttpHeaders.Authorization])
+        // No relay here: the server reads the origin and the cloud session from the token (ostrom-server#539).
+        assertNull(write.headers["x-ostrom-origin"])
+        val body = Json.parseToJsonElement((write.body as TextContent).text).jsonObject
+        assertEquals("team", body["scope"]?.jsonPrimitive?.content)
+        // No session named (an explicit null at most, as the contract's JSON writes absent values).
+        assertTrue(body["sessionId"] == null || body["sessionId"] == JsonNull, body.toString())
+        val answer = console.out.toString().lines().single { "\"id\":2" in it }
+        assertTrue("\"result\"" in answer && "m-1" in answer && "\"isError\":true" !in answer, answer)
     }
 
     @Test
