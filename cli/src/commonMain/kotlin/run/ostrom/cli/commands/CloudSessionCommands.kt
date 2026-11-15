@@ -38,6 +38,41 @@ internal fun CliDependencies.cloudAccess(
 
 internal fun cloudSessionPath(id: String) = "$CLOUD_SESSIONS/${segment(id)}"
 
+/** `ServerFeatures.RUNNERS_CLOUD_ON_BEHALF` of ostrom-core#291, newer than the core this CLI pins. */
+internal const val RUNNERS_CLOUD_ON_BEHALF = "runners.cloud.onbehalf.v1"
+
+/** What `--member` says to a server that would ignore `Ostrom-On-Behalf-Of` and act for the caller instead. */
+internal const val NO_ON_BEHALF =
+    "This Ostrom server does not act on behalf of another member: run the command without --member."
+
+/** A member named by id or login (`OnBehalfOf.PATTERN` of ostrom-core#291). */
+private val MEMBER_REFERENCE = Regex("[A-Za-z0-9._-]{1,64}")
+
+/**
+ * `--member ID|LOGIN`, as TeamCode's: an owner or an admin acts on that member's cloud sessions (`Ostrom-On-Behalf-Of`,
+ * `runners.cloud.onbehalf.v1`); the creation's owner, the session's owner for a pause, a resume or a deletion.
+ */
+internal fun CliktCommand.memberOption() =
+    option("--member", help = "Act for this member (id or login): owners and admins only")
+
+/** Stops on a malformed `--member`, a usage error, before any request. */
+internal fun checkMember(member: String?) {
+    if (member != null && !MEMBER_REFERENCE.matches(member)) {
+        throw stopWith(ExitCode.USAGE, "ostrom: --member is a member id or login: 1 to 64 of A-Z a-z 0-9 . _ -")
+    }
+}
+
+/**
+ * The checked `--member`, or null: a server without `runners.cloud.onbehalf.v1` would ignore the header and act on
+ * the caller's own sessions, so the command stops before any write.
+ */
+internal fun CliDependencies.onBehalfOf(access: OrgAccess, member: String?): String? {
+    if (member == null) return null
+    checkMember(member)
+    requireFeature(access.signed.serverUrl, access.signed.token, RUNNERS_CLOUD_ON_BEHALF, NO_ON_BEHALF)
+    return member
+}
+
 /** `cs_1  claude  running  acme/api  5m`: one row of `ostrom cloud list`, its age from [now]. */
 internal fun JsonObject.cloudLine(now: Long): String = listOf(
     text("id") ?: "?",
@@ -109,6 +144,9 @@ internal class CloudShowCommand(private val dependencies: CliDependencies) : Cli
             "Status" to listOfNotNull(shown.text("status"), shown.text("phase"), reason)
                 .joinToString(" · "),
             "Repository" to listOfNotNull(shown.text("repo"), shown.text("ref")).joinToString(" @ "),
+            // TeamCode's `Owner: ID (created by ID)`: only a session created on its owner's behalf says it.
+            "Created by" to shown.child("createdBy")?.text("initiatorId")
+                ?.takeIf { it != shown.text("owner") }.orEmpty(),
             "GitHub" to shown.text("githubAccess").orEmpty(),
             "Created" to shown.text("createdAt").orEmpty(),
             "Last active" to shown.text("lastActivityAt").orEmpty(),
@@ -138,12 +176,16 @@ internal class CloudChangeCommand(
     override fun help(context: Context) = summary
 
     private val session by argument("session", help = "The cloud session's id")
+    private val member by memberOption()
     private val org by orgOption()
     private val server by serverFlag()
 
     override fun run() {
+        checkMember(member)
         val access = dependencies.cloudAccess(server, org)
-        val changed = access.write("POST", "${cloudSessionPath(session)}/$action", null, "No cloud session $session.")
+        val onBehalfOf = dependencies.onBehalfOf(access, member)
+        val path = "${cloudSessionPath(session)}/$action"
+        val changed = access.write("POST", path, null, "No cloud session $session.", onBehalfOf = onBehalfOf)
         dependencies.console.out(changed.cloudLine(dependencies.clock()) + "\n")
     }
 }
@@ -157,6 +199,7 @@ internal class CloudDeleteCommand(private val dependencies: CliDependencies) : C
 
     private val session by argument("session", help = "The cloud session's id")
     private val yes by option("--yes", help = "Confirm the deletion").flag()
+    private val member by memberOption()
     private val org by orgOption()
     private val server by serverFlag()
 
@@ -165,8 +208,10 @@ internal class CloudDeleteCommand(private val dependencies: CliDependencies) : C
         if (!yes) {
             throw stopWith(ExitCode.USAGE, "ostrom: deleting $session and its workspace cannot be undone: add --yes.")
         }
+        checkMember(member)
         val access = dependencies.cloudAccess(server, org)
-        access.write("DELETE", cloudSessionPath(session), null, "No cloud session $session.")
+        val onBehalfOf = dependencies.onBehalfOf(access, member)
+        access.write("DELETE", cloudSessionPath(session), null, "No cloud session $session.", onBehalfOf = onBehalfOf)
         dependencies.console.out("Session $session is being deleted.\n")
     }
 }

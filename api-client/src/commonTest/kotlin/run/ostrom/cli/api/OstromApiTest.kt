@@ -78,9 +78,21 @@ class OstromApiTest {
     }
 
     @Test
+    fun aCloudSessionWriteOnAMembersBehalfNamesThem() = runTest {
+        val engine = MockEngine { request ->
+            assertEquals("ada", request.headers[ON_BEHALF_HEADER])
+            respond("{}", HttpStatusCode.Accepted)
+        }
+        val api = OstromApiImpl("https://ostrom.example", "ostrom/0.1.0", HttpClient(engine) { install(HttpTimeout) })
+        val request = ServerRequest("POST", "/api/v1/cloud/sessions/cs1/pause", null, "t0k", onBehalfOf = "ada")
+        assertEquals(202, api.send(request).status)
+    }
+
+    @Test
     fun anAnonymousCallHasNoTokenNorBody() = runTest {
         val engine = MockEngine { request ->
             assertNull(request.headers[IDEMPOTENCY_HEADER], "no key unless the call names one")
+            assertNull(request.headers[ON_BEHALF_HEADER], "nobody else's behalf unless the call names a member")
             assertNull(request.headers[HttpHeaders.Authorization])
             assertNull(request.headers[ORG_HEADER], "no organisation named: the server resolves it")
             assertEquals(0L, request.body.contentLength ?: 0L)

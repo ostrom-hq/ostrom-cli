@@ -31,6 +31,13 @@ class ServerJsonTest {
     }
 
     @Test
+    fun aCallCanActOnAMembersBehalf() = runTest {
+        fake["POST /b"] = 202 to "{}"
+        server.call("POST", "/b", null, "t", 5, onBehalfOf = "ada")
+        assertEquals(listOf("ada"), fake.sent("POST /b").map { it.onBehalfOf })
+    }
+
+    @Test
     fun anErrorIsReadAsTheContractsApiErrorOrThePrototypes() = runTest {
         fake["GET /closed"] = 409 to """{"error":{"type":"session_closed","message":"closed"}}"""
         fake["GET /old"] = 400 to """{"error":"bad thing"}"""

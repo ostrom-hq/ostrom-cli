@@ -67,6 +67,18 @@ class CloudCreateCommandTest : SetupKit() {
         assertTrue(sent().none { it == create })
     }
 
+    @Test
+    fun memberCreatesTheSessionForThatMemberOnAServerThatActsOnTheirBehalf() {
+        val onBehalf = routes(mapOf(capabilities("runners.cloud.v1", "runners.cloud.onbehalf.v1")))
+        assertEquals(0, run(onBehalf, "cloud", "create", "--agent", "claude", "--member", "ada"))
+        assertEquals("ada", requests.last { it.second.method == "POST" }.second.onBehalfOf)
+        assertEquals(69, run(routes(), "cloud", "create", "--agent", "claude", "--member", "ada"))
+        assertErr("does not act on behalf of another member")
+        assertEquals(1, sent().count { it == create }, "nothing created for the caller instead")
+        assertEquals(64, run(mapOf(capabilities()), "cloud", "create", "--agent", "claude", "--member", "a b"))
+        assertErr("--member is a member id or login")
+    }
+
     private fun keyOf(route: String): String? =
         requests.lastOrNull { "${it.second.method} ${it.second.path}" == route }?.second?.idempotencyKey
 
