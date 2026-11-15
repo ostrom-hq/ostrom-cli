@@ -381,8 +381,10 @@ jobs:
           python3 scripts/measure.py --label linuxArm64 --binary bin/linuxArm64/releaseExecutable/ostrom.kexe
           --max-hook-p95-ms 20 --max-version-p95-ms 30 --max-cold-ms 300 --max-hook-memory-mb 25
 
-  # The runner image of cloud sessions from main, docker.io/ostromhq/ostrom-runner:edge (and :sha-<commit>): the image a
-  # session's init container copies `ostrom` out of, before a release tags it (release.yml publishes the versions).
+  # The runner image of cloud sessions from main, docker.io/ostromhq/ostrom-runner:edge, :latest (and :sha-<commit>):
+  # the image a session's init container copies `ostrom` out of, before a release tags it (release.yml publishes the
+  # versions). :latest is the server's default runner image: from main while the CLI has no release, as
+  # ostrom-session:latest.
   runner-image:
     needs: ci
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -427,6 +429,7 @@ jobs:
           push: true
           tags: |
             ${{ env.IMAGE }}:edge
+            ${{ env.IMAGE }}:latest
             ${{ env.IMAGE }}:sha-${{ github.sha }}
 
   # The default session image from main, docker.io/ostromhq/ostrom-session:edge, :latest (and :sha-<commit>): TeamCode's
