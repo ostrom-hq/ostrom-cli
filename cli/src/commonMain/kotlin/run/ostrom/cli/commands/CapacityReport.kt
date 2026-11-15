@@ -47,15 +47,15 @@ private class Section<T>(val value: T?, val reason: String?)
  * Reads the four sections together: none of them fails `status`, whatever the server answers (TeamCode's: only the
  * lines it showed before are required).
  */
-internal suspend fun readCapacity(server: ServerJson, token: String, nowMillis: Long): CapacityReport = coroutineScope {
+internal suspend fun readCapacity(server: ServerJson, token: String, now: Long): CapacityReport = coroutineScope {
     val queue = async { section(server.get(QUEUE, token)) { it.takeIf { body -> body.number("waiting") != null } } }
     val budget = async {
         section(server.get(BUDGET, token)) { it.takeIf { body -> body.number("spentMicros") != null } }
     }
-    // `{}` is no advice: a section shown as "none"
+    // `{}` or a null advice is none: a section shown as "none"
     val pacing = async {
         section(server.get(PACING, token)) { body ->
-            body.takeIf { it["directive"].let { advice -> advice == null || advice is JsonObject } }
+            body.takeIf { advised(it) }
         }
     }
     val accounts = async {
@@ -72,9 +72,13 @@ internal suspend fun readCapacity(server: ServerJson, token: String, nowMillis: 
         pacing.await().value?.child("directive"),
         accounts.await().value,
         read.mapNotNull { (name, section) -> section.reason?.let { name to it } }.toMap(),
-        nowMillis,
+        now,
     )
 }
+
+/** Whether the advice is absent, null or an object: anything else is another shape. */
+private fun advised(body: JsonObject): Boolean =
+    body["directive"].let { it == null || it is JsonNull || it is JsonObject }
 
 private fun <T> section(answer: ServerAnswer, shape: (JsonObject) -> T?): Section<T> = when (answer) {
     is ServerAnswer.Ok -> shape(answer.body)?.let { Section(it, null) } ?: Section(null, UNEXPECTED)

@@ -96,7 +96,7 @@ class StatusCapacityTest {
             server(
                 "/api/v1/inference/queue" to (200 to """{"waiting":"many"}"""),
                 "/api/v1/budgets/me" to (null to "refused"),
-                "/api/v1/directives/current" to (200 to "{}"),
+                "/api/v1/directives/current" to (200 to """{"directive":null}"""),
                 "/api/v1/accounts" to (200 to """{"items":[]}"""),
             ),
             "ost_1",
