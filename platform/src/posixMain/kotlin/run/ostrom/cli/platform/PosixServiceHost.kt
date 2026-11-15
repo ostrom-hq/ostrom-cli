@@ -44,3 +44,13 @@ actual fun serviceStopRequested(): Boolean = ostrom_service_stop_requested() != 
 actual fun setEnvironmentVariable(name: String, value: String?) {
     if (value == null) unsetenv(name) else setenv(name, value, 1)
 }
+
+/** `link` fails when the target exists; the temporary name is removed either way. */
+actual fun publishFileIfAbsent(temporary: String, target: String): Boolean {
+    val linked = platform.posix.link(temporary, target)
+    val failure = errno
+    platform.posix.unlink(temporary)
+    if (linked == 0) return true
+    if (failure == platform.posix.EEXIST) return false
+    throw IOException("could not publish $target: ${strerror(failure)?.toKString()}")
+}

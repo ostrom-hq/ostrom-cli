@@ -7,6 +7,7 @@
 package run.ostrom.cli.service
 
 import okio.FileSystem
+import okio.IOException
 import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -39,5 +40,13 @@ class ServiceFilesTest {
         assertFalse(createPrivateFile(path, "second"))
         assertEquals("first", fs.read(path.toPath()) { readUtf8() })
         assertFailsWith<IllegalArgumentException> { createPrivateFile("/", "x") }
+        assertEquals(listOf("service.json"), fs.list(path.toPath().parent!!).map { it.name }, "no temporary file stays")
+    }
+
+    @Test
+    fun aFailureToPublishIsThrownAndLeavesNothingBehind() = serviceScratch { scratch ->
+        val path = (scratch.home / "new" / "service.json").toString()
+        assertFailsWith<IOException> { createPrivateFile(path, "x") { _, _ -> throw IOException("no") } }
+        assertEquals(emptyList(), fs.list(path.toPath().parent!!), "neither the file nor its temporary one")
     }
 }

@@ -52,3 +52,16 @@ actual fun serviceStopRequested(): Boolean = ostrom_service_stop_requested() != 
 actual fun setEnvironmentVariable(name: String, value: String?) {
     SetEnvironmentVariableW(name, value)
 }
+
+/** `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING` fails when the target exists; the temporary name is removed. */
+actual fun publishFileIfAbsent(temporary: String, target: String): Boolean {
+    val moved = platform.windows.MoveFileExW(temporary, target, 0u)
+    val failure = platform.windows.GetLastError()
+    if (moved != 0) return true
+    platform.windows.DeleteFileW(temporary)
+    if (failure == ERROR_ALREADY_EXISTS || failure == ERROR_FILE_EXISTS) return false
+    throw IOException("could not publish $target: error $failure")
+}
+
+private const val ERROR_FILE_EXISTS = 80u
+private const val ERROR_ALREADY_EXISTS = 183u

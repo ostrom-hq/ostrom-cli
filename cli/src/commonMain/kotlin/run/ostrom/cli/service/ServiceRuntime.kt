@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli.service
 
-import com.github.ajalt.clikt.core.CliktError
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
@@ -49,16 +48,17 @@ internal suspend fun runDaemon(settings: ServiceSettings, report: (String) -> Un
 
 /**
  * The local service. One per configuration: `daemon.lock` is held for the whole run, and a second instance exits before
- * writing anything (not even the log, which it would replace).
+ * writing anything (not even the log, which it would replace). That is not a failure: the OS manager restarts a service
+ * that exits with an error, so the second instance calls [onBusy] and returns (the command exits 0) instead.
  */
 internal suspend fun serve(
     settings: ServiceSettings,
+    onBusy: () -> Unit = {},
     daemon: suspend (ServiceSettings, (String) -> Unit, () -> Boolean) -> Unit = ::runDaemon,
     signalled: () -> Boolean = ::serviceStopRequested,
 ) = coroutineScope {
     installServiceSignalHandlers()
-    val instance = holdExclusiveLock(daemonLockPath(settings.config))
-        ?: throw CliktError("Another Ostrom service already runs for this configuration.")
+    val instance = holdExclusiveLock(daemonLockPath(settings.config)) ?: return@coroutineScope onBusy()
     try {
         serveLocked(settings, daemon) { stopRequested(settings, signalled) }
     } finally {

@@ -15,6 +15,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -31,12 +32,13 @@ class ServiceCommandTest : CliKit() {
         cloud: Boolean = false,
         signedIn: Boolean = true,
         runner: FakeRunner = FakeRunner(),
+        executable: String? = scratch.launcher,
         environment: Map<String, String> = mapOf("HOME" to scratch.home.toString(), "OSTROM_URL" to server),
     ): Int {
         if (signedIn) signIn((scratch.home / ".config" / "ostrom").toString())
         val platform = ServicePlatform(os, scratch.launcher, if (os == "windows") "S-1-5-21-123-456-789-1001" else userId, "maya", scratch.home.toString())
         val manager = ServiceManager(runner, { "C:\\Windows" }, {})
-        return cli(environment = environment, api = serverOf(emptyMap()), service = { ServiceCommand(it, manager, { platform }, { cloud }) })
+        return cli(environment = environment, api = serverOf(emptyMap()), executable = executable, service = { ServiceCommand(it, manager, { platform }, { cloud }) })
             .run(arrayOf("service") + args)
     }
 
@@ -119,6 +121,25 @@ class ServiceCommandTest : CliKit() {
     }
 
     @Test
+    fun aBootInstallThatTheOsRefusesLeavesNoServiceJsonBehind() = blockingScratch { scratch ->
+        launcher(scratch)
+        assertNotEquals(0, run(scratch, "install", "--at-boot", runner = FakeRunner { 1 }))
+        assertEquals(null, fs.metadataOrNull(servicePath(scratch.config).toPath()))
+    }
+
+    @Test
+    fun theServiceRunsTheLauncherOfTheInstallationNotThePayloadOrThePlatformsBinary() = blockingScratch { scratch ->
+        launcher(scratch)
+        val other = (scratch.root / "install" / "bin" / "stable").toString()
+        fs.write(other.toPath()) { writeUtf8("launcher") }
+        assertEquals(0, run(scratch, "install", executable = other))
+        assertEquals(other, saved(scratch).executable)
+        assertEquals(0, run(scratch, "uninstall"))
+        assertEquals(0, run(scratch, "install", executable = null))
+        assertEquals(scratch.launcher, saved(scratch).executable)
+    }
+
+    @Test
     fun theBootNoticeNamesWhatEachSystemAsks() = blockingScratch { scratch ->
         launcher(scratch)
         assertFailsWith<IllegalStateException> { run(scratch, "install", "--system", os = "windows", runner = FakeRunner { 1 }) }
@@ -169,7 +190,7 @@ class ServiceCommandTest : CliKit() {
         assertEquals(listOf("--user start $unit"), runner.calls.map { it.line.removePrefix("/usr/bin/systemctl ") })
         runner.calls.clear()
         assertEquals(0, run(scratch, "stop", runner = runner))
-        assertOut("Stopped. ostrom service automatic off keeps it stopped.")
+        assertOut("Stopped. It starts again at your next login, and ostrom install or ostrom update start it unless")
         assertEquals(listOf("--user stop $unit"), runner.calls.map { it.line.removePrefix("/usr/bin/systemctl ") })
         runner.calls.clear()
         assertEquals(0, run(scratch, "restart", runner = runner))
@@ -244,7 +265,7 @@ class ServiceCommandTest : CliKit() {
             assertOut("Running: true")
             // a service that holds the lock stops a second one
             assertFailsWith<IllegalArgumentException> { run(scratch, "serve", "--config", "relative.toml") }
-            assertEquals(1, run(scratch, "serve", "--config", scratch.config))
+            assertEquals(0, run(scratch, "serve", "--config", scratch.config), "not an error: the OS would restart it")
             assertTrue("Another Ostrom service already runs" in console.err.toString(), console.err.toString())
         } finally {
             lock.close()

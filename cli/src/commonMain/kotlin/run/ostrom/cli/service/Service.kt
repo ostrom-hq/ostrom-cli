@@ -90,7 +90,8 @@ private fun ServiceContext.settings(config: String, executable: String?, atBoot:
     val platform = platform()
     if (platform.userId == "0") fail("Run service installation as your user; Ostrom requests OS authorization only where needed.")
     val home = dependencies.environment.homeDirectory ?: fail("Cannot locate the user home directory.")
-    return newServiceSettings(config, executable ?: platform.executable, atBoot, platform, home)
+    // the stable launcher of a managed installation, never one of its payloads (deleted two updates later)
+    return newServiceSettings(config, executable ?: dependencies.executable ?: platform.executable, atBoot, platform, home)
 }
 
 /** A new registration's settings: a random id, and the registration path of [platform]'s startup mode. */
@@ -154,12 +155,13 @@ private class Install(private val context: ServiceContext) : CliktCommand(name =
         if (FileSystem.SYSTEM.metadataOrNull(selected.executable.toPath())?.isRegularFile != true) {
             context.fail("The executable must exist at a stable absolute path.")
         }
-        if (existing == null) writePrivateFile(servicePath(config), serviceJson.encodeToString(ServiceSettings.serializer(), selected))
         // An explicit installation is the opposite of the opt-out an earlier uninstall recorded.
         setAutomaticServiceSetup(config, true)
         if (selected.atBoot) context.echo(bootNotice(selected.os))
+        // The OS authorization (sudo, an elevated task) comes first: a declined one leaves no service.json behind.
         installServiceRegistration(selected, context.manager.runner)
         if (selected.atBoot && selected.os == "linux") enableLinuxBootStartup(selected, context.manager.runner)
+        if (existing == null) writePrivateFile(servicePath(config), serviceJson.encodeToString(ServiceSettings.serializer(), selected))
         if (selected.os == "linux") {
             context.manager.manager(selected, "daemon-reload")
             context.manager.manager(selected, "enable")
@@ -205,7 +207,10 @@ private class Manage(private val context: ServiceContext, private val operation:
             "stop" -> {
                 manager.stop(selected)
                 if (!selected.atBoot && automaticServiceSetup(selected.config)) {
-                    context.echo("Stopped. ostrom service automatic off keeps it stopped.")
+                    context.echo(
+                        "Stopped. It starts again at your next login, and ostrom install or ostrom update " +
+                            "start it unless ostrom service automatic is off.",
+                    )
                 }
             }
             "restart" -> {
@@ -320,6 +325,9 @@ private class Serve(private val context: ServiceContext) : CliktCommand(name = "
             context.dependencies.console.err(CLOUD_RUNNER_REFUSAL + "\n")
             return
         }
-        runBlocking { serve(requireNotNull(context.load(config)) { "Service settings are missing." }) }
+        val settings = requireNotNull(context.load(config)) { "Service settings are missing." }
+        // not an error: the OS manager would restart a service that exits with one
+        val busy = { context.dependencies.console.err("Another Ostrom service already runs for this configuration.\n") }
+        runBlocking { serve(settings, busy) }
     }
 }

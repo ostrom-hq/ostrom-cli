@@ -39,3 +39,13 @@ expect fun serviceStopRequested(): Boolean
  * tests, cannot change its own environment and ignores it.
  */
 expect fun setEnvironmentVariable(name: String, value: String?)
+
+/**
+ * Publishes the finished file [temporary] as [target] only when [target] does not exist: the two are one atomic step
+ * (`link` on macOS and Linux, a `MoveFileEx` without replacement on Windows), so a reader never sees a half-written
+ * [target], and of two concurrent publishers one wins. [temporary] is gone afterwards either way.
+ *
+ * @return False when [target] already exists (nothing is replaced).
+ * @throws okio.IOException For any other failure.
+ */
+expect fun publishFileIfAbsent(temporary: String, target: String): Boolean

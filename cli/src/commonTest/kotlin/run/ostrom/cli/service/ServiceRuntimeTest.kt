@@ -43,7 +43,7 @@ class ServiceRuntimeTest {
     fun theServiceHoldsItsLockLogsAndRunsTheDaemonUntilItStops() = serviceScratch { scratch ->
         val settings = scratch.install(scratch.settings("linux"))
         var lockedWhileRunning = false
-        serve(settings, { _, report, stop ->
+        serve(settings, daemon = { _, report, stop ->
             lockedWhileRunning = holdExclusiveLock(daemonLockPath(settings.config)) == null
             report("hosting nothing")
             assertTrue(stop())
@@ -60,7 +60,9 @@ class ServiceRuntimeTest {
         val first = assertNotNull(holdExclusiveLock(daemonLockPath(settings.config)))
         try {
             var ran = false
-            assertFailsWith<CliktError> { serve(settings, { _, _, _ -> ran = true }) { false } }
+            var busy = false
+            serve(settings, { busy = true }, { _, _, _ -> ran = true }) { false }
+            assertTrue(busy)
             assertFalse(ran)
             assertFalse(FileSystem.SYSTEM.exists(serviceLogPath(settings.config).toPath()), "not even the log is replaced")
             assertTrue(serviceRunning(settings.config))
@@ -73,17 +75,17 @@ class ServiceRuntimeTest {
     @Test
     fun aFailureIsLoggedWithoutItsDetailsAndPassedOn() = serviceScratch { scratch ->
         val settings = scratch.install(scratch.settings("linux"))
-        assertFailsWith<IllegalStateException> { serve(settings, { _, _, _ -> error("secret detail") }) { false } }
+        assertFailsWith<IllegalStateException> { serve(settings, daemon = { _, _, _ -> error("secret detail") }) { false } }
         val text = log(settings)
         assertTrue("Service failed." in text)
         assertFalse("secret detail" in text)
-        assertFailsWith<CancellationException> { serve(settings, { _, _, _ -> throw CancellationException("stop") }) { false } }
+        assertFailsWith<CancellationException> { serve(settings, daemon = { _, _, _ -> throw CancellationException("stop") }) { false } }
     }
 
     @Test
     fun theLogKeepsTheLastLinesAndCutsLongOnes() = serviceScratch { scratch ->
         val settings = scratch.install(scratch.settings("linux"))
-        serve(settings, { _, report, _ ->
+        serve(settings, daemon = { _, report, _ ->
             repeat(200) {
                 report("line $it")
                 yield()

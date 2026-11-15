@@ -51,3 +51,14 @@ actual fun serviceStopRequested(): Boolean = false
 // coverage: test-only JVM target; the JVM cannot change its own environment.
 @ExcludeFromCoverage
 actual fun setEnvironmentVariable(name: String, value: String?) = Unit
+
+/** Moves the temporary file without replacing the target. */
+// coverage: test-only JVM target; the shipped native actuals do the same with link and MoveFileEx.
+@ExcludeFromCoverage
+actual fun publishFileIfAbsent(temporary: String, target: String): Boolean = try {
+    java.nio.file.Files.move(Path.of(temporary), Path.of(target))
+    true
+} catch (_: java.nio.file.FileAlreadyExistsException) {
+    java.nio.file.Files.delete(Path.of(temporary))
+    false
+}
