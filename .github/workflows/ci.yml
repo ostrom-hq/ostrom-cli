@@ -151,11 +151,13 @@ jobs:
       # 17.86 MB (d0551960), 18.47 with the workflows commands (#146), 18.70 with the memory server and the relay
       # (#159, #161), 19.06 with the automations commands (#151), 19.25 with ostrom cloud mcp (#180, #182), 19.32 on
       # main (run 43634928886). Since then it is linked and measured on every pull request.
+      # 19 MB (Windows 21) from 15/11: the capacity guidance (cli#215: hooks, relay forwarder, agents commands, status
+      # capacity) took linuxX64 from 17.82 MB on main to 18.17 and ostrom.exe from 19.81 to 20.25 (run 43683335873).
       - name: Start-up (15 ms median, 20 ms p95, 40 ms for a git push), first start, memory and binary sizes
         run: >-
           python3 scripts/measure.py --label linuxX64 --max-push-ms 40
           --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
-          --sizes cli/build/bin/*/releaseExecutable/ostrom.* --max-size-mb 18 --size-budget mingwX64=20
+          --sizes cli/build/bin/*/releaseExecutable/ostrom.* --max-size-mb 19 --size-budget mingwX64=21
           --max-hook-p95-ms 20 --max-version-p95-ms 30 --max-cold-ms 300 --max-hook-memory-mb 25
       - name: End to end, the real binary with fake Claude Code and Codex against the contract's server
         run: python3 e2e/run.py --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
@@ -168,7 +170,7 @@ jobs:
       - name: Hook cost in a session (median of 20)
         run: >-
           python3 e2e/perf.py --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe --label linuxX64
-          --max-hook-ms 20 --max-cold-version-ms 500 --max-cold-hook-ms 500 --max-size-mb 18
+          --max-hook-ms 20 --max-cold-version-ms 500 --max-cold-hook-ms 500 --max-size-mb 19
           --max-burst-requests 0.1 --max-spaced-requests 0.5 --max-spaced-ms 20 --max-installed-ms 20
       - name: End to end, init, invite, members, policy and harness against the contract's server
         run: python3 e2e/setup_e2e.py --binary cli/build/bin/linuxX64/releaseExecutable/ostrom.kexe
