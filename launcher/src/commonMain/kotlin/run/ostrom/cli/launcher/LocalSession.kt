@@ -148,16 +148,18 @@ class LocalSession private constructor(
             )
             val created = server.call("POST", SESSIONS, body, token, CALL_MILLIS, idempotencyKey = launchId)
             val id = if (created is ServerAnswer.Ok) created.body.text("id") else null
-            val hosted = id?.let { host(server, it, token) } as? ServerAnswer.Ok
-            val epoch = hosted?.let { it.body.epoch() }
+            val hostAnswer = id?.let { host(server, it, token) }
+            val epoch = (hostAnswer as? ServerAnswer.Ok)?.let { it.body.epoch() }
             val session = if (id != null && epoch != null) LocalSession(id, server, token, say, epoch) else null
             // Ready before the agent starts, as a remote host reports it.
             if (session != null && session.beat()) return session
+            // the call that failed: the create, else the host; an answer without its id or epoch, or a refused ready
+            val failed = (hostAnswer ?: created) as? ServerAnswer.Failed
             val why = when {
-                created !is ServerAnswer.Failed -> "the server did not host it"
-                created.status == null -> "network error"
-                created.type == null -> "HTTP ${created.status}"
-                else -> "HTTP ${created.status} ${created.type}"
+                failed == null -> "the server did not host it"
+                failed.status == null -> "network error"
+                failed.type == null -> "HTTP ${failed.status}"
+                else -> "HTTP ${failed.status} ${failed.type}"
             }
             say("ostrom: the local session of this launch could not be opened ($why); the agent starts without it.")
             if (id != null) withContext(NonCancellable) { server.call("DELETE", path(id), null, token, CALL_MILLIS) }

@@ -83,7 +83,7 @@ class LocalSessionTest {
         serveASession()
         server["POST $SESSIONS/cs1/host"] = 409 to """{"error":{"type":"session_not_running","message":"no"}}"""
         assertNull(open())
-        assertTrue("the server did not host it" in said.single(), said.single())
+        assertTrue("HTTP 409 session_not_running" in said.single(), said.single())
         assertEquals(1, server.sent("DELETE $SESSIONS/cs1").size)
         server["POST $SESSIONS/cs1/host"] = 200 to """{"orgId":"o1","epoch":1,"session":{"id":"cs1"}}"""
         server["POST $HEARTBEAT"] = 409 to """{"error":{"type":"execution_fenced","message":"no"}}"""

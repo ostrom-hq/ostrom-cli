@@ -275,11 +275,11 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
                 files.write(settingsFile, sessionSettings(environment).toString(), FileAccess.PRIVATE)
                 val every = run.site.variable(ALIVE_VARIABLE).orEmpty().toLongOrNull() ?: ALIVE_MILLIS
                 // the launch's own cloud session (TeamCode's local session), listed beside the cloud and remote ones
-                val local = if (run.local) LocalSession.open(dependencies, run.site, run.launch, run.agent) else null
+                val own = if (run.local) LocalSession.open(dependencies, run.site, run.launch, run.agent) else null
                 try {
-                    runAgent(listOf(run.executable) + prepared.arguments, environment, lifeline, every, delivery, local)
+                    runAgent(listOf(run.executable) + prepared.arguments, environment, lifeline, every, delivery, own)
                 } finally {
-                    local.closeIfOpen()
+                    own.closeIfOpen()
                 }
             } finally {
                 delivery.close()
