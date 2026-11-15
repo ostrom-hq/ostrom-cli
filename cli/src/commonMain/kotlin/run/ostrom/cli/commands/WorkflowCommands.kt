@@ -17,7 +17,6 @@ import com.github.ajalt.clikt.parameters.types.choice
 import com.github.ajalt.clikt.parameters.types.int
 import run.ostrom.cli.CliDependencies
 import run.ostrom.cli.ExitCode
-import run.ostrom.cli.launcher.list
 import run.ostrom.cli.launcher.objectOf
 import run.ostrom.cli.launcher.text
 import run.ostrom.cli.platform.StandardInput
@@ -140,10 +139,9 @@ internal class WorkflowsListCommand(private val dependencies: CliDependencies) :
     private val json by jsonFlag()
 
     override fun run() {
-        val body = dependencies.workflows(server, org) {
-            it.read(WORKFLOWS, "No workflows in ${it.org.slug}.")
+        val items = dependencies.workflows(server, org) {
+            it.allWorkflows(WORKFLOWS, "No workflows in ${it.org.slug}.")
         }
-        val items = body.list("items").filterIsInstance<JsonObject>()
         if (json) {
             dependencies.console.data(JsonArray(items).toString() + "\n")
             return

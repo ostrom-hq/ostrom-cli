@@ -5,6 +5,7 @@ import run.ostrom.cli.api.OstromApi
 import run.ostrom.cli.api.ServerRequest
 import run.ostrom.cli.api.ServerResponse
 import run.ostrom.cli.api.ServerUnreachableException
+import run.ostrom.cli.commands.MAX_WORKFLOW_PAGES
 import run.ostrom.cli.platform.StandardInput
 import run.ostrom.cli.platform.StandardInputFailure
 import run.ostrom.cli.workflows.age
@@ -125,6 +126,26 @@ class WorkflowsCommandsTest : SetupKit() {
         assertEquals(0, run(routes(list to (200 to """{"items":[]}""")), "workflows", "list"))
         assertEquals("", console.out.toString())
         assertErr("No workflow is saved yet. Save one: ostrom workflows create --file FILE.json\n")
+    }
+
+    @Test
+    fun theListReadsEveryPageUntilOneHasNoNext() {
+        val pages = routes(
+            list to (200 to """{"items":[$stored],"next":"deploy"}"""),
+            "$list?after=deploy" to (200 to """{"items":[$bare]}"""),
+        )
+        assertEquals(0, run(pages, "workflows", "list", "--json"))
+        assertEquals("[$stored,$bare]\n", console.out.toString())
+        assertEquals(listOf(list, "$list?after=deploy"), calls())
+    }
+
+    @Test
+    fun theListStopsAfterThePagesAnOrganisationCanHold() {
+        val endless = """{"items":[],"next":"again"}"""
+        val pages = routes(list to (200 to endless), "$list?after=again" to (200 to endless))
+        assertEquals(0, run(pages, "workflows", "list"))
+        assertEquals(MAX_WORKFLOW_PAGES, calls().size)
+        assertErr("! More workflows exist than ostrom lists: see the others on the console.\n")
     }
 
     @Test
