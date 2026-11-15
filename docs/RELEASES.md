@@ -322,3 +322,29 @@ libcurl4, ripgrep, the `ostrom` binary of the release, Claude Code and Codex at 
 
 The release carries the three manifest files of `OstromHQ.Ostrom`. After the go, submit them:
 `wingetcreate submit` or a pull request to `microsoft/winget-pkgs` under `manifests/o/OstromHQ/Ostrom/<version>/`.
+
+## The desktop app, for `ostrom ui`
+
+`ostrom ui` (TeamCode's `teamcode ui`) opens Ostrom Desktop, installing the version of this CLI first when no app of
+that version or newer is installed (an older one is updated after a question, or with `--yes`). The app is not a file
+of this repository's release: ostrom-app's `release-desktop.yml` publishes it on **its** release of the same tag, with
+`desktop-manifest.json` and `desktop-manifest.json.sig`, signed with the release key of this document (Ed25519 over the
+raw bytes, base64, like `latest.json`):
+
+```json
+{ "schemaVersion": 1, "product": "desktop", "version": "1.0.0", "tag": "1.0.0", "sourceCommit": "<40 hex>",
+  "assets": { "macos-arm64": { "fileName": "ostrom-desktop-1.0.0-macos-arm64.zip", "sha256": "<hex>", "size": 0 }, "...": {} } }
+```
+
+The CLI downloads both files from `https://github.com/ostrom-hq/ostrom-app/releases/download/<version>/` (or from
+`OSTROM_APP_RELEASES_URL`), checks the signature against the roots compiled in (`release/trust`), requires
+`product: desktop` and the exact file names, then downloads the package of this system (at most 512 MiB) and checks its
+length and SHA-256 before anything opens it. macOS: the zipped `Ostrom.app` is unpacked next to
+`~/Applications/Ostrom.app`, checked with `codesign --verify --deep --strict` against the Developer ID of team
+`Z8T3MHFW48`, then replaces the previous app. Windows: `msiexec` installs the per-user package into
+`%LOCALAPPDATA%\Ostrom App`. Linux: the archive becomes `~/.local/share/ostrom-desktop/<version>`, `current` points at
+it and a menu entry is written. Each checks that the installed app reports the manifest's version (the file
+`ostrom-desktop-version` in the app's resources), and a failure leaves the previous app in place.
+
+`--no-launch` only installs; `--bundle DIR` installs from a folder holding the manifest, its signature and the package
+(release acceptance, offline use).

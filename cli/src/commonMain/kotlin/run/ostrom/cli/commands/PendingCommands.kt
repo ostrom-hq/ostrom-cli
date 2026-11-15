@@ -42,6 +42,7 @@ fun pendingCommands(implemented: List<CliktCommand>): List<CliktCommand> {
         named("service"),
         named("update"),
         named("verify-release"),
+        named("ui"),
         named("version"),
         named("invite"),
         named("members"),

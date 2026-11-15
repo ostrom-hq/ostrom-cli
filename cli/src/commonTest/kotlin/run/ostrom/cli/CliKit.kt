@@ -247,6 +247,9 @@ open class CliKit {
             secrets = secrets,
             clock = { now },
             userId = { "1000" },
+            fileSystem = fileSystem,
+            downloads = { url, _ -> (releases[url] ?: Download.Missing(404)).also { releaseUrls += url } },
+            releaseTrust = ReleaseTrust(ReleaseVectors.KEY_PEM),
         ),
     )
 

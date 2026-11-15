@@ -43,6 +43,7 @@ import run.ostrom.cli.commands.StatusCommand
 import run.ostrom.cli.commands.TelemetryCommand
 import run.ostrom.cli.commands.UpdateCommand
 import run.ostrom.cli.commands.VerifyCommand
+import run.ostrom.cli.commands.UiCommand
 import run.ostrom.cli.commands.VerifyReleaseCommand
 import run.ostrom.cli.commands.VersionCommand
 import run.ostrom.cli.commands.WaitCommand
@@ -208,6 +209,7 @@ class OstromCli(
             InstallCommand(dependencies),
             UpdateCommand(dependencies),
             VerifyReleaseCommand(dependencies),
+            UiCommand(dependencies),
             LogoutCommand(dependencies),
             ConfigCommand(dependencies),
             DoctorCommand(dependencies),
