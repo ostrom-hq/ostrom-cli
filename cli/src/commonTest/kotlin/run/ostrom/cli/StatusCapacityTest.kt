@@ -147,7 +147,8 @@ class StatusCapacityTest {
         assertEquals(listOf("-", "-", "-", "░░░░░░░░░░ -", "-", "50%", "no, "), rows[1])
         assertEquals(listOf("a b", "-", "ready", "-", "-", "-", "yes"), rows[2])
         val none = CapacityReport().text()
-        assertTrue(none.lines().take(4).all { "unavailable from this server" in it }, none)
+        assertEquals(3, none.lines().count { "unavailable from this server" in it }, none)
+        assertTrue("Pacing      none\n" in none, none)
         val absent = readCapacity(
             server(
                 "/api/v1/budgets/me" to (200 to """{"spentMicros":"1"}"""),
