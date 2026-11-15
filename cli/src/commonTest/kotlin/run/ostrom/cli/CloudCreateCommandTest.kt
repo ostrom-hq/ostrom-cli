@@ -47,6 +47,30 @@ class CloudCreateCommandTest : SetupKit() {
     }
 
     @Test
+    fun everyCreateGoesWithAnIdempotencyKeyRandomUnlessGiven() {
+        assertEquals(0, run(routes(), "cloud", "create", "--agent", "claude", "--idempotency-key", "press-1"))
+        assertEquals("press-1", keyOf(create))
+        assertEquals(0, run(routes(), "cloud", "create", "--agent", "claude"))
+        val random = keyOf(create)
+        assertEquals(36, random?.length)
+        assertEquals(0, run(routes(), "cloud", "create", "--agent", "claude"))
+        assertTrue(keyOf(create) != random, "a fresh key at every command")
+        // A replay (202) prints the session the key created.
+        assertEquals(0, run(recipe + (create to (202 to created)), "cloud", "create", "--agent", "claude"))
+        assertTrue(console.out.endsWith("cs1  claude  creating  -  5m\n"), console.out.toString())
+    }
+
+    @Test
+    fun aMalformedIdempotencyKeyIsRefusedBeforeAnyCreate() {
+        assertEquals(64, run(routes(), "cloud", "create", "--agent", "claude", "--idempotency-key", "not a key"))
+        assertErr("--idempotency-key is 1 to 128 of A-Z a-z 0-9 . _ : -")
+        assertTrue(sent().none { it == create })
+    }
+
+    private fun keyOf(route: String): String? =
+        requests.lastOrNull { "${it.second.method} ${it.second.path}" == route }?.second?.idempotencyKey
+
+    @Test
     fun theMessageMayComeFromStandardInputButNeverEmpty() {
         typed += listOf("Fix", "the build")
         assertEquals(0, run(routes(), "cloud", "create", "--agent", "claude", "--message", "-"))

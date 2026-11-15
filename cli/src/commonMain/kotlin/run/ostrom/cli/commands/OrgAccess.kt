@@ -104,18 +104,22 @@ internal class OrgAccess(
      * Made with a CLI token, a governance write is held by the server until an owner or an admin confirms it on the
      * console (202 `GovernanceConfirmationPending`, audit H1): any write held so is waited on,
      * the link said, and the write's result is what the confirmation returns (77 refused, 75 not answered in time).
+     *
+     * An [idempotencyKey] goes as `Idempotency-Key`: the server answers a retry with the first write's result.
      */
+    @Suppress("LongParameterList") // one parameter per part of the call, as ServerJson.call
     fun write(
         method: String,
         path: String,
         body: JsonObject?,
         notFound: String,
         governance: Boolean = false,
+        idempotencyKey: String? = null,
     ): JsonObject {
         // OSTROM_TOKEN, set on purpose, is the token the change goes with: never swapped for the admin token
         val elevated = if (governance && !consoleToken) admin.valid(signed.serverUrl) else null
         val token = elevated ?: signed.token
-        val answer = runBlocking { server.call(method, path, body, token, WRITE_MILLIS) }
+        val answer = runBlocking { server.call(method, path, body, token, WRITE_MILLIS, idempotencyKey) }
         if (answer is ServerAnswer.Failed) refused(answer, governance, elevated)
         val done = answer.orStop(signed.serverUrl, notFound)
         // a write the server holds for a confirmation is waited on, whichever: nothing was written yet
