@@ -67,7 +67,7 @@ import run.ostrom.cli.relay.LocalRelayStarterImpl
 import run.ostrom.cli.telemetry.UsageStatistics
 import run.ostrom.cli.commands.releaseTarget
 import run.ostrom.cli.update.AgentSessions
-import run.ostrom.cli.update.systemCommandPath
+import run.ostrom.cli.update.SystemCommandPath
 import run.ostrom.cli.update.Installations
 import run.ostrom.cli.update.AgentSessionsImpl
 import run.ostrom.cli.update.InstallationProbeImpl
@@ -292,7 +292,7 @@ class CliDependencies(
             InstallationProbeImpl(ProcessCaptureImpl()),
             ReleaseTrust(floor = BuildInfo.FLOOR),
             installations,
-            systemCommandPath(environment),
+            SystemCommandPath(environment),
         )
 
         /** `ostrom run <agent> --cloud` and `ostrom attach`: the session runs in Ostrom's cloud, its terminal here. */

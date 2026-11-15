@@ -119,6 +119,8 @@ internal class CommandPath(
 /** [CommandPath] on this system's files, home and (Windows) registry, for an installation's paths. */
 // coverage: the system's own home and registry; CommandPathTest covers CommandPath itself on a fake file system.
 @ExcludeFromCoverage
-internal fun systemCommandPath(environment: Environment): (InstallationPaths) -> CommandPathOutcome = { paths ->
-    CommandPath(paths.target, paths.launcher, environment, FileSystem.SYSTEM, ::readUserPath, ::writeUserPath).ensure()
+internal class SystemCommandPath(private val environment: Environment) : (InstallationPaths) -> CommandPathOutcome {
+    override fun invoke(paths: InstallationPaths): CommandPathOutcome =
+        CommandPath(paths.target, paths.launcher, environment, FileSystem.SYSTEM, ::readUserPath, ::writeUserPath)
+            .ensure()
 }
