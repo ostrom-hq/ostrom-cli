@@ -47,7 +47,7 @@ class NetworkFailuresTest {
                 NetworkFailure.REFUSED,
             DarwinHttpRequestException("Error Domain=NSURLErrorDomain Code=-1200 \"x\"") to NetworkFailure.TLS,
             DarwinHttpRequestException("Error Domain=NSURLErrorDomain Code=-1003 \"x\"") to NetworkFailure.DNS,
-            DarwinHttpRequestException("Error Domain=NSURLErrorDomain Code=-1001") to NetworkFailure.OTHER,
+            DarwinHttpRequestException("Error Domain=NSURLErrorDomain Code=-1001") to NetworkFailure.TIMEOUT,
             WinHttpIllegalStateException("Error 12029: A connection with the server could not be established") to
                 NetworkFailure.REFUSED,
             WinHttpIllegalStateException("Error 12007") to NetworkFailure.DNS,

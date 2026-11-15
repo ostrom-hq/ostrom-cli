@@ -35,6 +35,7 @@ class DownloadsTest {
         DownloadsImpl("ostrom/0.1.0") {
             HttpClient(engine) {
                 expectSuccess = false
+                followRedirects = false
                 install(HttpTimeout)
             }
         }
