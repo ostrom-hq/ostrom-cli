@@ -11,7 +11,9 @@ import io.ktor.http.HeadersBuilder
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import kotlinx.io.IOException
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.test.Test
@@ -23,6 +25,12 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
 class DownloadsTest {
+    /**
+     * The mock engine answers on its own threads, so the budget's timer must run on real time: runTest's virtual clock
+     * would fire it before the answer arrives.
+     */
+    private fun realTime(block: suspend () -> Unit) = runTest { withContext(Dispatchers.Default) { block() } }
+
     private fun downloads(engine: MockEngine) =
         DownloadsImpl("ostrom/0.1.0") {
             HttpClient(engine) {
@@ -32,7 +40,7 @@ class DownloadsTest {
         }
 
     @Test
-    fun aFileComesWholeWhenItFits() = runTest {
+    fun aFileComesWholeWhenItFits() = realTime {
         val downloads = downloads(
             MockEngine { request ->
                 assertEquals("ostrom/0.1.0", request.headers[HttpHeaders.UserAgent])
@@ -45,20 +53,20 @@ class DownloadsTest {
     }
 
     @Test
-    fun aFileSaidToBeTooLargeIsNotRead() = runTest {
+    fun aFileSaidToBeTooLargeIsNotRead() = realTime {
         val declared = headersOf(HttpHeaders.ContentLength, "4294967296")
         val downloads = downloads(MockEngine { respond(byteArrayOf(1), HttpStatusCode.OK, declared) })
         assertEquals(Download.TooLarge(16), downloads.fetch("https://releases.example/latest.json", 16))
     }
 
     @Test
-    fun anAnswerThatIsNotTheFileSaysItsStatus() = runTest {
+    fun anAnswerThatIsNotTheFileSaysItsStatus() = realTime {
         val downloads = downloads(MockEngine { respond("no", HttpStatusCode.NotFound) })
         assertEquals(Download.Missing(404), downloads.fetch("https://releases.example/latest.json", 10))
     }
 
     @Test
-    fun noAnswerIsUnreachableAndACancellationStaysOne() = runTest {
+    fun noAnswerIsUnreachableAndACancellationStaysOne() = realTime {
         for (failure in listOf(IOException("refused"), IllegalStateException("tls"))) {
             val downloads = downloads(MockEngine { throw failure })
             val error = assertFailsWith<ServerUnreachableException> { downloads.fetch("https://r.example/x", 1) }
@@ -87,7 +95,7 @@ class DownloadsTest {
     private val repo = "/repos/ostrom-hq/ostrom-cli/releases"
 
     @Test
-    fun aGitHubReleaseAssetComesThroughTheRestEndpointNotThePublicRedirect() = runTest {
+    fun aGitHubReleaseAssetComesThroughTheRestEndpointNotThePublicRedirect() = realTime {
         val asked = mutableListOf<String>()
         val downloads = downloads(
             MockEngine { request ->
@@ -114,7 +122,7 @@ class DownloadsTest {
     }
 
     @Test
-    fun theLatestReleaseIsLookedUpAsLatest() = runTest {
+    fun theLatestReleaseIsLookedUpAsLatest() = realTime {
         val downloads = downloads(
             MockEngine { request ->
                 when (request.url.encodedPath) {
@@ -129,7 +137,7 @@ class DownloadsTest {
     }
 
     @Test
-    fun aReleaseThatCannotBeReadOrLacksTheAssetIsMissing() = runTest {
+    fun aReleaseThatCannotBeReadOrLacksTheAssetIsMissing() = realTime {
         val url = "$base/latest.json"
         val notFound = downloads(MockEngine { respond("no", HttpStatusCode.NotFound) })
         assertEquals(Download.Missing(404), notFound.fetch(url, 8))
@@ -163,7 +171,7 @@ class DownloadsTest {
     }
 
     @Test
-    fun otherHostsAreFetchedAsTheyAre() = runTest {
+    fun otherHostsAreFetchedAsTheyAre() = realTime {
         val asked = mutableListOf<String>()
         val downloads = downloads(
             MockEngine { request ->
@@ -191,7 +199,7 @@ class DownloadsTest {
         assertEquals(code, assertFailsWith<ReleaseDownloadException> { block() }.code)
 
     @Test
-    fun everyRequestAsksForTheBytesAsTheyAre() = runTest {
+    fun everyRequestAsksForTheBytesAsTheyAre() = realTime {
         val downloads = downloads(
             MockEngine { request ->
                 assertEquals("identity", request.headers[HttpHeaders.AcceptEncoding])
@@ -203,7 +211,7 @@ class DownloadsTest {
     }
 
     @Test
-    fun anAssetRedirectsOnlyToTheReleaseCdnWithoutGitHubHeaders() = runTest {
+    fun anAssetRedirectsOnlyToTheReleaseCdnWithoutGitHubHeaders() = realTime {
         var requests = 0
         val downloads = downloads(
             releaseServer { request ->
@@ -222,7 +230,7 @@ class DownloadsTest {
     }
 
     @Test
-    fun aRedirectLoopStopsAfterFiveRedirects() = runTest {
+    fun aRedirectLoopStopsAfterFiveRedirects() = realTime {
         var requests = 0
         val downloads = downloads(
             releaseServer {
@@ -235,7 +243,7 @@ class DownloadsTest {
     }
 
     @Test
-    fun aRedirectCannotDowngradeOrLeaveTheReleaseCdn() = runTest {
+    fun aRedirectCannotDowngradeOrLeaveTheReleaseCdn() = realTime {
         val addresses = listOf(
             "http://release-assets.githubusercontent.com/file",
             "https://attacker.example/",
@@ -265,7 +273,7 @@ class DownloadsTest {
     }
 
     @Test
-    fun aRedirectWithoutExactlyOneLocationIsRefused() = runTest {
+    fun aRedirectWithoutExactlyOneLocationIsRefused() = realTime {
         val none = downloads(MockEngine { respond("", HttpStatusCode.Found) })
         refused("release_redirect_invalid") { none.fetch("https://releases.example/a", 8) }
         val two = downloads(
@@ -278,7 +286,7 @@ class DownloadsTest {
     }
 
     @Test
-    fun aReleaseLookupIsNeverRedirected() = runTest {
+    fun aReleaseLookupIsNeverRedirected() = realTime {
         val downloads = downloads(
             MockEngine { respond("", HttpStatusCode.Found, redirect("$CDN/f")) },
         )
@@ -286,7 +294,7 @@ class DownloadsTest {
     }
 
     @Test
-    fun aMirrorMayRedirectToAnyHttpsHostButNeverToHttp() = runTest {
+    fun aMirrorMayRedirectToAnyHttpsHostButNeverToHttp() = realTime {
         val asked = mutableListOf<String>()
         val mirror = downloads(
             MockEngine { request ->
@@ -307,7 +315,7 @@ class DownloadsTest {
     }
 
     @Test
-    fun theRateLimitSaysWhenItResets() = runTest {
+    fun theRateLimitSaysWhenItResets() = realTime {
         fun limited(status: HttpStatusCode, reset: String?) = DownloadsImpl(
             "ostrom/0.1.0",
             epochSeconds = { NOW },
@@ -346,7 +354,7 @@ class DownloadsTest {
     }
 
     @Test
-    fun aForbiddenAnswerWithRequestsLeftOrAnotherStatusIsJustMissing() = runTest {
+    fun aForbiddenAnswerWithRequestsLeftOrAnotherStatusIsJustMissing() = realTime {
         val left = downloads(
             MockEngine { respond("", HttpStatusCode.Forbidden, headersOf("x-ratelimit-remaining", "3")) },
         )
@@ -358,7 +366,7 @@ class DownloadsTest {
     }
 
     @Test
-    fun aCompressedAnswerIsRefusedAndIdentityIsFine() = runTest {
+    fun aCompressedAnswerIsRefusedAndIdentityIsFine() = realTime {
         for (encoding in listOf("gzip", "br")) {
             val downloads = downloads(
                 MockEngine { respond(byteArrayOf(1), HttpStatusCode.OK, encoded(encoding)) },
@@ -372,7 +380,7 @@ class DownloadsTest {
     }
 
     @Test
-    fun aBodyThatIsNotTheAnnouncedSizeIsRefused() = runTest {
+    fun aBodyThatIsNotTheAnnouncedSizeIsRefused() = realTime {
         val short = downloads(
             MockEngine { respond(byteArrayOf(1), HttpStatusCode.OK, headersOf(HttpHeaders.ContentLength, "5")) },
         )
@@ -384,7 +392,7 @@ class DownloadsTest {
     }
 
     @Test
-    fun anAssetThatAnswers404ThroughACachedIdIsLookedUpAgainOnce() = runTest {
+    fun anAssetThatAnswers404ThroughACachedIdIsLookedUpAgainOnce() = realTime {
         var lookups = 0
         val downloads = downloads(
             MockEngine { request ->
@@ -406,7 +414,7 @@ class DownloadsTest {
     }
 
     @Test
-    fun aMissingAssetIsNotLookedUpAgainWhenTheReleaseWasJustRead() = runTest {
+    fun aMissingAssetIsNotLookedUpAgainWhenTheReleaseWasJustRead() = realTime {
         var lookups = 0
         val downloads = downloads(
             MockEngine {

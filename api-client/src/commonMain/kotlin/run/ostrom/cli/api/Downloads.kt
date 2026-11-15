@@ -259,7 +259,8 @@ class DownloadsImpl(
     /** The answers no byte of which is read: a rate limit, and a body that came encoded. */
     private fun refuse(response: HttpResponse) {
         if (response.status.value in RATE_LIMIT_STATUSES && response.headers["x-ratelimit-remaining"] == "0") {
-            throw ReleaseDownloadException(RATE_LIMITED, rateLimitDetail(response.headers["x-ratelimit-reset"], epochSeconds()))
+            val reset = response.headers["x-ratelimit-reset"]
+            throw ReleaseDownloadException(RATE_LIMITED, rateLimitDetail(reset, epochSeconds()))
         }
         val encoding = response.headers[HttpHeaders.ContentEncoding]?.lowercase()
         if (response.status.isSuccess() && encoding != null && encoding != "identity") {
