@@ -47,7 +47,7 @@ class ConversationLoop(
      *
      * @param agent The prepared agent.
      *
-     * @return The exit code: 0 after a stop, 1 when the execution ended or was fenced.
+     * @return The exit code: [STOPPED] after a stop, [ENDED] when the execution ended or was fenced.
      */
     @Suppress("NestedBlockDepth") // The heartbeat loop and its three instructions.
     suspend fun run(agent: RunnerAgent): Int = coroutineScope {
@@ -62,7 +62,7 @@ class ConversationLoop(
                     ask(background() || agent.backgroundWork)
                 } catch (error: ExecutionEndedException) {
                     log("execution ended: ${error.message}")
-                    return@coroutineScope 1
+                    return@coroutineScope ENDED
                 }
                 if (instruction == Instruction.STOP) {
                     val drain = draining ?: async { agent.drain(clock.now().plus(PAUSE_DRAIN).toEpochMilliseconds()) }
@@ -74,7 +74,7 @@ class ConversationLoop(
                     if (drain.isCompleted) {
                         log("stopping")
                         stopped()
-                        return@coroutineScope 0
+                        return@coroutineScope STOPPED
                     }
                 } else if (instruction == Instruction.RUN) {
                     draining?.let {
@@ -86,7 +86,7 @@ class ConversationLoop(
                 withTimeoutOrNull(heartbeatInterval) { wake.receive() }
             }
             log("execution fenced")
-            1
+            ENDED
         } finally {
             withContext(NonCancellable) { agent.stop() }
             running.cancel()
@@ -122,8 +122,15 @@ class ConversationLoop(
         }
     }
 
-    private companion object {
+    /** How the loop ends. */
+    companion object {
+        /** The server stopped the execution and the agent drained: a pause. */
+        const val STOPPED = 0
+
+        /** The server ended the execution, or another execution took the session. */
+        const val ENDED = 1
+
         /** How long a conversation's agent may drain once told to stop: the server's pause deadline (ostrom-server). */
-        val PAUSE_DRAIN = 2.minutes
+        private val PAUSE_DRAIN = 2.minutes
     }
 }

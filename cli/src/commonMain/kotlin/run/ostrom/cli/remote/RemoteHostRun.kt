@@ -181,9 +181,11 @@ private class RemoteExecution(
             report(FENCED)
             return@coroutineScope ExitCode.OK.code
         } catch (error: Exception) {
-            // The pod's runner retries; here the person is at the terminal and resumes once the server answers.
+            // The pod's runner retries; here the person is at the terminal and resumes once the server answers. The
+            // epoch /host opened is given back: the session pauses instead of waiting for a host that never comes.
             report("The session's launch could not be opened (${error::class.simpleName}): run ostrom remote resume " +
                 "${record.sessionId} again.")
+            requestPause()
             return@coroutineScope ExitCode.UNREACHABLE.code
         }
         if (launch !is RunnerLaunch.Opened) {
@@ -193,22 +195,18 @@ private class RemoteExecution(
         }
         var relay: LocalRelay? = null
         try {
-            val (started, inference) = inference(launch)
-            relay = started
-            val removed = inference.filterValues { it == null }.keys
-            val inherited = ports.environment().filterKeys { !it.startsWith(OSTROM_PREFIX) && it !in removed }
-            val environment = inherited + inference.mapNotNull { (name, value) -> value?.let { name to it } }
-            val processes = ExecProcesses(starter, environment)
-            val agent = ConversationHost(
-                channel = HttpAgentChannel(client, config.serverUrl, { config.token }, record.sessionId, config.epoch),
-                start = processes::start,
-                state = sessions.conversation(record.sessionId),
-                workingDirectory = record.directory,
-                clientVersion = BuildInfo.VERSION,
-                log = report,
-                version = { kind -> ConversationLaunch.version(processes::start, kind, record.directory) },
-                permissionMode = permissionMode,
-            )
+            val agent = try {
+                val (started, inference) = inference(launch)
+                relay = started
+                agent(inference, permissionMode)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                // A relay that cannot listen, an agent that cannot be prepared: the session is given back, paused.
+                report("The agent could not be started (${error::class.simpleName}): the session is asked to pause.")
+                requestPause()
+                return@coroutineScope ExitCode.FAILED.code
+            }
             // A remote session always runs headless: a server that says otherwise is not one to host it.
             if (!agent.prepare()) return@coroutineScope ExitCode.OK.code.also { report(FENCED) }
             converse(ConversationLoop(server, Clock.System, report, ports.heartbeat, { null }, { false }), agent)
@@ -220,28 +218,52 @@ private class RemoteExecution(
         }
     }
 
+    /** The agent, in the session's directory with this process's environment less Ostrom's own and [inference]. */
+    private fun agent(inference: Map<String, String?>, permissionMode: String?): ConversationHost {
+        val removed = inference.filterValues { it == null }.keys
+        val inherited = ports.environment().filterKeys { !it.startsWith(OSTROM_PREFIX) && it !in removed }
+        val environment = inherited + inference.mapNotNull { (name, value) -> value?.let { name to it } }
+        val processes = ExecProcesses(starter, environment)
+        return ConversationHost(
+            channel = HttpAgentChannel(client, config.serverUrl, { config.token }, record.sessionId, config.epoch),
+            start = processes::start,
+            state = sessions.conversation(record.sessionId),
+            workingDirectory = record.directory,
+            clientVersion = BuildInfo.VERSION,
+            log = report,
+            version = { kind -> ConversationLaunch.version(processes::start, kind, record.directory) },
+            permissionMode = permissionMode,
+        )
+    }
+
+    /** How a host's conversation ended. */
+    private enum class Ending { PAUSED, ENDED, ABORTED }
+
     /** The loop beside the signal watch; says how it ended. */
     private suspend fun converse(loop: ConversationLoop, agent: ConversationHost): Int = coroutineScope {
-        val ended = CompletableDeferred<Int>()
-        val work = launch { ended.complete(loop.run(agent)) }
+        val ended = CompletableDeferred<Ending>()
+        val work = launch {
+            ended.complete(if (loop.run(agent) == ConversationLoop.STOPPED) Ending.PAUSED else Ending.ENDED)
+        }
         val stop = launch {
             while (!ports.stopRequested()) delay(ports.signalPollMillis)
             report("Pausing the session: the agent finishes its turn, then the host checkpoints and exits.")
             if (!requestPause()) {
                 report("The pause could not be requested; stopping now. The server pauses the session once it hears " +
                     "nothing more from this host.")
-                ended.complete(ABORTED)
+                ended.complete(Ending.ABORTED)
                 work.cancel()
             }
         }
-        val code = ended.await()
+        val ending = ended.await()
         stop.cancel()
-        when (code) {
-            ABORTED -> ExitCode.FAILED.code
-            STOPPED -> ExitCode.OK.code.also {
+        when (ending) {
+            Ending.PAUSED -> ExitCode.OK.code.also {
                 report("Paused: the host checkpointed and exits. ostrom remote resume ${record.sessionId} resumes it.")
             }
-            else -> ExitCode.OK.code.also { report(FENCED) }
+            // As TeamCode's EXIT_FENCED_OR_DONE: the session goes on elsewhere, or the server ended it on purpose.
+            Ending.ENDED -> ExitCode.OK.code.also { report(FENCED) }
+            Ending.ABORTED -> ExitCode.FAILED.code
         }
     }
 
@@ -386,10 +408,9 @@ internal const val FENCED = "This host no longer runs the session: another host 
 
 private const val PAUSING = "session_pausing"
 private const val PAUSING_RETRIES = 45
-private const val WRITE_MILLIS = 15_000L
+/** How long a write of the host or of `remote start` may take. */
+internal const val WRITE_MILLIS = 15_000L
 private const val INFERENCE_MILLIS = 3_000L
-private const val STOPPED = 0
-private const val ABORTED = -1
 private const val CLAUDE = "claude"
 private const val OSTROM_PREFIX = "OSTROM_"
 private const val INFERENCE_VARIABLE = "OSTROM_INFERENCE"

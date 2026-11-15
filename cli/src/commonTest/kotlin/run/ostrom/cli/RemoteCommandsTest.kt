@@ -100,6 +100,7 @@ class RemoteCommandsTest : SetupKit() {
     private var detachedExit: Int? = null
     private var detachFails = false
     private var signals = 0
+    private var relayFails = false
 
     private class VersionTerminal : Terminal {
         private var said = false
@@ -122,6 +123,7 @@ class RemoteCommandsTest : SetupKit() {
         http = ::http,
         relays = { _ ->
             LocalRelayStarter { config ->
+                check(!relayFails) { "no loopback port" }
                 relays += config
                 object : LocalRelay {
                     override val url = "http://127.0.0.1:4000"
@@ -222,7 +224,9 @@ class RemoteCommandsTest : SetupKit() {
         fileSystem.createDirectories("/work/acme".toPath())
         answer(create, 201 to """{"id":"$id"}""")
         hosting()
-        assertEquals(0, remote("start", "--agent", "codex", "--bypass-permissions"))
+        assertEquals(0, remote("start", "--agent", "codex", "--bypass-permissions", "--message", "hi"))
+        assertErr("The first message could not be sent (HTTP 404); send it from Ostrom's console or app.")
+        assertErr("Paused: the host checkpointed")
         assertEquals(
             """{"agent":"codex","name":"acme","kind":"remote","directoryName":"acme","permissionMode":"bypass"}""",
             bodyOf(create),
@@ -401,8 +405,16 @@ class RemoteCommandsTest : SetupKit() {
         assertEquals(0, remote("host", id))
         assertErr("This host no longer runs the session")
         launch = { 503 to "{}" }
+        val pauses = sent().count { it == pause }
         assertEquals(ExitCode.UNREACHABLE.code, remote("host", id))
+        assertEquals(pauses + 1, sent().count { it == pause }, "The epoch is given back")
         assertErr("The session's launch could not be opened (IllegalStateException): run ostrom remote resume $id")
+        launch = { 200 to """{"launchId":"L1","agentToken":"agent-token"}""" }
+        relayFails = true
+        assertEquals(1, remote("host", id, environment = withServer + ("OSTROM_INFERENCE" to "on")))
+        assertErr("The agent could not be started (IllegalStateException): the session is asked to pause.")
+        assertEquals(pauses + 2, sent().count { it == pause })
+        assertTrue("DELETE /api/v1/launches/L1" in sent(), "The launch still ends")
         launch = { throw CancellationException("stopped") }
         assertFailsWith<CancellationException> { remote("host", id) }
     }
@@ -471,6 +483,11 @@ class RemoteCommandsTest : SetupKit() {
         console.out.clear()
         assertEquals(0, remote("list", "--json"))
         assertTrue(console.out.startsWith("""[{"id":"$id","""), console.out.toString())
+        // A server without the devices route: this device's sessions are those it keeps a record of.
+        answers.remove("GET /api/v1/devices")
+        console.out.clear()
+        assertEquals(0, remote("list"))
+        assertEquals("$id\trunning\tn\tclaude\tonline\t/work/acme\n", console.out.toString())
     }
 
     @Test
@@ -485,10 +502,9 @@ class RemoteCommandsTest : SetupKit() {
         val page = (1..250).joinToString(",") { item("s$it", device = "d9") }
         answer(list, 200 to """{"items":[$page],"next":"a"}""")
         answer("$list&before=a", 200 to """{"items":[$page],"next":"b"}""")
-        answers.remove("GET /api/v1/devices")
         console.out.clear()
         assertEquals(0, remote("list", "--json"))
-        assertEquals("[]\n", console.out.toString(), "A server without devices has no current one: nothing is here")
+        assertEquals("[]\n", console.out.toString(), "No device of this server is current: nothing is here")
         assertErr("Showing the newest 500 remote sessions.")
         assertFalse(sent().any { it.endsWith("before=b") })
     }

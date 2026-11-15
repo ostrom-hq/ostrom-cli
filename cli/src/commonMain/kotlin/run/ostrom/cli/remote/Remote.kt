@@ -30,6 +30,7 @@ import run.ostrom.cli.commands.stopWith
 import run.ostrom.cli.launcher.child
 import run.ostrom.cli.launcher.flag
 import run.ostrom.cli.launcher.join
+import run.ostrom.cli.launcher.ServerAnswer
 import run.ostrom.cli.launcher.list
 import run.ostrom.cli.launcher.objectOf
 import run.ostrom.cli.launcher.text
@@ -171,14 +172,26 @@ private class RemoteStart(private val context: RemoteContext) : CliktCommand(nam
         val id = created.text("id") ?: throw stopWith(ExitCode.UNREACHABLE, "ostrom: the server created no session.")
         val record = RemoteSessionRecord(id, path.toString(), agent)
         context.sessions().save(record)
-        // The first message waits in the session's inputs: its host hands it to the agent, as any later one.
-        message?.let {
-            val messages = "${cloudSessionPath(id)}/messages"
-            access.write("POST", messages, objectOf("text" to it), NO_REMOTE, idempotencyKey = Uuid.random().toString())
-        }
         if (json) dependencies.console.data("$created\n")
         context.report("Remote session $id on this device, in $path.")
+        message?.let { sendFirstMessage(access, id, it) }
         exit(context.host(access, record, created.epoch(), detach))
+    }
+
+    /**
+     * The first message waits in the session's inputs: its host hands it to the agent, as any later one (the create's
+     * prompt reaches a pod only). One the server did not take is said, and the session is hosted all the same.
+     */
+    private fun sendFirstMessage(access: OrgAccess, id: String, text: String) {
+        val path = "${cloudSessionPath(id)}/messages"
+        val body = objectOf("text" to text)
+        val key = Uuid.random().toString()
+        val sent = runBlocking { access.server.call("POST", path, body, access.signed.token, WRITE_MILLIS, key) }
+        if (sent is ServerAnswer.Failed) {
+            context.report(
+                "The first message could not be sent (${sent.message}); send it from Ostrom's console or app.",
+            )
+        }
     }
 }
 
@@ -261,8 +274,9 @@ private class RemoteList(private val context: RemoteContext) : CliktCommand(name
     override fun run() {
         val access = context.access(server, org)
         val sessions = context.sessions()
-        val devices = access.readIfServed(DEVICES)?.list("items").orEmpty().filterIsInstance<JsonObject>()
-        val device = devices.firstOrNull { it.flag("current") == true }?.text("id")
+        val devices = access.readIfServed(DEVICES)
+        val device = devices?.list("items").orEmpty().filterIsInstance<JsonObject>()
+            .firstOrNull { it.flag("current") == true }?.text("id")
         val listed = mutableListOf<JsonObject>()
         var before: String? = null
         do {
@@ -274,7 +288,12 @@ private class RemoteList(private val context: RemoteContext) : CliktCommand(name
         // A terminated session never runs again: its record (path, conversation id, log) is dropped.
         sessions.prune(listed.filter { it.text("status") == TERMINATED }.mapNotNull { it.text("id") }.toSet())
         val shown = listed.filter {
-            val here = device != null && it.child("host")?.text("deviceId") == device
+            // A server without the devices route: here is where this device keeps the session's record.
+            val here = if (devices == null) {
+                it.text("id")?.let(sessions::load) != null
+            } else {
+                device != null && it.child("host")?.text("deviceId") == device
+            }
             it.text("status") != TERMINATED && (allDevices || here)
         }
         val console = context.dependencies.console
