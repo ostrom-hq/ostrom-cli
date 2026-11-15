@@ -18,6 +18,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlin.uuid.Uuid
 
 /** What `ostrom cloud create` says to a server that takes no preparation recipe. */
 internal const val NO_RECIPE =
@@ -33,17 +34,22 @@ private const val RUNNERS_CLOUD_PROFILES = "runners.cloud.profiles.v1"
 /** The shape of the profile ids the server generates (random UUIDs). */
 private val PROFILE_ID = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 
+/** An `Idempotency-Key` of the contract (`Idempotency.PATTERN` of ostrom-core#268, newer than the core pinned). */
+private val IDEMPOTENCY_KEY = Regex("[A-Za-z0-9._:-]{1,128}")
+
 /** The agents a cloud session starts (the contract's `CloudAgentKind`). */
 private val CLOUD_AGENT_KINDS = listOf("claude", "codex", "opencode", "gemini", "shell")
 
 /**
  * `ostrom cloud create --agent A [--profile ID|NAME] [--image REF] [--name N] [--model M] [--message TEXT|-]
- * [--repo [PATH=]URL[#REF]]… [--branch B] [--workdir DIR] [--json]`, as TeamCode's `teamcode cloud create`: creates a
- * cloud session without attaching to it (`ostrom attach ID` does), and prints it. `--profile` and `--image` are sent
- * only to a server that announces `runners.cloud.profiles.v1`; without `--profile`, the server takes the one profile
- * the caller may use (TeamCode requires it). `--repo`, `--branch` and `--workdir` are the session's preparation recipe
- * (the contract's `CloudEnvironment`), sent only to a server that announces `runners.cloud.environment.v1`: an older
- * one would ignore it and clone nothing.
+ * [--repo [PATH=]URL[#REF]]… [--branch B] [--workdir DIR] [--idempotency-key K] [--json]`, as TeamCode's
+ * `teamcode cloud create`: creates a cloud session without attaching to it (`ostrom attach ID` does), and prints it.
+ * `--profile` and `--image` are sent only to a server that announces `runners.cloud.profiles.v1`; without
+ * `--profile`, the server takes the one profile the caller may use (TeamCode requires it). `--repo`, `--branch` and
+ * `--workdir` are the session's preparation recipe (the contract's `CloudEnvironment`), sent only to a server that
+ * announces `runners.cloud.environment.v1`: an older one would ignore it and clone nothing. A random
+ * `Idempotency-Key` goes with every create, `--idempotency-key` when given, so a retry with the same key never
+ * creates a second session (`runners.cloud.idempotency.v1`).
  */
 internal class CloudCreateCommand(private val dependencies: CliDependencies) : CliktCommand(name = "create") {
     override fun help(context: Context) = "Create a cloud session without attaching to it (ostrom attach does)"
@@ -67,6 +73,10 @@ internal class CloudCreateCommand(private val dependencies: CliDependencies) : C
         help = "Create this local branch in every --repo after checking out its ref",
     )
     private val workdir by option("--workdir", help = "Working directory relative to /workspace")
+    private val idempotencyKey by option(
+        "--idempotency-key",
+        help = "Defaults to a random key; reuse one to retry without creating a second session",
+    )
     private val org by orgOption()
     private val server by serverFlag()
     private val json by jsonFlag()
@@ -88,6 +98,8 @@ internal class CloudCreateCommand(private val dependencies: CliDependencies) : C
         if (initial != null && initial.isBlank()) throw stopWith(ExitCode.USAGE, "ostrom: the --message text is empty.")
         if (branch != null && repositories.isEmpty()) throw UsageError("Use --branch with --repo.")
         if (profile?.isBlank() == true) throw UsageError("Name the profile: --profile ID|NAME.")
+        val key = idempotencyKey ?: Uuid.random().toString()
+        if (!IDEMPOTENCY_KEY.matches(key)) throw UsageError("--idempotency-key is 1 to 128 of A-Z a-z 0-9 . _ : -")
         val environment = recipe()
         val access = dependencies.orgAccess(server, org)
         val signed = access.signed
@@ -114,7 +126,9 @@ internal class CloudCreateCommand(private val dependencies: CliDependencies) : C
             "prompt" to initial,
             "environment" to environment,
         )
-        val session = access.write("POST", CLOUD_SESSIONS, body, "No cloud sessions on ${signed.serverUrl}.")
+        // A server older than runners.cloud.idempotency.v1 ignores the key: the create is as before.
+        val notFound = "No cloud sessions on ${signed.serverUrl}."
+        val session = access.write("POST", CLOUD_SESSIONS, body, notFound, idempotencyKey = key)
         dependencies.console.out(if (json) "$session\n" else session.cloudLine(dependencies.clock()) + "\n")
     }
 }
