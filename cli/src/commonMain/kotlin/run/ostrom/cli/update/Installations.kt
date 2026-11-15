@@ -61,7 +61,13 @@ internal class Installations(
             grandparent.name == "versions" && DIGEST.matches(parent.name) -> (grandparent / "..").normalized()
             else -> return null
         }
-        val store = InstallationStore(InstallationPaths(root, target), fileSystem, files)
+        // a root no installation can have (a control character in it): not ours
+        val paths = try {
+            InstallationPaths(root, target)
+        } catch (_: IllegalArgumentException) {
+            return null
+        }
+        val store = InstallationStore(paths, fileSystem, files)
         val named = actual.name.equals(store.paths.executableName, ignoreCase = windows)
         return store.takeIf { named && store.launcherVersion() != null }
     }

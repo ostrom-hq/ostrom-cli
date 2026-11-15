@@ -66,6 +66,9 @@ class ManagedInstallationTest {
         fake.createDirectories("/home/dev/y/versions/zz".toPath())
         fake.write("/home/dev/y/versions/zz/ostrom".toPath()) { }
         assertNull(installations.of("/home/dev/y/versions/zz/ostrom"), "not a digest")
+        fake.createDirectories("/home/dev/a\u0001b/bin".toPath())
+        fake.write("/home/dev/a\u0001b/bin/ostrom".toPath()) { }
+        assertNull(installations.of("/home/dev/a\u0001b/bin/ostrom"), "a root no installation has")
     }
 
     @Test

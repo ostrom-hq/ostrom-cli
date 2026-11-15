@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli.update
 
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.longOrNull
@@ -17,6 +18,7 @@ import run.ostrom.cli.launcher.objectOf
 import run.ostrom.cli.launcher.parseObject
 import run.ostrom.cli.launcher.text
 import run.ostrom.cli.platform.FileStoreImpl
+import run.ostrom.cli.platform.FileWriteException
 import run.ostrom.cli.platform.InstallationFiles
 import run.ostrom.cli.platform.restrictToOwner
 import run.ostrom.cli.platform.secureRandomBytes
@@ -93,7 +95,7 @@ internal data class InstallationState(val current: InstalledVersion, val previou
         fun of(json: JsonObject?): InstallationState {
             requireNotNull(json)
             require(json.schemaVersion() == SCHEMA_VERSION)
-            val previous = json["previous"]?.takeUnless { it is kotlinx.serialization.json.JsonNull }
+            val previous = json["previous"]?.takeUnless { it is JsonNull }
             return InstallationState(
                 InstalledVersion.of(json["current"] as? JsonObject),
                 previous?.let { InstalledVersion.of(it as? JsonObject) },
@@ -119,7 +121,7 @@ internal data class InstallationJournal(val before: InstallationState?, val afte
         fun of(json: JsonObject?): InstallationJournal {
             requireNotNull(json)
             require(json.schemaVersion() == SCHEMA_VERSION)
-            val before = json["before"]?.takeUnless { it is kotlinx.serialization.json.JsonNull }
+            val before = json["before"]?.takeUnless { it is JsonNull }
             return InstallationJournal(
                 before?.let { InstallationState.of(it as? JsonObject) },
                 InstallationState.of(json["after"] as? JsonObject),
@@ -432,7 +434,7 @@ internal class InstallationStore(
 
     private fun writePrivate(path: Path, text: String) = try {
         texts.write(path.toString(), text)
-    } catch (_: run.ostrom.cli.platform.FileWriteException) {
+    } catch (_: FileWriteException) {
         refuseInstallation("release_write_failed")
     }
 
