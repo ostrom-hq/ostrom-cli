@@ -26,6 +26,7 @@ import run.ostrom.cli.automations.hasProblems
 import run.ostrom.cli.automations.parsePayload
 import run.ostrom.cli.automations.parseVariables
 import run.ostrom.cli.automations.refuse
+import run.ostrom.cli.automations.requireProfile
 import run.ostrom.cli.automations.requireRepository
 import run.ostrom.cli.automations.str
 import run.ostrom.cli.automations.sub
