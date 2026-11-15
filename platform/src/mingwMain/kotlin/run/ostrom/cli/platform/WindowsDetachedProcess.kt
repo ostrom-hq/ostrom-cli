@@ -11,11 +11,12 @@ import kotlinx.cinterop.ptr
 import kotlinx.cinterop.value
 import kotlinx.cinterop.wcstr
 import okio.IOException
+import platform.windows.CloseHandle
 import platform.windows.GetLastError
 import run.ostrom.cli.platform.interop.ostrom_detached_poll_w
 import run.ostrom.cli.platform.interop.ostrom_spawn_logged_w
 
-/** A process of [startDetachedProcess] on Windows, its end read from its handle (kept until this process exits). */
+/** A process of [startDetachedProcess] on Windows, its end read from its handle, closed once the end is known. */
 private class WindowsDetachedProcess(private val handle: COpaquePointer) : DetachedProcess {
     private var exit: Int? = null
 
@@ -28,6 +29,8 @@ private class WindowsDetachedProcess(private val handle: COpaquePointer) : Detac
                 -1 -> exit = UNKNOWN
             }
         }
+        // The daemon starts a host per session for as long as it runs: an ended one keeps no handle.
+        if (exit != null) CloseHandle(handle)
         return exit
     }
 

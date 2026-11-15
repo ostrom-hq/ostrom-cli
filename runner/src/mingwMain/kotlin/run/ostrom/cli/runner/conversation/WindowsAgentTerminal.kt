@@ -26,6 +26,7 @@ import run.ostrom.cli.runner.windows.ostrom_agent_poll
 import run.ostrom.cli.runner.windows.ostrom_agent_read
 import run.ostrom.cli.runner.windows.ostrom_agent_terminate
 import run.ostrom.cli.runner.windows.ostrom_agent_write
+import kotlin.concurrent.AtomicInt
 import kotlin.concurrent.Volatile
 
 /**
@@ -61,19 +62,35 @@ internal class WindowsAgentTerminal(private val handle: COpaquePointer) : Termin
     @Volatile
     private var inputClosed = false
 
+    /** Held (1) by a poll of the handle or its release, so that no poll reads a handle being freed. */
+    private val handleBusy = AtomicInt(0)
+
     override val exitCode: Int?
         get() {
             exit?.let { return it }
-            if (released) return null
-            memScoped {
-                val code = alloc<UIntVar>()
-                when (ostrom_agent_poll(handle, code.ptr)) {
-                    1 -> exit = code.value.toInt()
-                    -1 -> exit = UNKNOWN
+            withHandle {
+                if (!released) {
+                    memScoped {
+                        val code = alloc<UIntVar>()
+                        when (ostrom_agent_poll(handle, code.ptr)) {
+                            1 -> exit = code.value.toInt()
+                            -1 -> exit = UNKNOWN
+                        }
+                    }
                 }
             }
             return exit
         }
+
+    /** Runs [action] alone with the handle: polls and the release never overlap (each is short, never blocking). */
+    private inline fun withHandle(action: () -> Unit) {
+        while (!handleBusy.compareAndSet(0, 1)) Unit
+        try {
+            action()
+        } finally {
+            handleBusy.value = 0
+        }
+    }
 
     override suspend fun read(): ByteArray? {
         val bytes = readLock.withLock { if (closing || released) null else readAvailable() }
@@ -146,7 +163,7 @@ internal class WindowsAgentTerminal(private val handle: COpaquePointer) : Termin
             waited += STOP_POLL_MILLIS
         }
         if (exitCode == null && !released) {
-            ostrom_agent_terminate(handle)
+            withHandle { if (!released) ostrom_agent_terminate(handle) }
             repeat(TERMINATE_POLLS) { if (exitCode == null) delay(STOP_POLL_MILLIS) }
         }
         // The reader leaves within one poll once stopped, and a blocked writer failed with the broken pipe.
@@ -180,9 +197,11 @@ internal class WindowsAgentTerminal(private val handle: COpaquePointer) : Termin
         try {
             if (!writeLock.tryLock()) return
             try {
-                if (!released) {
-                    released = true
-                    ostrom_agent_close(handle)
+                withHandle {
+                    if (!released) {
+                        released = true
+                        ostrom_agent_close(handle)
+                    }
                 }
             } finally {
                 writeLock.unlock()
