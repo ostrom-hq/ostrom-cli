@@ -177,5 +177,8 @@ private fun variable(row: Row, open: (String, String, String) -> String): JsonOb
     "name" to row["name"],
     "binding" to if (row["binding"] == "PER_MEMBER") "perMember" else "shared",
     "ownerId" to row["owner_id"]?.takeIf { it.isNotEmpty() },
-    "value" to row["shared_secret"]?.let { open(it, "${row["id"]}", "environment variable ${row["target"]}") },
+    // a per-member variant's values are its members': a value left on it in TeamCode is never opened nor sent
+    "value" to row["shared_secret"]?.takeIf { row["binding"] != "PER_MEMBER" }?.let {
+        open(it, "${row["id"]}", "environment variable ${row["target"]}")
+    },
 )

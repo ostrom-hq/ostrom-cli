@@ -63,8 +63,9 @@ class SkillImportPlanTest {
         variables = listOf(
             mapOf("id" to "e1", "target" to "GITHUB_TOKEN", "name" to "org", "binding" to "SHARED",
                 "shared_secret" to "sealed-1", "owner_id" to ""),
+            // a value left on a per-member variant stays sealed in TeamCode
             mapOf("id" to "e2", "target" to "NPM_TOKEN", "name" to "own", "binding" to "PER_MEMBER",
-                "shared_secret" to null, "owner_id" to "m1"),
+                "shared_secret" to "stale", "owner_id" to "m1"),
             mapOf("id" to "e3", "target" to "OLD", "name" to "x", "binding" to "SHARED", "shared_secret" to "sealed-3"),
         ),
         variableAssignments = listOf(
