@@ -60,6 +60,9 @@ class NetworkFailuresTest {
             curl("https://tls.example.com: Could not connect to server") to NetworkFailure.REFUSED,
             DarwinHttpRequestException("Code=-1004") to NetworkFailure.REFUSED,
             DarwinHttpRequestException("Code=-1004x") to NetworkFailure.OTHER,
+            DarwinHttpRequestException("Code=-1200\"x\"") to NetworkFailure.TLS,
+            // the text of a Curl request, whatever the exception is called
+            IllegalStateException("CurlRequestData(url) failed") to NetworkFailure.OTHER,
             DarwinHttpRequestException("Code=-1003 ") to NetworkFailure.DNS,
         )
         for ((error, family) in cases) assertEquals(family, networkFailure(error), error.toString())
@@ -69,6 +72,8 @@ class NetworkFailuresTest {
     fun aLocalFailureIsNotANetworkOne() {
         assertNull(networkFailure(IOException("No space left on device")))
         assertNull(networkFailure(IllegalStateException("bug")))
+        // anonymous classes have no name
+        assertNull(networkFailure(object : IllegalStateException("bug") {}))
     }
 
     @Test

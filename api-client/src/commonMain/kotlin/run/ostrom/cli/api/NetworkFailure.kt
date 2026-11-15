@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli.api
 
-import io.ktor.client.network.sockets.ConnectTimeoutException
-import io.ktor.client.network.sockets.SocketTimeoutException
-import io.ktor.client.plugins.HttpRequestTimeoutException
 
 /**
  * Network failures by family, for the messages of a server or a release that cannot be reached. [HEADERS] is an answer
@@ -31,7 +28,7 @@ private val REFUSED_NAMES = listOf("ConnectException", "NoRouteToHost", "PortUnr
 private val CLOSED_NAMES = listOf("EOFException", "ClosedReceiveChannel", "ClosedByteChannel")
 
 /**
- * The family of [error], detected from ktor's common types and each engine's error names and messages (inspected, never
+ * The family of [error], detected from the ktor package names and each engine's error names and messages (inspected, never
  * printed); null when the error was not raised by the HTTP stack. A local disk or permission failure (also an
  * IOException on the JVM) must not read as an unreachable server.
  */
@@ -40,15 +37,12 @@ fun networkFailure(error: Throwable): NetworkFailure? {
     val text = chain.joinToString("\n") { it.message.orEmpty() }
     val names = chain.map { it::class.simpleName.orEmpty() }
     val packages = chain.map { it::class.qualifiedName.orEmpty() }
-    val timedOut = chain.any {
-        it is ConnectTimeoutException || it is SocketTimeoutException || it is HttpRequestTimeoutException
-    }
     val fromHttpStack = packages.any { name -> HTTP_PACKAGES.any(name::startsWith) } ||
-        names.matchesAny(ENGINE_NAMES) || text.mentions(CURL_TEXT) || timedOut
+        names.matchesAny(ENGINE_NAMES) || text.mentions(CURL_TEXT)
     return when {
         text.mentions(HEADER_TEXT) -> NetworkFailure.HEADERS
         !fromHttpStack -> null
-        else -> byName(names, timedOut) ?: byText(text, names)
+        else -> byName(names) ?: byText(text, names)
     }
 }
 
@@ -56,10 +50,10 @@ private fun List<String>.matchesAny(candidates: List<String>) = any { name -> ca
 
 private fun String.mentions(fragments: List<String>) = fragments.any { contains(it) }
 
-private fun byName(names: List<String>, timedOut: Boolean): NetworkFailure? = when {
+private fun byName(names: List<String>): NetworkFailure? = when {
     names.matchesAny(TLS_NAMES) -> NetworkFailure.TLS
     names.matchesAny(DNS_NAMES) -> NetworkFailure.DNS
-    timedOut || names.matchesAny(TIMEOUTS) -> NetworkFailure.TIMEOUT
+    names.matchesAny(TIMEOUTS) -> NetworkFailure.TIMEOUT
     names.matchesAny(REFUSED_NAMES) -> NetworkFailure.REFUSED
     names.matchesAny(CLOSED_NAMES) -> NetworkFailure.CLOSED
     else -> null

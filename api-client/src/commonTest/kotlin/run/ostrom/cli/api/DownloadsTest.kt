@@ -257,6 +257,7 @@ class DownloadsTest {
             "//objects.githubusercontent.com/file",
             "https://objects.githubusercontent.com/file#fragment",
             "https://objects.githubusercontent.com/file\r\nsecret",
+            "https://objects.githubusercontent.com/file\u007f",
             "https://objects.githubusercontent.com/" + "a".repeat(9000),
             "https://[",
             "",
