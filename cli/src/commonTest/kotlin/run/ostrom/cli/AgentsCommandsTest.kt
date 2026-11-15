@@ -73,9 +73,10 @@ class AgentsCommandsTest : SetupKit() {
         val api = sequence(
             claim,
             200 to """{"directive":${advice()},"claimId":"c-1"}""",
+            200 to "{}",
             200 to """{"directive":${advice("adv-2")}}""",
         )
-        assertEquals(0, watch(api, "--session", "launch-1", rounds = 2))
+        assertEquals(0, watch(api, "--session", "launch-1", rounds = 3))
         assertEquals("""{"sessionId":"launch-1","stage":"received_by_cli"}""", bodyOf(claim))
         assertEquals("""{"id":"adv-1","stage":"received_by_cli","sessionId":"launch-1","claimId":"c-1"}""",
             bodyOf(receipt))
@@ -119,6 +120,7 @@ class AgentsCommandsTest : SetupKit() {
     fun hintSaysNothingWithoutANewLiveAdviceOrWhenAnythingFails() {
         val answers = listOf(
             200 to "{}",
+            200 to """{"claimId":"c-1"}""",
             200 to """{"directive":${advice()}}""",
             200 to """{"directive":${advice(expiresAt = "1970-01-01T00:00:00Z")},"claimId":"c-1"}""",
             200 to """{"directive":${advice(expiresAt = "soon")},"claimId":"c-1"}""",

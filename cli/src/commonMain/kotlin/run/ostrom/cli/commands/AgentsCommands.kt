@@ -57,8 +57,8 @@ internal class AgentsWatchCommand(private val dependencies: CliDependencies) : C
     /** One read: prints and confirms the advice when it is new and in force; the id of the last one printed. */
     private suspend fun round(reads: GuidanceReads, previous: String?): String? {
         val named = session
-        val claim = named?.let { reads.claim(it, DirectiveStage.RECEIVED_BY_CLI) }
-        val advice = if (named == null) reads.current() else claim?.directive?.takeIf { claim.claimId != null }
+        val claim = if (named == null) null else reads.claim(named, DirectiveStage.RECEIVED_BY_CLI)
+        val advice = if (claim == null) reads.current() else claim.directive?.takeIf { claim.claimId != null }
         if (advice == null || advice.id == previous || !advice.liveAt(dependencies.clock())) return previous
         dependencies.console.data(OstromJson.encodeToString(Directive.serializer(), advice) + "\n")
         reads.acknowledge(DirectiveReceipt(advice.id, DirectiveStage.RECEIVED_BY_CLI, named, claim?.claimId))

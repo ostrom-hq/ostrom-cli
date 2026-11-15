@@ -132,6 +132,38 @@ class StatusCapacityTest {
     }
 
     @Test
+    fun sparseAnswersAreShownWithTheirDefaults() = runTest {
+        val accounts = listOf(
+            parse("""{"windows":[{"utilization":0.5},{"window":"five_hour"}]}"""),
+            parse("""{"label":"a\u0007b","status":"ready","cooldownUntil":"later"}"""),
+            parse("""{"label":"A much longer label","provider":"claude","status":"ready"}"""),
+        )
+        val report = CapacityReport(parse("{}"), parse("{}"), parse("{}"), accounts, nowMillis = now)
+        val text = report.text()
+        assertTrue("Queue       0 calls waiting, 0 of yours\n" in text, text)
+        assertTrue("Budget      $0.00 used, no limit\n" in text, text)
+        assertTrue("Pacing      unknown: no concurrency cap, 0 ms between calls\n" in text, text)
+        val rows = text.lines().drop(4).map { row -> row.split(Regex(" {2,}")).filter { it.isNotEmpty() } }
+        assertEquals(listOf("-", "-", "-", "░░░░░░░░░░ -", "-", "50%", "no, "), rows[1])
+        assertEquals(listOf("a b", "-", "ready", "-", "-", "-", "yes"), rows[2])
+        val none = CapacityReport().text()
+        assertTrue(none.lines().take(4).all { "unavailable from this server" in it }, none)
+        val absent = readCapacity(
+            server(
+                "/api/v1/budgets/me" to (200 to """{"spentMicros":"1"}"""),
+                "/api/v1/directives/current" to (200 to "{}"),
+                "/api/v1/accounts" to (200 to "{}"),
+            ),
+            "ost_1",
+            now,
+        )
+        assertEquals(
+            mapOf("queue" to "not_served", "budget" to "unexpected_response", "accounts" to "unexpected_response"),
+            absent.unavailable,
+        )
+    }
+
+    @Test
     fun barsAndDelaysAreReadableWithoutColour() {
         assertEquals("░░░░░░░░░░", bar(0.0))
         assertEquals("█░░░░░░░░░", bar(0.01))

@@ -46,7 +46,7 @@ internal class GuidanceReads(private val server: ServerJson, private val token: 
         OstromJson.encodeToJsonElement(serializer, value).jsonObject
 
     private fun <T> decode(answer: ServerAnswer, serializer: KSerializer<T>): T {
-        val body = (answer as? ServerAnswer.Ok)?.body ?: throw GuidanceUnavailableException()
+        val body = if (answer is ServerAnswer.Ok) answer.body else throw GuidanceUnavailableException()
         return try {
             OstromJson.decodeFromJsonElement(serializer, body)
         } catch (_: IllegalArgumentException) {
