@@ -25,6 +25,7 @@ import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.set
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -129,19 +130,25 @@ class PtyTerminal private constructor(
         }
         kill(-pid, SIGTERM)
         val deadline = grace.inWholeMilliseconds / POLL.inWholeMilliseconds
-        repeat(deadline.toInt()) {
-            if (exited()) {
-                // The group can outlive its shell: a process the shell was forking as SIGTERM came (it missed the
-                // signal) or one that ignores it would hold the output open forever. The shell is not reaped yet, so
-                // its pid, the group's id, cannot have gone to another process.
-                kill(-pid, SIGKILL)
+        // The group can outlive its shell: a process the shell was forking as SIGTERM came (it missed the signal) or
+        // one that ignores it would hold the output open forever. Until the shell is reaped its pid, the group's id,
+        // cannot have gone to another process.
+        var waited = 0
+        while (waited++ < deadline && !exited()) delay(POLL)
+        withContext(NonCancellable) {
+            // Already reaped (by a read): the pid may be another process's by now, so nothing is sent to it.
+            if (exit.value != RUNNING) return@withContext
+            try {
+                // SIGKILL to the whole group, repeated: a process being forked at the instant of a sweep may not be in
+                // the group yet (seen on a loaded macOS); its parent is killed by that sweep and cannot fork again.
+                repeat(SWEEPS) { index ->
+                    kill(-pid, SIGKILL)
+                    if (index < SWEEPS - 1) delay(SWEEP_GAP)
+                }
+            } finally {
                 reap()
-                return
             }
-            delay(POLL)
         }
-        kill(-pid, SIGKILL)
-        reap()
     }
 
     override fun close() {
@@ -206,6 +213,8 @@ class PtyTerminal private constructor(
         private const val SIGNALED = 128
         private const val CHUNK = 16 * 1024
         private val POLL = 100.milliseconds
+        private const val SWEEPS = 3
+        private val SWEEP_GAP = 50.milliseconds
         const val SHELL = "/bin/sh"
         private const val COLUMNS = 120
         private const val ROWS = 40
