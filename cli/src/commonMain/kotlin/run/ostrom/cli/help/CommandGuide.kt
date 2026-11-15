@@ -190,6 +190,7 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
         "ostrom install" to "install the latest signed version for this user, with its launcher",
         "ostrom install --bundle ./release" to "install offline from a signed release folder",
         "ostrom install --no-path" to "without linking ~/.local/bin/ostrom",
+        "ostrom install --no-service" to "without setting up the local service (or OSTROM_NO_SERVICE=1)",
     ),
     "service" to guide(
         "install",
@@ -230,6 +231,7 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
         "ostrom update" to "install the latest signed version",
         "ostrom update --check" to "only say whether one is out",
         "ostrom update --rollback" to "back to the version before",
+        "ostrom update --no-service" to "without checking the local service (or OSTROM_NO_SERVICE=1)",
         "ostrom update --notifications off" to "no more daily notice on this device",
         "ostrom update --automatic on" to "update by itself every hour (an ostrom install installation)",
         "ostrom update --automatic status" to "whether it does, and its last attempt",

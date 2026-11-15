@@ -73,7 +73,8 @@ internal class SystemLoginService(private val manager: ServiceManager) : LoginSe
     }
 }
 
-internal enum class ServiceSetupOutcome {
+/** How the service step ended. */
+enum class ServiceSetupOutcome {
     INSTALLED,
     REPAIRED,
     UNCHANGED,
@@ -85,8 +86,13 @@ internal enum class ServiceSetupOutcome {
     FAILED,
 }
 
-/** The one line `install` and `update` print about the service, on the error stream when [failed]. */
-internal data class ServiceSetup(val outcome: ServiceSetupOutcome, val line: String) {
+/**
+ * The one line `install` and `update` print about the service, on the error stream when [failed].
+ *
+ * @property outcome How the step ended.
+ * @property line What it says.
+ */
+data class ServiceSetup(val outcome: ServiceSetupOutcome, val line: String) {
     val failed: Boolean get() = outcome == ServiceSetupOutcome.FAILED
 }
 
@@ -181,12 +187,18 @@ internal suspend fun setUpService(
     } catch (error: CancellationException) {
         throw error
     } catch (error: Exception) {
-        val reason = (error as? CliktError)?.message?.let(::reasonOf) ?: "unexpected error"
+        val reason = failureReason(error)
         result(
             ServiceSetupOutcome.FAILED,
             "Local Ostrom service: not set up ($reason). Ostrom itself is installed; run ostrom service install to retry.",
         )
     }
+}
+
+/** Why a setup failed, as a Clikt error says it, or that nothing was expected. */
+private fun failureReason(error: Exception): String {
+    val message = if (error is CliktError) error.message else null
+    return if (message == null) "unexpected error" else reasonOf(message)
 }
 
 /** A failure's message as it reads in the middle of a line: no final full stop, first letter lower case. */

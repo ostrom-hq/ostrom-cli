@@ -256,6 +256,13 @@ linked as `~/.local/bin/ostrom` (macOS, Linux; a name held by another file is le
 the user PATH (Windows). A single binary installed by the installers keeps updating in place, with
 `ostrom.previous` for `--rollback`.
 
+`ostrom install` and `ostrom update` end with the local service step (`ostrom service`): the service run by the
+installation's launcher is installed and started at login, or its login startup checked and repaired, and one
+`Local Ostrom service: ...` line says what happened (on the error stream when it failed, without changing the exit code
+or undoing the installation). `--no-service` or a non-empty `OSTROM_NO_SERVICE` skips it, so does
+`ostrom service automatic off`, a registration made with `--at-boot`, a service run by another executable, a binary that
+is not a managed installation, and a cloud session's runner. It never asks for elevation.
+
 ### Automatic updates (`ostrom update --automatic`)
 
 A managed installation can update itself every hour, once you opt in with `ostrom update --automatic on` (`off`,

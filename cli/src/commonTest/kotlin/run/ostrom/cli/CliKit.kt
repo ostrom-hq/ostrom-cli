@@ -34,6 +34,7 @@ import run.ostrom.cli.platform.StandardInput
 import run.ostrom.cli.platform.terminalSafe
 import run.ostrom.cli.service.serviceCommand
 import run.ostrom.cli.update.AgentSessionsImpl
+import run.ostrom.cli.service.ServiceStep
 import run.ostrom.cli.update.Installations
 import run.ostrom.cli.update.ReleaseTrust
 import run.ostrom.cli.update.ReleaseVerification
@@ -173,7 +174,7 @@ open class CliKit {
     protected fun assertOut(text: String) = assertTrue(console.out.contains(text), console.out.toString())
 
     @Suppress("LongParameterList") // one default per dependency a test replaces
-    protected fun cli(
+    internal fun cli(
         environment: Map<String, String> = mapOf("HOME" to "/home/maya"),
         installed: Set<String> = setOf("git", "claude"),
         api: (String) -> OstromApi = { error("no server in this test") },
@@ -183,6 +184,7 @@ open class CliKit {
         secrets: () -> SecretStore = storeIn(SecretBackend.KEYCHAIN),
         postHogKey: String = "",
         service: (CliDependencies) -> CliktCommand = ::serviceCommand,
+        serviceStep: ServiceStep = ServiceStep.None,
     ) = OstromCli(
         service = service,
         dependencies = CliDependencies(
@@ -222,6 +224,7 @@ open class CliKit {
                 trust = ReleaseTrust(ReleaseVectors.KEY_PEM),
                 installations = managedInstallations,
             ),
+            serviceStep = serviceStep,
             releaseVerification = ReleaseVerification(fileSystem, ReleaseTrust(ReleaseVectors.KEY_PEM)),
             updateNotice = UpdateNotice(FileStoreImpl(fileSystem), NOTICE, "1.0.0", { now }, { noticeAdvice() }) {
                 true.also { refreshes++ }
