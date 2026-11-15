@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli.relay
 
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.toByteArray
 import io.ktor.client.request.bearerAuth
@@ -13,6 +15,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.http.headersOf
 import io.ktor.server.testing.ApplicationTestBuilder
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -258,5 +261,14 @@ class RelayActivityTest {
     private companion object {
         const val SEGMENT = """{"session":{"id":"claude-session-1~r2","agentSessionId":"claude-session-1"}}"""
         val JSON = headersOf("Content-Type", "application/json")
+    }
+
+    @Test
+    fun aReportOstromNeverAnswersIsGivenUpAfterItsBoundOnVirtualTime() = runTest {
+        // The handler never answers, so only the report's own bound ends it: no race with a real clock.
+        val client = HttpClient(MockEngine { awaitCancellation() })
+        val forwarder = ActivityForwarder(relayConfig(), client, AgentSession(), backgroundScope)
+        assertEquals(ActivityOutcome.RETRY, forwarder.send("claude-session-1~r2", "working", "2026-11-15T00:00:00Z"))
+        client.close()
     }
 }

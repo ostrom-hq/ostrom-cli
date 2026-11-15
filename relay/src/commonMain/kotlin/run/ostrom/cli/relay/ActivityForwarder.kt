@@ -229,7 +229,8 @@ internal class ActivityForwarder(
         if (state != null && id != null) reporter.report(id, state, observed)
     }
 
-    private suspend fun send(id: String, state: String, observedAt: String): ActivityOutcome = try {
+    /** One report to Ostrom, bounded by [timeout]: what came of it. Internal so a test can run it by itself. */
+    internal suspend fun send(id: String, state: String, observedAt: String): ActivityOutcome = try {
         withTimeoutOrNull(timeout) {
             // the id is one the relay learnt from Ostrom ([SESSION_ID]): no character a path would read as more
             val response = client.post("${config.serverUrl}/api/v1/sessions/$id/activity") {
