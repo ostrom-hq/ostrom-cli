@@ -67,8 +67,8 @@ class AskWaitUseCaseTest {
             minimal.copy(fields = listOf("note:text::required")) to FIELD,
             minimal.copy(fields = listOf("1x:text:Note")) to
                 "\"1x\" is not a field id: a letter, then letters, digits or _ (64 at most).",
-            minimal.copy(fields = listOf("note:secret:Note")) to
-                "\"secret\" is not a field type: use text, choice, confirm, number, date, info.",
+            minimal.copy(fields = listOf("note:slider:Note")) to
+                "\"slider\" is not a field type: use text, choice, confirm, number, date, file, secret, info.",
             minimal.copy(fields = listOf("r:choice:Region")) to
                 "The choice field r needs its choices: --option r=VALUE, repeated.",
             minimal.copy(fields = listOf("note:text:Note"), options = listOf("note" to "a")) to
@@ -93,9 +93,28 @@ class AskWaitUseCaseTest {
     }
 
     private companion object {
-        const val FIELD = "--field is ID:TYPE:LABEL[:required], such as notes:text:Notes:required."
+        const val FIELD = "--field is ID:TYPE:LABEL[:required][:oneTime], such as notes:text:Notes:required."
         const val ACTION = "--action is ID:LABEL, such as approve:Approve."
         const val REF = "--ref is artifact:ID, session:ID or url:https://… ."
         const val USE_LIST = "use the id that ostrom waits list prints."
+    }
+
+    @Test
+    fun aSecretFieldMayBeOneTimeAndAFileFieldIsAKnownType() = runTest {
+        fake.answer("POST /api/v1/waits", 201, """{"id":"w1"}""")
+        val fields = listOf("pw:secret:Pass: word:required:oneTime", "k:secret:Key:oneTime:required", "f:file:A file")
+        ask(minimal.copy(fields = fields))
+        val expected = """[{"id":"pw","type":"secret","label":"Pass: word","required":true,""" +
+            """"options":[],"oneTime":true},""" +
+            """{"id":"k","type":"secret","label":"Key","required":true,"options":[],"oneTime":true},""" +
+            """{"id":"f","type":"file","label":"A file","required":false,"options":[]}]"""
+        val question = fake.bodyOf(0)["question"] as kotlinx.serialization.json.JsonObject
+        assertEquals(expected, question["fields"].toString())
+        val text = minimal.copy(fields = listOf("n:text:N:oneTime"))
+        assertEquals(":oneTime is for a secret field, and n is text.", refusal(text))
+        assertEquals(
+            "--field is ID:TYPE:LABEL[:required][:oneTime], such as notes:text:Notes:required.",
+            refusal(minimal.copy(fields = listOf("n:secret::oneTime"))),
+        )
     }
 }

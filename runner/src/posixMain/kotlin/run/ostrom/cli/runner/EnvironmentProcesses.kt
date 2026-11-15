@@ -56,7 +56,7 @@ internal fun environmentScript(args: List<String>): Nothing {
                 selector.close()
             }
         }
-        if (answer != null) print(AgentEnvironment.script(answer.variables, answer.withdrawn))
+        if (answer != null) print(AgentEnvironment.script(answer.variables, answer.withdrawn, answer.secrets))
     }
     exitProcess(0)
 }

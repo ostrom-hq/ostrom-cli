@@ -218,7 +218,7 @@ class WaitsCommandsTest : SetupKit() {
     fun anAskTheServerWouldRefuseIsRefusedFirstOrExplained() {
         assertEquals(64, run(routes(), "waits", "ask"))
         assertEquals(64, run(routes(), "waits", "ask", "--title", "T", "--field", "bad"))
-        assertErr("ostrom: --field is ID:TYPE:LABEL[:required], such as notes:text:Notes:required.\n")
+        assertErr("ostrom: --field is ID:TYPE:LABEL[:required][:oneTime], such as notes:text:Notes:required.\n")
         assertEquals(64, run(routes(), "waits", "ask", "--title", "T", "--option", "novalue"))
         assertEquals(emptyList(), calls())
         val only = error("wait_session_owner_only", "Only the person of the session asks in it.")
@@ -270,5 +270,39 @@ class WaitsCommandsTest : SetupKit() {
         assertEquals(0, run(emptyMap(), "waits", "answer", "--help"))
         assertTrue(console.out.contains("(403)"), console.out.toString())
         assertTrue(sent().isEmpty(), "help asks the server nothing")
+    }
+
+    private val secretWait = """{"id":"w1","status":"open","kind":"question","assignee":"m1",""" +
+        """"question":{"title":"Access","fields":[{"id":"pw","type":"secret","label":"Password"},""" +
+        """{"id":"key","type":"secret","label":"Key"},{"id":"note","type":"text","label":"Note"}],""" +
+        """"actions":[{"id":"go","label":"Go"}]}}"""
+
+    @Test
+    fun aSecretIsReadWithoutEchoOrFromStdinAndNeverAnArgument() {
+        val both = routes(show to (200 to secretWait), answerRoute to (200 to """{"id":"w1"}"""))
+        hidden += "hunter2"
+        assertEquals(0, run(both, "waits", "answer", "w1", "--set-secret", "pw", "--set", "note=n"))
+        assertEquals("""{"action":"go","values":{"note":"n","pw":"hunter2"}}""", bodyOf(answerRoute))
+        assertErr("Secret for pw (hidden): ")
+        console.err.clear()
+        typed += listOf("one", "two")
+        val two = arrayOf("--secret-stdin", "--set-secret", "pw", "--set-secret", "key")
+        assertEquals(0, run(both, "waits", "answer", "w1", *two))
+        assertEquals("""{"action":"go","values":{"pw":"one","key":"two"}}""", bodyOf(answerRoute))
+        assertEquals("", console.err.toString(), "no prompt on stdin")
+        typed += listOf("a", "b")
+        assertEquals(0, run(both, "waits", "answer", "w1", "--secret-stdin", "--set-secret", "key"))
+        assertEquals("""{"action":"go","values":{"key":"a\nb"}}""", bodyOf(answerRoute))
+        // A typo costs no typed secret, a secret is never an argument, and a field is named once.
+        hidden += "unused"
+        assertEquals(64, run(both, "waits", "answer", "w1", "--set-secret", "nope"))
+        assertEquals(listOf("unused"), hidden.toList())
+        assertEquals(64, run(both, "waits", "answer", "w1", "--set", "pw=x"))
+        assertErr("is a secret: give it with --set-secret pw")
+        assertEquals(64, run(both, "waits", "answer", "w1", "--set-json", "pw=\"x\""))
+        assertEquals(64, run(both, "waits", "answer", "w1", "--set-secret", "pw", "--set-secret", "pw"))
+        assertErr("--set-secret names each field once.")
+        assertEquals(64, run(both, "waits", "answer", "w1", "--set-secret", "note"))
+        assertErr("Field note is not a secret")
     }
 }

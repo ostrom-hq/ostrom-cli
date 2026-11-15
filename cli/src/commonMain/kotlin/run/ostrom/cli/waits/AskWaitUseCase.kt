@@ -7,7 +7,7 @@ import kotlinx.serialization.json.JsonObject
 private val FIELD_ID = Regex("[A-Za-z][A-Za-z0-9_]{0,63}")
 
 /** The types of field the server takes (`WaitField.type`). */
-internal val FIELD_TYPES = listOf("text", "choice", "confirm", "number", "date", "info")
+internal val FIELD_TYPES = listOf("text", "choice", "confirm", "number", "date", "file", "secret", "info")
 
 /** The kinds of reference a wait shows. */
 private val REF_KINDS = listOf("artifact", "session", "url")
@@ -26,7 +26,7 @@ private const val FIELD_PARTS = 3
  * @property body Markdown, or null.
  * @property assignee A member id or username; null for the person of the session.
  * @property refs `artifact:ID`, `session:ID` or `url:https://…`.
- * @property fields `ID:TYPE:LABEL[:required]`.
+ * @property fields `ID:TYPE:LABEL[:required][:oneTime]`.
  * @property options `FIELD=VALUE`: a choice of a choice field.
  * @property actions `ID:LABEL`.
  */
@@ -86,8 +86,11 @@ internal class AskWaitUseCase(private val server: WaitsServer, private val newKe
         if (type !in FIELD_TYPES) {
             refuse("\"$type\" is not a field type: use ${FIELD_TYPES.joinToString(", ")}.")
         }
-        val required = rest.endsWith(":required")
-        val label = rest.removeSuffix(":required")
+        val flags = Flags.of(rest)
+        val label = flags.label
+        val required = flags.required
+        val oneTime = flags.oneTime
+        if (oneTime && type != "secret") refuse(":oneTime is for a secret field, and $id is $type.")
         if (label.isBlank()) refuse(FIELD_USAGE)
         val choices = options[id].orEmpty()
         if (type == "choice" && choices.isEmpty()) {
@@ -102,8 +105,33 @@ internal class AskWaitUseCase(private val server: WaitsServer, private val newKe
             "label" to label,
             "required" to required,
             "options" to choices,
+            "oneTime" to oneTime.takeIf { it },
         )
         return Field(id, json)
+    }
+
+    /** What follows `ID:TYPE:` in a `--field`: the label, then the flags in any order. */
+    private class Flags(val label: String, val required: Boolean, val oneTime: Boolean) {
+        companion object {
+            fun of(rest: String): Flags {
+                var label = rest
+                var required = false
+                var oneTime = false
+                while (true) {
+                    when {
+                        label.endsWith(REQUIRED) -> {
+                            required = true
+                            label = label.removeSuffix(REQUIRED)
+                        }
+                        label.endsWith(ONE_TIME) -> {
+                            oneTime = true
+                            label = label.removeSuffix(ONE_TIME)
+                        }
+                        else -> return Flags(label, required, oneTime)
+                    }
+                }
+            }
+        }
     }
 
     /** `--action ID:LABEL`. */
@@ -128,6 +156,9 @@ internal class AskWaitUseCase(private val server: WaitsServer, private val newKe
     }
 
     private companion object {
-        const val FIELD_USAGE = "--field is ID:TYPE:LABEL[:required], such as notes:text:Notes:required."
+        const val REQUIRED = ":required"
+        const val ONE_TIME = ":oneTime"
+        const val FIELD_USAGE =
+            "--field is ID:TYPE:LABEL[:required][:oneTime], such as notes:text:Notes:required."
     }
 }

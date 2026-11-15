@@ -218,6 +218,7 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
         "waits",
         "ostrom waits answer 7f3a --action approve --set note=\"ship it\"" to "answer with an action and a value",
         "ostrom waits answer 7f3a --set-json tags='[\"a\",\"b\"]'" to "a JSON value",
+        "ostrom waits answer 7f3a --set-secret password" to "a secret field, typed without echo",
     ),
     "waits cancel" to guide("waits", "ostrom waits cancel 7f3a" to "withdraw a wait"),
     "waits ask" to guide(
@@ -225,6 +226,8 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
         "ostrom waits ask --title \"Deploy?\" --action yes:Yes --action no:No" to "ask for a decision",
         "ostrom waits ask --title \"Region\" --field r:choice:Region:required --option r=eu --option r=us" to
             "ask with a typed field",
+        "ostrom waits ask --title \"Access\" --field pw:secret:Password:required:oneTime" to
+            "ask for a secret, given to your shell as OSTROM_WAIT_PW for this turn",
     ),
     "hooks" to guide(
         "harness",

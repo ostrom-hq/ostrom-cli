@@ -101,6 +101,9 @@ open class CliKit {
     protected val attached = mutableListOf<Pair<String, CloudSite>>()
     protected val waits = mutableListOf<Long>()
     protected val typed = ArrayDeque<String>()
+
+    /** What is typed without echo (a secret). */
+    protected val hidden = ArrayDeque<String>()
     protected val opened = mutableListOf<String>()
     protected val bridged = mutableListOf<BridgeTarget>()
     protected var browser = true
@@ -198,6 +201,7 @@ open class CliKit {
             agents = AgentRunner { request, site -> 7.also { launches += request to site } },
             sleep = { waits += it },
             readLine = { typed.removeFirstOrNull() },
+            readSecret = { hidden.removeFirstOrNull() },
             openUrl = { url -> browser.also { opened += url } },
             gateWait = gateWait,
             selfUpdate = SelfUpdate(
