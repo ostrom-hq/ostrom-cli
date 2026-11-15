@@ -5,6 +5,8 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.toByteArray
+import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.request.HttpRequestData
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
@@ -17,7 +19,9 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
+import okio.Buffer
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
@@ -103,5 +107,82 @@ class AgentChannelTest {
         assertNull(assertFailsWith<RunnerChannelException> { plain.acknowledge(emptyList()) }.code)
         val untyped = channel(HttpStatusCode.BadRequest) { """{"error":{}}""" }
         assertNull(assertFailsWith<RunnerChannelException> { untyped.events(emptyList()) }.code)
+    }
+
+    private val requests = mutableListOf<HttpRequestData>()
+
+    private fun files(status: HttpStatusCode = HttpStatusCode.OK, body: ByteArray, type: String? = null) =
+        HttpAgentChannel(
+            HttpClient(
+                MockEngine { request ->
+                    requests += request
+                    val headers = if (type == null) {
+                        headersOf(HttpHeaders.ContentType, "application/octet-stream")
+                    } else {
+                        json
+                    }
+                    respond(body, status, headers)
+                },
+            ) { install(HttpTimeout) },
+            "https://ostrom.test",
+            { "runner-token" },
+            "s1",
+            2,
+        )
+
+    @Test
+    fun aFileIsStreamedFromTheRunnerRouteWithTheExecution() = runTest {
+        val bytes = ByteArray(150_000) { (it % 251).toByte() }
+        val received = Buffer()
+        files(body = bytes).file("f-1", bytes.size.toLong()) { chunk, count -> received.write(chunk, 0, count) }
+        assertContentEquals(bytes, received.readByteArray())
+        val request = requests.single()
+        assertEquals("/api/v1/cloud/runner/files/f-1", request.url.encodedPath)
+        assertEquals("s1", request.url.parameters["sessionId"])
+        assertEquals("2", request.url.parameters["epoch"])
+        assertEquals("Bearer runner-token", request.headers[HttpHeaders.Authorization])
+    }
+
+    @Test
+    fun aFileLongerThanAnnouncedOrRefusedFails() = runTest {
+        val long = assertFailsWith<RunnerChannelException> { files(body = ByteArray(10)).file("f", 9) { _, _ -> } }
+        assertEquals(502, long.statusCode)
+        assertEquals("file_too_large", long.code)
+        val gone = files(HttpStatusCode.NotFound, """{"error":{"type":"not_found"}}""".encodeToByteArray(), "json")
+        val refused = assertFailsWith<RunnerChannelException> { gone.file("f", 9) { _, _ -> } }
+        assertEquals(404, refused.statusCode)
+        assertEquals("not_found", refused.code)
+        assertFailsWith<IllegalArgumentException> { files(body = ByteArray(0)).file("../f", 0) { _, _ -> } }
+        var calls = 0
+        files(body = ByteArray(0)).file("empty", 0) { _, _ -> calls++ }
+        assertEquals(0, calls, "An empty file hands no chunk")
+    }
+
+    @Test
+    fun aChannelWithoutFilesDownloadsNone() = runTest {
+        val bare = object : AgentChannel {
+            override suspend fun agent() = RunnerAgentView("claude")
+            override suspend fun events(events: List<RunnerEventView>) = RunnerEventsAckView(0, 0)
+            override suspend fun poll(waitMillis: Long, desiredState: String, accepts: RunnerAccepts) =
+                RunnerInputsView(emptyList())
+            override suspend fun acknowledge(acks: List<RunnerInputAckView>) = Unit
+        }
+        assertFailsWith<UnsupportedOperationException> { bare.file("f", 1) { _, _ -> } }
+        bare.agent()
+        bare.events(emptyList())
+        bare.poll(0, "running", RunnerAccepts())
+        bare.acknowledge(emptyList())
+    }
+
+    @Test
+    fun anInputCarriesItsFiles() {
+        val input = Json.decodeFromString(
+            RunnerInputView.serializer(),
+            """
+            {"id":"i1","kind":"message","text":"","files":[{"id":"f1","name":"a.png","size":8,
+            "contentType":"image/png","sha256":"${"0".repeat(64)}"}]}
+            """,
+        )
+        assertEquals(listOf(RunnerFileView("f1", "a.png", 8, "image/png", "0".repeat(64))), input.files)
     }
 }

@@ -2,14 +2,19 @@
 package run.ostrom.cli.runner.conversation
 
 import io.ktor.client.HttpClient
+import io.ktor.client.plugins.timeout
 import io.ktor.client.request.bearerAuth
+import io.ktor.client.request.parameter
 import io.ktor.client.request.post
+import io.ktor.client.request.prepareGet
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
+import io.ktor.utils.io.readAvailable
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -61,15 +66,35 @@ data class RunnerEventView(val sequence: Long, val type: String, val data: JsonO
 data class RunnerEventsAckView(val acceptedThrough: Long, val lastSeq: Long)
 
 /**
+ * A file a message carries (`runners.cloud.files.v1`), downloaded with [AgentChannel.file] before the agent reads the
+ * message.
+ *
+ * @property id The file.
+ * @property name Its name, cleaned by the server (the host cleans it again).
+ * @property size Its size in bytes.
+ * @property contentType Its type, recognized by the server from its bytes.
+ * @property sha256 The SHA-256 of its bytes, in hexadecimal: the host checks it.
+ */
+@Serializable
+data class RunnerFileView(val id: String, val name: String, val size: Long, val contentType: String, val sha256: String)
+
+/**
  * An input handed to the runner.
  *
  * @property id The input.
  * @property kind One of [CloudInputKinds].
  * @property text A message's text, a permission answer's JSON, a task's id, a model or an effort.
  * @property attempt How many times it was handed, this one included.
+ * @property files The files a message carries, in their upload order.
  */
 @Serializable
-data class RunnerInputView(val id: String, val kind: String, val text: String? = null, val attempt: Int = 1)
+data class RunnerInputView(
+    val id: String,
+    val kind: String,
+    val text: String? = null,
+    val attempt: Int = 1,
+    val files: List<RunnerFileView> = emptyList(),
+)
 
 /**
  * The inputs of a poll.
@@ -152,10 +177,25 @@ interface AgentChannel {
      * @param acks The outcomes.
      */
     suspend fun acknowledge(acks: List<RunnerInputAckView>)
+
+    /**
+     * Streams the bytes of a message file to [receive] (`GET /api/v1/cloud/runner/files/{id}`), only while the message
+     * carrying it is delivered to this execution and unacknowledged.
+     *
+     * @param fileId The file.
+     * @param maxBytes Its announced size: more is refused.
+     * @param receive Takes each chunk: the buffer and how many of its first bytes are the file's.
+     *
+     * @throws RunnerChannelException The server's refusal (`404 not_found`, `409 execution_fenced`, `410
+     *   file_expired`, `503 file_storage_unavailable`), or `502 file_too_large` for a body over [maxBytes].
+     */
+    suspend fun file(fileId: String, maxBytes: Long, receive: (ByteArray, Int) -> Unit): Unit =
+        throw UnsupportedOperationException("This channel downloads no file.")
 }
 
 /**
- * [AgentChannel] over HTTP with the execution's credential (`/api/v1/cloud/runner/agent|events|inputs|inputs/ack`).
+ * [AgentChannel] over HTTP with the execution's credential (`/api/v1/cloud/runner/agent|events|inputs|inputs/ack`,
+ * `files/{id}`).
  * A refusal is a [RunnerChannelException] with the error's `type`.
  *
  * @param client The HTTP client (`expectSuccess = false`).
@@ -226,6 +266,28 @@ class HttpAgentChannel(
         call("inputs/ack", AcksRequest.serializer(), AcksRequest(sessionId, epoch, acks))
     }
 
+    override suspend fun file(fileId: String, maxBytes: Long, receive: (ByteArray, Int) -> Unit) {
+        require(FILE_ID.matches(fileId)) { "Invalid file id." }
+        client.prepareGet("$serverUrl/api/v1/cloud/runner/files/$fileId") {
+            bearerAuth(token())
+            parameter("sessionId", sessionId)
+            parameter("epoch", epoch)
+            timeout { requestTimeoutMillis = FILE_TIMEOUT_MILLIS }
+        }.execute { response ->
+            if (!response.status.isSuccess()) throw RunnerChannelException(response.status.value, errorType(response))
+            val body = response.bodyAsChannel()
+            val chunk = ByteArray(FILE_CHUNK_BYTES)
+            var total = 0L
+            while (true) {
+                val count = body.readAvailable(chunk, 0, chunk.size)
+                if (count < 0) break
+                total += count
+                if (total > maxBytes) throw RunnerChannelException(BAD_GATEWAY, "file_too_large")
+                if (count > 0) receive(chunk, count)
+            }
+        }
+    }
+
     private suspend fun <T> call(path: String, serializer: KSerializer<T>, body: T): HttpResponse {
         val response = client.post("$serverUrl/api/v1/cloud/runner/$path") {
             bearerAuth(token())
@@ -245,6 +307,18 @@ class HttpAgentChannel(
         null
     }
 }
+
+/** A file id as the channel puts it in a path (the server's are UUIDs). */
+private val FILE_ID = Regex("[A-Za-z0-9_-]{1,64}")
+
+/** How long one file may take to download. */
+private const val FILE_TIMEOUT_MILLIS = 10 * 60_000L
+
+/** The chunk a download is read in. */
+private const val FILE_CHUNK_BYTES = 64 * 1024
+
+/** The status a body longer than announced is reported with: the server's answer is wrong. */
+private const val BAD_GATEWAY = 502
 
 /** The runner channel's JSON: unknown fields read, no null written. */
 private val JSON = Json {
