@@ -42,6 +42,14 @@ class RunnerConfigTest {
     }
 
     @Test
+    fun theUploadsVolumeComesFromThePodAndAnOlderPodSpecHasNone() {
+        assertNull(RunnerConfig.from(base) { "t" }.uploadsDirectory)
+        assertNull(RunnerConfig.from(base + ("OSTROM_UPLOADS_DIR" to " ")) { "t" }.uploadsDirectory)
+        val config = RunnerConfig.from(base + ("OSTROM_UPLOADS_DIR" to "/var/ostrom/uploads")) { "t" }
+        assertEquals("/var/ostrom/uploads", config.uploadsDirectory)
+    }
+
+    @Test
     fun theConfigurationComesFromThePodsEnvironment() {
         val config = RunnerConfig.from(
             base + ("OSTROM_REPOSITORY_URL" to "https://github.com/a/b") + ("OSTROM_REPOSITORY_REF" to "main"),

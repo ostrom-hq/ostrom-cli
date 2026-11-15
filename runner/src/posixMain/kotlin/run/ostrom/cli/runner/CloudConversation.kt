@@ -7,11 +7,12 @@ import run.ostrom.cli.runner.conversation.ConversationHost
 import run.ostrom.cli.runner.conversation.ConversationLaunch
 import run.ostrom.cli.runner.conversation.ExecProcesses
 import run.ostrom.cli.runner.conversation.HttpAgentChannel
+import run.ostrom.cli.runner.conversation.SessionUploads
 
 /**
  * The headless agent of a `conversation` session: started in the agent's container without a terminal, relayed to the
  * server's runner channel with the runner's credential ([RunnerConfig.bearer]), its conversation kept in the agent's
- * home.
+ * home. The files of a message go to the pod's `uploads` volume ([RunnerConfig.uploadsDirectory]).
  */
 internal fun conversation(client: HttpClient, config: RunnerConfig, terminals: RemoteTerminalStarter) =
     ConversationStarter { agentEnvironment, directory, first, activity ->
@@ -29,6 +30,8 @@ internal fun conversation(client: HttpClient, config: RunnerConfig, terminals: R
             launchCommand = { kind, command -> ConversationLaunch.command(kind, command, agentEnvironment) },
             initialMessage = first,
             activity = activity,
+            // The pod's `uploads` volume, mounted read-only in the agent's container; an older pod spec has none.
+            uploads = config.uploadsDirectory?.let { SessionUploads.pod(it) },
         )
     }
 

@@ -85,8 +85,8 @@ interface RunnerAgent {
  * turn before a stop.
  *
  * An execution fenced by the server (`409 execution_fenced`, 401, 403, or 404 for a server without the channel)
- * stops everything; [fenced] tells the runner loop. Message files are not handled yet (`acceptsFiles` false): the
- * server stores none.
+ * stops everything; [fenced] tells the runner loop. The files of a message are downloaded into [uploads] before the
+ * agent reads it, their paths appended to its text.
  *
  * @param channel The runner channel.
  * @param start Starts a process (the agent) with variables over the agent's environment (null removes one).
@@ -102,6 +102,9 @@ interface RunnerAgent {
  * @param initialMessage The execution's first message (the session's prompt, the answers to its waits), delivered
  *   at once; null starts the agent with the first input.
  * @param activity Called for each line of the agent (the runner reports the last as model activity).
+ * @param uploads Where the files of a message are written for the agent; null (or one [SessionUploads.prepare]
+ *   refuses) announces no file support, so the server rejects such messages (`files_unsupported`) instead of
+ *   delivering their text alone.
  */
 @Suppress("LongParameterList") // The host's collaborators, injected so that `ostrom remote host` reuses it.
 class ConversationHost(
@@ -118,6 +121,7 @@ class ConversationHost(
         ::defaultLaunch,
     private val initialMessage: String? = null,
     private val activity: () -> Unit = {},
+    private val uploads: SessionUploads? = null,
 ) : RunnerAgent {
     override var fenced: Boolean = false
         private set
@@ -186,8 +190,18 @@ class ConversationHost(
     private var desiredState = RUNNING
     private var instructionChanged: () -> Unit = {}
 
+    /** The uploads directory once prepared, given to the agent at start; null announces no file support. */
+    private var uploadsDirectory: String? = null
+
+    /** Set when the server terminated the session; only then does [stop] remove its files. */
+    private var ended = false
+
     override fun onInstructionChange(changed: () -> Unit) {
         instructionChanged = changed
+    }
+
+    override fun sessionEnded() {
+        ended = true
     }
 
     override suspend fun prepare(): Boolean {
@@ -221,12 +235,15 @@ class ConversationHost(
 
     override suspend fun run() = coroutineScope {
         scope = this
-        val uploads = launch { uploadLoop() }
+        // The sweep at start: what a previous execution left, and anything older than a week.
+        // A successful prepare sets the directory.
+        uploadsDirectory = uploads?.takeIf { it.prepare(log) }?.let { it.directory.toString() }
+        val transcript = launch { uploadLoop() }
         try {
             initialMessage?.let { first(it) }
             inputLoop()
         } finally {
-            uploads.cancel()
+            transcript.cancel()
         }
         // The input loop ends once fenced: another execution owns the session, so this agent stops now (and its
         // reader with it).
@@ -296,6 +313,11 @@ class ConversationHost(
 
     override suspend fun stop() {
         stopping = true
+        // Files stay until the session ends (a week at most): a pause, a host restart or a resume keeps them, so the
+        // resumed conversation can read them again. A fenced execution never removes them, since the execution that
+        // fenced it may run on this device and use the same directory. Removed first, so that a failing stop of the
+        // agent never keeps them.
+        if (ended && !fenced) uploads?.clear()
         agent?.let { it.process.stop(1_000) }
         reader?.cancel()
         lock.withLock { cancelAllDeadlines() }
@@ -304,7 +326,8 @@ class ConversationHost(
     @Suppress("LoopWithTooManyJumpStatements") // TeamCode's loop: retry a failed poll, skip an empty batch.
     private suspend fun inputLoop() {
         var wait = 1_000L
-        val accepts = RunnerAccepts(files = false, taskStops = true, modelChanges = true, effortChanges = true)
+        val accepts =
+            RunnerAccepts(files = uploadsDirectory != null, taskStops = true, modelChanges = true, effortChanges = true)
         while (!fenced) {
             val view = try {
                 channel.poll(INPUT_WAIT_MILLIS, desiredState, accepts).also { wait = 1_000L }
@@ -443,7 +466,19 @@ class ConversationHost(
     }
 
     private suspend fun message(input: RunnerInputView): RunnerInputAckView? {
-        val text = input.text ?: return rejected(input, INVALID_INPUT)
+        if (input.text == null && input.files.isEmpty()) return rejected(input, INVALID_INPUT)
+        var text = input.text.orEmpty()
+        if (input.files.isNotEmpty()) {
+            // Stopping for a pause: nothing is downloaded, the message waits for the next execution.
+            if (lock.withLock { stopping }) return null
+            // Downloaded before the agent starts: a file that cannot be written rejects the message and starts no turn.
+            val attached = when (val outcome = attach(input)) {
+                is Attachment.Refused -> return rejected(input, outcome.reason)
+                Attachment.Fenced -> return null
+                is Attachment.Written -> outcome.lines
+            }
+            text = (listOf(text).filter { it.isNotBlank() } + attached).joinToString("\n\n")
+        }
         val (child, lines) = lock.withLock {
             // Stopping for a pause: the message stays queued on the server for the next execution, never lost.
             if (stopping) return null
@@ -454,6 +489,64 @@ class ConversationHost(
         }
         if (!write(child, lines)) return rejected(input, UNAVAILABLE)
         return consumed(input)
+    }
+
+    private sealed interface Attachment {
+        class Written(val lines: List<String>) : Attachment
+
+        class Refused(val reason: String) : Attachment
+
+        data object Fenced : Attachment
+    }
+
+    /**
+     * Downloads the files of [input] through the runner channel into [uploads], each once (by file id, so a
+     * redelivered message writes nothing again), and returns the line the agent reads for each: its absolute path,
+     * type and size. A file the server no longer offers, a failed download, a size or SHA-256 mismatch or a write
+     * that is not safe refuses the whole message with a reason.
+     */
+    @Suppress("CyclomaticComplexMethod", "NestedBlockDepth") // TeamCode's outcomes of a download, one branch each.
+    private suspend fun attach(input: RunnerInputView): Attachment {
+        val target = uploads?.takeIf { uploadsDirectory != null }
+            ?: return Attachment.Refused(SessionUploads.UNAVAILABLE)
+        val lines = mutableListOf<String>()
+        for (file in input.files) {
+            var attempt = 0
+            while (true) {
+                try {
+                    val path = target.write(file) { receive -> channel.file(file.id, file.size, receive) }
+                    lines += SessionUploads.line(path, file)
+                    break
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: SessionUploads.Refused) {
+                    log("a message file was refused (${error.reason})")
+                    return Attachment.Refused(error.reason)
+                } catch (error: RunnerChannelException) {
+                    refusal(error)?.let { return it }
+                } catch (_: Exception) {
+                    // Unreachable or failed on the way: retried below.
+                }
+                if (++attempt >= FILE_ATTEMPTS) {
+                    log("a message file could not be downloaded")
+                    return Attachment.Refused(SessionUploads.DOWNLOAD_FAILED)
+                }
+                sleep(1_000L * attempt)
+            }
+        }
+        return Attachment.Written(lines)
+    }
+
+    /** What a refused download means for the message; null when retrying may help (a 5xx). */
+    private fun refusal(error: RunnerChannelException): Attachment? = when {
+        error.code == EXECUTION_FENCED || error.statusCode == 401 || error.statusCode == 403 -> {
+            handle(error)
+            Attachment.Fenced
+        }
+        // Not offered to this execution any more (acknowledged, expired): retrying cannot help.
+        error.statusCode == 404 -> Attachment.Refused(SessionUploads.NOT_FOUND)
+        error.statusCode / 100 == 4 -> Attachment.Refused(SessionUploads.DOWNLOAD_FAILED)
+        else -> null
     }
 
     /** The execution's first message: recorded in the transcript as the member's, then handed to the agent. */
@@ -507,7 +600,7 @@ class ConversationHost(
             state.clear()
             enqueue(CloudEventTypes.STATUS, transcriptOnly(config.kind))
         }
-        val next = agentAdapter(config, clientVersion, now)
+        val next = agentAdapter(config, clientVersion, now, readableDirectories = listOfNotNull(uploadsDirectory))
         val (command, environment) = launchCommand(config.kind, next.command(resume, fork = kept?.fork == true))
         val child = start(command, environment, workingDirectory)
         val started = Running(child, next)
@@ -859,6 +952,9 @@ class ConversationHost(
 
         /** How long the transcript may take to upload after a drain. */
         const val FLUSH_MILLIS = 30_000L
+
+        /** Attempts at downloading one message file. */
+        const val FILE_ATTEMPTS = 3
 
         /** The answers of a permission input. */
         private val ANSWERS = ListSerializer(CloudQuestionAnswer.serializer())

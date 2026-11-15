@@ -35,6 +35,8 @@ import kotlin.uuid.Uuid
  * @property readPodToken Reads [podTokenFile]; a failed or empty read falls back to the runner token.
  * @property mode The session's mode (`OSTROM_SESSION_MODE`): [CONVERSATION_MODE] runs the agent headless and relays
  *   it to the server's runner channel; anything else (`terminal`, or nothing) relays a terminal.
+ * @property uploadsDirectory The pod's `uploads` volume (`OSTROM_UPLOADS_DIR`), where a conversation's host writes the
+ *   files of a message for the agent, which mounts it read-only; null (an older pod spec) turns message files off.
  */
 data class RunnerConfig(
     val serverUrl: String,
@@ -57,6 +59,7 @@ data class RunnerConfig(
     val podTokenFile: String? = null,
     val readPodToken: (String) -> String = { "" },
     val mode: String = TERMINAL_MODE,
+    val uploadsDirectory: String? = null,
 ) {
     /**
      * The credential of a call to the server: the pod's projected token when the server mounted one (TeamCode's runner
@@ -144,6 +147,7 @@ data class RunnerConfig(
                 podTokenFile = optional("OSTROM_POD_TOKEN_FILE"),
                 readPodToken = readFile,
                 mode = optional("OSTROM_SESSION_MODE") ?: TERMINAL_MODE,
+                uploadsDirectory = optional("OSTROM_UPLOADS_DIR"),
             )
         }
 
