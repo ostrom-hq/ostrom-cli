@@ -50,7 +50,7 @@ internal fun OrgAccess.automationId(ref: String): String {
 
 /** The id of the workflow [ref] names: an id as it is, else the one workflow of that name. */
 internal fun OrgAccess.workflowId(ref: String): String {
-    val workflows = read(WORKFLOWS, "No workflows in ${org.slug}.").objects("items")
+    val workflows = allWorkflows(WORKFLOWS, "No workflows in ${org.slug}.")
     val named = workflows.filter { it.text("name") == ref }
     if (named.size > 1) refuse("Several workflows are named \"$ref\": give the id.")
     val found = workflows.firstOrNull { it.text("id") == ref } ?: named.singleOrNull()

@@ -140,10 +140,9 @@ internal class WorkflowsListCommand(private val dependencies: CliDependencies) :
     private val json by jsonFlag()
 
     override fun run() {
-        val body = dependencies.workflows(server, org) {
-            it.read(WORKFLOWS, "No workflows in ${it.org.slug}.")
+        val items = dependencies.workflows(server, org) {
+            it.allWorkflows(WORKFLOWS, "No workflows in ${it.org.slug}.")
         }
-        val items = body.list("items").filterIsInstance<JsonObject>()
         if (json) {
             dependencies.console.data(JsonArray(items).toString() + "\n")
             return

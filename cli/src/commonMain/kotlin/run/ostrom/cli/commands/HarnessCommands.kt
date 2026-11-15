@@ -12,6 +12,7 @@ import run.ostrom.cli.launcher.list
 import run.ostrom.cli.launcher.objectOf
 import run.ostrom.cli.launcher.parseObject
 import run.ostrom.cli.launcher.text
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import okio.Path.Companion.toPath
@@ -96,12 +97,11 @@ internal class HarnessListCommand(private val dependencies: CliDependencies) : C
         val access = dependencies.orgAccess(server, org)
         val target = if (all) null else repo ?: dependencies.currentRepo()
         val path = if (target == null) WORKFLOWS else "$WORKFLOWS?repo=${segment(target)}"
-        val body = access.read(path, "No workflows in ${access.org.slug}.")
-        val workflows = body.list("items").filterIsInstance<JsonObject>()
+        val workflows = access.allWorkflows(path, "No workflows in ${access.org.slug}.")
         val console = dependencies.console
         val where = target ?: access.org.name
         when {
-            json -> console.data("$body\n")
+            json -> console.data("${JsonObject(mapOf("items" to JsonArray(workflows)))}\n")
             workflows.isEmpty() ->
                 console.out("Nothing applies to $where yet. Add a workflow: ostrom harness add <file.json>\n")
             else -> {

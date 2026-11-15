@@ -38,6 +38,14 @@ class HarnessCommandsTest : SetupKit() {
         assertEquals(0, run(all, "harness", "list", "--all", "--repo", "api"))
         assertOut("Harness of Acme\n  two  enforced  2 steps  2 approvals\n  three  enforced  0 steps\n")
         assertOut("  four  archived  0 steps\n")
+        console.out.clear()
+        // A second page is read after the first one's `next`, the repository kept.
+        val paged = mapOf(
+            "GET /api/v1/workflows?repo=api" to (200 to """{"items":[$safety],"next":"w1"}"""),
+            "GET /api/v1/workflows?repo=api&after=w1" to (200 to """{"items":[$tests]}"""),
+        )
+        assertEquals(0, run(paged, "harness", "list", "--repo", "api", "--json"))
+        assertEquals("""{"items":[$safety,$tests]}""" + "\n", console.out.toString())
     }
 
     @Test
