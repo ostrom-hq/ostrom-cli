@@ -472,6 +472,22 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
         "ostrom cloud github ses_41b2 --access shared" to "let anyone who may use the session instruct the agent",
         "ostrom cloud github ses_41b2 --access none" to "no GitHub token (pause the session first)",
     ),
+    "cloud logs" to guide(
+        "cloud-sessions",
+        "ostrom cloud logs ses_41b2" to "the last 50 events of a conversation session",
+        "ostrom cloud logs ses_41b2 --follow" to "and the new ones until the session ends",
+    ),
+    "cloud send" to guide(
+        "cloud-sessions",
+        "ostrom cloud send ses_41b2 \"Run the tests\"" to "a message to the agent (a paused session wakes up)",
+        "ostrom cloud send ses_41b2 - --wait < notes.md" to "from stdin, waiting until the agent read it",
+    ),
+    "cloud interrupt" to guide("cloud-sessions", "ostrom cloud interrupt ses_41b2" to "stop the agent's current turn"),
+    "cloud answer" to guide(
+        "cloud-sessions",
+        "ostrom cloud answer ses_41b2 req_3 allow" to "allow the tool use of a [permission] line",
+        "ostrom cloud answer ses_41b2 req_4 allow --answer 0=1" to "answer a [question] by its indexes",
+    ),
     "accounts" to guide(
         "migrate-from-teamcode",
         "ostrom accounts handover \"Team Max\" --confirm" to "let Ostrom renew an imported account's tokens",

@@ -72,6 +72,10 @@ private fun cloudCommand(dependencies: CliDependencies) = CloudCommand().subcomm
     CloudTransferCommand(dependencies),
     CloudTransfersCommand(dependencies),
     CloudGithubCommand(dependencies),
+    CloudLogsCommand(dependencies),
+    CloudSendCommand(dependencies),
+    CloudInterruptCommand(dependencies),
+    CloudAnswerCommand(dependencies),
     AttachCommand(dependencies),
 )
 
