@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli
 
+import run.ostrom.cli.api.Downloads
 import run.ostrom.cli.api.DownloadsImpl
 import run.ostrom.cli.api.OstromApi
 import run.ostrom.cli.api.OstromApiImpl
@@ -57,6 +58,7 @@ import run.ostrom.cli.platform.ProcessCapture
 import run.ostrom.cli.platform.ProcessCaptureImpl
 import run.ostrom.cli.platform.ProcessLauncherImpl
 import run.ostrom.cli.platform.currentUserId
+import run.ostrom.cli.platform.restrictToOwner
 import run.ostrom.cli.platform.RawTerminalImpl
 import run.ostrom.cli.platform.SecretStore
 import run.ostrom.cli.platform.SystemInstallationFiles
@@ -122,6 +124,11 @@ import kotlin.time.TimeSource
  * @property sendStatistics Posts usage statistics (opt-in only).
  * @property clock The time, in milliseconds since the epoch (the expiry of `ostrom login --admin`'s token).
  * @property userId The numeric id of the user running this process (macOS, Linux), for `ostrom update --automatic`.
+ * @property fileSystem Where `ostrom ui` installs the desktop app.
+ * @property downloads Fetches the desktop manifest and package of `ostrom ui`.
+ * @property releaseTrust The roots (and floor) the desktop manifest is authenticated with.
+ * @property restrictToOwner Makes a folder `ostrom ui` made the owner's alone.
+ * @property cliVersion The version of this binary, which `ostrom ui` installs the desktop app of.
  */
 @Suppress("LongParameterList") // The composition root: one parameter per dependency, each replaced in tests.
 class CliDependencies(
@@ -156,6 +163,11 @@ class CliDependencies(
     val secrets: () -> SecretStore = { systemSecretStore(environment, files) },
     val clock: () -> Long = SessionHooks::epochMillis,
     val userId: () -> String? = ::currentUserId,
+    val fileSystem: FileSystem = FileSystem.SYSTEM,
+    val downloads: Downloads = DownloadsImpl("ostrom/${BuildInfo.VERSION}"),
+    val releaseTrust: ReleaseTrust = ReleaseTrust(floor = BuildInfo.FLOOR),
+    val cliVersion: String = BuildInfo.VERSION,
+    val restrictToOwner: (String) -> Unit = { restrictToOwner(it, executable = true) },
 ) {
     /** The opt-in usage statistics. */
     val usage: UsageStatistics by lazy {
