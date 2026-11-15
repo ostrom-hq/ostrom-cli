@@ -261,8 +261,8 @@ private class RemoteList(private val context: RemoteContext) : CliktCommand(name
     override fun run() {
         val access = context.access(server, org)
         val sessions = context.sessions()
-        val device = access.readIfServed(DEVICES)?.list("items")?.filterIsInstance<JsonObject>()
-            ?.firstOrNull { it.flag("current") == true }?.text("id")
+        val devices = access.readIfServed(DEVICES)?.list("items").orEmpty().filterIsInstance<JsonObject>()
+        val device = devices.firstOrNull { it.flag("current") == true }?.text("id")
         val listed = mutableListOf<JsonObject>()
         var before: String? = null
         do {
