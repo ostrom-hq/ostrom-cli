@@ -26,6 +26,7 @@ import run.ostrom.cli.ui.OnlineDesktopSource
 import run.ostrom.cli.ui.desktopLaunchCommand
 import kotlinx.coroutines.runBlocking
 import okio.Buffer
+import okio.IOException
 import okio.Path.Companion.toPath
 
 /**
@@ -53,6 +54,12 @@ internal class UiCommand(private val dependencies: CliDependencies) : CliktComma
             runBlocking { open() }
         } catch (failure: DesktopFailure) {
             throw PrintMessage(failure.text, failure.code.code, printError = true)
+        } catch (failure: IOException) {
+            throw PrintMessage(
+                "✗ ostrom could not write the desktop app: ${failure.message}",
+                ExitCode.CANNOT_WRITE.code,
+                printError = true,
+            )
         }
     }
 

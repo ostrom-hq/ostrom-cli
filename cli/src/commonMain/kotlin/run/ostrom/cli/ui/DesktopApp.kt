@@ -116,7 +116,7 @@ internal fun linuxDesktopEntry(root: Path): String {
     require(current.toString().none { it.isISOControl() })
     fun quoted(path: Path) =
         "\"" + path.toString().replace("\\", "\\\\").replace("\"", "\\\"").replace("`", "\\`")
-            .replace("$", "\\$") + "\""
+            .replace("$", "\\$").replace("%", "%%") + "\""
     return listOf(
         "[Desktop Entry]",
         "Type=Application",

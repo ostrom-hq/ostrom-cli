@@ -265,9 +265,12 @@ internal class DesktopInstaller(
     private fun activateMacos(staged: StagedDesktop): DesktopInstallation {
         val applications = locations.applications ?: throw unknownHome()
         val destination = applications / DesktopLocations.APP
-        if (fs.metadataOrNull(destination) != null) fs.atomicMove(destination, staged.directory / "previous.app")
-        fs.atomicMove(staged.directory / DesktopLocations.APP, destination)
-        return installed(destination, staged.version)
+        val kept = staged.directory / "previous.app"
+        val hadPrevious = fs.metadataOrNull(destination) != null
+        return swapped(hadPrevious, destination, kept) {
+            fs.atomicMove(staged.directory / DesktopLocations.APP, destination)
+            installed(destination, staged.version)
+        }
     }
 
     private fun activateWindows(staged: StagedDesktop): DesktopInstallation {
@@ -312,7 +315,13 @@ internal class DesktopInstaller(
         val root = locations.linuxRoot ?: throw unknownHome()
         val version = staged.version
         val destination = root / version
-        if (fs.metadataOrNull(destination) != null) fs.atomicMove(destination, staged.directory / "previous")
+        val kept = staged.directory / "previous"
+        val hadPrevious = fs.metadataOrNull(destination) != null
+        return swapped(hadPrevious, destination, kept) { linkCurrent(staged, root, destination) }
+    }
+
+    private fun linkCurrent(staged: StagedDesktop, root: Path, destination: Path): DesktopInstallation {
+        val version = staged.version
         fs.atomicMove(staged.directory / LINUX_APP, destination)
         val current = root / "current"
         val previous = fs.metadataOrNull(current)?.symlinkTarget?.name
@@ -329,6 +338,33 @@ internal class DesktopInstaller(
             fs.write(entry) { writeUtf8(linuxDesktopEntry(root)) }
         }
         return installed(current, version)
+    }
+
+    /**
+     * Moves the app at [destination] to [kept] (when there is one), runs [put] and, when it fails, puts the app back:
+     * the previous app is only removed with the stage once the new one is in place and reports its version.
+     */
+    @Suppress("SwallowedException") // its message is in the failure
+    private fun swapped(hadPrevious: Boolean, destination: Path, kept: Path, put: () -> DesktopInstallation) =
+        try {
+            if (hadPrevious) fs.atomicMove(destination, kept)
+            put()
+        } catch (failure: IOException) {
+            restore(hadPrevious, destination, kept)
+            throw DesktopFailure(ExitCode.CANNOT_WRITE, "✗ ostrom could not put the app in place: ${failure.message}")
+        } catch (failure: DesktopFailure) {
+            restore(hadPrevious, destination, kept)
+            throw failure
+        }
+
+    private fun restore(hadPrevious: Boolean, destination: Path, kept: Path) {
+        if (!hadPrevious || fs.metadataOrNull(kept) == null) return
+        deleteQuietly(destination)
+        try {
+            fs.atomicMove(kept, destination)
+        } catch (_: IOException) {
+            // the previous app stays in the stage folder, named in the message of the failure
+        }
     }
 
     private fun ran(command: List<String>, timeoutMillis: Int, what: String) {
@@ -350,7 +386,7 @@ internal class DesktopInstaller(
         try {
             fs.deleteRecursively(path, mustExist = false)
         } catch (_: IOException) {
-            // leftovers of a stage are removed by the next one or by hand
+            // a stage that cannot be removed is left for the person to delete
         }
     }
 

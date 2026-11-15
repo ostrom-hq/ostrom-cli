@@ -220,6 +220,27 @@ class DesktopInstallerTest {
     }
 
     @Test
+    fun anActivationThatFailsPutsThePreviousAppBack() {
+        val places = locations(OperatingSystem.MACOS)
+        versionInPackage = "1.0.0"
+        app(places, places.applications!! / "Ostrom.app")
+        versionInPackage = "1.2.3"
+        val installer = installer(OperatingSystem.MACOS)
+        val refused = failure {
+            val staged = installer.stage(installer.release("1.2.3"))
+            // the staged app changes after its checks: the installed one must not report the signed version
+            fs.write(places.versionFile(staged.directory / "Ostrom.app")) { writeUtf8("9.9.9\n") }
+            try {
+                installer.activate(staged)
+            } finally {
+                installer.discard(staged)
+            }
+        }
+        assertEquals(ExitCode.FAILED, refused.code)
+        assertEquals("1.0.0", places.at(places.applications!! / "Ostrom.app")?.version)
+    }
+
+    @Test
     fun macosWithoutATeamIdDoesNotInstall() {
         val refused = failure {
             installer(OperatingSystem.MACOS, teamId = null).let { it.install(it.release("1.2.3")) }

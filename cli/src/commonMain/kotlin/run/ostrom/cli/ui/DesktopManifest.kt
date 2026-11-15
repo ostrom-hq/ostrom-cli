@@ -65,12 +65,13 @@ internal class DesktopManifestVerifier(private val trust: ReleaseTrust) {
         val own = schema == 1L && body.text("product") == DesktopFormat.PRODUCT && body.text("tag") == version
         if (!own) throw unreadable()
         val assets = body.child("assets") ?: throw unreadable()
-        val listed = assets.keys.associateWith { target ->
+        // a target this CLI does not know is ignored: only its own is used
+        val listed = assets.keys.filter { it in DesktopFormat.TARGETS }.associateWith { target ->
             val entry = assets.child(target) ?: throw unreadable()
             val name = entry.text("fileName")
             val sha256 = entry.text("sha256")
             val size = (entry["size"] as? JsonPrimitive)?.longOrNull
-            val valid = target in DesktopFormat.TARGETS && name == DesktopFormat.fileName(version, target) &&
+            val valid = name == DesktopFormat.fileName(version, target) &&
                 sha256 != null && DesktopFormat.validSha256(sha256) && size != null &&
                 size in 1..DesktopFormat.MAX_PACKAGE_BYTES
             // the checks above say these are set
