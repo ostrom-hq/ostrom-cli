@@ -47,6 +47,8 @@ import kotlin.uuid.Uuid
  *   when the waits' server is connected: the agent of this execution starts with them as its first message, after
  *   the session's own first message if any; never taken when null.
  * @param newConversation The id of a new conversation of the agent, used when it has none to resume.
+ * @param inference Serves the agent's model calls on the pod's loopback under the execution's own credential, once the
+ *   launch is open (`runners.cloud.inference.v1`); the agent keeps its own provider configuration when null.
  */
 // Six collaborators and three tunings with defaults, all named at the call sites; one function per phase of a start.
 @Suppress("LongParameterList", "TooManyFunctions")
@@ -66,6 +68,7 @@ class Runner(
     private val servers: CloudServers? = null,
     private val answers: WaitAnswers? = null,
     private val newConversation: () -> String = { Uuid.random().toString() },
+    private val inference: InferenceProxy? = null,
 ) {
     private val output = Channel<ByteArray>(outputBuffer, BufferOverflow.DROP_OLDEST)
 
@@ -107,8 +110,14 @@ class Runner(
                 code
             }
         } finally {
-            current.terminal?.close()
+            close(current)
         }
+    }
+
+    /** Closes the terminal in use and stops the inference relay. */
+    private suspend fun close(current: Current) {
+        current.terminal?.close()
+        inference?.close()
     }
 
     private suspend fun prepareThenRun(base: Map<String, String>, current: Current): Int = coroutineScope {
@@ -176,6 +185,14 @@ class Runner(
         code
     }
 
+    /** The agent's model calls through the runner's relay, under a credential the agent never holds; none otherwise. */
+    private suspend fun relayed(launch: RunnerLaunch?, current: Current): Delivered =
+        if (launch is RunnerLaunch.Opened && inference != null) {
+            beating(current) { inference.start(launch) }
+        } else {
+            Delivered(emptyMap())
+        }
+
     /** The owner's variables asked of the server for an agent starting now, under [agentEnvironment], which wins. */
     private suspend fun withVariables(agentEnvironment: Map<String, String>): Map<String, String> =
         if (variables == null) agentEnvironment else variables.forStart() + agentEnvironment
@@ -214,11 +231,12 @@ class Runner(
         }
 
     /**
-     * Asks which of Ostrom's MCP servers the agent gets ([connected]), then installs what the owner receives, with
-     * unready heartbeats meanwhile, as during the preparation; nothing installed without [deliveries] or when the
-     * launch was refused (the agent then does not start). Claude Code's settings then get the todo's and the workflow's
-     * hooks for the servers connected ([CloudHookSettings]), over the team's. Last, the answers to the session's
-     * waits that arrived while it was paused ([firstMessage]), for the first terminal only.
+     * Starts the agent's inference relay ([relayed]), asks which of Ostrom's MCP servers the agent gets
+     * ([connected]), then installs what the owner receives, with unready heartbeats meanwhile, as during the
+     * preparation; nothing installed without [deliveries] or when the launch was refused (the agent then does not
+     * start). Claude Code's settings then get the todo's and the workflow's hooks for the servers connected
+     * ([CloudHookSettings]), over the team's. Last, the answers to the session's waits that arrived while it was
+     * paused ([firstMessage]), for the first terminal only.
      */
     @Suppress("ReturnCount") // Ended while asking, nothing to install, or installed.
     private suspend fun deliver(
@@ -226,12 +244,14 @@ class Runner(
         environment: Map<String, String>,
         current: Current,
     ): Delivered {
+        val relayed = relayed(launch, current)
+        if (relayed.code != null) return relayed
         var names = emptySet<String>()
         val asked = beating(current) { connected(launch).also { names = it.first }.second }
         if (asked.code != null) return asked
         val installer = deliveries.takeIf { launch !is RunnerLaunch.Refused }
         val installed = if (installer == null) null else beating(current) { installer.install(environment) }
-        val variables = asked.variables + installed?.variables.orEmpty()
+        val variables = relayed.variables + asked.variables + installed?.variables.orEmpty()
         val settings = variables[RunnerConfig.SETTINGS_VARIABLE] ?: environment[RunnerConfig.SETTINGS_VARIABLE]
         val hooked = variables + hookSettings(settings, names)
         if (installed?.code != null) return Delivered(hooked, installed.code)

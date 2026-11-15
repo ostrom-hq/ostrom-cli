@@ -15,6 +15,9 @@ package run.ostrom.cli.relay
  * instance's key), which the relay answers to `GET /api/v1/gates/catalog` from its own memory, out of the agent's reach
  * (security audit S2-20); null without a package, and the call then goes to Ostrom.
  * @property background True to send every model call as `x-ostrom-workload: background` (`--workload background`).
+ * @property inferenceCredential Where the inference routes take their credential instead of [agentToken]: a cloud
+ * runner's execution credential, held and renewed in the runner's memory (`runners.cloud.inference.v1`, TeamCode's
+ * `tcex_`); null for a local launch. When it has none, a model call is answered 503 with `Retry-After` and never sent.
  */
 data class RelayConfig(
     val serverUrl: String,
@@ -25,9 +28,20 @@ data class RelayConfig(
     val inference: Boolean,
     val gateCatalog: String? = null,
     val background: Boolean = false,
+    val inferenceCredential: InferenceCredential? = null,
 ) {
     /** Everything but the credential, so that a configuration printed in a log or an error never carries it. */
     override fun toString(): String = "RelayConfig(serverUrl=$serverUrl, agentToken=<redacted>, " +
         "userAgent=$userAgent, launchId=$launchId, mcpServers=$mcpServers, inference=$inference, " +
         "background=$background)"
+}
+
+/** The credential of the inference routes, asked for on every model call (TeamCode's `RunnerInference.token`). */
+fun interface InferenceCredential {
+    /**
+     * The credential to send now.
+     *
+     * @return It, or null when none is usable (the server is unreachable or refused it).
+     */
+    suspend fun token(): String?
 }
