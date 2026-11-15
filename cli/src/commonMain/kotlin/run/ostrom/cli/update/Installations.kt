@@ -78,16 +78,22 @@ internal class Installations(
         fileSystem.canonicalize(installationPath(executable)).toString()
             .equals(fileSystem.canonicalize(store.paths.launcher).toString(), ignoreCase = windows)
 
+    /** The installation [executable] runs from, or null when it is not one (or cannot be read as one). */
+    fun managed(executable: String?): InstallationStore? = try {
+        executable?.let(::of)
+    } catch (_: InstallationException) {
+        null
+    } catch (_: IOException) {
+        null
+    }
+
     /**
      * The path the hooks and MCP servers an agent starts must name: the stable launcher of the installation
      * [executable] runs from (a payload is deleted two updates later), else [executable] itself.
      */
-    fun stable(executable: String?): String? = try {
-        executable?.let { path -> of(path)?.let { it.paths.launcher.toString() } } ?: executable
-    } catch (_: InstallationException) {
-        executable
-    } catch (_: IOException) {
-        executable
+    fun stable(executable: String?): String? {
+        val store = managed(executable)
+        return if (store == null) executable else store.paths.launcher.toString()
     }
 }
 

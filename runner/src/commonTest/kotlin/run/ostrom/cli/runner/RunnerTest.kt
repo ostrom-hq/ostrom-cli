@@ -9,6 +9,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.awaitCancellation
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -210,6 +211,7 @@ class RunnerTest {
     private suspend fun TestScope.firstEnvironment(
         server: FakeServer,
         logs: MutableList<String> = mutableListOf(),
+        inference: InferenceProxy? = null,
     ): Map<String, String> {
         val environments = mutableListOf<Map<String, String>>()
         val runner = Runner(
@@ -219,10 +221,74 @@ class RunnerTest {
             mapOf("OSTROM_RUNNER_CHECKS" to "/elsewhere", "OSTROM_CHECK_HOST_SOCKET" to "/run/ostrom-check/check.sock"),
             clock,
             { logs += it },
+            inference = inference,
         )
         server.instructions.send(Result.success(Instruction.STOP))
         assertEquals(0, runner.run())
         return environments.single()
+    }
+
+    /** Points the agent at a relay and records the launch it was started for and its closing. */
+    private class FakeInferenceProxy : InferenceProxy {
+        val started = mutableListOf<String>()
+        var closed = false
+
+        override suspend fun start(launch: RunnerLaunch.Opened): Map<String, String> {
+            started += launch.launchId
+            return mapOf("ANTHROPIC_BASE_URL" to "http://127.0.0.1:1", "ANTHROPIC_API_KEY" to "")
+        }
+
+        override fun close() {
+            closed = true
+        }
+    }
+
+    @Test
+    fun anOpenedLaunchsAgentReachesModelsThroughTheRunnersRelay() = runTest {
+        val server = FakeServer()
+        server.launches.send(Result.success(RunnerLaunch.Opened("L-1", "ostrom_agent_secret")))
+        val proxy = FakeInferenceProxy()
+        val environment = firstEnvironment(server, inference = proxy)
+
+        assertEquals(listOf("L-1"), proxy.started)
+        assertEquals("http://127.0.0.1:1", environment["ANTHROPIC_BASE_URL"])
+        assertEquals("", environment["ANTHROPIC_API_KEY"], "The agent's own key is emptied")
+        assertTrue(proxy.closed, "Stopped with the runner")
+    }
+
+    @Test
+    fun aStopWhileTheRelayStartsEndsTheRunnerWithoutAnAgent() = runTest {
+        val server = FakeServer()
+        server.launches.send(Result.success(RunnerLaunch.Opened("L-1", "ostrom_agent_secret")))
+        val started = mutableListOf<String>()
+        val stuck = object : InferenceProxy {
+            override suspend fun start(launch: RunnerLaunch.Opened): Map<String, String> = awaitCancellation()
+
+            override fun close() = Unit
+        }
+        val runner = Runner(
+            config.copy(agent = "claude-code"),
+            server,
+            starter { script, _, _ -> FakeTerminal(script).also { started += script } },
+            emptyMap(),
+            clock,
+            {},
+            inference = stuck,
+        )
+        server.instructions.send(Result.success(Instruction.STOP))
+        assertEquals(0, runner.run())
+        assertTrue(started.isEmpty())
+    }
+
+    @Test
+    fun aRefusedLaunchStartsNoRelay() = runTest {
+        val server = FakeServer()
+        server.launches.send(Result.success(RunnerLaunch.Refused("over the limit")))
+        val proxy = FakeInferenceProxy()
+        val environment = firstEnvironment(server, inference = proxy)
+
+        assertTrue(proxy.started.isEmpty())
+        assertNull(environment["ANTHROPIC_BASE_URL"])
     }
 
     @Test

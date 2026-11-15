@@ -312,6 +312,23 @@ A refusal, an error or no answer in time leaves the server out, and the agent ke
 revoked when the launch ends. The server takes the owner (and the origin) of what the agent publishes or writes from
 the token, never from the call.
 
+## The agent's models through the runner's relay (`runners.cloud.inference.v1`)
+
+TeamCode's inference from the pod. In a Kubernetes pod, once the launch is open and the agent is Claude Code, the
+runner asks `POST /api/v1/cloud/runner/inference` for the execution's credential: a one-hour agent token of that
+launch, limited to inference, kept in the runner's memory only (`RunnerInference`). It is renewed after a third of its
+lifetime, measured on the runner's clock; while a renewal is in flight the current one is served, and one is never
+offered in its last five minutes. The runner starts the relay of a local launch (`relay`, inference only) on the pod's
+loopback, which the agent's container shares, and starts Claude Code as `ostrom run` does: `ANTHROPIC_BASE_URL` on the
+relay, `ANTHROPIC_AUTH_TOKEN` its random local token, and `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` and the
+`CLAUDE_CODE_USE_*` provider switches emptied, over the owner's variables. The relay sends each model call under the
+credential of the moment, and answers 503 with `Retry-After: 15` while it has none.
+
+The agent keeps its own provider configuration, and the pod log says so, on a server without the route (404), when
+the organization serves no model through Ostrom (`GET /api/v1/inference/v1/models` empty, the local launch's test),
+for another agent than Claude Code, and on a Docker delivery, whose containers do not share a loopback.
+`OSTROM_AGENT_TOKEN` is still given to the agent for Ostrom's MCP servers and hooks (above).
+
 ## The agent cannot read the runner token (S2-49)
 
 The agent and the runner never share a UID, a container, a process namespace or the token. They do share a group:

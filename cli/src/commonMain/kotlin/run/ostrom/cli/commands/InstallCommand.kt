@@ -9,11 +9,14 @@ import com.github.ajalt.clikt.parameters.options.option
 import kotlinx.coroutines.runBlocking
 import run.ostrom.cli.BuildInfo
 import run.ostrom.cli.CliDependencies
+import run.ostrom.cli.ExitCode
+import run.ostrom.cli.service.InstalledAt
 import run.ostrom.cli.update.UpdateRequest
 
 /**
- * `ostrom install [--version V] [--bundle DIR] [--root DIR] [--no-path]`: a verified release installed for this user
- * with an immutable launcher and one folder per version (TeamCode's `install`, without its service).
+ * `ostrom install [--version V] [--bundle DIR] [--root DIR] [--no-path] [--no-service]`: a verified release installed
+ * for this user with an immutable launcher and one folder per version (TeamCode's `install`), then the local service,
+ * started at login.
  */
 internal class InstallCommand(private val dependencies: CliDependencies) : CliktCommand(name = "install") {
     override fun help(context: Context) =
@@ -29,6 +32,10 @@ internal class InstallCommand(private val dependencies: CliDependencies) : Clikt
         "--no-path",
         help = "Do not make ostrom reachable by name (~/.local/bin/ostrom, or the user PATH on Windows)",
     ).flag()
+    val noService by option(
+        "--no-service",
+        help = "Do not set up the local service (this device's daemon); OSTROM_NO_SERVICE does the same",
+    ).flag()
 
     override fun run() {
         val environment = dependencies.environment
@@ -43,6 +50,8 @@ internal class InstallCommand(private val dependencies: CliDependencies) : Clikt
             noPath = noPath,
         )
         val code = runBlocking { dependencies.selfUpdate.install(request, apiVersionOf(dependencies)) }
+        // the installation is done and kept: the service step only says what it did
+        if (code == ExitCode.OK.code) dependencies.reportServiceStep(noService, InstalledAt(root))
         throw ProgramResult(code)
     }
 }

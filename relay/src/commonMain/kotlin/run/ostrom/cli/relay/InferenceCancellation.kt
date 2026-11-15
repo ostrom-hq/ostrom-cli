@@ -41,20 +41,20 @@ internal class InferenceCancellation(
     private val upstream: () -> HttpClient,
     private val exchange: UpstreamExchange,
 ) {
-    /** Runs [send] for a new [InferenceAttempt], and cancels it upstream when it ends unfinished. */
-    suspend fun guard(send: suspend (InferenceAttempt) -> Unit) {
+    /** Runs [send] for a new [InferenceAttempt], and cancels it upstream under [bearer] when it ends unfinished. */
+    suspend fun guard(bearer: String = config.agentToken, send: suspend (InferenceAttempt) -> Unit) {
         val attempt = InferenceAttempt(Uuid.random().toString())
         try {
             send(attempt)
         } catch (e: CancellationException) {
-            if (!attempt.consumed) cancel(attempt.id)
+            if (!attempt.consumed) cancel(attempt.id, bearer)
             throw e
         }
-        if (attempt.answered && !attempt.consumed) cancel(attempt.id)
+        if (attempt.answered && !attempt.consumed) cancel(attempt.id, bearer)
     }
 
-    /** Asks Ostrom to stop the call [id]; an answer under 500 ends it, whatever it says. */
-    internal suspend fun cancel(id: String) = withContext(NonCancellable) {
+    /** Asks Ostrom to stop the call [id] under the call's [bearer]; an answer under 500 ends it, whatever it says. */
+    internal suspend fun cancel(id: String, bearer: String = config.agentToken) = withContext(NonCancellable) {
         withTimeoutOrNull(DEADLINE) {
             upstream().use { control ->
                 var tries = 0
@@ -65,7 +65,7 @@ internal class InferenceCancellation(
                     exchange.attempt(control, TRY_TIMEOUT, {
                         method = HttpMethod.Post
                         url("${config.serverUrl}/api/v1/inference/requests/$id/cancel")
-                        identify(config)
+                        identify(config, bearer)
                     }) { done = it.status.value < SERVER_ERROR }
                 }
             }

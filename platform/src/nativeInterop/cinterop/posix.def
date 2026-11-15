@@ -512,6 +512,39 @@ static inline void ostrom_unlock_file(int fd) {
 }
 
 /*
+ * Opens (creating it, owner-only, never through a symbolic link, never inherited by a child) and locks the file at
+ * `path` with flock, without waiting. Returns the descriptor to give back to ostrom_unlock_file, -2 when another holder
+ * has it, or -1 (errno says why). The local service holds it for its whole run.
+ */
+static inline int ostrom_try_lock_file(const char *path) {
+    int fd;
+    do { fd = open(path, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600); } while (fd < 0 && errno == EINTR);
+    if (fd < 0) return -1;
+    int locked;
+    do { locked = flock(fd, LOCK_EX | LOCK_NB); } while (locked != 0 && errno == EINTR);
+    if (locked != 0) {
+        int error = errno;
+        close(fd);
+        errno = error;
+        return (error == EWOULDBLOCK || error == EAGAIN) ? -2 : -1;
+    }
+    return fd;
+}
+
+/* The local service stops on SIGTERM or SIGINT: the handler only raises a flag the service loop polls. */
+static volatile sig_atomic_t ostrom_service_stopping = 0;
+static void ostrom_service_signal(int signal_number) { (void)signal_number; ostrom_service_stopping = 1; }
+static inline void ostrom_service_signals(void) {
+    struct sigaction action;
+    memset(&action, 0, sizeof action);
+    action.sa_handler = ostrom_service_signal;
+    sigemptyset(&action.sa_mask);
+    sigaction(SIGTERM, &action, NULL);
+    sigaction(SIGINT, &action, NULL);
+}
+static inline int ostrom_service_stop_requested(void) { return ostrom_service_stopping != 0; }
+
+/*
  * What a crashing `ostrom hook` says and exits with (security audit CLI n°2, M1): a stack overflow, a bad access, an
  * abort (an uncaught Kotlin exception, memory exhausted) never leave the agent a code other than the refusal's, which
  * it would read as "run the tool". Copied here when the handlers are set: the handler only writes and exits.

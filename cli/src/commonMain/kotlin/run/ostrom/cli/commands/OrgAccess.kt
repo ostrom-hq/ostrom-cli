@@ -183,6 +183,7 @@ internal class OrgAccess(
  */
 private val LOGIN_READ_RIGHTS = setOf(
     "profile:read", "orgs:read", "workflows:read", "receipts:read", "gates:read", "mcp:read", "rules:read",
+    "budgets:read", "accounts:read", "inference:read", "guidance",
 )
 
 /**

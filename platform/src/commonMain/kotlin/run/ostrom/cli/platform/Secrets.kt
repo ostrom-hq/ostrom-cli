@@ -198,8 +198,11 @@ internal interface Vault {
 /** The system store of this platform, or null where there is none (the JVM test target). */
 internal expect fun systemVault(): Vault?
 
-/** The numeric id of the user running the CLI (`getuid`), stable whatever the environment says. */
-internal expect fun currentUserId(): String
+/**
+ * The numeric id of the user running the CLI (`getuid`), stable whatever the environment says; empty on Windows. Also
+ * the user the jobs of `ostrom update --automatic` belong to on macOS and Linux.
+ */
+expect fun currentUserId(): String
 
 /** [SecretStore] over the system store [vault]: one entry per secret, under [SECRET_SERVICE_NAME]. */
 internal class VaultSecretStore(private val vault: Vault) : SecretStore {

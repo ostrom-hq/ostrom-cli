@@ -5,6 +5,7 @@ package run.ostrom.cli.platform
 @ExcludeFromCoverage
 internal actual fun systemVault(): Vault? = null
 
+/** The id of the user running the CLI (see the expect declaration). */
 // coverage: test-only JVM target; the shipped native actual is getuid (posixMain), proved by SecretServiceVaultTest.
 @ExcludeFromCoverage
-internal actual fun currentUserId(): String = System.getProperty("user.name").orEmpty()
+actual fun currentUserId(): String = System.getProperty("user.name").orEmpty()

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli
 
+import com.github.ajalt.clikt.core.CliktCommand
 import run.ostrom.cli.api.Download
 import run.ostrom.cli.api.OstromApi
 import run.ostrom.cli.api.ServerRequest
@@ -31,7 +32,10 @@ import run.ostrom.cli.platform.SecretBackend
 import run.ostrom.cli.platform.SecretStore
 import run.ostrom.cli.platform.StandardInput
 import run.ostrom.cli.platform.terminalSafe
+import run.ostrom.cli.service.serviceCommand
 import run.ostrom.cli.update.AgentSessionsImpl
+import run.ostrom.cli.service.ServiceStep
+import run.ostrom.cli.update.Installations
 import run.ostrom.cli.update.ReleaseTrust
 import run.ostrom.cli.update.ReleaseVerification
 import run.ostrom.cli.update.ReleaseVectors
@@ -92,6 +96,9 @@ open class CliKit {
 
     /** The system the command line runs on. */
     protected var operatingSystem = OperatingSystem.LINUX
+
+    /** The managed installations `ostrom update` sees; none by default. */
+    internal var managedInstallations: Installations? = null
     protected val fileSystem = FakeFileSystem()
     protected val hookCalls = mutableListOf<List<String>>()
     protected val statistics = mutableListOf<String>()
@@ -100,6 +107,9 @@ open class CliKit {
     protected val clouds = mutableListOf<Pair<CloudStart, CloudSite>>()
     protected val attached = mutableListOf<Pair<String, CloudSite>>()
     protected val waits = mutableListOf<Long>()
+
+    /** What a wait does besides being recorded: a test ends a loop that waits forever by throwing from it. */
+    protected var onSleep: (Long) -> Unit = {}
     protected val typed = ArrayDeque<String>()
 
     /** What is typed without echo (a secret). */
@@ -167,7 +177,7 @@ open class CliKit {
     protected fun assertOut(text: String) = assertTrue(console.out.contains(text), console.out.toString())
 
     @Suppress("LongParameterList") // one default per dependency a test replaces
-    protected fun cli(
+    internal fun cli(
         environment: Map<String, String> = mapOf("HOME" to "/home/maya"),
         installed: Set<String> = setOf("git", "claude"),
         api: (String) -> OstromApi = { error("no server in this test") },
@@ -176,8 +186,11 @@ open class CliKit {
         capture: ProcessCapture = FakeMysql(),
         secrets: () -> SecretStore = storeIn(SecretBackend.KEYCHAIN),
         postHogKey: String = "",
+        service: (CliDependencies) -> CliktCommand = ::serviceCommand,
+        serviceStep: ServiceStep = ServiceStep.None,
     ) = OstromCli(
-        CliDependencies(
+        service = service,
+        dependencies = CliDependencies(
             console = console,
             environment = FakeEnvironment(environment, operatingSystem),
             files = FileStoreImpl(fileSystem),
@@ -199,7 +212,10 @@ open class CliKit {
             executable = executable,
             temporaryDirectory = "/tmp",
             agents = AgentRunner { request, site -> 7.also { launches += request to site } },
-            sleep = { waits += it },
+            sleep = {
+                waits += it
+                onSleep(it)
+            },
             readLine = { typed.removeFirstOrNull() },
             readSecret = { hidden.removeFirstOrNull() },
             openUrl = { url -> browser.also { opened += url } },
@@ -212,7 +228,9 @@ open class CliKit {
                 sessions = AgentSessionsImpl(FakeEnvironment(environment), fileSystem, "/tmp", noRelay),
                 probe = { binary, version, api -> true.also { probes += Triple(binary, version, api) } },
                 trust = ReleaseTrust(ReleaseVectors.KEY_PEM),
+                installations = managedInstallations,
             ),
+            serviceStep = serviceStep,
             releaseVerification = ReleaseVerification(fileSystem, ReleaseTrust(ReleaseVectors.KEY_PEM)),
             updateNotice = UpdateNotice(FileStoreImpl(fileSystem), NOTICE, "1.0.0", { now }, { noticeAdvice() }) {
                 true.also { refreshes++ }
@@ -228,6 +246,7 @@ open class CliKit {
             sendStatistics = { _, body -> statistics += body },
             secrets = secrets,
             clock = { now },
+            userId = { "1000" },
         ),
     )
 

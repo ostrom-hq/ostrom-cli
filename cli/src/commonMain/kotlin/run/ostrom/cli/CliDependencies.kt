@@ -56,11 +56,14 @@ import run.ostrom.cli.platform.LoopbackHttpImpl
 import run.ostrom.cli.platform.ProcessCapture
 import run.ostrom.cli.platform.ProcessCaptureImpl
 import run.ostrom.cli.platform.ProcessLauncherImpl
+import run.ostrom.cli.platform.currentUserId
 import run.ostrom.cli.platform.RawTerminalImpl
 import run.ostrom.cli.platform.SecretStore
 import run.ostrom.cli.platform.SystemInstallationFiles
 import run.ostrom.cli.platform.currentExecutable
 import run.ostrom.cli.platform.ExcludeFromCoverage
+import run.ostrom.cli.service.ServiceStep
+import run.ostrom.cli.service.systemServiceStep
 import run.ostrom.cli.platform.stderrIsTerminal
 import run.ostrom.cli.platform.systemSecretStore
 import run.ostrom.cli.relay.LocalRelayStarterImpl
@@ -108,6 +111,7 @@ import kotlin.time.TimeSource
  * @property openUrl Opens a page in the developer's browser; false when it could not.
  * @property cloud Runs `ostrom run <agent> --cloud` and `ostrom attach`.
  * @property selfUpdate `ostrom update`.
+ * @property serviceStep The local service step at the end of `ostrom install` and `ostrom update`.
  * @property releaseVerification `ostrom verify-release`.
  * @property updateNotice The once-a-day update notice, kept in the CLI folder; null when there is none.
  * @property stderrIsTerminal Whether stderr is a terminal, where the update notice is said.
@@ -117,6 +121,7 @@ import kotlin.time.TimeSource
  * @property postHogKey The usage statistics destination of this build; blank means none.
  * @property sendStatistics Posts usage statistics (opt-in only).
  * @property clock The time, in milliseconds since the epoch (the expiry of `ostrom login --admin`'s token).
+ * @property userId The numeric id of the user running this process (macOS, Linux), for `ostrom update --automatic`.
  */
 @Suppress("LongParameterList") // The composition root: one parameter per dependency, each replaced in tests.
 class CliDependencies(
@@ -141,6 +146,7 @@ class CliDependencies(
     val openUrl: (String) -> Boolean,
     val cloud: CloudRunner,
     val selfUpdate: SelfUpdate,
+    val serviceStep: ServiceStep = ServiceStep.None,
     val updateNotice: UpdateNotice? = null,
     val releaseVerification: ReleaseVerification =
         ReleaseVerification(FileSystem.SYSTEM, ReleaseTrust(floor = BuildInfo.FLOOR)),
@@ -149,6 +155,7 @@ class CliDependencies(
     val sendStatistics: suspend (url: String, body: String) -> Unit,
     val secrets: () -> SecretStore = { systemSecretStore(environment, files) },
     val clock: () -> Long = SessionHooks::epochMillis,
+    val userId: () -> String? = ::currentUserId,
 ) {
     /** The opt-in usage statistics. */
     val usage: UsageStatistics by lazy {
@@ -172,6 +179,7 @@ class CliDependencies(
     /** The real wiring. */
     companion object {
         /** The real wiring of the CLI. */
+        @Suppress("LongMethod") // one line per collaborator of the command line
         fun create(): CliDependencies {
             val console = ConsoleImpl()
             val environment = EnvironmentImpl()
@@ -232,6 +240,7 @@ class CliDependencies(
                 openUrl = BrowserOpener(ProcessLauncherImpl(), environment.operatingSystem)::open,
                 cloud = cloudRunner(console, api),
                 selfUpdate = selfUpdate(environment, console, sessions, installations),
+                serviceStep = systemServiceStep(installations),
                 updateNotice = updateNotice(environment, files, self, sessions),
                 stderrIsTerminal = ::stderrIsTerminal,
                 postHogKey = BuildInfo.POSTHOG_KEY,

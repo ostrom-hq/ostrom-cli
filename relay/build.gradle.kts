@@ -6,6 +6,9 @@ plugins {
     id("ostrom.kmp")
 }
 
+// The contract's models of the capacity advice the relay claims for the agent's hooks (GuidanceForwarder).
+val ostromCoreVersion = providers.gradleProperty("ostromCoreVersion").get()
+
 kotlin {
     targets.withType<KotlinNativeTarget>().configureEach {
         if (konanTarget.family == Family.LINUX) {
@@ -22,6 +25,7 @@ kotlin {
             implementation(libs.ktor.server.cio)
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.engine.defaults)
+            implementation("run.ostrom:ostrom-api:$ostromCoreVersion")
         }
         commonTest.dependencies {
             implementation(libs.ktor.server.test.host)

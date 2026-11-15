@@ -69,6 +69,10 @@ internal class AgentCommand(
         "--no-activity",
         help = "Do not report to your team whether the agent works or waits for you (Claude Code, Codex)",
     ).flag()
+    val noGuidance by option(
+        "--no-guidance",
+        help = "Do not give the agent your team's capacity advice in this session (Claude Code, Codex)",
+    ).flag()
     val label by option(
         "--label",
         help = "key=value kept on this launch and on its sessions, to filter them (repeat it, at most 16)",
@@ -132,6 +136,7 @@ internal class AgentCommand(
             background = workload == BACKGROUND,
             variables = !noVariables,
             activity = !noActivity,
+            guidance = !noGuidance,
             labels = labels,
         )
         throw ProgramResult(runBlocking { dependencies.agents.run(request, site) })
@@ -150,9 +155,11 @@ internal class AgentCommand(
         if (cloud && noVariables) {
             throw UsageError("--no-variables is for a launch on this machine: it does not go with --cloud")
         }
-        // a cloud session's runner sees the agent's turns itself: its hooks report no activity (TeamCode's)
-        if (cloud && noActivity) {
-            throw UsageError("--no-activity is for a launch on this machine: it does not go with --cloud")
+        // a cloud session's runner sees the agent's turns itself: its hooks report no activity (TeamCode's), and the
+        // capacity advice is asked for by a local launch's hooks
+        val localHooks = listOfNotNull("--no-activity".takeIf { noActivity }, "--no-guidance".takeIf { noGuidance })
+        if (cloud && localHooks.isNotEmpty()) {
+            throw UsageError("${localHooks.first()} is for a launch on this machine: it does not go with --cloud")
         }
         // the agents that read a repository's own configuration only when the developer asks
         val trusting = agent == Agent.CLAUDE || agent == Agent.GEMINI

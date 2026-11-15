@@ -24,8 +24,11 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
- * `ostrom status [--json]`: who, in which organisation, this repository's harness, the yeses waiting, this device
- * (CLI.md § `ostrom status`). The organisation is the one the CLI acts in (`OSTROM_ORG`, the one `ostrom init` kept,
+ * `ostrom status [--json]`: who, in which organisation, this repository's harness, the yeses waiting, the capacity
+ * (the queue, your budget, the advice, the shared accounts: [CapacityReport], TeamCode's `teamcode status`), this
+ * device (CLI.md § `ostrom status`).
+ *
+ * The organisation is the one the CLI acts in (`OSTROM_ORG`, the one `ostrom init` kept,
  * else the person's only one), and the harness and the yeses are read in it. When Ostrom is unreachable or fails
  * (5xx), what could be read is shown, the rest as unknown, and the exit code is 69; `--json` stays JSON, with the same
  * keys, null for what is not known.
@@ -50,14 +53,16 @@ internal class StatusCommand(private val dependencies: CliDependencies) : CliktC
         val org = (orgs as? ServerAnswer.Ok)?.let { organisationOf(it.body) }
         val scoped = org?.let { ServerJson(ApiServerTransport(dependencies.api(signed.serverUrl), it.id)) }
         val repository = dependencies.currentRepo()
-        val (harness, waiting) = runBlocking {
+        val (harness, waiting, capacity) = runBlocking {
             coroutineScope {
                 val harness = async { harnessOf(scoped ?: signed.server, signed.token, repository) }
                 val waiting = async { waitingOf(scoped ?: signed.server, signed.token) }
-                harness.await() to waiting.await()
+                // the capacity is the organisation's: without one, not read
+                val capacity = async { scoped?.let { readCapacity(it, signed.token, dependencies.clock()) } }
+                Triple(harness.await(), waiting.await(), capacity.await())
             }
         }
-        val facts = Facts(login, org, device, repository, harness, waiting)
+        val facts = Facts(login, org, device, repository, harness, waiting, capacity)
         if (json) dependencies.console.data(facts.json() + "\n") else dependencies.console.out(facts.text())
         val failed = listOfNotNull(failing(orgs), harness.down, waiting.down).firstOrNull()
         failed?.let { said(it, "some lines are unknown") }
@@ -147,6 +152,7 @@ private class Device(val serverUrl: String, val kid: String?) {
 }
 
 /** What status shows. */
+@Suppress("LongParameterList") // one property per line of the status
 private class Facts(
     val login: String,
     val org: Org?,
@@ -154,6 +160,7 @@ private class Facts(
     val repository: String? = null,
     val harness: Read<String> = Read(null, known = false),
     val waiting: Read<Waiting> = Read(null, known = false),
+    val capacity: CapacityReport? = null,
 ) {
     fun text(): String {
         val where = if (org == null) device.host else "${org.name} (${device.host})"
@@ -172,7 +179,8 @@ private class Facts(
             1 -> "1$more request needs your yes (ostrom inbox)"
             else -> "${count.count}$more requests need your yes (ostrom inbox)"
         }
-        return "Signed in   $who\nRepository  $repo\nWaiting     $yes\nThis device ${device.line}\n"
+        val sections = capacity?.text().orEmpty()
+        return "Signed in   $who\nRepository  $repo\nWaiting     $yes\n${sections}This device ${device.line}\n"
     }
 
     /** Always the same keys (CLI.md principle 6): what is not known is null, never missing. */
@@ -188,7 +196,7 @@ private class Facts(
             "waitingComplete" to JsonPrimitive(waiting.value?.complete),
             "version" to JsonPrimitive(BuildInfo.VERSION),
             "pinnedKey" to JsonPrimitive(device.kid),
-        ),
+        ) + (capacity ?: CapacityReport()).json(),
     ).toString()
 }
 

@@ -49,14 +49,22 @@ data class UpdateRequest(
     val noPath: Boolean = false,
 )
 
-/** A step of [SelfUpdate] that stops it: the exit code and what is said. */
-internal open class Stop(val code: ExitCode, val text: String) : Exception(text)
+/**
+ * A step of [SelfUpdate] that stops it: the exit code and what is said, and the [diagnostic] an automatic update
+ * records (`release_<exit code>` unless the step names its own, as a refusal of the installation does).
+ */
+internal open class Stop(
+    val code: ExitCode,
+    val text: String,
+    val diagnostic: String = "release_${code.name.lowercase()}",
+) : Exception(text)
 
 /** No release is published at an address asked for (HTTP 404), told apart from a release without this target. */
 private class NoRelease(text: String) : Stop(ExitCode.NOT_FOUND, text)
 
-/** Stops [SelfUpdate] with [code], saying [text]. */
-internal fun stop(code: ExitCode, text: String): Nothing = throw Stop(code, text)
+/** Stops [SelfUpdate] with [code], saying [text]; [diagnostic] names it for an automatic update. */
+internal fun stop(code: ExitCode, text: String, diagnostic: String? = null): Nothing =
+    throw if (diagnostic == null) Stop(code, text) else Stop(code, text, diagnostic)
 
 
 /** A release manifest that does not read as one. */
@@ -69,6 +77,7 @@ private fun refuseIn(sessions: AgentSessions) {
             ExitCode.REFUSED,
             "✗ ostrom does not update itself while an agent's session runs ($it): its hooks run this binary. " +
                 "Nothing was changed. Run ostrom update once the sessions have ended.",
+            SESSION_RUNNING,
         )
     }
 }
@@ -131,7 +140,7 @@ class SelfUpdate internal constructor(
     private val sessions: AgentSessions,
     private val probe: InstallationProbe,
     private val trust: ReleaseTrust = ReleaseTrust(),
-    private val installations: Installations? = null,
+    internal val installations: Installations? = null,
     private val link: (InstallationPaths) -> CommandPathOutcome = { CommandPathOutcome.Ready(emptyList()) },
 ) {
     private val managed = ManagedUpdate(fileSystem, unpack, say, probe)
@@ -295,6 +304,35 @@ class SelfUpdate internal constructor(
         manifest(request.copy(version = null)).version
     } catch (_: Stop) {
         null
+    }
+
+    /** The signed latest release, for an automatic update of [request]'s version; stops as [update] does. */
+    internal suspend fun releaseCheck(request: UpdateRequest): ReleaseCheck =
+        ReleaseCheck(request.current, manifest(request.copy(version = null)))
+
+    /**
+     * An automatic update: the release [candidate] installed into [store] and selected, through the same checks as a
+     * managed `ostrom update` (never inside an agent's session, the floors, the archive's checksum, the probe of the
+     * new binary). The version selected, or null when it already was; stops as [update] does.
+     *
+     * @param apiVersion The API version of the server this device works with.
+     */
+    internal suspend fun automaticInstall(
+        store: InstallationStore,
+        request: UpdateRequest,
+        candidate: ReleaseCheck,
+        apiVersion: suspend () -> Int,
+    ): InstalledVersion? {
+        refuseIn(sessions)
+        val asset = candidate.asset
+        floorRefusal(asset.version, request.current, asset.floor, trust.floor)?.let { stop(ExitCode.REFUSED, it) }
+        val api = apiVersion()
+        val archive = fetch(asset.url, MAX_BINARY_BYTES, request)
+        checked(asset, archive)
+        return managed.writing(store) {
+            val before = managed.guard { store.state() }?.current
+            managed.put(store, asset, archive, api).takeIf { it != before }
+        }
     }
 
     /**
@@ -513,6 +551,18 @@ class SelfUpdate internal constructor(
         const val REINSTALL = "Install the version you want with ostrom update --version."
     }
 }
+
+/**
+ * The signed latest release [asset] seen by an automatic update of the version [currentVersion] (TeamCode's
+ * `ReleaseCheck`).
+ */
+internal class ReleaseCheck(val currentVersion: String, val asset: Asset) {
+    /** True when the release is later than [currentVersion]. */
+    val updateAvailable: Boolean get() = newer(asset.version, currentVersion)
+}
+
+/** An agent's session runs: an automatic update waits for the next attempt. */
+internal const val SESSION_RUNNING = "release_session_running"
 
 /**
  * `ostrom update --check --json`: one line, from the signed manifest only. [latest] and [keyId] are null when no

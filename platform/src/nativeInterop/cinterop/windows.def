@@ -9,6 +9,8 @@ linkerOpts = -lkernel32 -ladvapi32 -lws2_32 -luser32
 #include <mstcpip.h>
 #include <windows.h>
 #include <wincred.h>
+#include <sddl.h>
+#include <stdlib.h>
 #include <string.h>
 
 static BOOL WINAPI ostrom_ignore_console_event(DWORD event) { (void)event; return TRUE; }
@@ -491,6 +493,58 @@ static inline void ostrom_unlock_file_w(void *file) {
     ZeroMemory(&whole, sizeof whole);
     UnlockFileEx((HANDLE)file, 0, MAXDWORD, MAXDWORD, &whole);
     CloseHandle((HANDLE)file);
+}
+
+/*
+ * Opens (creating it, never through a reparse point) and locks the first byte of the UTF-16 `path` with LockFileEx,
+ * without waiting. The handle is not inheritable, so a child never holds the lock. Returns the handle to close, or
+ * NULL with *busy set to 1 when another holder has it (0 for any other failure).
+ */
+static inline void *ostrom_try_lock_file_w(const unsigned short *path, int *busy) {
+    *busy = 0;
+    DWORD attributes = GetFileAttributesW((LPCWSTR)path);
+    if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT)) return NULL;
+    HANDLE file = CreateFileW((LPCWSTR)path, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                              OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+    if (file == INVALID_HANDLE_VALUE) return NULL;
+    OVERLAPPED position;
+    ZeroMemory(&position, sizeof position);
+    if (!LockFileEx(file, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &position)) {
+        *busy = GetLastError() == ERROR_LOCK_VIOLATION;
+        CloseHandle(file);
+        return NULL;
+    }
+    return file;
+}
+
+/*
+ * Console control events (Ctrl+C, Ctrl+Break, closing the window, logoff, shutdown) become a flag the local service
+ * polls, like SIGTERM on POSIX. Only `ostrom service serve` installs it.
+ */
+static volatile LONG ostrom_service_stop_flag = 0;
+static BOOL WINAPI ostrom_service_control(DWORD event) {
+    if (event == CTRL_C_EVENT || event == CTRL_BREAK_EVENT || event == CTRL_CLOSE_EVENT ||
+        event == CTRL_LOGOFF_EVENT || event == CTRL_SHUTDOWN_EVENT) {
+        InterlockedExchange(&ostrom_service_stop_flag, 1);
+        return TRUE;
+    }
+    return FALSE;
+}
+static inline void ostrom_service_signals(void) { SetConsoleCtrlHandler(ostrom_service_control, TRUE); }
+static inline int ostrom_service_stop_requested(void) { return InterlockedCompareExchange(&ostrom_service_stop_flag, 0, 0) != 0; }
+
+/* The SID string of this process's user, which the caller frees with LocalFree; NULL when it cannot be read. */
+static inline wchar_t *ostrom_user_sid(void) {
+    HANDLE token = NULL;
+    DWORD size = 0;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return NULL;
+    GetTokenInformation(token, TokenUser, NULL, 0, &size);
+    TOKEN_USER *user = (TOKEN_USER *)malloc(size);
+    wchar_t *sid = NULL;
+    if (user && GetTokenInformation(token, TokenUser, user, size, &size)) ConvertSidToStringSidW(user->User.Sid, &sid);
+    free(user);
+    CloseHandle(token);
+    return sid;
 }
 
 #ifndef SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE

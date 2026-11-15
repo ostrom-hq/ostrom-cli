@@ -190,7 +190,7 @@ class ClaudeAdapter : AgentAdapter {
         // connected (workflows.deliver.v1); Claude Code runs the entries of an event side by side
         val steps = if (layout.workflowDelivery) entry(WORKFLOW_STOP, WORKFLOW_STOP_SECONDS, null) else emptyList()
         val stops = stop + steps
-        val ours = activity(layout, if (stops.isEmpty()) events else events + ("Stop" to stops))
+        val ours = activity(layout, guidance(layout, if (stops.isEmpty()) events else events + ("Stop" to stops)))
         // the team hooks the member approved run after Ostrom's on each event, by the absolute path of their command
         val team = layout.teamHooks.flatMap { hook ->
             val handler = mapOf("type" to "command", "command" to quoted(hook.command), "timeout" to hook.seconds)
@@ -199,6 +199,26 @@ class ClaudeAdapter : AgentAdapter {
         }.groupBy({ it.first }, { it.second })
         val all = (ours.keys + team.keys).associateWith { ours[it].orEmpty() + team[it].orEmpty() }
         files.write(join(layout.plugin, "hooks", "hooks.json"), pretty(objectOf("hooks" to all)))
+    }
+
+    /**
+     * [hooks] with the guidance's: on `UserPromptSubmit` and every `PreToolUse`, an HTTP hook to the relay that answers
+     * the session's new capacity advice as the agent's additional context (TeamCode's session plugin and
+     * `GuidanceHook`), with the agent's own relay capability read from its environment. Ostrom's gate stays first.
+     */
+    private fun guidance(
+        layout: SessionLayout,
+        hooks: Map<String, List<Map<String, Any?>>>,
+    ): Map<String, List<Map<String, Any?>>> {
+        if (!layout.guidance) return hooks
+        val handler = relayHook(layout, "/guidance", GUIDANCE_SECONDS)
+        val groups = mapOf(
+            "PreToolUse" to mapOf("matcher" to "*", "hooks" to listOf(handler)),
+            "UserPromptSubmit" to mapOf("hooks" to listOf(handler)),
+        )
+        return (hooks.keys + groups.keys).associateWith { event ->
+            hooks[event].orEmpty() + listOfNotNull(groups[event])
+        }
     }
 
     /**
@@ -211,14 +231,7 @@ class ClaudeAdapter : AgentAdapter {
         hooks: Map<String, List<Map<String, Any?>>>,
     ): Map<String, List<Map<String, Any?>>> {
         if (!layout.activity) return hooks
-        val token = LaunchVariables.RELAY_TOKEN
-        val handler = mapOf(
-            "type" to "http",
-            "url" to "${layout.relay.url}/activity",
-            "timeout" to ACTIVITY_SECONDS,
-            "headers" to mapOf("Authorization" to "Bearer \${$token}"),
-            "allowedEnvVars" to listOf(token),
-        )
+        val handler = relayHook(layout, "/activity", ACTIVITY_SECONDS)
         val group = mapOf("hooks" to listOf(handler))
         return (hooks.keys + ACTIVITY_EVENTS).associateWith { event ->
             hooks[event].orEmpty() + if (event in ACTIVITY_EVENTS) listOf(group) else emptyList()
@@ -266,6 +279,9 @@ class ClaudeAdapter : AgentAdapter {
 
         /** The relay answers at once; TeamCode's HTTP hooks have 4 s. */
         private const val ACTIVITY_SECONDS = 4L
+
+        /** TeamCode's guidance hook: the relay bounds its lookup at 2.5 s, its HTTP hook has 4 s. */
+        private const val GUIDANCE_SECONDS = 4L
 
         /** The Stop hook's timeout: it holds the agent for a wait's answer, a day at most. */
         private const val WAKE_SECONDS = 86_400L
@@ -333,4 +349,16 @@ class ClaudeAdapter : AgentAdapter {
             "CLAUDE_CODE_USE_FOUNDRY",
         )
     }
+}
+
+/** An HTTP hook to the relay's [path], with the agent's own relay capability read from its environment. */
+private fun relayHook(layout: SessionLayout, path: String, seconds: Long): Map<String, Any?> {
+    val token = LaunchVariables.RELAY_TOKEN
+    return mapOf(
+        "type" to "http",
+        "url" to "${layout.relay.url}$path",
+        "timeout" to seconds,
+        "headers" to mapOf("Authorization" to "Bearer \${$token}"),
+        "allowedEnvVars" to listOf(token),
+    )
 }

@@ -37,6 +37,13 @@ internal const val INFERENCE_BODY_LIMIT = 4 * 1024 * 1024
 
 private const val MCP_SESSION_HEADER = "Mcp-Session-Id"
 
+/** When an agent refused for want of a model credential may retry: the runner asks the server again by then. */
+private const val NO_CREDENTIAL_RETRY_SECONDS = 15
+
+/** The refusal of a model call without a usable credential, in the Anthropic error shape the agents retry on. */
+private const val NO_CREDENTIAL_BODY = "{\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\"," +
+    "\"message\":\"Ostrom has no model credential for this session right now; retry shortly.\"}}"
+
 /** The MCP server every launch connects (the launcher's built-in one): Ostrom's waits server, not a relayed one. */
 internal const val OSTROM_SERVER = "ostrom"
 private const val WAITS_MCP = "/api/v1/waits/mcp"
@@ -191,13 +198,26 @@ internal class InferenceForwarder(
 ) {
     private val cancellation = InferenceCancellation(config, upstream, exchange)
 
-    /** Forwards [call] to [upstreamPath]. */
+    /**
+     * Forwards [call] to [upstreamPath], under the model calls' own credential when the relay has one
+     * ([RelayConfig.inferenceCredential]); without a usable one, 503 and `Retry-After` instead of a call Ostrom would
+     * refuse (TeamCode's runner proxy).
+     */
     suspend fun forward(call: ApplicationCall, upstreamPath: String) {
+        val credential = config.inferenceCredential
+        val bearer = if (credential == null) config.agentToken else credential.token()
+        if (bearer == null) {
+            call.response.header(HttpHeaders.RetryAfter, NO_CREDENTIAL_RETRY_SECONDS.toString())
+            call.response.header(HttpHeaders.CacheControl, "no-store")
+            call.respondText(NO_CREDENTIAL_BODY, ContentType.Application.Json, HttpStatusCode.ServiceUnavailable)
+            return
+        }
         val body = call.receiveBounded(INFERENCE_BODY_LIMIT)
         when {
             body == null -> call.respondTooLarge()
-            call.request.httpMethod == HttpMethod.Post -> cancellation.guard { relay(call, upstreamPath, body, it) }
-            else -> relay(call, upstreamPath, body, null)
+            call.request.httpMethod == HttpMethod.Post ->
+                cancellation.guard(bearer) { relay(call, upstreamPath, body, bearer, it) }
+            else -> relay(call, upstreamPath, body, bearer, null)
         }
     }
 
@@ -205,6 +225,7 @@ internal class InferenceForwarder(
         call: ApplicationCall,
         upstreamPath: String,
         body: ByteArray,
+        bearer: String,
         attempt: InferenceAttempt?,
     ) {
         val method = call.request.httpMethod
@@ -216,7 +237,7 @@ internal class InferenceForwarder(
             exchange.run(call, client, Duration.INFINITE, {
                 this.method = method
                 url(config.serverUrl + upstreamPath + if (query.isEmpty()) "" else "?$query")
-                identify(config)
+                identify(config, bearer)
                 copyHeaders(headers, INFERENCE_REQUEST_HEADERS)
                 if (config.background) header(WORKLOAD_HEADER, BACKGROUND)
                 if (attempt != null) {
