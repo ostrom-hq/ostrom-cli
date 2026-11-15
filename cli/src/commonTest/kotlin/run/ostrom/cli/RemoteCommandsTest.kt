@@ -485,9 +485,10 @@ class RemoteCommandsTest : SetupKit() {
         val page = (1..250).joinToString(",") { item("s$it", device = "d9") }
         answer(list, 200 to """{"items":[$page],"next":"a"}""")
         answer("$list&before=a", 200 to """{"items":[$page],"next":"b"}""")
+        answers.remove("GET /api/v1/devices")
         console.out.clear()
         assertEquals(0, remote("list", "--json"))
-        assertEquals("[]\n", console.out.toString(), "No device of this server is current: nothing is here")
+        assertEquals("[]\n", console.out.toString(), "A server without devices has no current one: nothing is here")
         assertErr("Showing the newest 500 remote sessions.")
         assertFalse(sent().any { it.endsWith("before=b") })
     }
