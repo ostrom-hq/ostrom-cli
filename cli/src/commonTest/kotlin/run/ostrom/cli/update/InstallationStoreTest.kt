@@ -211,6 +211,7 @@ class InstallationStoreTest {
         val state = InstallationState(stageOn(fake, store)).json().toString()
         val other = state.replace("linux-x64", "macos-arm64")
         val journals = listOf(
+            "[]",
             """{"after":$state}""",
             """{"schemaVersion":1}""",
             """{"schemaVersion":1,"before":[],"after":$state}""",
@@ -294,6 +295,15 @@ class InstallationStoreTest {
         activity.close()
         files.lockFails = true
         assertEquals("release_lock_failed", refusal { store.lock(exclusive = true) })
+    }
+
+    @Test
+    fun anAttestationHoldsTwoDigestsAndASizeABinaryCanHave() {
+        val good = stageOn(fake, store)
+        assertFailsWith<IllegalArgumentException> { good.copy(manifestSha256 = "zz") }
+        assertFailsWith<IllegalArgumentException> { good.copy(binarySha256 = "zz") }
+        assertFailsWith<IllegalArgumentException> { good.copy(size = MAX_PAYLOAD_BYTES + 1) }
+        assertEquals(InstallationStore.ROLLBACK_UNAVAILABLE, refusal { store.activate(good, rollback = true) })
     }
 
     @Test

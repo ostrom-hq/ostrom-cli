@@ -66,7 +66,7 @@ internal class UpdateCommand(private val dependencies: CliDependencies) : CliktC
             throw ProgramResult(ExitCode.OK.code)
         }
         val code = runBlocking {
-            val api: suspend () -> Int = { serverApiVersion(dependencies) }
+            val api = apiVersionOf(dependencies)
             if (rollback) updates.rollback(request, api) else updates.update(request, api)
         }
         throw ProgramResult(code)
@@ -87,6 +87,9 @@ internal class UpdateCommand(private val dependencies: CliDependencies) : CliktC
         }
     }
 }
+
+/** Asks [serverApiVersion] of [dependencies], once a binary is to be put in place. */
+internal fun apiVersionOf(dependencies: CliDependencies): suspend () -> Int = { serverApiVersion(dependencies) }
 
 /** The API version of the server this device is signed in to, which the binary to put in place must speak. */
 internal suspend fun serverApiVersion(dependencies: CliDependencies): Int {

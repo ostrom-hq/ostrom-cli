@@ -42,7 +42,7 @@ internal class InstallCommand(private val dependencies: CliDependencies) : Clikt
             root = root,
             noPath = noPath,
         )
-        val code = runBlocking { dependencies.selfUpdate.install(request) { serverApiVersion(dependencies) } }
+        val code = runBlocking { dependencies.selfUpdate.install(request, apiVersionOf(dependencies)) }
         throw ProgramResult(code)
     }
 }

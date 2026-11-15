@@ -52,13 +52,14 @@ internal class Installations(
     fun of(executable: String): InstallationStore? {
         val binary = installationPath(executable)
         val metadata = fileSystem.metadataOrNull(binary) ?: return null
+        // a link is followed (~/.local/bin/ostrom); a folder or anything else is not a binary
         if (!metadata.isRegularFile && metadata.symlinkTarget == null) return null
         val actual = fileSystem.canonicalize(binary)
         val parent = (actual / "..").normalized()
         val grandparent = (parent / "..").normalized()
         val root = when {
             parent.name.equals("bin", ignoreCase = windows) -> grandparent
-            grandparent.name == "versions" && DIGEST.matches(parent.name) -> (grandparent / "..").normalized()
+            grandparent.name == "versions" && HEX_DIGEST.matches(parent.name) -> (grandparent / "..").normalized()
             else -> return null
         }
         // a root no installation can have (a control character in it): not ours
@@ -82,15 +83,11 @@ internal class Installations(
      * [executable] runs from (a payload is deleted two updates later), else [executable] itself.
      */
     fun stable(executable: String?): String? = try {
-        executable?.let { of(it)?.paths?.launcher?.toString() } ?: executable
+        executable?.let { path -> of(path)?.let { it.paths.launcher.toString() } } ?: executable
     } catch (_: InstallationException) {
         executable
     } catch (_: IOException) {
         executable
-    }
-
-    private companion object {
-        val DIGEST = Regex("[0-9a-f]{64}")
     }
 }
 

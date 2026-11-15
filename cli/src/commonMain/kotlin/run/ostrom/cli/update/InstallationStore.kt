@@ -32,7 +32,7 @@ internal class InstallationException(val code: String) : Exception(code)
 /** Throws the [InstallationException] [code]. */
 internal fun refuseInstallation(code: String): Nothing = throw InstallationException(code)
 
-private val HEX_DIGEST = Regex("[0-9a-f]{64}")
+internal val HEX_DIGEST = Regex("[0-9a-f]{64}")
 private val TARGET = Regex("[a-z0-9]+-[a-z0-9]+")
 
 /**
@@ -219,7 +219,7 @@ internal class InstallationStore(
     fun journal(): InstallationJournal? {
         if (fileSystem.metadataOrNull(paths.journal) == null) return null
         val journal = decode(paths.journal, InstallationJournal::of)
-        val targets = listOfNotNull(journal.after.current.target, journal.before?.current?.target)
+        val targets = listOfNotNull(journal.after.current.target, journal.before?.let { it.current.target })
         if (targets.any { it != paths.target }) refuseInstallation(INVALID)
         return journal
     }
@@ -229,7 +229,7 @@ internal class InstallationStore(
         val pending = journal() ?: return false
         val selected = state()
         if (selected != pending.before && selected != pending.after) refuseInstallation("release_recovery_conflict")
-        pending.before?.current?.let(::validate)
+        pending.before?.let { validate(it.current) }
         restore(pending.before)
         fileSystem.delete(paths.journal)
         flush(paths.root)
@@ -258,8 +258,12 @@ internal class InstallationStore(
             fileSystem.atomicMove(produce(work), binary)
             fileSystem.deleteRecursively(work)
             val (sha256, size) = digest(binary)
-            if (size !in 1..MAX_PAYLOAD_BYTES) refuseInstallation(BINARY_INVALID)
-            val staged = InstalledVersion(version, paths.target, manifestSha256, sha256, size)
+            val staged = try {
+                InstalledVersion(version, paths.target, manifestSha256, sha256, size)
+            } catch (_: IllegalArgumentException) {
+                // an empty or too large binary, or a version that does not read
+                refuseInstallation(BINARY_INVALID)
+            }
             seal(binary)
             writePrivate(temporary / "latest.json", manifest.decodeToString())
             writePrivate(temporary / "latest.json.sig", signature.decodeToString())
@@ -270,7 +274,7 @@ internal class InstallationStore(
             validate(staged)
             return staged
         } finally {
-            if (fileSystem.metadataOrNull(temporary) != null) fileSystem.deleteRecursively(temporary)
+            fileSystem.deleteRecursively(temporary, mustExist = false)
         }
     }
 
@@ -292,7 +296,7 @@ internal class InstallationStore(
             fileSystem.atomicMove(temporary, paths.launcherDirectory)
             flush(paths.root)
         } finally {
-            if (fileSystem.metadataOrNull(temporary) != null) fileSystem.deleteRecursively(temporary)
+            fileSystem.deleteRecursively(temporary, mustExist = false)
         }
     }
 
@@ -347,7 +351,7 @@ internal class InstallationStore(
         if (journal() != null) refuseInstallation("release_recovery_required")
         validate(version)
         val before = state()
-        before?.current?.let(::validate)
+        before?.let { validate(it.current) }
         if (before?.current == version) return
         if (rollback && before?.previous != version) refuseInstallation(ROLLBACK_UNAVAILABLE)
         val after = InstallationState(current = version, previous = before?.current)
@@ -400,13 +404,14 @@ internal class InstallationStore(
 
     private fun regular(path: Path) {
         val metadata = fileSystem.metadataOrNull(path)
-        val file = metadata != null && metadata.isRegularFile && metadata.symlinkTarget == null
+        // okio's metadata never follows a link: a link is not a regular file
+        val file = metadata != null && metadata.isRegularFile
         if (!file || !files.isPrivate(path.toString(), directory = false)) refuseInstallation("release_file_unreadable")
     }
 
     private fun regularDirectory(path: Path) {
         val metadata = fileSystem.metadataOrNull(path)
-        val directory = metadata != null && metadata.isDirectory && metadata.symlinkTarget == null
+        val directory = metadata != null && metadata.isDirectory
         if (!directory || !files.isPrivate(path.toString(), directory = true)) refuseInstallation(INVALID)
     }
 
@@ -418,7 +423,7 @@ internal class InstallationStore(
         val marker = path / ".directory"
         val existing = fileSystem.metadataOrNull(path)
         if (existing != null) {
-            if (!existing.isDirectory || existing.symlinkTarget != null) refuseInstallation(INVALID)
+            if (!existing.isDirectory) refuseInstallation(INVALID)
             val marked = fileSystem.metadataOrNull(marker) != null
             if (!marked && fileSystem.list(path).isNotEmpty()) refuseInstallation(NOT_OWNED)
             if (marked) {

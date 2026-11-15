@@ -169,9 +169,11 @@ class SelfUpdate internal constructor(
         apiVersion: suspend () -> Int,
     ): Int {
         val bundle = request.bundle?.toPath()
-        val asset = bundle?.let {
-            signed(it.toString(), read(it / MANIFEST), read(it / SIGNATURE, MAX_SIGNATURE_BYTES), request)
-        } ?: manifest(request)
+        val asset = if (bundle != null) {
+            signed(bundle.toString(), read(bundle / MANIFEST), read(bundle / SIGNATURE, MAX_SIGNATURE_BYTES), request)
+        } else {
+            manifest(request)
+        }
         val before = managed.guard { store.state() }?.current
         val asked = request.version != null || bundle != null
         if (before != null && !asked && !newer(asset.version, before.version)) {
@@ -179,11 +181,15 @@ class SelfUpdate internal constructor(
             return ExitCode.OK.code
         }
         val floor = if (bundle != null || request.version == null) asset.floor else latestFloor(request)
-        floorRefusal(asset.version, before?.version ?: request.current, floor, trust.floor)
+        val baseline = if (before == null) request.current else before.version
+        floorRefusal(asset.version, baseline, floor, trust.floor)
             ?.let { stop(ExitCode.REFUSED, it) }
         val api = apiVersion()
-        val archive = bundle?.let { read(it / asset.url.substringAfterLast('/'), MAX_BINARY_BYTES) }
-            ?: fetch(asset.url, MAX_BINARY_BYTES, request)
+        val archive = if (bundle != null) {
+            read(bundle / asset.url.substringAfterLast('/'), MAX_BINARY_BYTES)
+        } else {
+            fetch(asset.url, MAX_BINARY_BYTES, request)
+        }
         checked(asset, archive)
         managed.put(store, asset, archive, api)
         say("✓ Installed ostrom ${asset.version} (signature checked).")
@@ -209,7 +215,8 @@ class SelfUpdate internal constructor(
     /** The file [path] of a bundle, a regular file of at most [maxBytes], or stop. */
     private fun read(path: Path, maxBytes: Long = MAX_MANIFEST_BYTES): ByteArray {
         val metadata = fileSystem.metadataOrNull(path)
-        if (metadata == null || !metadata.isRegularFile || metadata.symlinkTarget != null) {
+        // okio's metadata never follows a link: a link is not a regular file
+        if (metadata == null || !metadata.isRegularFile) {
             stop(ExitCode.NOT_FOUND, "✗ $path is not a file of the release (links are refused). $UNCHANGED")
         }
         val bytes = managed.guard {
@@ -325,7 +332,7 @@ class SelfUpdate internal constructor(
         request: UpdateRequest,
         apiVersion: suspend () -> Int,
     ): Int {
-        val previous = managed.guard { store.state() }?.previous
+        val previous = managed.guard { store.state()?.previous }
             ?: stop(ExitCode.NOT_FOUND, "No previous version of ostrom is kept on this device.")
         floorRefusal(previous.version, request.current, latestFloor(request), trust.floor)
             ?.let { stop(ExitCode.REFUSED, it) }

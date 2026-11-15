@@ -198,6 +198,46 @@ class ManagedUpdateTest {
     }
 
     @Test
+    fun anInterruptedSelectionIsPutBackBeforeAnInstallation() = runTest {
+        updater().install(request())
+        val selected = requireNotNull(store.state())
+        val other = stageOn(fake, store, "LATEST_FLOOR", binary = "other")
+        fake.write(store.paths.state) { writeUtf8(InstallationState(other, selected.current).json().toString()) }
+        fake.write(store.paths.journal) {
+            writeUtf8(InstallationJournal(selected, InstallationState(other, selected.current)).json().toString())
+        }
+        assertEquals(0, updater().install(request()))
+        assertEquals(selected, store.state(), "back to the selection before, then nothing newer")
+        assertNull(store.journal())
+    }
+
+    @Test
+    fun anArchiveWithoutTheBinaryIsRefused() = runTest {
+        unpacked = { true }
+        assertEquals(1, updater().install(request()))
+        assertEquals("✗ The archive does not hold ostrom. Nothing was changed.", said.last())
+    }
+
+    @Test
+    fun withoutAHomeTheRootMustBeGiven() = runTest {
+        val homeless = Installations(fake, files, "linux-x64", variables())
+        assertEquals(64, updater(all = homeless).install(request().copy(root = null)))
+        assertEquals(
+            "ostrom cannot tell where your home folder is. Give the installation's folder with --root.",
+            said.last(),
+        )
+    }
+
+    @Test
+    fun aSwitchUnderWayElsewhereIsWaitedForByNobody() = runTest {
+        store.initialize()
+        files.held += store.paths.lock.toString()
+        assertEquals(1, updater().install(request()))
+        assertTrue(said.last().startsWith("✗ Another ostrom install or update is running."))
+        assertNull(store.state())
+    }
+
+    @Test
     fun aNameSomeoneElseHoldsStopsAfterTheInstallation() = runTest {
         linked = CommandPathOutcome.Conflict("/home/dev/.local/bin/ostrom".toPath())
         assertEquals(77, updater().install(request()))
@@ -239,6 +279,10 @@ class ManagedUpdateTest {
     fun aRollbackOfAManagedInstallationSelectsThePreviousPayload() = runTest {
         updater().install(request())
         val launcher = store.paths.launcher.toString()
+        val installed = fake.read(store.paths.state) { readUtf8() }
+        fake.delete(store.paths.state)
+        assertEquals(66, updater().rollback(request(current = "9.9.9", executable = launcher)), "nothing selected")
+        fake.write(store.paths.state) { writeUtf8(installed) }
         assertEquals(66, updater().rollback(request(current = "9.9.9", executable = launcher)))
         assertEquals("No previous version of ostrom is kept on this device.", said.last())
         val older = stageOn(fake, store, "LATEST_FLOOR", version = "1.0.0", binary = "older")

@@ -80,6 +80,17 @@ class CommandPathTest {
     }
 
     @Test
+    fun aLinkTheSystemRefusesIsAFailure() {
+        val refusing = FailingFileSystem(fake)
+        refusing.fail = { function, _ -> function == "createSymlink" }
+        val home = variables("HOME" to "/home/dev")
+        val refused = assertFailsWith<InstallationException> {
+            CommandPath("linux-x64", launcher, home, refusing, { null }, { }).ensure()
+        }
+        assertEquals("release_command_link_failed", refused.code)
+    }
+
+    @Test
     fun aLinkMadeMeanwhileByAnotherInstallerIsKept() {
         val racing = FailingFileSystem(fake)
         racing.fail = { function, path ->
@@ -103,7 +114,7 @@ class CommandPathTest {
         userPath = UserPath("C:\\tools;", expandable = false)
         windows()
         assertEquals(UserPath("C:\\tools;$folder", expandable = false), written.last())
-        userPath = UserPath(";;%LOCAL%\\Ostrom\\bin\\;%UNSET%", expandable = true)
+        userPath = UserPath(";;%UNSET%;%LOCAL%\\Ostrom\\bin\\", expandable = true)
         assertEquals(
             "$folder is already in your user PATH.",
             windows("LOCAL" to "c:/users/dev/appdata/local").lines.last(),

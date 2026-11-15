@@ -60,8 +60,8 @@ internal class CommandPath(
     }
 
     private fun ensurePosix(): CommandPathOutcome {
-        val home = environment["HOME"]?.let { if (it.length > 1) it.trimEnd('/') else it }
-            ?: refuseInstallation(HOME_UNAVAILABLE)
+        val given = environment["HOME"] ?: refuseInstallation(HOME_UNAVAILABLE)
+        val home = if (given.length > 1) given.trimEnd('/') else given
         val directory = installationPath("$home/.local/bin")
         val link = directory / COMMAND_NAME
         if (fileSystem.metadataOrNull(link) == null) {
@@ -73,8 +73,8 @@ internal class CommandPath(
                 if (fileSystem.metadataOrNull(link) == null) throw failure
             }
         }
-        val pointed = fileSystem.metadataOrNull(link)?.symlinkTarget
-            ?.let { if (it.isAbsolute) it else directory / it.toString() }?.normalized()
+        val pointed = fileSystem.metadata(link).symlinkTarget
+            ?.let { (if (it.isAbsolute) it else directory / it.toString()).normalized() }
         if (pointed != launcher.normalized()) return CommandPathOutcome.Conflict(link)
         val lines = mutableListOf("Command: $link -> $launcher")
         val onPath = environment["PATH"].orEmpty().split(':')
@@ -97,13 +97,13 @@ internal class CommandPath(
     private fun ensureWindows(): CommandPathOutcome {
         val directory = launcher.parent.toString()
         val current = readUserPath()
-        val entries = current?.value?.split(';')?.filter { it.isNotEmpty() }.orEmpty()
+        val entries = current?.let { path -> path.value.split(';').filter { it.isNotEmpty() } }.orEmpty()
         val lines = mutableListOf("Command: $launcher")
         if (entries.any { sameDirectory(expand(it), directory) }) {
             lines += "$directory is already in your user PATH."
         } else {
             // the user's own value is kept byte for byte: only appended to
-            val kept = current?.value?.trimEnd(';').orEmpty()
+            val kept = current?.let { it.value.trimEnd(';') }.orEmpty()
             writeUserPath(UserPath(if (kept.isEmpty()) directory else "$kept;$directory", current?.expandable ?: true))
             lines += "Added $directory to your user PATH. Open a new terminal to use '$COMMAND_NAME'."
         }
