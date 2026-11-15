@@ -6,10 +6,12 @@ import run.ostrom.cli.launcher.Routes
 import run.ostrom.cli.launcher.ServerAnswer
 import run.ostrom.cli.launcher.ServerJson
 import run.ostrom.cli.launcher.list
+import run.ostrom.cli.launcher.objectOf
 import run.ostrom.cli.launcher.text
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonObject
 
 /**
  * What `ostrom import teamcode` was asked.
@@ -21,6 +23,7 @@ import kotlinx.serialization.json.intOrNull
  * @property cutover True for the owner's final pass once TeamCode is stopped (`--cutover`, ostrom-server#86).
  * @property accessOnly True for TeamCode's trial (`--access-only`): the accounts serve their access tokens, never
  *   renewed.
+ * @property bodyLimit The most characters of one import body: the skills and hooks past it go in more bodies.
  */
 data class ImportTeamCodeRequest(
     val db: String,
@@ -29,6 +32,7 @@ data class ImportTeamCodeRequest(
     val apply: Boolean,
     val cutover: Boolean = false,
     val accessOnly: Boolean = false,
+    val bodyLimit: Int = TeamCodePlan.BODY_LIMIT,
 )
 
 /**
@@ -62,9 +66,12 @@ class ImportTeamCodeUseCase(
             ?: throw Stop(ExitCode.USAGE, "--key-file holds no TeamCode key (32 bytes, base64).")
         val tables = database.read(request.db, request.team)
         val map = memberMap(tables, members())
-        val (body, skipped) = TeamCodePlan(key, request.team).request(tables, map)
-        skipped.forEach { say("! Left out: $it\n") }
-        if (request.cutover) cutover(body) else normal(body, request.apply, request.accessOnly)
+        val files = TeamCodeFiles { table, versions -> database.files(request.db, table, versions) }
+        val planned = TeamCodePlan(key, request.team).request(tables, map, files, request.bodyLimit)
+        planned.skipped.forEach { say("! Left out: $it\n") }
+        // the cutover is about the shared accounts, all in the first body
+        val bodies = listOf(planned.body) + planned.more
+        if (request.cutover) cutover(planned.body) else normal(bodies, request.apply, request.accessOnly)
     } catch (e: TeamCodeReadException) {
         fail("ostrom import teamcode: ${e.message}\n")
         ExitCode.FAILED.code
@@ -74,11 +81,11 @@ class ImportTeamCodeUseCase(
     }
 
     /** The normal pass: the plan, then the import with `--yes`; the accounts waiting for the cutover are said. */
-    private suspend fun normal(body: JsonObject, apply: Boolean, accessOnly: Boolean): Int {
+    private suspend fun normal(bodies: List<JsonObject>, apply: Boolean, accessOnly: Boolean): Int {
         val trial = if (accessOnly) "accessOnly=true" else ""
-        var last = report("Plan (nothing imported yet):", ok(import("?dryRun=true${trial.prefixed("&")}", body)))
+        var last = report("Plan (nothing imported yet):", importAll("?dryRun=true${trial.prefixed("&")}", bodies))
         if (apply) {
-            last = report("Imported:", ok(import(trial.prefixed("?"), body)))
+            last = report("Imported:", importAll(trial.prefixed("?"), bodies))
         } else {
             say("Run the same command with --yes to import.\n")
         }
@@ -212,6 +219,29 @@ class ImportTeamCodeUseCase(
         val revive = count(body, REVIVE).takeIf { waiting && it > 0 }?.let { ", $it to revive at the cutover" }
         say("$counts${revive.orEmpty()}.\n")
         return body
+    }
+
+    /**
+     * Imports [bodies] one after the other, as one report: the lines of each (the MCP prefix's once), the counts
+     * recounted from them.
+     */
+    private suspend fun importAll(query: String, bodies: List<JsonObject>): JsonObject {
+        val reports = bodies.map { ok(import(query, it)) }
+        if (reports.size == 1) return reports.single()
+        // a report's items are objects: the server writes them
+        val lines = reports.first().list("items").map { it.jsonObject } + reports.drop(1).flatMap { report ->
+            report.list("items").map { it.jsonObject }.filter { it.text("kind") != "setting" }
+        }
+        val actions = (COUNTS + "revive_at_cutover").associateWith { action ->
+            lines.count { it.text("action") == action }
+        }
+        return objectOf(
+            "items" to lines,
+            *COUNTS.map { it to actions[it] }.toTypedArray(),
+            REVIVE to actions["revive_at_cutover"],
+            PENDING to lines.count { it.text("refreshOwnership") == "pending_handover" },
+            ACCESS_ONLY to lines.count { it.text("refreshOwnership") == "access_only" },
+        )
     }
 
     /** `POST /api/v1/import/teamcode[query]` with the export. */

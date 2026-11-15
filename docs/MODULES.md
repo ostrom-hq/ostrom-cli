@@ -416,7 +416,15 @@ they name (all read-only; a TeamCode without those tables adds nothing) and send
 (workflows `tc-<id>`, automations paused until the cutover, a profile reduced to its repositories as `OWNER/NAME`).
 An automation's webhook secret, a profile's credentials and setup commands are never read or sent; a row that cannot be
 read is said and left out. An MCP server's tool mode is named as Ostrom does too (TeamCode's `ALLOWLIST` and `DENYLIST`
-are `allow` and `deny`); a server with any other mode is said and left out. It imports only with `--yes`, and prints
+are `allow` and `deny`); a server with any other mode is said and left out. It also reads TeamCode's skills, hooks
+and environment variants (`skills`, `skill_versions`, `skill_assignments`, `hooks`, `hook_versions`,
+`hook_assignments`, `variants`, `variant_assignments` and `variant_exclusions` of kind `ENV`) and sends them as
+`skills`, `hooks`, `variables`, `variableAssignments` and `variableExclusions` (ostrom-core#276), which the server
+publishes through its catalogs and its environment: each skill and hook with the files of the version TeamCode
+delivers (its pinned one, else its latest), read in pieces of 576 KiB under the 1 MiB `mysql` prints at most; the
+environment values opened with the key (only those of the members Ostrom has) and never printed. Skills and hooks
+past 7 million characters of body go in more bodies, imported one after the other and reported as one. It imports
+only with `--yes`, and prints
 no secret. A normal pass refreshes no token: a shared account TeamCode still
 uses is reported `revive_at_cutover`, and the CLI says how many wait. `--cutover` is the owner's final pass once
 TeamCode is stopped (ostrom-server#86): the plan with `?dryRun=true&cutover=true` (its account lines say `planned` for
