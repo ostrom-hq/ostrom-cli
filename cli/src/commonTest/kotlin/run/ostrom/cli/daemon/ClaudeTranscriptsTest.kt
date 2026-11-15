@@ -289,5 +289,7 @@ class ClaudeTranscriptsTest {
         assertEquals(1, summary?.turns)
         assertNull(summarizeTranscript(Buffer().writeUtf8(huge)), "A last line over the bound ends the file")
         assertEquals("No newline", summarizeTranscript(Buffer().writeUtf8(user("No newline", "/w")))?.title)
+        val two = listOf(user("First", "/w"), user("Second", "/w")).joinToString("\n", postfix = "\n")
+        assertEquals(1, summarizeTranscript(Buffer().writeUtf8(two), maxBytes = 10)?.turns, "Nothing past the file's bound")
     }
 }

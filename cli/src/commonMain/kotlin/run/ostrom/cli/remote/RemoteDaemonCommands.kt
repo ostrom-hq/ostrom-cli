@@ -72,7 +72,8 @@ internal class RemoteResumable(private val context: RemoteContext) : CliktComman
         refuseFolder(path, canonicalHome(dependencies), windows)
         val hosting = context.ports.processes != null
         val access = context.access(server, org)
-        val target = context.daemonCall(access) { localResumeTarget(it, context.features(access), hosting) }
+        val features = context.features(access)
+        val target = context.daemonCall(access) { localResumeTarget(it, features, hosting) }
         val view = localResumables(ClaudeTranscripts.local(dependencies), target, path, limit, before)
         print(view, path)
     }

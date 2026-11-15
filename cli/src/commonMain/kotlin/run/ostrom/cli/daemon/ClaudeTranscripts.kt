@@ -183,9 +183,9 @@ private class Reading {
  * (`custom-title`), else its last summary (`summary`, older versions), else the start of its first message. Null when
  * the member sent no message (an empty or unreadable file).
  */
-internal fun summarizeTranscript(source: BufferedSource): TranscriptSummary? {
+internal fun summarizeTranscript(source: BufferedSource, maxBytes: Long = MAX_TRANSCRIPT_BYTES): TranscriptSummary? {
     val reading = Reading()
-    source.boundedLines { line ->
+    source.boundedLines(maxBytes) { line ->
         // Only the lines that can matter are parsed; the type is then read from the parsed line, never from the text.
         val relevant = "\"custom-title\"" in line || "\"summary\"" in line || "\"user\"" in line
         // A tool result (most user lines, often large) is never a message; typed text holds that only escaped.
@@ -264,24 +264,26 @@ private fun JsonObject.text(key: String) = (this[key] as? JsonPrimitive)?.takeIf
 private fun JsonObject.flag(key: String) = (this[key] as? JsonPrimitive)?.booleanOrNull == true
 
 // Not inline: the line's handling is compiled once, whichever way the line ends.
-private fun BufferedSource.boundedLines(each: (String) -> Unit) {
+private fun BufferedSource.boundedLines(maxBytes: Long, each: (String) -> Unit) {
     var read = 0L
-    while (read < MAX_TRANSCRIPT_BYTES && !exhausted()) {
+    // Within a line longer than the bound: skipped bound by bound, never held whole.
+    var skipping = false
+    while (read < maxBytes && !exhausted()) {
         val newline = indexOf('\n'.code.toByte(), 0, MAX_LINE_BYTES + 1)
         if (newline >= 0) {
             val line = readUtf8(newline)
             skip(1)
             read += newline + 1
-            each(line)
+            if (!skipping) each(line)
+            skipping = false
         } else if (!request(MAX_LINE_BYTES + 1)) {
             val rest = readUtf8()
             read += rest.length
-            each(rest)
+            if (!skipping) each(rest)
         } else {
-            // A line longer than the bound: skipped up to its end, without holding it; none ends the file.
-            val end = indexOf('\n'.code.toByte())
-            read = if (end < 0) MAX_TRANSCRIPT_BYTES else read + end + 1
-            if (end >= 0) skip(end + 1)
+            skip(MAX_LINE_BYTES)
+            read += MAX_LINE_BYTES
+            skipping = true
         }
     }
 }

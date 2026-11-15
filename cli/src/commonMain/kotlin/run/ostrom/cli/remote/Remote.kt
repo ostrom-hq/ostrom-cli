@@ -138,6 +138,18 @@ internal class RemoteContext(val dependencies: CliDependencies, ports: () -> Rem
         }
     }
 
+    /**
+     * This device's id when its daemon is online ([daemonDevice]); null otherwise, and also when the device list cannot
+     * be read: the command then hosts the session itself, as without a daemon.
+     */
+    fun onlineDaemon(access: OrgAccess, features: List<String>): String? = runBlocking {
+        try {
+            daemonDevice(daemon(access), features)
+        } catch (_: DaemonCallException) {
+            null
+        }
+    }
+
     /** What the server serves, as the command's feature check read it (no second request). */
     fun features(access: OrgAccess): List<String> =
         when (val read = runBlocking { dependencies.capabilities.read(access.signed.serverUrl, access.signed.token) }) {
@@ -223,10 +235,12 @@ private class RemoteStart(private val context: RemoteContext) : CliktCommand(nam
             "directoryName" to path.name,
             "permissionMode" to if (bypass) RemotePermissionModes.BYPASS else RemotePermissionModes.ASK,
         )
-        val device = context.daemonCall(access) { server ->
-            val features = context.features(access)
-            // Continuing a conversation goes through the daemon only: no host of this command forks it.
-            if (resume != null) resumeDevice(server, features) else daemonDevice(server, features)
+        val features = context.features(access)
+        // Continuing a conversation goes through the daemon only: no host of this command forks it.
+        val device = if (resume != null) {
+            context.daemonCall(access) { resumeDevice(it, features) }
+        } else {
+            context.onlineDaemon(access, features)
         }
         if (device != null) {
             hostThroughDaemon(access, device, path, body)
@@ -312,7 +326,7 @@ private class RemoteResume(private val context: RemoteContext) : CliktCommand(na
         val hostedNow = state.online && state.desiredStatus == SessionState.RUNNING
         // A session started through the daemon is the daemon's to host: resuming puts it back in its queue.
         val throughDaemon = state.folderId != null && !hostedNow &&
-            context.daemonCall(access) { daemonDevice(it, context.features(access)) } != null
+            context.onlineDaemon(access, context.features(access)) != null
         when {
             throughDaemon -> {
                 if (state.desiredStatus != SessionState.RUNNING) {

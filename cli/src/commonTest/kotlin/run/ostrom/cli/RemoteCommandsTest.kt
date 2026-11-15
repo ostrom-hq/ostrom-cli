@@ -395,6 +395,18 @@ class RemoteCommandsTest : SetupKit() {
     }
 
     @Test
+    fun startHostsTheSessionItselfWhenTheDeviceListCannotBeRead() {
+        fileSystem.createDirectories("/work/acme".toPath())
+        answer(create, 201 to """{"id":"$id"}""")
+        hosting()
+        answer("GET /api/v1/devices", 503 to """{"error":{"type":"unavailable","message":"down"}}""")
+        val features = arrayOf("runners.cloud.v1", "runners.cloud.remote.v1", "runners.cloud.remote.daemon.v1")
+        assertEquals(0, remote("start", features = features))
+        assertTrue("GET /api/v1/devices" in sent())
+        assertErr("Paused: the host checkpointed")
+    }
+
+    @Test
     fun aHostRefusesARecordThatNamesNoSession() {
         record(sessionId = "not-a-uuid")
         assertEquals(64, remote("host", "not-a-uuid"))

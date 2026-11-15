@@ -224,4 +224,34 @@ class DeviceDaemonEdgesTest {
         const val POLL = "POST /api/v1/devices/current/daemon/poll"
         const val ID_A = "0000000a-aaaa-4bbb-8ccc-00000000000a"
     }
+
+    @Test
+    fun anUnexpectedFailureStillPausesTheHostsAndSaysTheDeviceOffline() = test { f ->
+        val folder = f.folder("project")
+        f.server.queue("s1", folder.id, "project")
+        f.server.queue("s2", folder.id, "project")
+        f.hosts.exploding += "s2"
+        val failure = assertFailsWith<IllegalStateException> { f.daemon().run() }
+        assertEquals("the launcher failed", failure.message)
+        assertTrue("pause s1" in f.server.events && "offline" in f.server.events, f.server.events.toString())
+    }
+
+    @Test
+    fun aSessionStillPausingFromThePreviousStopIsResumedOnceItHasPaused() = test { f ->
+        val folder = f.folder("project")
+        f.server.queue("s1", folder.id, "project", status = "pausing")
+        f.server.sessions.getValue("s1").also {
+            it.waiting = false
+            it.desiredStatus = "paused"
+            it.epoch = 3
+        }
+        f.state.put(DaemonSession("s1", 3, DaemonSession.PAUSED))
+        val daemon = f.start(this)
+        waitUntil { f.server.calls.count { it == "GET /api/v1/cloud/sessions/s1" } >= 3 }
+        assertFalse("resume s1" in f.server.events, "Not before it has paused")
+        assertEquals(listOf(DaemonSession("s1", 3, DaemonSession.PAUSED)), f.state.read())
+        f.server.sessions.getValue("s1").status = "paused"
+        waitUntil { "resume s1" in f.server.events }
+        f.stopAndJoin(daemon)
+    }
 }

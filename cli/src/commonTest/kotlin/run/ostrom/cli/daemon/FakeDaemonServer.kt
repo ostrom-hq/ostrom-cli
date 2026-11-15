@@ -277,8 +277,12 @@ internal class FakeDaemonServer(private val daemonCapability: Boolean = true) : 
         /** Sessions whose host cannot be started at all. */
         val broken = mutableSetOf<String>()
 
+        /** Sessions whose start fails in a way the daemon does not expect. */
+        val exploding = mutableSetOf<String>()
+
         override fun start(sessionId: String, epoch: Long, orgId: String, log: String): DetachedProcess {
             if (sessionId in broken) throw okio.IOException("no such program")
+            check(sessionId !in exploding) { "the launcher failed" }
             started += Triple(sessionId, epoch, orgId)
             logs += log
             val session = sessions.getValue(sessionId)

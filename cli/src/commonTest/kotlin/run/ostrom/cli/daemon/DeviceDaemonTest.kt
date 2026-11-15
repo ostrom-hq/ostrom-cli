@@ -498,8 +498,11 @@ class DeviceDaemonTest {
         val daemon = f.start(this)
         waitUntil { f.reports.any { "The host of session s1 could not start." in it } }
         assertTrue(f.reports.any { "not bound to this device" in it }, f.reports.toString())
+        // Supervised as a host that exited at once: started again within the limit, then given up.
+        waitUntil { f.reports.any { "The host of session s1 stopped (exit code 127); not starting it again." in it } }
+        assertEquals(3, f.server.events.count { it.startsWith("host s1 ") })
         f.stopAndJoin(daemon)
-        assertEquals(listOf(DaemonSession("s1", 1, DaemonSession.HOSTING)), f.state.read(), "Not paused: no host")
+        assertEquals(emptyList(), f.state.read(), "Nothing left to resume")
     }
 
     @Test

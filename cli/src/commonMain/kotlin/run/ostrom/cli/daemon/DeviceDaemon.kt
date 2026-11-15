@@ -133,10 +133,16 @@ internal class DeviceDaemon(
             launch { supervise() }
             poll()
         }
-        // A failure of the work fails this scope, which cancels the wait: only the stop request ends it.
-        while (!stopRequested()) delay(STOP_POLL_MILLIS)
-        work.cancelAndJoin()
-        withContext(NonCancellable) { shutdown() }
+        // A failure of the work fails this scope, which cancels the wait: the hosts are still paused and the device
+        // said offline before it is rethrown.
+        try {
+            while (!stopRequested()) delay(STOP_POLL_MILLIS)
+        } finally {
+            withContext(NonCancellable) {
+                work.cancelAndJoin()
+                shutdown()
+            }
+        }
     }
 
     private suspend fun poll() {
@@ -282,10 +288,10 @@ internal class DeviceDaemon(
             launcher.start(id, host.epoch, host.orgId, records.log(id))
         } catch (_: IOException) {
             report("The host of session $id could not start.")
-            null
+            // Supervised as a host that exited at once: started again within the limit, then given up.
+            DetachedProcess { FAILED_START }
         }
-        // Without a process, the epoch is lost once its host is silent and the session waits for a host again.
-        if (process != null) hosted[id] = Hosted(id, host.epoch, process)
+        hosted[id] = Hosted(id, host.epoch, process)
         report("Hosting session $id (epoch ${host.epoch}) in ${folderLabel(directory, home)}.")
     }
 
@@ -343,14 +349,19 @@ internal class DeviceDaemon(
         val pausedHere = entry.state == DaemonSession.PAUSED && view.paused
         val stillRunning = entry.state == DaemonSession.HOSTING && view.desiredStatus == SessionState.RUNNING &&
             view.epoch == entry.epoch && view.online
-        when {
-            pausedHere || lost -> return resume(entry.sessionId)
+        return when {
+            stillPausing(entry, view) -> false
+            pausedHere || lost -> resume(entry.sessionId)
             // A host of the previous daemon still runs it: paused with the others when this daemon stops.
-            stillRunning -> hosted[entry.sessionId] = Hosted(entry.sessionId, entry.epoch, null)
-            else -> sessions.remove(entry.sessionId)
+            stillRunning -> true.also { hosted[entry.sessionId] = Hosted(entry.sessionId, entry.epoch, null) }
+            else -> true.also { sessions.remove(entry.sessionId) }
         }
-        return true
     }
+
+    /** Paused by the previous daemon's stop, its host still checkpointing: resumed once it has paused. */
+    private fun stillPausing(entry: DaemonSession, view: SessionState): Boolean =
+        entry.state == DaemonSession.PAUSED && view.desiredStatus == SessionState.PAUSED && !view.paused &&
+            !view.ended
 
     private suspend fun resume(id: String): Boolean = try {
         server.resume(id)
@@ -503,6 +514,7 @@ internal class DeviceDaemon(
         const val STOP_POLL_MILLIS = 250L
         const val IDLE_MILLIS = 1_000L
         const val BACKOFF_UNIT_MILLIS = 1_000L
+        const val FAILED_START = 127
         const val MAX_SHIFT = 6
         const val HOST_OFFLINE = "host_offline"
         const val CREATING = "creating"
