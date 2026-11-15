@@ -29,6 +29,8 @@ import threading
 from pathlib import Path
 
 WINDOWS = os.name == "nt"
+# the installers and the binary print ✓ / ✗: read and write UTF-8 whatever the console's code page (Windows)
+TEXT = {"text": True, "encoding": "utf-8", "errors": "replace"}
 PINNED = re.compile(r"-----BEGIN PUBLIC KEY-----.*?-----END PUBLIC KEY-----", re.S)
 
 
@@ -67,7 +69,7 @@ def run_installer(script, environment):
         command = [shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(script)]
     else:
         command = ["sh", str(script)]
-    result = subprocess.run(command, env=environment, capture_output=True, text=True, timeout=600)
+    result = subprocess.run(command, env=environment, capture_output=True, timeout=600, **TEXT)
     output = result.stdout + result.stderr
     print(output)
     return result.returncode, output
@@ -79,13 +81,13 @@ def main():
     parser.add_argument("--version", required=True)
     parser.add_argument("--dry-run-cosign-pub", type=Path)
     args = parser.parse_args()
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     dist = args.dist.resolve(strict=True)
     with tempfile.TemporaryDirectory(prefix="ostrom-smoke-") as directory:
         work = Path(directory)
         site = work / "site"
         shutil.copytree(dist, site / "download" / args.version)
-        (site / "latest" / "download").mkdir(parents=True)
-        shutil.copy(dist / "latest.json", site / "latest" / "download" / "latest.json")
+        shutil.copytree(dist, site / "latest" / "download")
         home = work / "home"
         home.mkdir()
         root = work / "root"
@@ -135,8 +137,8 @@ def release(code, script, environment, root, version):
     current = json.loads((root / "current.json").read_text(encoding="utf-8"))["current"]
     if current["version"] != version:
         fail(f"current.json selects {current['version']}, not {version}")
-    shown = subprocess.run([str(launcher), "--version"], env=environment, capture_output=True, text=True, timeout=60)
-    if shown.returncode != 0 or version not in shown.stdout:
+    shown = subprocess.run([str(launcher), "--version"], env=environment, capture_output=True, timeout=60, **TEXT)
+    if shown.returncode != 0 or not re.match(rf"ostrom {re.escape(version)} ", shown.stdout):
         fail(f"the launcher did not run {version}: {shown.stdout}{shown.stderr}")
     code, _ = run_installer(script, environment)
     if code != 0:
@@ -145,7 +147,7 @@ def release(code, script, environment, root, version):
     os.chmod(payload, 0o700)
     with open(payload, "ab") as binary:
         binary.write(b"\0")
-    refused = subprocess.run([str(launcher), "--version"], env=environment, capture_output=True, text=True, timeout=60)
+    refused = subprocess.run([str(launcher), "--version"], env=environment, capture_output=True, timeout=60, **TEXT)
     if refused.returncode == 0 or "release_binary_invalid" not in refused.stderr:
         fail(f"a changed payload was run: {refused.stdout}{refused.stderr}")
 

@@ -339,6 +339,7 @@ jobs:
           name: dry-run-cosign-pub
           path: ${{ runner.temp }}/keys/cosign.pub
           if-no-files-found: error
+          overwrite: true
       - name: Package-manager manifests and installers
         env:
           REPO: ${{ github.repository }}
