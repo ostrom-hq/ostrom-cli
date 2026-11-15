@@ -118,7 +118,9 @@ class PtyTerminalTest {
     fun whatTheShellLeavesBehindEndsWithIt() = runBlocking {
         withTimeout(20.seconds) {
             // A child that ignores SIGTERM, as one forked while the signal came: the shell ends, the child would not.
-            val argv = listOf("/bin/sh", "-c", "(trap '' TERM; sleep 100) & echo up; wait")
+            // "up" comes from the child once its trap is set, so that the signal never finds it without the trap (it
+            // would then die of it, and the test prove nothing).
+            val argv = listOf("/bin/sh", "-c", "(trap '' TERM; echo up; sleep 100) & wait")
             val terminal = PtyTerminal.spawnPipe(argv, environment, "/", 2.seconds)
             terminal.readUntil("up")
             terminal.terminate()

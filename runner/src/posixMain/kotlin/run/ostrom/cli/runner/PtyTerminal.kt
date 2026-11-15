@@ -134,14 +134,28 @@ class PtyTerminal private constructor(
                 // The group can outlive its shell: a process the shell was forking as SIGTERM came (it missed the
                 // signal) or one that ignores it would hold the output open forever. The shell is not reaped yet, so
                 // its pid, the group's id, cannot have gone to another process.
-                kill(-pid, SIGKILL)
-                reap()
+                sweep()
                 return
             }
             delay(POLL)
         }
-        kill(-pid, SIGKILL)
-        reap()
+        sweep()
+    }
+
+    /**
+     * SIGKILL to the whole group, repeated a few times: a process being forked at the instant of a sweep may not be
+     * in the group yet, so the first sweep misses it (seen on a loaded macOS). Its parent is killed by that sweep and
+     * cannot fork again, so the next one reaches it. The shell is reaped last: until then its pid is still the group.
+     */
+    private suspend fun sweep() {
+        try {
+            repeat(SWEEPS) {
+                kill(-pid, SIGKILL)
+                delay(SWEEP_GAP)
+            }
+        } finally {
+            reap()
+        }
     }
 
     override fun close() {
@@ -206,6 +220,8 @@ class PtyTerminal private constructor(
         private const val SIGNALED = 128
         private const val CHUNK = 16 * 1024
         private val POLL = 100.milliseconds
+        private const val SWEEPS = 3
+        private val SWEEP_GAP = 50.milliseconds
         const val SHELL = "/bin/sh"
         private const val COLUMNS = 120
         private const val ROWS = 40
