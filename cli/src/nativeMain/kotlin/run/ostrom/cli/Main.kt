@@ -43,7 +43,7 @@ fun main(args: Array<String>) {
     // `ostrom update` asks a new binary, before putting it in place, whether it runs here as that version and API
     installationProbeExit(args.asList(), BuildInfo.VERSION, ServerFeatures.SUPPORTED_API_VERSIONS)?.let(::exitProcess)
     // `ostrom --version` is measured at start-up (scripts/measure.py): answered before the command tree is built
-    val usage = { QuickVersion.usageState(environment, FileStoreImpl(), BuildInfo.POSTHOG_KEY) }
+    val usage = { QuickVersion.usageState(environment, FileStoreImpl(), BuildInfo.POSTHOG_KEY) { _, _ -> } }
     if (QuickVersion.answer(args.asList(), environment, usage, ::stderrIsTerminal, ConsoleImpl()::out)) {
         exitProcess(0)
     }

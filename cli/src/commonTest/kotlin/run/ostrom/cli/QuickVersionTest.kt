@@ -12,13 +12,15 @@ class QuickVersionTest : CliKit() {
     private val line = "ostrom ${BuildInfo.VERSION} (kotlin-native, Linux x64)\n"
     private val environment = FakeEnvironment(mapOf("HOME" to "/home/maya"))
 
+    private val noSend: suspend (String, String) -> Unit = { _, _ -> }
+
     private fun answer(
         vararg args: String,
         key: String = "",
         terminal: Boolean = false,
         printed: StringBuilder = StringBuilder(),
     ) = QuickVersion.answer(
-        args.asList(), environment, { QuickVersion.usageState(environment, FileStoreImpl(fileSystem), key) },
+        args.asList(), environment, { QuickVersion.usageState(environment, FileStoreImpl(fileSystem), key, noSend) },
         { terminal }, printed::append,
     )
 
@@ -58,7 +60,7 @@ class QuickVersionTest : CliKit() {
     fun answersOnADeviceWithNoHomeFolder() {
         val printed = StringBuilder()
         val none = FakeEnvironment(emptyMap())
-        val usage = { QuickVersion.usageState(none, FileStoreImpl(fileSystem), "phc") }
+        val usage = { QuickVersion.usageState(none, FileStoreImpl(fileSystem), "phc", noSend) }
         assertTrue(QuickVersion.answer(listOf("--version"), none, usage, { false }, printed::append))
         assertEquals(line, printed.toString())
     }

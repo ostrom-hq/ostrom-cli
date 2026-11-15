@@ -20,10 +20,15 @@ import run.ostrom.cli.telemetry.UsageStatistics
 internal object QuickVersion {
     private const val OPTION = "--version"
 
-    /** Whether usage statistics are on here: what a command would send one event for. */
-    fun usageState(environment: Environment, files: FileStore, postHogKey: String): UsageState {
+    /** Whether usage statistics are on here: what a command would send one event for ([send] is never called). */
+    fun usageState(
+        environment: Environment,
+        files: FileStore,
+        postHogKey: String,
+        send: suspend (url: String, body: String) -> Unit,
+    ): UsageState {
         val config = environment.configDirectory?.let { ConfigStoreImpl(files, configFileIn(it)) }
-        return UsageStatistics(environment, config, postHogKey, BuildInfo.VERSION, send = { _, _ -> }).state()
+        return UsageStatistics(environment, config, postHogKey, BuildInfo.VERSION, send).state()
     }
 
     /** Prints the version line to [out] and returns true when [args] is `--version` alone and nothing follows it. */
