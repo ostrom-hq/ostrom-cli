@@ -35,17 +35,40 @@ esac
 
 # --- the fake release -------------------------------------------------------
 site="$tmp/site"
-mk_release() { # <version> <target>
+# A release's binary: it prints its version; a managed one (third argument) also has `install`, which records what
+# it was asked into $HOME/install.args and the files of its bundle into $HOME/bundle.files (OSTROM_FAKE_INSTALL_EXIT:
+# its exit status). An older one has no `install` command.
+mk_release() { # <version> <target> [managed]
   v="$1"; t="$2"
   d="$site/download/$v"; mkdir -p "$d" "$tmp/pkg-$v"
-  printf '#!/bin/sh\necho "ostrom %s"\n' "$v" > "$tmp/pkg-$v/ostrom"; chmod +x "$tmp/pkg-$v/ostrom"
+  if [ "${3:-}" = managed ]; then
+    cat > "$tmp/pkg-$v/ostrom" <<FAKE
+#!/bin/sh
+if [ "\$1" = install ]; then
+  [ "\$2" != --help ] || exit 0
+  printf '%s\\n' "\$@" > "\$HOME/install.args"
+  ls "\$3" > "\$HOME/bundle.files"
+  echo "fake ostrom $v install"
+  exit "\${OSTROM_FAKE_INSTALL_EXIT:-0}"
+fi
+echo "ostrom $v"
+FAKE
+    printf '{"version":"%s"}\n' "$v" > "$d/latest.json"; printf 'signed\n' > "$d/latest.json.sig"
+  else
+    printf '#!/bin/sh\n[ "$1" != install ] || { echo "no such command: install" >&2; exit 1; }\necho "ostrom %s"\n' \
+      "$v" > "$tmp/pkg-$v/ostrom"
+  fi
+  chmod +x "$tmp/pkg-$v/ostrom"
   printf 'Apache\n' > "$tmp/pkg-$v/LICENSE"
   tar -czf "$d/ostrom-$v-$t.tar.gz" -C "$tmp/pkg-$v" ostrom LICENSE
   ( cd "$d" && printf '%s  %s\n' "$(sha256_file "ostrom-$v-$t.tar.gz")" "ostrom-$v-$t.tar.gz" > SHA256SUMS )
   sign "$d/SHA256SUMS"
 }
 mk_release 1.2.3 "$host"
-mk_release 1.3.0 "$host"
+mk_release 1.3.0 "$host" managed
+# a managed release whose latest.json.sig is missing
+mk_release 3.0.0 "$host" managed
+rm "$site/download/3.0.0/latest.json.sig"
 mkdir -p "$site/latest/download"
 printf '{"version":"1.3.0","date":"2026-10-30T10:00:00Z","assets":{}}\n' > "$site/latest/download/latest.json"
 # a release whose checksum file lies
@@ -96,7 +119,47 @@ assert_eq "no stray temp dirs left in HOME" 0 "$(find "$LAST_HOME" -name 'ostrom
 runi OSTROM_VERSION=v1.2.3 && ok "leading v accepted" || ko "leading v accepted"
 
 if runi; then ok "latest resolves through latest.json"; else ko "latest resolves through latest.json"; cat "$tmp/out.log" >&2; fi
-assert_eq "latest installed 1.3.0" "ostrom 1.3.0" "$("$LAST_HOME/.ostrom/bin/ostrom")"
+assert_contains "latest 1.3.0 installs itself" "$(cat "$tmp/out.log")" 'fake ostrom 1.3.0 install'
+
+# the hand-over: a release with `ostrom install` installs itself from the checked files (a managed installation)
+args() { tr '\n' ' ' < "$LAST_HOME/install.args" | sed 's/ $//'; }
+runi OSTROM_VERSION=1.3.0 && ok "a managed release installs" || { ko "a managed release installs"; cat "$tmp/out.log" >&2; }
+bundle=$(sed -n 3p "$LAST_HOME/install.args")
+assert_eq "handed over to ostrom install --bundle, with the version" "install --bundle $bundle --version 1.3.0" "$(args)"
+assert_eq "the bundle holds the signed manifest and the checked archive" \
+  "latest.json latest.json.sig ostrom-1.3.0-$host.tar.gz" \
+  "$(grep -E '^(latest\.json|latest\.json\.sig|ostrom-.*\.tar\.gz)$' "$LAST_HOME/bundle.files" | sort | tr '\n' ' ' | sed 's/ $//')"
+assert_eq "no single binary in ~/.ostrom/bin" no "$([ -e "$LAST_HOME/.ostrom/bin" ] && echo yes || echo no)"
+assert_eq "no shell profile written by a managed install" 0 \
+  "$(find "$LAST_HOME" -maxdepth 1 \( -name .profile -o -name .zshrc -o -name .bashrc \) | wc -l | tr -d ' ')"
+assert_eq "the bundle is removed afterwards" no "$([ -e "$bundle" ] && echo yes || echo no)"
+assert_contains "says to log in" "$(cat "$tmp/out.log")" 'ostrom login'
+runi OSTROM_VERSION=1.3.0 OSTROM_NO_MODIFY_PATH=1
+assert_eq "OSTROM_NO_MODIFY_PATH=1 is --no-path" "install --bundle $(sed -n 3p "$LAST_HOME/install.args") --version 1.3.0 --no-path" "$(args)"
+runi OSTROM_VERSION=1.3.0 OSTROM_INSTALL_ROOT="$tmp/managed-root"
+assert_eq "OSTROM_INSTALL_ROOT is --root" \
+  "install --bundle $(sed -n 3p "$LAST_HOME/install.args") --version 1.3.0 --root $tmp/managed-root" "$(args)"
+if runi OSTROM_VERSION=1.3.0 OSTROM_FAKE_INSTALL_EXIT=4; then ko "a refused hand-over must fail"; else
+  status=$?; assert_eq "a refused hand-over fails with ostrom install's status" 4 "$status"; fi
+if runi OSTROM_VERSION=3.0.0; then ko "a managed release without latest.json.sig must be refused"; else
+  ok "a managed release without latest.json.sig is refused"; fi
+assert_contains "names the missing signature" "$(cat "$tmp/out.log")" 'latest.json.sig'
+assert_eq "nothing handed over without latest.json.sig" no "$([ -e "$LAST_HOME/install.args" ] && echo yes || echo no)"
+# OSTROM_INSTALL_DIR keeps the single binary, even for a managed release
+runi OSTROM_VERSION=1.3.0 OSTROM_INSTALL_DIR="$tmp/single/bin" && ok "OSTROM_INSTALL_DIR installs the single binary" \
+  || ko "OSTROM_INSTALL_DIR installs the single binary"
+assert_eq "single binary in OSTROM_INSTALL_DIR" "ostrom 1.3.0" "$("$tmp/single/bin/ostrom")"
+assert_eq "no hand-over with OSTROM_INSTALL_DIR" no "$([ -e "$LAST_HOME/install.args" ] && echo yes || echo no)"
+# an older release has no ostrom install: OSTROM_INSTALL_ROOT cannot be honoured
+if runi OSTROM_VERSION=1.2.3 OSTROM_INSTALL_ROOT="$tmp/managed-root"; then ko "OSTROM_INSTALL_ROOT with an older release must fail"
+else ok "OSTROM_INSTALL_ROOT with an older release fails"; fi
+assert_contains "says to unset it" "$(cat "$tmp/out.log")" 'OSTROM_INSTALL_ROOT'
+# a single binary left by an earlier installer is named, never removed
+HOME_N=$((HOME_N + 1)); old_home="$tmp/home-$HOME_N"; mkdir -p "$old_home/.ostrom/bin"
+printf 'old\n' > "$old_home/.ostrom/bin/ostrom"
+HOME="$old_home" OSTROM_DOWNLOAD_BASE="$base" OSTROM_VERSION=1.3.0 sh "$installer" > "$tmp/out.log" 2>&1
+assert_contains "names the older single binary" "$(cat "$tmp/out.log")" "$old_home/.ostrom/bin/ostrom"
+assert_eq "leaves the older single binary in place" old "$(cat "$old_home/.ostrom/bin/ostrom")"
 
 runi OSTROM_VERSION=1.2.3 OSTROM_INSTALL_DIR="$tmp/custom/bin" && ok "custom install dir" || ko "custom install dir"
 assert_eq "binary in the custom dir" "ostrom 1.2.3" "$("$tmp/custom/bin/ostrom")"
