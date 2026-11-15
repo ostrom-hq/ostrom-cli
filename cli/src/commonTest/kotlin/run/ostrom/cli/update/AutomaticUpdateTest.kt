@@ -263,7 +263,7 @@ class AutomaticUpdateTest {
 
     @Test
     fun newSettingsPutTheJobWhereEachSystemLooksForIt() {
-        val home = variables("HOME" to "/home/dev")
+        val home = onLinux("HOME" to "/home/dev")
         val label = "run.ostrom.updates.$ID"
         val mac = automaticUpdateSettings(policy.paths, AutomaticUpdatePlatform(MACOS, "501"), home, ID)
         assertEquals("/home/dev/Library/LaunchAgents/$label.plist", mac.registration)
@@ -271,7 +271,7 @@ class AutomaticUpdateTest {
         assertEquals("$ROOT/$label.xml", windows.registration)
         assertEquals("/home/dev/.config/systemd/user/$label.timer", settings.registration)
         assertFalse(settings.enabled)
-        val xdg = variables("HOME" to "/home/dev", "XDG_CONFIG_HOME" to "/home/dev/cfg")
+        val xdg = onLinux("HOME" to "/home/dev", "XDG_CONFIG_HOME" to "/home/dev/cfg")
         val linux = automaticUpdateSettings(policy.paths, platform, xdg)
         assertEquals("/home/dev/cfg/systemd/user/${linux.label}.timer", linux.registration)
         assertEquals("/home/dev/cfg/ostrom", linux.configuration)
@@ -280,7 +280,7 @@ class AutomaticUpdateTest {
             automaticUpdateSettings(policy.paths, platform.copy(userId = null), home)
         }
         assertEquals(USER_UNAVAILABLE, noUser.code)
-        for (environment in listOf(variables(), variables("OSTROM_HOME" to "/home/dev/o"))) {
+        for (environment in listOf(onLinux(), onLinux("OSTROM_HOME" to "/home/dev/o"))) {
             val code = assertFailsWith<InstallationException> {
                 automaticUpdateSettings(policy.paths, platform, environment)
             }.code
@@ -313,6 +313,14 @@ class AutomaticUpdateTest {
         val ID = "a".repeat(32)
     }
 }
+
+/** The [variables] given, on Linux whatever system runs the tests (the config folder follows the system). */
+private fun onLinux(vararg variables: Pair<String, String>): Environment =
+    object : Environment {
+        override fun get(name: String): String? = variables.toMap()[name]?.takeIf { it.isNotEmpty() }
+        override val operatingSystem = OperatingSystem.LINUX
+        override val architecture = "x64"
+    }
 
 private class FakeSchedule(private val policy: AutomaticUpdateStore) : AutomaticUpdateSchedule {
     var cancelInstall = false
