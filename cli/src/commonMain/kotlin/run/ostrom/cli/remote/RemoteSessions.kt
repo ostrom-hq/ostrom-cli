@@ -9,6 +9,8 @@ import okio.Path
 import okio.Path.Companion.toPath
 import run.ostrom.cli.ExitCode
 import run.ostrom.cli.commands.stopWith
+import run.ostrom.cli.daemon.lastModified
+import run.ostrom.cli.daemon.regularFile
 import run.ostrom.cli.platform.FileStore
 import run.ostrom.cli.runner.conversation.FileAgentStateStore
 
@@ -66,6 +68,25 @@ internal class RemoteSessions(
         return log
     }
 
+    /**
+     * The directories of the most recent records with when each was written (milliseconds), newest first and each
+     * directory once. Only the newest [MAX_SCANNED] files are read; a damaged record is skipped.
+     */
+    fun recentDirectories(): List<Pair<String, Long>> {
+        val newest = files.list(root).filter { it.endsWith(".json") && !it.endsWith(".conversation.json") }
+            .mapNotNull { name ->
+                val file = root.toPath() / name
+                val metadata = fileSystem.metadataOrNull(file)
+                if (regularFile(metadata)) file.toString() to lastModified(metadata) else null
+            }
+            .sortedByDescending { it.second }.take(MAX_SCANNED)
+        val seen = mutableSetOf<String>()
+        return newest.mapNotNull { (file, at) ->
+            val directory = files.read(file)?.let(::decode)?.directory
+            if (directory != null && seen.add(directory)) directory to at else null
+        }
+    }
+
     /** Removes the records of [ended] sessions (with their conversation id and log); records of other sessions stay. */
     fun prune(ended: Set<String>) {
         val stale = ended.filter { SESSION_ID.matches(it) && files.exists(file(it, ".json")) }
@@ -86,6 +107,7 @@ internal class RemoteSessions(
         private val SESSION_ID = Regex("[a-zA-Z0-9-]{1,36}")
         private val SUFFIXES = listOf(".json", ".conversation.json", ".log")
         private val JSON = Json { ignoreUnknownKeys = true }
+        private const val MAX_SCANNED = 200
 
         /** A background host's log past this size starts again. */
         const val MAX_LOG_BYTES = 1_048_576L

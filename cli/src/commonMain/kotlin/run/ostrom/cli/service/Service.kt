@@ -27,6 +27,8 @@ import run.ostrom.cli.commands.GroupCommand
 import run.ostrom.cli.commands.directory
 import run.ostrom.cli.commands.serverOf
 import run.ostrom.cli.commands.signedIn
+import run.ostrom.cli.daemon.runDaemon
+import run.ostrom.cli.daemon.systemDaemonPorts
 import run.ostrom.cli.platform.ExcludeFromCoverage
 import run.ostrom.cli.platform.holdExclusiveLock
 
@@ -36,13 +38,14 @@ internal class ServiceCommand(
     manager: ServiceManager,
     platform: () -> ServicePlatform,
     cloudRunner: () -> Boolean,
+    daemon: ServiceDaemon,
 ) : GroupCommand(
     "service",
     "Manage the local service: automatic startup at login or, explicitly, at boot",
     comingSoon = false,
 ) {
     init {
-        val context = ServiceContext(dependencies, manager, platform, cloudRunner)
+        val context = ServiceContext(dependencies, manager, platform, cloudRunner, daemon)
         subcommands(
             Install(context),
             Print(context),
@@ -66,7 +69,11 @@ internal fun serviceCommand(dependencies: CliDependencies): ServiceCommand = Ser
     ServiceManager(SystemServiceRunner, { dependencies.environment["SystemRoot"] }, { delay(it) }),
     ::servicePlatform,
     { insideCloudRunner(dependencies.environment) },
+    { settings, report, stop -> runDaemon(dependencies, settings, report, stop, systemDaemonPorts()) },
 )
+
+/** What `service serve` runs while it holds its lock: the device's daemon, until the stop request. */
+internal typealias ServiceDaemon = suspend (ServiceSettings, (String) -> Unit, () -> Boolean) -> Unit
 
 /** What the subcommands of `service` share. */
 internal class ServiceContext(
@@ -74,6 +81,7 @@ internal class ServiceContext(
     val manager: ServiceManager,
     val platform: () -> ServicePlatform,
     val cloudRunner: () -> Boolean,
+    val daemon: ServiceDaemon,
 ) {
     /** The configuration file the service belongs to: `config.toml` in the CLI folder. */
     fun configPath(): String = dependencies.configFile(dependencies.directory())
@@ -328,6 +336,6 @@ private class Serve(private val context: ServiceContext) : CliktCommand(name = "
         val settings = requireNotNull(context.load(config)) { "Service settings are missing." }
         // not an error: the OS manager would restart a service that exits with one
         val busy = { context.dependencies.console.err("Another Ostrom service already runs for this configuration.\n") }
-        runBlocking { serve(settings, busy) }
+        runBlocking { serve(settings, busy, context.daemon) }
     }
 }

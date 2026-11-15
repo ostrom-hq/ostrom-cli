@@ -54,6 +54,7 @@ import run.ostrom.cli.help.colourLevel
 import run.ostrom.cli.launcher.Agent
 import run.ostrom.cli.platform.ConfigKey
 import run.ostrom.cli.platform.SecretStoreException
+import run.ostrom.cli.daemon.foldersCommand
 import run.ostrom.cli.remote.remoteCommand
 import run.ostrom.cli.service.serviceCommand
 import run.ostrom.cli.telemetry.UsageStatistics
@@ -219,6 +220,7 @@ class OstromCli(
             TelemetryCommand(dependencies),
             service(dependencies),
             remote(dependencies),
+            foldersCommand(dependencies),
             VersionCommand(dependencies),
             ImportTeamCodeCommand(dependencies),
         ) + setupCommands(dependencies)

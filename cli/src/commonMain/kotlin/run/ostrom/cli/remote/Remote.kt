@@ -11,9 +11,12 @@ import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.types.choice
+import com.github.ajalt.clikt.parameters.types.long
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import okio.Path
 import run.ostrom.cli.CliDependencies
 import run.ostrom.cli.ExitCode
 import run.ostrom.cli.commands.CLOUD_SESSIONS
@@ -21,12 +24,21 @@ import run.ostrom.cli.commands.GroupCommand
 import run.ostrom.cli.commands.OrgAccess
 import run.ostrom.cli.commands.cloudAccess
 import run.ostrom.cli.commands.cloudSessionPath
+import run.ostrom.cli.commands.refusal
 import run.ostrom.cli.commands.directory
 import run.ostrom.cli.commands.jsonFlag
 import run.ostrom.cli.commands.orgOption
 import run.ostrom.cli.commands.segment
 import run.ostrom.cli.commands.serverFlag
 import run.ostrom.cli.commands.stopWith
+import run.ostrom.cli.commands.windows
+import run.ostrom.cli.capabilities.CapabilitiesRead
+import run.ostrom.cli.daemon.ClaudeTranscripts
+import run.ostrom.cli.daemon.DaemonCallException
+import run.ostrom.cli.daemon.DaemonServer
+import run.ostrom.cli.daemon.SessionState
+import run.ostrom.cli.daemon.canonicalHome
+import run.ostrom.cli.daemon.folderStore
 import run.ostrom.cli.launcher.child
 import run.ostrom.cli.launcher.flag
 import run.ostrom.cli.launcher.join
@@ -37,14 +49,15 @@ import run.ostrom.cli.launcher.text
 import run.ostrom.cli.platform.OperatingSystem
 import run.ostrom.core.api.models.CloudSessionKinds
 import run.ostrom.core.api.models.RemotePermissionModes
+import run.ostrom.core.api.models.ResumableSessionLimits
 import run.ostrom.core.api.models.ServerFeatures
 import kotlin.uuid.Uuid
 
 // `ostrom remote start|list|resume|stop|host`, as TeamCode's `teamcode remote`: sessions that run on this device, in a
 // directory of yours, that the organisation's clients follow and drive like cloud sessions. The agent runs here
 // through the same conversation host as a cloud pod, with your own sign-in; only the directory's name reaches the
-// server. The daemon's paths (`remote start` through `ostrom service`, `resumable`, `--resume`) come with the device
-// daemon.
+// server. When this device's daemon runs (`ostrom service`), `remote start` and `resume` hand the session to it, and
+// continuing one of this device's Claude Code conversations (`--resume`) goes through it only (RemoteDaemon.kt).
 
 /** `ostrom remote`, its ports built on first use ([systemRemoteHostPorts] unless a test gives its own). */
 internal fun remoteCommand(
@@ -58,6 +71,8 @@ internal fun remoteCommand(
         RemoteResume(context),
         RemoteStop(context),
         RemoteHost(context),
+        RemoteResumable(context),
+        RemoteFolders(context),
     )
 }
 
@@ -110,6 +125,39 @@ internal class RemoteContext(val dependencies: CliDependencies, ports: () -> Rem
         }
     }
 
+    /** The daemon's channel, on the organisation and with the sign-in of the command. */
+    private fun daemon(access: OrgAccess) = DaemonServer(access.server) { access.signed.token }
+
+    /** Runs [block] on the daemon's channel; a call that does not succeed stops the command as any other. */
+    @Suppress("SwallowedException") // the refusal carries the server's type and message, never a body
+    fun <T> daemonCall(access: OrgAccess, block: suspend (DaemonServer) -> T): T = runBlocking {
+        try {
+            block(daemon(access))
+        } catch (error: DaemonCallException) {
+            throw error.failure.refusal(access.signed.serverUrl, "Not found: ${error.failure.message}")
+        }
+    }
+
+    /** What the server serves, as the command's feature check read it (no second request). */
+    fun features(access: OrgAccess): List<String> =
+        when (val read = runBlocking { dependencies.capabilities.read(access.signed.serverUrl, access.signed.token) }) {
+            is CapabilitiesRead.Read -> read.capabilities.features
+            else -> emptyList()
+        }
+
+    /** What a start through the daemon reads of this device. */
+    fun startSite(): DaemonStartSite {
+        val environment = dependencies.environment
+        return DaemonStartSite(
+            home = canonicalHome(dependencies),
+            windows = dependencies.windows,
+            searchPath = environment["PATH"],
+            folders = dependencies.folderStore(),
+            sessions = sessions(),
+            transcripts = ClaudeTranscripts.local(dependencies),
+        )
+    }
+
     /** The record of [session], or the refusal of a session this device did not start. */
     fun record(session: String): RemoteSessionRecord = sessions().load(session) ?: throw stopWith(
         ExitCode.NOT_FOUND,
@@ -142,10 +190,17 @@ private class RemoteStart(private val context: RemoteContext) : CliktCommand(nam
     ).flag()
     private val detach by option("--detach", help = DETACH_HELP).flag()
     private val json by jsonFlag()
+    private val resume by option(
+        "--resume",
+        help = "Continue one of DIRECTORY's Claude Code conversations on this device (an id from ostrom remote " +
+            "resumable), through this device's daemon: the session starts from a copy (--fork-session) and the " +
+            "conversation stays as it was",
+    )
     private val org by orgOption()
     private val server by serverFlag()
 
     override fun run() {
+        resume?.let(::checkResume)
         val dependencies = context.dependencies
         val environment = dependencies.environment
         val windows = environment.operatingSystem == OperatingSystem.WINDOWS
@@ -168,6 +223,15 @@ private class RemoteStart(private val context: RemoteContext) : CliktCommand(nam
             "directoryName" to path.name,
             "permissionMode" to if (bypass) RemotePermissionModes.BYPASS else RemotePermissionModes.ASK,
         )
+        val device = context.daemonCall(access) { server ->
+            val features = context.features(access)
+            // Continuing a conversation goes through the daemon only: no host of this command forks it.
+            if (resume != null) resumeDevice(server, features) else daemonDevice(server, features)
+        }
+        if (device != null) {
+            hostThroughDaemon(access, device, path, body)
+            return
+        }
         val created = access.write("POST", CLOUD_SESSIONS, body, NO_REMOTE, idempotencyKey = Uuid.random().toString())
         val id = created.text("id") ?: throw stopWith(ExitCode.UNREACHABLE, "ostrom: the server created no session.")
         val record = RemoteSessionRecord(id, path.toString(), agent)
@@ -176,6 +240,41 @@ private class RemoteStart(private val context: RemoteContext) : CliktCommand(nam
         context.report("Remote session $id on this device, in $path.")
         message?.let { sendFirstMessage(access, id, it) }
         exit(context.host(access, record, created.epoch(), detach))
+    }
+
+    private fun checkResume(id: String) {
+        if (agent != CLAUDE_AGENT) {
+            throw stopWith(ExitCode.USAGE, "ostrom: --resume continues a Claude Code conversation: use it with " +
+                "--agent claude.")
+        }
+        if (!ResumableSessionLimits.ID.matches(id)) {
+            throw stopWith(ExitCode.USAGE, "ostrom: --resume takes a Claude Code session id (a lowercase UUID).")
+        }
+    }
+
+    private suspend fun resumeDevice(server: DaemonServer, features: List<String>): String =
+        when (val target = localResumeTarget(server, features, hosting = true)) {
+            is LocalResume.Ready -> target.deviceId
+            is LocalResume.Unavailable ->
+                throw stopWith(ExitCode.FAILED, "ostrom: ${localResumeRefusal(target.reason)}")
+        }
+
+    /** The daemon hosts it: the session is created on this device's folder, then waited for. */
+    private fun hostThroughDaemon(access: OrgAccess, device: String, path: Path, body: JsonObject) {
+        val site = context.startSite()
+        val key = Uuid.random().toString()
+        val created = context.daemonCall(access) {
+            startThroughDaemon(it, device, path, body, agent, site, context::report, key, resume)
+        }
+        // startThroughDaemon stops when the server created no session: its id is there.
+        val id = created.getValue("id").jsonPrimitive.content
+        if (json) context.dependencies.console.data("$created\n")
+        context.report("Remote session $id on this device, in $path; this device's daemon hosts it.")
+        message?.let { sendFirstMessage(access, id, it) }
+        context.daemonCall(access) {
+            awaitDaemonHost(it, id, created.epoch(), context::report, context.dependencies.sleep)
+        }
+        context.report("Follow it from Ostrom's console or app. ostrom remote stop $id pauses it.")
     }
 
     /**
@@ -209,11 +308,23 @@ private class RemoteResume(private val context: RemoteContext) : CliktCommand(na
         val record = context.record(session)
         val access = context.access(server, org)
         val current = access.read(cloudSessionPath(session), "No remote session $session.")
-        if (current.child("host")?.flag("online") == true && current.text("desiredStatus") == "running") {
-            context.report("Session $session is already hosted on this device.")
-            return
+        val state = SessionState.of(current)
+        val hostedNow = state.online && state.desiredStatus == SessionState.RUNNING
+        // A session started through the daemon is the daemon's to host: resuming puts it back in its queue.
+        val throughDaemon = state.folderId != null && !hostedNow &&
+            context.daemonCall(access) { daemonDevice(it, context.features(access)) } != null
+        when {
+            throughDaemon -> {
+                if (state.desiredStatus != SessionState.RUNNING) {
+                    access.write("POST", "${cloudSessionPath(session)}/resume", null, "No remote session $session.")
+                }
+                context.daemonCall(access) {
+                    awaitDaemonHost(it, session, state.epoch, context::report, context.dependencies.sleep)
+                }
+            }
+            hostedNow -> context.report("Session $session is already hosted on this device.")
+            else -> exit(context.host(access, record, current.epoch(), detach))
         }
-        exit(context.host(access, record, current.epoch(), detach))
     }
 }
 
@@ -223,14 +334,24 @@ private class RemoteHost(private val context: RemoteContext) : CliktCommand(name
         "(what ostrom remote resume --detach runs in the background)"
 
     private val session by argument("SESSION")
+    private val acceptedEpoch by option(
+        "--accepted-epoch",
+        hidden = true,
+        help = "The epoch this device's daemon opened for the session, with --org",
+    ).long()
     private val org by orgOption()
     private val server by serverFlag()
 
     override fun run() {
+        if (acceptedEpoch != null && org == null) {
+            throw stopWith(ExitCode.USAGE, "ostrom: use --accepted-epoch with --org.")
+        }
         val record = context.record(session)
         val access = context.access(server, org)
         val code = runBlocking {
-            hostRemoteSession(context.dependencies, access, record, context.sessions(), context.ports, context::report)
+            val sessions = context.sessions()
+            val report = context::report
+            hostRemoteSession(context.dependencies, access, record, sessions, context.ports, report, acceptedEpoch)
         }
         exit(code)
     }
@@ -332,3 +453,5 @@ internal fun remoteLine(session: JsonObject, record: RemoteSessionRecord?, showD
 
 /** The session's current epoch, 0 before its first execution. */
 private fun JsonObject.epoch(): Long = epochOf(this) ?: 0
+
+private const val CLAUDE_AGENT = "claude"

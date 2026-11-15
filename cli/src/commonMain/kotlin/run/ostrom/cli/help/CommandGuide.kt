@@ -438,6 +438,24 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
     ),
     "remote stop" to guide("cloud-sessions", "ostrom remote stop 9f3c" to "pause it: the agent finishes its turn"),
     "remote host" to guide("cloud-sessions", "ostrom remote host 9f3c" to "the host itself, in the foreground"),
+    "remote resumable" to guide(
+        "cloud-sessions",
+        "ostrom remote resumable ~/code/api" to "the Claude Code conversations remote start --resume can continue",
+        "ostrom remote start ~/code/api --resume 0b9a…" to "continue one through this device's daemon",
+    ),
+    "remote folders" to guide(
+        "cloud-sessions",
+        "ostrom remote folders" to "the folders this device knows, the most recently used first",
+        "ostrom remote folders --json" to "the same, for the desktop app",
+    ),
+    "folders" to guide(
+        "cloud-sessions",
+        "ostrom folders add ~/code/api" to "let your other devices start sessions there",
+        "ostrom folders list" to "the folders this device offers",
+    ),
+    "folders add" to guide("cloud-sessions", "ostrom folders add ~/code/api" to "offer a folder to your other devices"),
+    "folders list" to guide("cloud-sessions", "ostrom folders list --json" to "this device's folders, for a script"),
+    "folders remove" to guide("cloud-sessions", "ostrom folders remove 3f9c1a2b" to "stop offering a folder"),
     "cloud" to guide(
         "cloud-sessions",
         "ostrom cloud list" to "your cloud sessions",

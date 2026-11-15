@@ -28,8 +28,8 @@ private const val NOT_ON_WINDOWS = "Team hooks are not run on Windows yet: ostro
 /** What a team hooks command works with: the server's routes with this device's credential, the member's decisions. */
 private class TeamHookAccess(val hooks: TeamHooks, val approvals: HookApprovals)
 
-/** Whether this computer runs team hooks: POSIX only for now. */
-private val CliDependencies.windows: Boolean get() = environment.operatingSystem == OperatingSystem.WINDOWS
+/** Whether this computer runs Windows, where team hooks do not run yet (POSIX only for now). */
+internal val CliDependencies.windows: Boolean get() = environment.operatingSystem == OperatingSystem.WINDOWS
 
 /**
  * Runs [block] against the team hooks delivered to the person signed in: the organisation, then the server's

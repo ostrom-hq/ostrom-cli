@@ -23,6 +23,7 @@ import run.ostrom.cli.ExitCode
 import run.ostrom.cli.api.longPollHttpClient
 import run.ostrom.cli.commands.OrgAccess
 import run.ostrom.cli.commands.cloudSessionPath
+import run.ostrom.cli.commands.orStop
 import run.ostrom.cli.commands.refusal
 import run.ostrom.cli.commands.stopWith
 import run.ostrom.cli.launcher.Routes
@@ -33,6 +34,7 @@ import run.ostrom.cli.launcher.list
 import run.ostrom.cli.launcher.text
 import run.ostrom.cli.platform.DetachedProcess
 import run.ostrom.cli.platform.ExcludeFromCoverage
+import run.ostrom.cli.platform.currentServiceAccount
 import run.ostrom.cli.platform.installServiceSignalHandlers
 import run.ostrom.cli.platform.serviceStopRequested
 import run.ostrom.cli.platform.startDetachedProcess
@@ -50,6 +52,7 @@ import run.ostrom.cli.runner.conversation.ConversationHost
 import run.ostrom.cli.runner.conversation.ConversationLaunch
 import run.ostrom.cli.runner.conversation.ExecProcesses
 import run.ostrom.cli.runner.conversation.HttpAgentChannel
+import run.ostrom.cli.runner.conversation.SessionUploads
 import run.ostrom.cli.runner.conversation.localAgentProcesses
 import run.ostrom.cli.runner.conversation.processEnvironment
 import kotlin.time.Clock
@@ -71,6 +74,8 @@ import kotlin.uuid.Uuid
  * @property signalPollMillis How often [stopRequested] is read.
  * @property startPollMillis How often a background host's start is checked.
  * @property startMillis How long a background host may take to start before it is said to be still starting.
+ * @property uploads Where a session's message files are written for its agent (`runners.cloud.files.v1`): this user's
+ * temporary directory, never the session's directory. It throws when there is none, and files are then off.
  */
 @Suppress("LongParameterList") // the host's ports, one each, named at the call sites
 internal class RemoteHostPorts(
@@ -85,6 +90,7 @@ internal class RemoteHostPorts(
     val signalPollMillis: Long,
     val startPollMillis: Long,
     val startMillis: Long,
+    val uploads: (String) -> SessionUploads,
 )
 
 /** The real ports: POSIX processes, the platform's HTTP engine, the relay module, the OS's signals. */
@@ -102,6 +108,7 @@ internal fun systemRemoteHostPorts(): RemoteHostPorts = RemoteHostPorts(
     signalPollMillis = 100,
     startPollMillis = 1_000,
     startMillis = 30_000,
+    uploads = { SessionUploads.remote(it, currentServiceAccount().userId) },
 )
 
 /** The execution the host opened (`POST /cloud/sessions/{id}/host`, the contract's `CloudHost`). */
@@ -125,12 +132,21 @@ internal suspend fun hostRemoteSession(
     sessions: RemoteSessions,
     ports: RemoteHostPorts,
     report: (String) -> Unit,
+    acceptedEpoch: Long? = null,
 ): Int {
     val processes = requireHosting(ports)
     val sessionId = Uuid.parseOrNull(record.sessionId)
         ?: throw stopWith(ExitCode.USAGE, "ostrom: ${record.sessionId} is not a session id.")
-    val hosted = takeSession(access, record.sessionId, report, dependencies.sleep)
-    report("Hosting ${hosted.name} (epoch ${hosted.epoch}) in ${record.directory}.")
+    val hosted = if (acceptedEpoch == null) {
+        takeSession(access, record.sessionId, report, dependencies.sleep).also {
+            report("Hosting ${it.name} (epoch ${it.epoch}) in ${record.directory}.")
+        }
+    } else {
+        acceptedSession(access, record.sessionId, acceptedEpoch).also {
+            report("Hosting session ${record.sessionId} (epoch $acceptedEpoch) for this device's daemon, in " +
+                "${record.directory}.")
+        }
+    }
     ports.installSignals()
     val client = ports.http()
     return try {
@@ -233,7 +249,18 @@ private class RemoteExecution(
             log = report,
             version = { kind -> ConversationLaunch.version(processes::start, kind, record.directory) },
             permissionMode = permissionMode,
+            uploads = uploads(record.sessionId),
         )
+    }
+
+    /** The session's uploads; null turns message files off (TeamCode's `uploads`). */
+    private fun uploads(session: String): SessionUploads? = try {
+        ports.uploads(session)
+    } catch (error: CancellationException) {
+        throw error
+    } catch (_: Exception) {
+        report("Message files are off for this session: no uploads directory.")
+        null
     }
 
     /** How a host's conversation ended. */
@@ -334,6 +361,16 @@ internal suspend fun takeSession(
             }
         }
     }
+}
+
+/**
+ * The execution this device's daemon already opened (`POST /host`, epoch [epoch]) for this host to run: the session is
+ * read for its name and permission mode, as `POST /host` answers them.
+ */
+private suspend fun acceptedSession(access: OrgAccess, session: String, epoch: Long): HostedSession {
+    val answer = access.server.get(cloudSessionPath(session), access.signed.token)
+    val read = answer.orStop(access.signed.serverUrl, "No remote session $session.")
+    return HostedSession(epoch, read.text("name") ?: "the session", read.child("host")?.text("permissionMode"))
 }
 
 private fun JsonObject.hosted(): HostedSession {
