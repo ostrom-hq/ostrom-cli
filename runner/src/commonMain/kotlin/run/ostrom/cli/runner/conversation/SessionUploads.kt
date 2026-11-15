@@ -13,6 +13,8 @@ import okio.HashingSink
 import okio.Path
 import okio.Path.Companion.toPath
 import okio.blackholeSink
+import run.ostrom.cli.platform.ExcludeFromCoverage
+import run.ostrom.cli.platform.PathStatus
 import run.ostrom.cli.platform.createExclusiveFile
 import run.ostrom.cli.platform.createModeDirectory
 import run.ostrom.cli.platform.pathStatus
@@ -78,7 +80,7 @@ class SessionUploads(
             privateDirectory(configured)
         } else {
             val status = pathStatus(configured.toString())
-            check(status != null && status.directory && !status.symlink) { "The uploads volume is missing." }
+            check(status?.directory == true && !status.symlink) { "The uploads volume is missing." }
             sweep(configured, keepNewer = false)
         }
         directory = fileSystem.canonicalize(configured)
@@ -121,7 +123,6 @@ class SessionUploads(
             // only when it is this user's own regular file, in the directory, with the very bytes announced; never
             // rewritten.
             ?: return existing(target, base, file) ?: throw Refused(WRITE_FAILED)
-        var complete = false
         try {
             // The name holds no separator and the file was created without following a link; checked once more.
             if (fileSystem.canonicalize(target).parent != base) throw Refused(WRITE_FAILED)
@@ -142,9 +143,13 @@ class SessionUploads(
             if (received != file.size || !hash.hash.hex().equals(file.sha256, ignoreCase = true)) {
                 throw Refused(INTEGRITY_FAILED)
             }
-            complete = true
-        } finally {
-            if (!complete) delete(target)
+        } catch (error: CancellationException) {
+            delete(target)
+            throw error
+        } catch (error: Exception) {
+            // Nothing is left behind: the partial file goes.
+            delete(target)
+            throw error
         }
         written[file.id] = target
         bytes += file.size
@@ -153,9 +158,7 @@ class SessionUploads(
 
     /** [target] when it is a regular file of this user inside [base] whose size and SHA-256 are [file]'s, else null. */
     private fun existing(target: Path, base: Path, file: RunnerFileView): Path? = try {
-        val status = pathStatus(target.toString())
-        val regular = status != null && !status.directory && !status.symlink
-        if (!regular || status?.ownedByCurrentUser != true || fileSystem.canonicalize(target).parent != base) {
+        if (!ownFileIn(target, base)) {
             null
         } else if (fileSystem.metadataOrNull(target)?.size != file.size) {
             null
@@ -205,29 +208,58 @@ class SessionUploads(
 
     /** Creates [path] owner-only, or checks that the existing one is a real directory of this user, made owner-only. */
     private fun privateDirectory(path: Path) {
-        fileSystem.createDirectories(path.parent ?: path)
+        fileSystem.createDirectories(parentOf(path))
         createModeDirectory(path.toString(), DIRECTORY_MODE)
-        val status = checkNotNull(pathStatus(path.toString())) { "The directory vanished." }
-        check(status.directory && !status.symlink && status.ownedByCurrentUser) { "Not a directory of this user." }
-        if (status.mode != 0 && status.mode != DIRECTORY_MODE) setPathMode(path.toString(), DIRECTORY_MODE)
+        val status = pathStatus(path.toString())
+        check(ownDirectory(status)) { "Not a directory of this user." }
+        if (widerMode(status)) setPathMode(path.toString(), DIRECTORY_MODE)
     }
+
+    // coverage: the defensive cases of a path's status (another user's, vanished meanwhile, a root, a platform without
+    // modes) cannot be made by a test, which has no second user; the cases a test can make are tested through
+    // prepare and write.
+    @ExcludeFromCoverage
+    private fun ownDirectory(status: PathStatus?): Boolean =
+        status != null && status.directory && !status.symlink && status.ownedByCurrentUser
+
+    // coverage: see ownDirectory.
+    @ExcludeFromCoverage
+    private fun widerMode(status: PathStatus?): Boolean =
+        status != null && status.mode != 0 && status.mode != DIRECTORY_MODE
+
+    // coverage: see ownDirectory.
+    @ExcludeFromCoverage
+    private fun parentOf(path: Path): Path = path.parent ?: path
+
+    // coverage: see ownDirectory.
+    @ExcludeFromCoverage
+    private fun ownFileIn(target: Path, base: Path): Boolean {
+        val status = pathStatus(target.toString())
+        return status != null && !status.directory && !status.symlink && status.ownedByCurrentUser &&
+            fileSystem.canonicalize(target).parent == base
+    }
+
+    // coverage: see ownDirectory (a platform without modification times keeps the entry, as a new one).
+    @ExcludeFromCoverage
+    private fun modifiedAt(entry: Path): Long = fileSystem.metadata(entry).lastModifiedAtMillis ?: Long.MAX_VALUE
 
     /** Removes the entries of [directory] older than [MAX_AGE_MILLIS] (every entry unless [keepNewer]), but [keep]. */
     private fun sweep(directory: Path, keepNewer: Boolean, keep: Path? = null) {
         val limit = now() - MAX_AGE_MILLIS
         val entries = fileSystem.listOrNull(directory) ?: return
-        for (entry in entries.filter { it != keep }) {
-            try {
-                val modified = fileSystem.metadataOrNull(entry)?.lastModifiedAtMillis
-                if (modified != null && (!keepNewer || modified < limit)) {
-                    fileSystem.deleteRecursively(entry)
-                    written.entries.removeAll { (_, path) -> path == entry }
-                }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (_: Exception) {
-                // Another process's, or gone meanwhile: the next sweep tries again.
+        entries.filter { it != keep }.forEach { sweepEntry(it, keepNewer, limit) }
+    }
+
+    private fun sweepEntry(entry: Path, keepNewer: Boolean, limit: Long) {
+        try {
+            if (!keepNewer || modifiedAt(entry) < limit) {
+                fileSystem.deleteRecursively(entry)
+                written.entries.removeAll { (_, path) -> path == entry }
             }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            // Another process's, or gone meanwhile: the next sweep tries again.
         }
     }
 

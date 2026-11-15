@@ -283,7 +283,7 @@ class HttpAgentChannel(
                 if (count < 0) break
                 total += count
                 if (total > maxBytes) throw RunnerChannelException(BAD_GATEWAY, "file_too_large")
-                if (count > 0) receive(chunk, count)
+                receive(chunk, count)
             }
         }
     }

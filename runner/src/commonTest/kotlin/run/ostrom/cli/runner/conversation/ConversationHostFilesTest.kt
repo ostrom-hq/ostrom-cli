@@ -4,6 +4,7 @@
 
 package run.ostrom.cli.runner.conversation
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -534,6 +535,9 @@ class ConversationHostFilesTest {
             assertTrue(bare.announced.none { it }, "Never announced")
             assertEquals("files_unavailable", bare.acks.single().reason)
             bareJob.cancel()
+            val ended = fileHost(FileChannel(), scratch, mutableListOf(), null)
+            ended.sessionEnded()
+            ended.stop()
         } finally {
             scratch.close()
         }
@@ -556,6 +560,113 @@ class ConversationHostFilesTest {
             assertFalse(FileSystem.SYSTEM.exists(volume / "old.png"))
             if (!windows) assertEquals(0x1A0, pathStatus(written.toString())!!.mode, "0640: read through the group")
             job.cancel()
+        } finally {
+            scratch.close()
+        }
+    }
+
+    @Test
+    fun aWriteChecksItsDirectoryAndTheBytesItGets() = runTest {
+        val scratch = Scratch()
+        try {
+            val channel = FileChannel()
+            val volume = (scratch.root / "uploads").also { FileSystem.SYSTEM.createDirectories(it) }
+            val uploads = SessionUploads.pod(volume.toString())
+            val file = channel.serve("f1", "a.png", png)
+            assertEquals("files_unavailable", runCatchingRefusal { uploads.write(file) { channel.file("f1", 8, it) } })
+            assertTrue(uploads.prepare {})
+            val first = uploads.write(file) { channel.file("f1", 8, it) }
+            // Removed meanwhile: written again.
+            FileSystem.SYSTEM.delete(first)
+            assertEquals(first, uploads.write(file) { channel.file("f1", 8, it) })
+            assertEquals(2, channel.downloads)
+            // Fewer bytes than announced.
+            val short = channel.serve("f2", "b.png", png).copy(size = 9)
+            val integrity = runCatchingRefusal { uploads.write(short) { channel.file("f2", 9, it) } }
+            assertEquals("file_integrity_failed", integrity)
+            // A cancelled download leaves nothing.
+            val cancelled = channel.serve("f3", "c.png", png)
+            val error = try {
+                uploads.write(cancelled) { throw CancellationException("stopped") }
+                null
+            } catch (stopped: CancellationException) {
+                stopped
+            }
+            assertNotNull(error)
+            assertFalse(FileSystem.SYSTEM.exists(uploads.directory!! / "f3-c.png"))
+            // The directory gone after prepare: nothing can be written.
+            FileSystem.SYSTEM.deleteRecursively(volume)
+            val gone = channel.serve("f4", "d.png", png)
+            assertEquals("file_write_failed", runCatchingRefusal { uploads.write(gone) { channel.file("f4", 8, it) } })
+            if (!windows) {
+                // The directory replaced by a link elsewhere: the file would land outside, so it is refused, removed.
+                val elsewhere = (scratch.root / "elsewhere").also { FileSystem.SYSTEM.createDirectories(it) }
+                assertTrue(symbolicLink(elsewhere.toString(), volume.toString()))
+                val moved = channel.serve("f5", "e.png", png)
+                assertEquals(
+                    "file_write_failed",
+                    runCatchingRefusal { uploads.write(moved) { channel.file("f5", 8, it) } },
+                )
+                assertTrue(FileSystem.SYSTEM.list(elsewhere).isEmpty())
+            }
+        } finally {
+            scratch.close()
+        }
+    }
+
+    @Test
+    fun aFileOnDiskWithOtherBytesOfTheSameSizeIsNeverReused() = runTest {
+        val scratch = Scratch()
+        try {
+            val channel = FileChannel()
+            val uploads = remote(scratch)
+            assertTrue(uploads.prepare {})
+            FileSystem.SYSTEM.write(uploads.directory!! / "f1-a.png") { write(ByteArray(8)) }
+            val file = channel.serve("f1", "a.png", png)
+            assertEquals("file_write_failed", runCatchingRefusal { uploads.write(file) { channel.file("f1", 8, it) } })
+            assertEquals(0, channel.downloads)
+        } finally {
+            scratch.close()
+        }
+    }
+
+    @Test
+    fun aPodVolumeMustBeARealDirectory() {
+        val scratch = Scratch()
+        try {
+            FileSystem.SYSTEM.write(scratch.root / "file") { writeUtf8("x") }
+            assertFalse(SessionUploads.pod((scratch.root / "file").toString()).prepare {})
+            if (!windows) {
+                assertTrue(symbolicLink(scratch.workspace.toString(), (scratch.root / "link").toString()))
+                assertFalse(SessionUploads.pod((scratch.root / "link").toString()).prepare {})
+            }
+            val uploads = SessionUploads.remote("s-1", "a-b_c", scratch.temporary)
+            assertTrue(uploads.prepare {})
+            assertEquals(FileSystem.SYSTEM.canonicalize(scratch.temporary / "ostrom-a-bc" / "s-1"), uploads.directory)
+        } finally {
+            scratch.close()
+        }
+    }
+
+    @Test
+    fun aPausingHostDownloadsNothingAndAForbiddenDownloadFencesIt() = runTest {
+        val scratch = Scratch()
+        try {
+            val channel = FileChannel()
+            val host = fileHost(channel, scratch, mutableListOf(), remote(scratch))
+            val job = launch { host.run() }
+            host.drain(null)
+            channel.inputs.send(listOf(message("in-1", "x", channel.serve("f1", "a.png", png))))
+            channel.inputs.send(listOf(message("in-2", "x")))
+            until { channel.announced.size == 3 }
+            assertTrue(channel.acks.none { it.id == "in-1" }, "Left for the next execution")
+            assertEquals(0, channel.downloads)
+            host.resumeAfterDrain()
+            channel.failure = RunnerChannelException(403, "forbidden")
+            channel.inputs.send(listOf(message("in-3", "x", channel.serve("f3", "c.png", png))))
+            until { host.fenced }
+            job.join()
+            assertTrue(channel.acks.none { it.id == "in-3" })
         } finally {
             scratch.close()
         }

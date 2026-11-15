@@ -236,7 +236,8 @@ class ConversationHost(
     override suspend fun run() = coroutineScope {
         scope = this
         // The sweep at start: what a previous execution left, and anything older than a week.
-        uploadsDirectory = uploads?.takeIf { it.prepare(log) }?.directory?.toString()
+        // A successful prepare sets the directory.
+        uploadsDirectory = uploads?.takeIf { it.prepare(log) }?.let { it.directory.toString() }
         val transcript = launch { uploadLoop() }
         try {
             initialMessage?.let { first(it) }
