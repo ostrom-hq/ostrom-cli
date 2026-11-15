@@ -15,6 +15,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.http.headersOf
 import io.ktor.server.testing.ApplicationTestBuilder
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.TestScope
@@ -22,6 +23,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.testTimeSource
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -269,6 +271,33 @@ class RelayActivityTest {
         val client = HttpClient(MockEngine { awaitCancellation() })
         val forwarder = ActivityForwarder(relayConfig(), client, AgentSession(), backgroundScope)
         assertEquals(ActivityOutcome.RETRY, forwarder.send("claude-session-1~r2", "working", "2026-11-15T00:00:00Z"))
+        client.close()
+    }
+
+    @Test
+    fun eachAnswerOfOstromIsOneOutcomeOfTheReport() = runTest {
+        // off the test scheduler: the mock answers at once on a real thread, virtual time must not run out the bound
+        val answers = listOf(
+            Triple(HttpStatusCode.OK, """{"superseded":false}""", ActivityOutcome.REPORTED),
+            Triple(HttpStatusCode.Accepted, """{"superseded":true}""", ActivityOutcome.SUPERSEDED),
+            Triple(HttpStatusCode.Forbidden, "{}", ActivityOutcome.REFUSED),
+            Triple(HttpStatusCode.NotFound, "{}", ActivityOutcome.REFUSED),
+            Triple(HttpStatusCode.Conflict, """{"superseded":true}""", ActivityOutcome.REFUSED),
+            Triple(HttpStatusCode.Unauthorized, "{}", ActivityOutcome.RETRY),
+            Triple(HttpStatusCode.BadGateway, "{}", ActivityOutcome.RETRY),
+        )
+        withContext(Dispatchers.Default) {
+            for ((status, body, outcome) in answers) {
+                assertEquals(outcome, report(HttpClient(MockEngine { respond(body, status, JSON) })), "$status")
+            }
+            assertEquals(ActivityOutcome.RETRY, report(HttpClient(MockEngine { error("down") })), "down")
+        }
+    }
+
+    private suspend fun TestScope.report(client: HttpClient): ActivityOutcome = try {
+        val forwarder = ActivityForwarder(relayConfig(), client, AgentSession(), backgroundScope)
+        forwarder.send("claude-session-1~r2", "working", "2026-11-15T00:00:00Z")
+    } finally {
         client.close()
     }
 }
