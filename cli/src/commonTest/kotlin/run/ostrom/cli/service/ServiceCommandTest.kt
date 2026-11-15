@@ -162,7 +162,10 @@ class ServiceCommandTest : CliKit() {
     fun printRendersTheRegistrationWithoutInstallingAnything() = blockingScratch { scratch ->
         val runner = FakeRunner()
         assertEquals(0, run(scratch, "print", runner = runner))
-        assertOut("ExecStart=\"${scratch.launcher}\" \"service\" \"serve\" \"--config\" \"${scratch.config}\"")
+        // systemd escapes a backslash and takes such a path through env (Windows paths, as the tests run there too)
+        fun quoted(value: String) = "\"" + value.replace("\\", "\\\\") + "\""
+        val wrapper = if ('\\' in scratch.launcher) "\"/usr/bin/env\" \"--\" " else ""
+        assertOut("ExecStart=$wrapper${quoted(scratch.launcher)} \"service\" \"serve\" \"--config\" ${quoted(scratch.config)}")
         assertEquals(null, fs.metadataOrNull(scratch.config.toPath().parent!!.resolve("service.json")))
         assertTrue(runner.calls.isEmpty())
         console.out.clear()
