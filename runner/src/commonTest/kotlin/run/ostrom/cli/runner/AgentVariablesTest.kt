@@ -253,6 +253,9 @@ class AgentVariablesTest {
             ),
             script.lines().filter { it.isNotEmpty() },
         )
+        val plain = AgentEnvironment.script(mapOf("A" to "1")).lines().filter { it.isNotEmpty() }
+        assertEquals("export A='1'", plain.last())
+        assertEquals(2, plain.size)
         assertTrue(AgentEnvironment.isWaitSecret("OSTROM_WAIT_A1_B"))
         assertFalse(AgentEnvironment.isWaitSecret("OSTROM_WAIT_a"))
         assertFalse(AgentEnvironment.isWaitSecret("OSTROM_WAIT_"))
