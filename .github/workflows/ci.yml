@@ -161,7 +161,7 @@ jobs:
           --max-hook-p95-ms 20 --max-version-p95-ms 30 --max-cold-ms 300 --max-hook-memory-mb 25
       # The hooks of a managed installation (`ostrom install`) name its launcher, which checks the selected payload
       # before running it. Hashing the whole payload on every launch cost 388-514 ms on macOS (15/11, #211's binary);
-      # launch-cache.json skips the hash while the payload's file identity holds (cli#<this PR>). Budgets: the hook's
+      # launch-cache.json skips the hash while the payload's file identity holds (cli#227). Budgets: the hook's
       # own 15 ms through the launcher, 10 ms of overhead over the bare binary; a changed payload must be refused.
       - name: Start-up through the launcher of a managed installation (15 ms median, 10 ms overhead)
         run: >-
