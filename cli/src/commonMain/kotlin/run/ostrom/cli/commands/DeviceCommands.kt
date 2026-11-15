@@ -45,7 +45,7 @@ private fun CliDependencies.listDevices(server: String?, json: Boolean) {
         return
     }
     answer.list("items").filterIsInstance<JsonObject>().forEach { device ->
-        val active = device["activeSessions"]?.toString() ?: "0"
+        val active = device["activeSessions"] ?: 0
         val current = if (device.flag("current") == true) "\tcurrent" else ""
         console.out("${device.text("id")}\t${device.text("name")}\t$active active sessions$current\n")
     }
