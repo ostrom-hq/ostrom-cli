@@ -176,6 +176,9 @@ class AnswerWaitUseCaseTest {
         val typo = assertFailsWith<WaitInputException> { use(nope) }
         assertEquals(1, reads, "nothing was read for a field the wait does not have")
         assertEquals(true, typo.message.orEmpty().startsWith("This wait has no field"))
+        val twice = AnswerWait("w1", "stop", emptyList(), emptyList(), listOf("pw"))
+        assertEquals(true, assertFailsWith<WaitInputException> { use(twice) }.message.orEmpty().contains("no action"))
+        assertEquals(1, reads, "nothing was read for an action the wait does not have")
         val note = AnswerWait("w1", null, emptyList(), emptyList(), listOf("note"))
         val plain = assertFailsWith<WaitInputException> { use(note) }
         assertEquals("Field note is not a secret: give it with --set note=VALUE.", plain.message)

@@ -60,8 +60,8 @@ internal class AnswerWaitUseCase(
         val fields = question.list("fields").filterIsInstance<JsonObject>()
         // Checked before anything is read: a typo in a field name must not cost the person a typed secret.
         values(fields, request.sets, request.jsonSets, request.secretFields.associateWith { "x" })
-        val values = values(fields, request.sets, request.jsonSets, readSecrets(request.secretFields))
         val action = action(question.list("actions").filterIsInstance<JsonObject>(), request.action)
+        val values = values(fields, request.sets, request.jsonSets, readSecrets(request.secretFields))
         return server.answer(request.id, objectOf("action" to action, "values" to JsonObject(values)))
     }
 
