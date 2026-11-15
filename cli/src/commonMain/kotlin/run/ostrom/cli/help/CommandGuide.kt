@@ -97,6 +97,21 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
         "ostrom sessions list --all --open" to "everyone's sessions still running",
     ),
     "sessions show" to sessionsShow,
+    "agents" to guide(
+        "agents",
+        "ostrom agents watch" to "each new capacity advice of your team, as JSON lines",
+        "ostrom agents hint --session launch-1" to "the advice new for one session, for its hook",
+    ),
+    "agents watch" to guide(
+        "agents",
+        "ostrom agents watch" to "your member-wide advice, as JSON lines, until Ctrl-C",
+        "ostrom agents watch --session launch-1" to "only one session's new advice",
+    ),
+    "agents hint" to guide(
+        "agents",
+        "ostrom agents hint --session launch-1" to "the session's new advice, in words",
+        "ostrom agents hint --session launch-1 --format claude" to "as Claude Code's hook context",
+    ),
     "logs" to sessionsShow,
     "harness" to guide(
         "harness",

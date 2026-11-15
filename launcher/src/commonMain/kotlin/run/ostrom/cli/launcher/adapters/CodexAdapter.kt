@@ -12,6 +12,9 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
+/** TeamCode's `teamcode agents hook` events: the agent reads their additional context. */
+private val GUIDANCE_EVENTS = listOf("UserPromptSubmit" to "user_prompt_submit", "PreToolUse" to "pre_tool_use")
+
 /** Codex has no `Notification` and no per-tool report of it: the activity reports its turn's start and end. */
 private val ACTIVITY_EVENTS = listOf("UserPromptSubmit" to "user_prompt_submit", "Stop" to "stop")
 
@@ -39,7 +42,7 @@ class CodexAdapter : AgentAdapter {
             OstromHook("SessionEnd", "session_end", "session", END_SECONDS),
         ) + (if (layout.todo) listOf(OstromHook("Stop", "stop", "todo-stop", TODO_STOP_SECONDS)) else emptyList()) +
             // whether the agent works or waits for a person, as TeamCode's `teamcode agents hook` on these two events
-            activityHooks(layout)
+            activityHooks(layout) + guidanceHooks(layout)
         val ours = hooks.groupBy({ it.event }, { group(handler(layout, it)) })
         // the team hooks the member approved: later groups of the same events, not trusted by Ostrom (Codex asks the
         // member to review them in /hooks, as any hook it has not seen)
@@ -110,6 +113,13 @@ class CodexAdapter : AgentAdapter {
         emptyList()
     }
 
+    /** The guidance's hooks, after Ostrom's gate and the activity's, when the launch gives the agent advice. */
+    private fun guidanceHooks(layout: SessionLayout): List<OstromHook> = if (layout.guidance) {
+        GUIDANCE_EVENTS.map { (event, label) -> OstromHook(event, label, GUIDANCE, GUIDANCE_SECONDS) }
+    } else {
+        emptyList()
+    }
+
     /** One hook's handler: the one source of both its `-c` override and the identity whose hash is trusted. */
     private fun handler(layout: SessionLayout, hook: OstromHook): Map<String, JsonPrimitive> = linkedMapOf(
         "type" to JsonPrimitive("command"),
@@ -156,6 +166,10 @@ class CodexAdapter : AgentAdapter {
 
         /** It waits 1.5 s at most for the relay, which answers at once. */
         const val ACTIVITY_SECONDS = 2L
+        const val GUIDANCE = "guidance"
+
+        /** TeamCode's: the relay bounds the advice's lookup at 2.5 s, the hook waits 3 s for it, Codex 5 s. */
+        const val GUIDANCE_SECONDS = 5L
 
         /** The todo's Stop hook, as Claude Code's: its decision's own budget is 140 s. */
         const val TODO_STOP_SECONDS = 150L

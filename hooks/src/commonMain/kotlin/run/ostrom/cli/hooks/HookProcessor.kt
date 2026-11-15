@@ -22,6 +22,12 @@ enum class HookKind(val command: String) {
      * whether the agent works or waits for a person (`sessions.activity.v1`). Never refuses nor holds anything.
      */
     ACTIVITY("activity"),
+
+    /**
+     * Codex's `UserPromptSubmit` and `PreToolUse` in a local session: asks the relay for the session's new capacity
+     * advice (`capacity.pacing.v1`) and prints it as the agent's additional context. Never refuses nor holds anything.
+     */
+    GUIDANCE("guidance"),
     ;
 
     /** Lookup by command name. */
@@ -79,7 +85,7 @@ class HookProcessorImpl(private val gate: GateHandler) : HookProcessor {
             GateDecision.Allow -> HookReply()
             is GateDecision.Deny -> deny(decision.reason, dialect)
         }
-        HookKind.SESSION, HookKind.WAKE, HookKind.ACTIVITY -> HookReply()
+        HookKind.SESSION, HookKind.WAKE, HookKind.ACTIVITY, HookKind.GUIDANCE -> HookReply()
     }
 
     /** A refusal in the agent's dialect ([HookReplies.deny]): exit 2, the reason on stderr. */

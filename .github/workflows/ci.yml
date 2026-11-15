@@ -151,6 +151,8 @@ jobs:
       # 17.86 MB (d0551960), 18.47 with the workflows commands (#146), 18.70 with the memory server and the relay
       # (#159, #161), 19.06 with the automations commands (#151), 19.25 with ostrom cloud mcp (#180, #182), 19.32 on
       # main (run 43634928886). Since then it is linked and measured on every pull request.
+      # 19 MB (Windows 21) from 15/11: the capacity guidance (cli#215: hooks, relay forwarder, agents commands, status
+      # capacity) took linuxX64 from 17.82 MB on main to 18.17 and ostrom.exe from 19.81 to 20.25 (run 43683335873).
       - name: Start-up (15 ms median, 20 ms p95, 40 ms for a git push), first start, memory and binary sizes
         run: >-
           python3 scripts/measure.py --label linuxX64 --max-push-ms 40
@@ -317,7 +319,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ostrom-hq/ostrom-core
-          ref: 88fa37e5f683cde1b34d8907f5a4468843c5bef7 # docs-truth and served-routes.txt; move it forward by pull request
+          ref: f34e5bebbcb109a1d565b2a5c2196eb66b918fa2 # docs-truth and served-routes.txt; move it forward by pull request
           ssh-key: ${{ secrets.DEPLOY_KEY_CORE }}
           path: docs-truth-core
           persist-credentials: false

@@ -115,6 +115,7 @@ private class Relay(
     private val inference = InferenceForwarder(config, upstream, exchange, notices)
     private val policy = SignedCatalogForwarder(config, shared, exchange, timeouts.hook, memory)
     private val activity = ActivityForwarder(config, shared, session, scope)
+    private val guidance = GuidanceForwarder(config, shared)
 
     suspend fun handle(call: ApplicationCall) {
         val headers = call.request.headers
@@ -142,6 +143,7 @@ private class Relay(
             is RelayTarget.Todo, RelayTarget.WorkflowPending -> todo.forward(call)
             RelayTarget.Memory -> memoryCalls.forward(call)
             RelayTarget.Activity -> activity.forward(call)
+            RelayTarget.Guidance -> guidance.forward(call)
             is RelayTarget.Catalog -> call.respondText(target.catalog, ContentType.Application.Json)
             RelayTarget.SignedCatalog -> policy.forward(call)
             is RelayTarget.Mcp -> mcp.forward(call, target.server)

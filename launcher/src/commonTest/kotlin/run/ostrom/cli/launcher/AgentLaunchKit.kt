@@ -111,6 +111,7 @@ open class AgentLaunchKit {
         background: Boolean = false,
         giveVariables: Boolean = true,
         activity: Boolean = true,
+        guidance: Boolean = true,
         labels: Map<String, String> = emptyMap(),
     ): Int {
         val dependencies = LaunchDependencies(
@@ -155,6 +156,7 @@ open class AgentLaunchKit {
                 background = background,
                 variables = giveVariables,
                 activity = activity,
+                guidance = guidance,
                 labels = labels,
             )
         return AgentLaunchUseCase(dependencies, adapters).launch(request, site)

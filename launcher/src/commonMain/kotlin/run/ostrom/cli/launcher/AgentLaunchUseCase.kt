@@ -36,6 +36,7 @@ import okio.IOException
  *   ones in the admission queue; its quotas and permissions are the same.
  * @property variables False for `--no-variables`: the agent gets none of the member's environment variables.
  * @property activity False for `--no-activity`: the hooks report nothing of whether the agent works or waits.
+ * @property guidance False for `--no-guidance`: the hooks give the agent no capacity advice.
  * @property labels `--label key=value` (TeamCode's): kept on the launch and copied to its sessions, to filter them.
  */
 data class LaunchRequest(
@@ -49,6 +50,7 @@ data class LaunchRequest(
     val background: Boolean = false,
     val variables: Boolean = true,
     val activity: Boolean = true,
+    val guidance: Boolean = true,
     val labels: Map<String, String> = emptyMap(),
 )
 
@@ -204,6 +206,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
         val artifacts = reads.hooks.artifacts
         val teamHooks = reads.hooks.team
         val activity = reads.hooks.activity
+        val guidance = reads.hooks.guidance
         val variables = reads.variables
         val plugin = join(temporary, "plugin")
         val relayTokenFile = join(temporary, "relay-token")
@@ -309,6 +312,7 @@ class AgentLaunchUseCase(private val dependencies: LaunchDependencies, adapters:
             artifacts = run.artifacts,
             teamHooks = run.teamHooks,
             activity = run.activity,
+            guidance = run.guidance,
         )
         return try {
             run.adapter.prepare(layout, dependencies.files)
