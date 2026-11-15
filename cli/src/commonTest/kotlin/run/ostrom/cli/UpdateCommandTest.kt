@@ -25,6 +25,13 @@ class UpdateCommandTest : CliKit() {
     }
 
     @Test
+    fun installTakesTheReleaseAndThePlaceItIsAskedFor() {
+        val line = arrayOf("install", "--version", "9.9.9", "--bundle", "/b", "--root", "/r", "--no-path")
+        assertEquals(73, cli().run(line), "no managed installation in this test's wiring")
+        assertOut("ostrom cannot install itself on this system.\n")
+    }
+
+    @Test
     fun jsonIsAFormOfCheck() {
         assertEquals(64, cli().run(arrayOf("update", "--json")))
         assertEquals(0, cli().run(arrayOf("update", "--check", "--json")))

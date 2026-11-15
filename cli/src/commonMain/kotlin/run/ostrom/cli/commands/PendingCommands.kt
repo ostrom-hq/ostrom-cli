@@ -37,6 +37,7 @@ fun pendingCommands(implemented: List<CliktCommand>): List<CliktCommand> {
         named("config"),
         named("doctor"),
         named("telemetry"),
+        named("install"),
         named("update"),
         named("verify-release"),
         named("version"),

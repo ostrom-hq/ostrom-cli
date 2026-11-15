@@ -66,7 +66,8 @@ internal class UpdateCommand(private val dependencies: CliDependencies) : CliktC
             throw ProgramResult(ExitCode.OK.code)
         }
         val code = runBlocking {
-            if (rollback) updates.rollback(request, ::serverApiVersion) else updates.update(request, ::serverApiVersion)
+            val api: suspend () -> Int = { serverApiVersion(dependencies) }
+            if (rollback) updates.rollback(request, api) else updates.update(request, api)
         }
         throw ProgramResult(code)
     }
@@ -85,17 +86,17 @@ internal class UpdateCommand(private val dependencies: CliDependencies) : CliktC
             console.out("Environment override: OSTROM_DISABLE_AUTOUPDATE turns the notice off in this process.\n")
         }
     }
+}
 
-    /** The API version of the server this device is signed in to, which the binary to put in place must speak. */
-    private suspend fun serverApiVersion(): Int {
-        val signedIn = dependencies.environment.configDirectory?.let { directory ->
-            val serverUrl = dependencies.serverOf(null, directory)
-            // the device's token never travels in clear, not even for this read
-            serverUrl to if (inClear(serverUrl)) null else dependencies.credentials(directory).load(serverUrl)?.token
-        }
-        val read = ServerApiVersion(dependencies.capabilities) { dependencies.console.out("$it\n") }
-        return read(signedIn?.first, signedIn?.second)
+/** The API version of the server this device is signed in to, which the binary to put in place must speak. */
+internal suspend fun serverApiVersion(dependencies: CliDependencies): Int {
+    val signedIn = dependencies.environment.configDirectory?.let { directory ->
+        val serverUrl = dependencies.serverOf(null, directory)
+        // the device's token never travels in clear, not even for this read
+        serverUrl to if (inClear(serverUrl)) null else dependencies.credentials(directory).load(serverUrl)?.token
     }
+    val read = ServerApiVersion(dependencies.capabilities) { dependencies.console.out("$it\n") }
+    return read(signedIn?.first, signedIn?.second)
 }
 
 /** The release target of this binary, as the release names its archives (`linux-x64`, `macos-arm64`…). */

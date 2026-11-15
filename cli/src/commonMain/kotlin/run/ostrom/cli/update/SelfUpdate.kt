@@ -18,6 +18,8 @@ import okio.FileSystem
 import okio.IOException
 import okio.Path
 import okio.Path.Companion.toPath
+import okio.buffer
+import okio.use
 
 /**
  * What `ostrom update` was asked.
@@ -29,6 +31,10 @@ import okio.Path.Companion.toPath
  * @property version The version asked for, or null for the latest.
  * @property checkOnly True to only say whether an update exists.
  * @property json With [checkOnly]: says it as one JSON line (what a desktop banner reads) instead of text.
+ * @property bundle `ostrom install --bundle`: a folder holding the signed `latest.json`, its `.sig` and the archive,
+ * installed offline.
+ * @property root `ostrom install --root`: the installation's folder instead of this user's default one.
+ * @property noPath `ostrom install --no-path`: the command is not made reachable by name.
  */
 data class UpdateRequest(
     val current: String,
@@ -38,16 +44,19 @@ data class UpdateRequest(
     val version: String? = null,
     val checkOnly: Boolean = false,
     val json: Boolean = false,
+    val bundle: String? = null,
+    val root: String? = null,
+    val noPath: Boolean = false,
 )
 
 /** A step of [SelfUpdate] that stops it: the exit code and what is said. */
-private open class Stop(val code: ExitCode, val text: String) : Exception(text)
+internal open class Stop(val code: ExitCode, val text: String) : Exception(text)
 
 /** No release is published at an address asked for (HTTP 404), told apart from a release without this target. */
 private class NoRelease(text: String) : Stop(ExitCode.NOT_FOUND, text)
 
 /** Stops [SelfUpdate] with [code], saying [text]. */
-private fun stop(code: ExitCode, text: String): Nothing = throw Stop(code, text)
+internal fun stop(code: ExitCode, text: String): Nothing = throw Stop(code, text)
 
 
 /** A release manifest that does not read as one. */
@@ -73,15 +82,19 @@ private fun FileSystem.textOf(path: Path): String? = try {
 
 /**
  * The signed release manifest's entry for one target, the version floor the manifest publishes, if any, and the id of
- * the root that signed it ([ReleaseTrust]).
+ * the root that signed it ([ReleaseTrust]), with the exact bytes of the manifest and its signature (kept by a managed
+ * installation beside its payload).
  */
-private class Asset(
+@Suppress("LongParameterList") // The signed fields, and the bytes they were read from.
+internal class Asset(
     val version: String,
     val url: String,
     val sha256: String,
     val size: Long,
     val floor: String?,
     val keyId: String,
+    val manifest: ByteArray,
+    val signature: ByteArray,
 )
 
 /**
@@ -106,9 +119,11 @@ private class Asset(
  * @param sessions Says whether this runs inside an agent's session.
  * @param probe Runs a binary with [INSTALLATION_PROBE].
  * @param trust The release key and the floor this binary was built with.
+ * @param installations The managed installations of `ostrom install` ([ManagedUpdate]); null where there are none.
+ * @param link Makes an installation's launcher reachable by name ([CommandPath]).
  */
 @Suppress("LongParameterList", "TooManyFunctions") // One parameter per collaborator, each replaced in tests.
-class SelfUpdate(
+class SelfUpdate internal constructor(
     private val downloads: Downloads,
     private val fileSystem: FileSystem,
     private val unpack: Unpacker,
@@ -116,7 +131,101 @@ class SelfUpdate(
     private val sessions: AgentSessions,
     private val probe: InstallationProbe,
     private val trust: ReleaseTrust = ReleaseTrust(),
+    private val installations: Installations? = null,
+    private val link: (InstallationPaths) -> CommandPathOutcome = { CommandPathOutcome.Ready(emptyList()) },
 ) {
+    private val managed = ManagedUpdate(fileSystem, unpack, say, probe)
+
+    /**
+     * `ostrom install`: the signed release asked for (the latest, a [UpdateRequest.version], or the offline
+     * [UpdateRequest.bundle]) installed into a managed installation ([InstallationStore]): its immutable launcher,
+     * one payload per release, the selection switched atomically. The same checks as [update] hold: the signature,
+     * the floor, the archive's checksum, the probe of the new binary, and never inside an agent's session.
+     *
+     * @param apiVersion The API version of the server this device works with.
+     */
+    suspend fun install(
+        request: UpdateRequest,
+        apiVersion: suspend () -> Int = { ServerFeatures.API_VERSION },
+    ): Int = try {
+        if (request.version != null && SemVer.of(request.version) == null) {
+            stop(ExitCode.USAGE, "ostrom install: ${request.version} is not a version (1.2.3 or v1.2.3).")
+        }
+        refuseIn(sessions)
+        val all = installations ?: stop(ExitCode.CANNOT_WRITE, "ostrom cannot install itself on this system.")
+        val store = managed.guard { all.at(request.root) }
+        val code = managed.writing(store) { installInto(store, request, apiVersion) }
+        linked(store.paths, request.noPath)
+        code
+    } catch (stopped: Stop) {
+        say(stopped.text)
+        stopped.code.code
+    }
+
+    /** [install], holding the writer lock of [store]. */
+    private suspend fun installInto(
+        store: InstallationStore,
+        request: UpdateRequest,
+        apiVersion: suspend () -> Int,
+    ): Int {
+        val bundle = request.bundle?.toPath()
+        val asset = bundle?.let {
+            signed(it.toString(), read(it / MANIFEST), read(it / SIGNATURE, MAX_SIGNATURE_BYTES), request)
+        } ?: manifest(request)
+        val before = managed.guard { store.state() }?.current
+        val asked = request.version != null || bundle != null
+        if (before != null && !asked && !newer(asset.version, before.version)) {
+            say("✓ ostrom ${before.version} is already installed.")
+            return ExitCode.OK.code
+        }
+        val floor = if (bundle != null || request.version == null) asset.floor else latestFloor(request)
+        floorRefusal(asset.version, before?.version ?: request.current, floor, trust.floor)
+            ?.let { stop(ExitCode.REFUSED, it) }
+        val api = apiVersion()
+        val archive = bundle?.let { read(it / asset.url.substringAfterLast('/'), MAX_BINARY_BYTES) }
+            ?: fetch(asset.url, MAX_BINARY_BYTES, request)
+        checked(asset, archive)
+        managed.put(store, asset, archive, api)
+        say("✓ Installed ostrom ${asset.version} (signature checked).")
+        say("  Launcher: ${store.paths.launcher}")
+        return ExitCode.OK.code
+    }
+
+    /** Makes the launcher at [paths] reachable by name, unless [noPath]; stops when the name is someone else's. */
+    private fun linked(paths: InstallationPaths, noPath: Boolean) {
+        if (noPath) {
+            say("Not changing PATH. Run ${paths.launcher}, or add ${paths.launcherDirectory} to your PATH yourself.")
+            return
+        }
+        val outcome = managed.guard { link(paths) }
+        outcome.lines.forEach(say)
+        if (outcome is CommandPathOutcome.Conflict) {
+            stop(ExitCode.REFUSED, "ostrom itself is installed; once the name is free, run ostrom install again.")
+        }
+    }
+
+    private suspend fun latestFloor(request: UpdateRequest) = manifest(request.copy(version = null)).floor
+
+    /** The file [path] of a bundle, a regular file of at most [maxBytes], or stop. */
+    private fun read(path: Path, maxBytes: Long = MAX_MANIFEST_BYTES): ByteArray {
+        val metadata = fileSystem.metadataOrNull(path)
+        if (metadata == null || !metadata.isRegularFile || metadata.symlinkTarget != null) {
+            stop(ExitCode.NOT_FOUND, "✗ $path is not a file of the release (links are refused). $UNCHANGED")
+        }
+        val bytes = managed.guard {
+            fileSystem.source(path).buffer().use { source ->
+                if (source.request(maxBytes + 1)) null else source.readByteArray()
+            }
+        }
+        return bytes ?: stop(ExitCode.FAILED, "✗ $path is larger than $maxBytes bytes.")
+    }
+
+    /** Stops when [archive] is not the one [asset] signs. */
+    private fun checked(asset: Asset, archive: ByteArray) {
+        if (archive.size.toLong() != asset.size || sha256Hex(archive) != asset.sha256) {
+            stop(ExitCode.SIGNATURE_REFUSED, "✗ The download does not match its signed checksum. $UNCHANGED")
+        }
+    }
     /**
      * Runs [request]; the exit code.
      *
@@ -168,7 +277,7 @@ class SelfUpdate(
             say("! ostrom ${asset.version} is available. Run $run.")
             say("  Release key: ${asset.keyId}")
         }
-        else -> install(request, asset, apiVersion)
+        else -> installAsset(request, asset, apiVersion)
     }
 
     /**
@@ -193,6 +302,8 @@ class SelfUpdate(
         apiVersion: suspend () -> Int = { ServerFeatures.API_VERSION },
     ): Int = try {
         refuseIn(sessions)
+        val store = request.executable?.let { executable -> installations?.let { managed.guard { it.of(executable) } } }
+        if (store != null) return managed.writing(store) { rollbackIn(store, request, apiVersion) }
         val binary = request.executable?.toPath()
         if (binary == null || !fileSystem.exists(previousOf(binary))) {
             stop(ExitCode.NOT_FOUND, "No previous version of ostrom is kept on this device.")
@@ -206,6 +317,23 @@ class SelfUpdate(
     } catch (stopped: Stop) {
         say(stopped.text)
         stopped.code.code
+    }
+
+    /** `--rollback` of a managed installation: its previous selection, holding its writer lock. */
+    private suspend fun rollbackIn(
+        store: InstallationStore,
+        request: UpdateRequest,
+        apiVersion: suspend () -> Int,
+    ): Int {
+        val previous = managed.guard { store.state() }?.previous
+            ?: stop(ExitCode.NOT_FOUND, "No previous version of ostrom is kept on this device.")
+        floorRefusal(previous.version, request.current, latestFloor(request), trust.floor)
+            ?.let { stop(ExitCode.REFUSED, it) }
+        managed.guard { store.validate(previous) }
+        probe.refusal(store.paths.binary(previous), previous.version, apiVersion())?.let { stop(ExitCode.REFUSED, it) }
+        managed.select(store, previous, rollback = true)
+        say("✓ Back to ostrom ${previous.version}. Run ostrom update to come back.")
+        return ExitCode.OK.code
     }
 
     private fun swapBack(binary: Path, current: String): Int {
@@ -248,6 +376,11 @@ class SelfUpdate(
         val url = "${request.releases.trimEnd('/')}/$folder/latest.json"
         val manifest = fetch(url, MAX_MANIFEST_BYTES, request)
         val signature = fetch("$url.sig", MAX_SIGNATURE_BYTES, request)
+        return signed(url, manifest, signature, request)
+    }
+
+    /** The asset of [request]'s target in the [manifest] read at [url], once its [signature] matches. */
+    private fun signed(url: String, manifest: ByteArray, signature: ByteArray, request: UpdateRequest): Asset {
         val keyId = trust.verify(manifest, signature.decodeToString())
             ?: stop(ExitCode.SIGNATURE_REFUSED, "✗ The release signature does not match. Nothing was changed.")
         val body = parseObject(manifest.decodeToString()) ?: unreadable()
@@ -261,20 +394,16 @@ class SelfUpdate(
         }
         val entry = body.child("assets")?.child(request.target)
             ?: stop(ExitCode.NOT_FOUND, "No ostrom $version is built for ${request.target}.")
-        return assetOf(version, entry, body.text("floor"), keyId)
-    }
-
-    private fun assetOf(version: String, entry: JsonObject, floor: String?, keyId: String): Asset {
         val url = entry.text("url")
         val sha256 = entry.text("sha256")
         val size = (entry["size"] as? JsonPrimitive)?.longOrNull
         if (url == null || sha256 == null || size == null) unreadable()
-        return Asset(version, url, sha256, size, floor, keyId)
+        return Asset(version, url, sha256, size, body.text("floor"), keyId, manifest, signature)
     }
 
     /** Installs [asset] when the latest release's floor allows it (S2-39), and the binary speaks the server's API. */
-    private suspend fun install(request: UpdateRequest, asset: Asset, apiVersion: suspend () -> Int): Int {
-        val floor = if (request.version == null) asset.floor else manifest(request.copy(version = null)).floor
+    private suspend fun installAsset(request: UpdateRequest, asset: Asset, apiVersion: suspend () -> Int): Int {
+        val floor = if (request.version == null) asset.floor else latestFloor(request)
         floorRefusal(asset.version, request.current, floor, trust.floor)?.let { stop(ExitCode.REFUSED, it) }
         val executable = request.executable
             ?: stop(ExitCode.CANNOT_WRITE, "ostrom cannot find its own binary. Reinstall it with the installer.")
@@ -282,8 +411,13 @@ class SelfUpdate(
         managerOf(binary)?.let { stop(ExitCode.USAGE, "This ostrom is managed by $it.") }
         val api = apiVersion()
         val archive = fetch(asset.url, MAX_BINARY_BYTES, request)
-        if (archive.size.toLong() != asset.size || sha256Hex(archive) != asset.sha256) {
-            stop(ExitCode.SIGNATURE_REFUSED, "✗ The download does not match its signed checksum. $UNCHANGED")
+        checked(asset, archive)
+        val store = installations?.let { managed.guard { it.of(executable) } }
+        if (store != null) {
+            managed.writing(store) { managed.put(store, asset, archive, api) }
+            say("✓ Updated ostrom ${request.current} → ${asset.version} (signature checked).")
+            say("  Running sessions keep ${request.current} until they end.")
+            return ExitCode.OK.code
         }
         val work = "$binary.update".toPath()
         try {
@@ -356,7 +490,9 @@ class SelfUpdate(
     private companion object {
         const val MAX_MANIFEST_BYTES = 16L * 1024
         const val MAX_SIGNATURE_BYTES = 2048L
-        const val MAX_BINARY_BYTES = 256L * 1024 * 1024
+        const val MAX_BINARY_BYTES = MAX_PAYLOAD_BYTES
+        const val MANIFEST = "latest.json"
+        const val SIGNATURE = "latest.json.sig"
         const val NOT_FOUND = 404
         /** Why a release answer was refused, for the person reading. */
         fun refusal(code: String): String = when (code) {
