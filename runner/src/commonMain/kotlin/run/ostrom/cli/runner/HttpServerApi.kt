@@ -99,7 +99,7 @@ class HttpServerApi(
         background: Boolean,
     ): Instruction {
         val response = client.post("${config.serverUrl}/api/v1/cloud/runner/heartbeat") {
-            bearerAuth(config.token)
+            bearerAuth(config.bearer())
             contentType(ContentType.Application.Json)
             val request = HeartbeatRequest(
                 config.sessionId.toString(),
@@ -123,7 +123,7 @@ class HttpServerApi(
 
     override suspend fun openLaunch(): RunnerLaunch {
         val response = client.post("${config.serverUrl}/api/v1/cloud/runner/launch") {
-            bearerAuth(config.token)
+            bearerAuth(config.bearer())
             contentType(ContentType.Application.Json)
             val request = ExecutionRequest(config.sessionId.toString(), config.epoch)
             setBody(JSON.encodeToString(ExecutionRequest.serializer(), request))
@@ -141,7 +141,7 @@ class HttpServerApi(
 
     override suspend fun reportCheck(check: RunnerCheck): Boolean {
         val response = client.post("${config.serverUrl}/api/v1/cloud/runner/checks") {
-            bearerAuth(config.token)
+            bearerAuth(config.bearer())
             contentType(ContentType.Application.Json)
             val request = CheckRequest(config.sessionId.toString(), config.epoch, check)
             setBody(JSON.encodeToString(CheckRequest.serializer(), request))
@@ -159,7 +159,7 @@ class HttpServerApi(
      */
     suspend fun gitHubToken(): GitHubToken? {
         val response = client.post("${config.serverUrl}/api/v1/cloud/runner/github") {
-            bearerAuth(config.token)
+            bearerAuth(config.bearer())
             contentType(ContentType.Application.Json)
             val request = ExecutionRequest(config.sessionId.toString(), config.epoch)
             setBody(JSON.encodeToString(ExecutionRequest.serializer(), request))
@@ -181,7 +181,7 @@ class HttpServerApi(
 
     override suspend fun environment(): RunnerEnvironment? {
         val response = client.post("${config.serverUrl}/api/v1/cloud/runner/environment") {
-            bearerAuth(config.token)
+            bearerAuth(config.bearer())
             contentType(ContentType.Application.Json)
             val request = ExecutionRequest(config.sessionId.toString(), config.epoch)
             setBody(JSON.encodeToString(ExecutionRequest.serializer(), request))
@@ -198,7 +198,7 @@ class HttpServerApi(
 
     override suspend fun reportPreparation(phase: String, failure: PreparationFailure?): Instruction {
         val response = client.post("${config.serverUrl}/api/v1/cloud/runner/preparation") {
-            bearerAuth(config.token)
+            bearerAuth(config.bearer())
             contentType(ContentType.Application.Json)
             val request = PreparationRequest(config.sessionId.toString(), config.epoch, phase, failure)
             setBody(JSON.encodeToString(PreparationRequest.serializer(), request))
@@ -235,7 +235,7 @@ class HttpServerApi(
      */
     suspend fun variables(): EnvironmentValues? {
         val response = client.post("${config.serverUrl}/api/v1/cloud/runner/variables") {
-            bearerAuth(config.token)
+            bearerAuth(config.bearer())
             contentType(ContentType.Application.Json)
             val request = ExecutionRequest(config.sessionId.toString(), config.epoch)
             setBody(JSON.encodeToString(ExecutionRequest.serializer(), request))
@@ -255,7 +255,7 @@ class HttpServerApi(
     override suspend fun openTerminal(): TerminalLink {
         val query = "sessionId=${config.sessionId}&epoch=${config.epoch}"
         val url = config.serverUrl.replaceFirst("http", "ws") + "/api/v1/cloud/runner/terminal?$query"
-        val session = client.webSocketSession(url) { bearerAuth(config.token) }
+        val session = client.webSocketSession(url) { bearerAuth(config.bearer()) }
         return WebSocketLink(session, scope)
     }
 
