@@ -29,8 +29,8 @@ private val CLOSED_NAMES = listOf("EOFException", "ClosedReceiveChannel", "Close
 
 /**
  * The family of [error], detected from the ktor package names and each engine's error names and messages
- * (inspected, never printed); null when the error was not raised by the HTTP stack. A local disk or permission failure (also an
- * IOException on the JVM) must not read as an unreachable server.
+ * (inspected, never printed); null when the error was not raised by the HTTP stack. A local disk or permission
+ * failure (also an IOException on the JVM) must not read as an unreachable server.
  */
 fun networkFailure(error: Throwable): NetworkFailure? {
     val chain = generateSequence(error) { it.cause }.take(CHAIN_LENGTH).toList()
