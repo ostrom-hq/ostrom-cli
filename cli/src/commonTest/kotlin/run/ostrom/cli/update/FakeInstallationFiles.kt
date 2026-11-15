@@ -6,6 +6,7 @@ import okio.Path.Companion.toPath
 import okio.fakefilesystem.FakeFileSystem
 import run.ostrom.cli.platform.Environment
 import run.ostrom.cli.platform.EnvironmentImpl
+import run.ostrom.cli.platform.FileIdentity
 import run.ostrom.cli.platform.InstallationFiles
 
 /** [InstallationFiles] over a fake file system: locks held in memory, failures and foreign files on demand. */
@@ -23,6 +24,12 @@ internal class FakeInstallationFiles : InstallationFiles {
     val foreign = mutableSetOf<String>()
     val sealed = mutableListOf<String>()
 
+    /** The identity of each file, by path: none by default (a launch then always checks in full). */
+    val identities = mutableMapOf<String, FileIdentity>()
+
+    /** What [identity] answers, by default from [identities]. */
+    var identityOf: (String) -> FileIdentity? = { identities[it] }
+
     override fun tryLock(path: String, exclusive: Boolean): AutoCloseable? {
         if (lockFails) throw IOException("no lock")
         if (!held.add(path)) return null
@@ -39,6 +46,8 @@ internal class FakeInstallationFiles : InstallationFiles {
     }
 
     override fun isPrivate(path: String, directory: Boolean): Boolean = path !in foreign
+
+    override fun identity(path: String): FileIdentity? = identityOf(path)
 }
 
 /** An [Environment] of the [variables] given. */

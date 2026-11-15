@@ -40,6 +40,11 @@ internal actual fun isPrivateInstallationPath(path: String, directory: Boolean):
         if (directory) Files.isDirectory(file, LinkOption.NOFOLLOW_LINKS) else Files.isRegularFile(file)
 }
 
+// The JVM has no portable inode nor change time: no identity, so a launch always checks the payload in full.
+// coverage: test-only JVM target; the shipped native actuals run in the end-to-end tests.
+@ExcludeFromCoverage
+internal actual fun installationFileIdentity(path: String): FileIdentity? = null
+
 /** Runs the payload in place of this process (see the expect declaration). */
 // coverage: test-only JVM target; the shipped native actuals run in the end-to-end tests.
 @ExcludeFromCoverage

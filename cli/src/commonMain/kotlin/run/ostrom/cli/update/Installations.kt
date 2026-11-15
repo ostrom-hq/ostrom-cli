@@ -110,8 +110,9 @@ private fun recoverIfIdle(store: InstallationStore) {
 /**
  * When [executable] is the launcher of a managed installation, runs the selected payload with [arguments] in its place
  * ([run]); its exit code, or null when this binary is not a launcher and goes on as itself. A payload that does not
- * match its attestation is never run (exit 1, said on [err]). With nothing selected yet, only `install` and `update`
- * run, from the launcher itself.
+ * match its attestation is never run (exit 1, said on [err]); its binary is hashed again only when its file identity
+ * changed since the last full check ([InstallationStore.validateForLaunch]). With nothing selected yet, only `install`
+ * and `update` run, from the launcher itself.
  */
 internal fun launchInstalled(
     arguments: List<String>,
@@ -136,7 +137,7 @@ private fun launched(
             selected == null && arguments.dropWhile { it == "--debug" }.firstOrNull() in SELF_COMMANDS -> null
             selected == null -> refuseInstallation("release_installation_missing")
             else -> {
-                store.validate(selected)
+                store.validateForLaunch(selected)
                 run(store.paths.binary(selected).toString(), arguments)
             }
         }

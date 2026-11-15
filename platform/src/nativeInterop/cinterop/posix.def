@@ -674,6 +674,26 @@ static inline int ostrom_install_seal(const char *path) {
     return valid ? 0 : -1;
 }
 
+/*
+ * The identity of the regular file at `path`, never followed when it is a link: device, inode, size, and the
+ * modification and change times in nanoseconds, in `identity[0..4]`. Returns 0, or -1.
+ */
+static inline int ostrom_install_identity(const char *path, long long *identity) {
+    struct stat information;
+    if (lstat(path, &information) != 0 || !S_ISREG(information.st_mode)) return -1;
+#ifdef __APPLE__
+    struct timespec modified = information.st_mtimespec, changed = information.st_ctimespec;
+#else
+    struct timespec modified = information.st_mtim, changed = information.st_ctim;
+#endif
+    identity[0] = (long long)information.st_dev;
+    identity[1] = (long long)information.st_ino;
+    identity[2] = (long long)information.st_size;
+    identity[3] = (long long)modified.tv_sec * 1000000000LL + modified.tv_nsec;
+    identity[4] = (long long)changed.tv_sec * 1000000000LL + changed.tv_nsec;
+    return 0;
+}
+
 /* Flushes a folder of this user (its renames) to disk. Returns 0, or -1. */
 static inline int ostrom_install_sync_directory(const char *path) {
     int file = open(path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
