@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+// An unreachable server reads as no model served; cancellation is rethrown first (scripts/check-conventions.py).
+@file:Suppress("TooGenericExceptionCaught")
+
 package run.ostrom.cli.runner
 
 import io.ktor.client.HttpClient
@@ -10,6 +13,7 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -67,16 +71,17 @@ class HttpInferenceApi(private val client: HttpClient, private val config: Runne
      *
      * @param token The execution's inference credential.
      *
-     * @return True when it does.
+     * @return True when it does; false when the answer cannot be read or the server cannot be reached, as a local
+     *   launch reads it.
      */
-    suspend fun servesModels(token: String): Boolean {
+    suspend fun servesModels(token: String): Boolean = try {
         val response = client.get("${config.serverUrl}/api/v1/inference/v1/models") { bearerAuth(token) }
-        if (response.status != HttpStatusCode.OK) return false
-        return try {
+        response.status == HttpStatusCode.OK &&
             JSON.decodeFromString(ModelList.serializer(), response.bodyAsText()).data.isNotEmpty()
-        } catch (_: IllegalArgumentException) {
-            false
-        }
+    } catch (error: CancellationException) {
+        throw error
+    } catch (_: Exception) {
+        false
     }
 
     private fun errorType(body: String): String? = try {

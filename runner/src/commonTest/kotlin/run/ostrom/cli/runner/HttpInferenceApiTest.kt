@@ -10,6 +10,7 @@ import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.test.runTest
+import kotlinx.io.IOException
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -72,5 +73,7 @@ class HttpInferenceApiTest {
         status = HttpStatusCode.Unauthorized
         answer = """{"data":[{"id":"claude-opus"}]}"""
         assertFalse(api.servesModels("credential"))
+        val down = HttpClient(MockEngine { throw IOException("reset") }) { expectSuccess = false }
+        assertFalse(HttpInferenceApi(down, config).servesModels("credential"), "Unreachable: no model served")
     }
 }

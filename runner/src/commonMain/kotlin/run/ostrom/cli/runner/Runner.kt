@@ -114,10 +114,11 @@ class Runner(
         }
     }
 
-    /** Closes the terminal in use and stops the inference relay. */
+    /** Stops the inference relay and closes the terminal in use. */
     private suspend fun close(current: Current) {
-        current.terminal?.close()
+        // The relay first: it does not throw, so a terminal that fails to close never leaves it running.
         inference?.close()
+        current.terminal?.close()
     }
 
     private suspend fun prepareThenRun(base: Map<String, String>, current: Current): Int = coroutineScope {
@@ -251,7 +252,8 @@ class Runner(
         if (asked.code != null) return asked
         val installer = deliveries.takeIf { launch !is RunnerLaunch.Refused }
         val installed = if (installer == null) null else beating(current) { installer.install(environment) }
-        val variables = relayed.variables + asked.variables + installed?.variables.orEmpty()
+        // The relay's variables last: nothing delivered points the agent elsewhere.
+        val variables = asked.variables + installed?.variables.orEmpty() + relayed.variables
         val settings = variables[RunnerConfig.SETTINGS_VARIABLE] ?: environment[RunnerConfig.SETTINGS_VARIABLE]
         val hooked = variables + hookSettings(settings, names)
         if (installed?.code != null) return Delivered(hooked, installed.code)
