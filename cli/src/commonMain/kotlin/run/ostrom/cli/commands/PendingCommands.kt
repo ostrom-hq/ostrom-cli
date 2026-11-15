@@ -32,6 +32,7 @@ fun pendingCommands(implemented: List<CliktCommand>): List<CliktCommand> {
         named("configure"),
         named("keys"),
         named("auth"),
+        named("devices"),
         named("init"),
         named("config"),
         named("doctor"),

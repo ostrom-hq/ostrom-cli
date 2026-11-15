@@ -80,6 +80,11 @@ private fun identityCommands(dependencies: CliDependencies) = listOf(
         KeysCreateCommand(dependencies),
         KeysRevokeCommand(dependencies),
     ),
+    DevicesCommand(dependencies).subcommands(
+        DevicesListCommand(dependencies),
+        DevicesRenameCommand(dependencies),
+        DevicesRevokeCommand(dependencies),
+    ),
     AuthCommand().subcommands(
         AuthSessionsCommand(dependencies).subcommands(
             AuthSessionsListCommand(dependencies),
