@@ -76,6 +76,8 @@ const val CAPACITY_PACING = "capacity.pacing.v1"
  * `--no-activity`), for Claude Code and Codex.
  * @property guidance The hooks give the agent the session's capacity advice ([CAPACITY_PACING], not `--no-guidance`),
  * for Claude Code and Codex.
+ * @property local The launch opens its local session ([LocalSession], [RUNNERS_CLOUD_LOCAL]), for Claude Code and
+ * Codex.
  */
 @Suppress("LongParameterList") // one flag per hook family the server serves
 internal class LaunchHooks(
@@ -87,6 +89,7 @@ internal class LaunchHooks(
     val artifacts: Boolean = false,
     val activity: Boolean = false,
     val guidance: Boolean = false,
+    val local: Boolean = false,
 )
 
 /**
@@ -309,6 +312,7 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
                 activity = request.activity && SESSIONS_ACTIVITY in served,
                 // the same two agents read the advice as their hooks' additional context (TeamCode's)
                 guidance = request.guidance && CAPACITY_PACING in served,
+                local = LocalSession.wanted(request.agent, served),
             )
             LaunchReads(pack, read, servers, inference.await(), launchHooks, given.variables)
         }
