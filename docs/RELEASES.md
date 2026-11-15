@@ -215,9 +215,18 @@ The first start of a new binary costs its signature check, about 25 ms on a CI r
 from the system libraries every program loads (Foundation, Security), which a running Mac keeps in memory as long as
 they are in use; when a developer's Mac has dropped them, after a restart for instance, has not been measured.
 
-Installer variables: `OSTROM_VERSION` (default: the latest, through `latest.json`), `OSTROM_INSTALL_DIR` (default
-`~/.ostrom/bin`; never needs root), `OSTROM_DOWNLOAD_BASE` (default `https://github.com/ostrom-hq/ostrom-cli/releases`),
-`OSTROM_NO_MODIFY_PATH=1`.
+Installer variables: `OSTROM_VERSION` (default: the latest, through `latest.json`), `OSTROM_INSTALL_ROOT` (the
+managed installation's folder, `--root` below), `OSTROM_INSTALL_DIR` (install the single binary into this folder
+instead, as the installers did before `ostrom install`; never needs root), `OSTROM_DOWNLOAD_BASE` (default
+`https://github.com/ostrom-hq/ostrom-cli/releases`), `OSTROM_NO_MODIFY_PATH=1` (`--no-path` below; for the single
+binary, no line in a shell profile or the user PATH).
+
+Once the archive is checked, the installers hand over to it: they download the release's `latest.json` and
+`latest.json.sig` next to the archive and run the unpacked binary as
+`ostrom install --bundle <that folder> --version <version>`, which checks the Ed25519 signature again and makes the
+managed installation below; it never edits a shell profile. With `OSTROM_INSTALL_DIR` (not together with
+`OSTROM_INSTALL_ROOT`), the single binary is put in that folder instead. A single binary already in `~/.ostrom/bin`
+is left in place, and the installer says to remove it.
 
 Both installers check the signature of `SHA256SUMS` before the archive's checksum. `install.sh` does it with `cosign`
 or, without it, `openssl`. With neither, it installs nothing: the checksum alone comes from the same place as the

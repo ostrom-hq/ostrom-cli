@@ -4,9 +4,10 @@
 #
 # Environment:
 #   OSTROM_VERSION          version to install (default: the latest, read from latest.json)
-#   OSTROM_INSTALL_DIR      where to put the binary (default: ~/.ostrom/bin); no root needed
+#   OSTROM_INSTALL_ROOT     the managed installation's folder (absolute; default: ostrom install's own, per system)
+#   OSTROM_INSTALL_DIR      install the single binary into this folder instead of a managed installation
 #   OSTROM_DOWNLOAD_BASE    releases URL (default: https://github.com/ostrom-hq/ostrom-cli/releases)
-#   OSTROM_NO_MODIFY_PATH   set to 1 to leave your shell profile alone
+#   OSTROM_NO_MODIFY_PATH   set to 1 to leave PATH alone (no ~/.local/bin/ostrom, no line in a shell profile)
 #   OSTROM_TARGET           force a target (linux-x64, linux-arm64, macos-arm64), for tests
 #
 # SHA256SUMS is checked against its signature and the key pinned below, with cosign when it is installed, else with
@@ -16,11 +17,16 @@
 # authenticated, or nothing is installed).
 # A download with curl is never redirected from HTTPS to HTTP (wget has no such option; the signature covers it).
 #
+# The checked binary then installs itself: `ostrom install --bundle` checks the Ed25519 signature of the release's
+# latest.json again and owns the managed installation (immutable launcher, one folder per version, atomic switch,
+# recovery). With OSTROM_INSTALL_DIR, the single binary is put in that folder instead.
+#
 # Everything runs from main, called on the last line: a download cut short runs nothing.
 set -eu
 
 BASE="${OSTROM_DOWNLOAD_BASE:-https://github.com/ostrom-hq/ostrom-cli/releases}"
 INSTALL_DIR="${OSTROM_INSTALL_DIR:-$HOME/.ostrom/bin}"
+LEGACY="$HOME/.ostrom/bin/ostrom"
 
 COSIGN_PUB='-----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENbn5GmwW348HxCtTPQbNfcvHmSZG
@@ -86,6 +92,8 @@ main() {
     *) fail "unsupported platform: $target (supported: linux-x64, linux-arm64, macos-arm64; on Windows use install.ps1)" ;;
   esac
   verifier
+  [ -z "${OSTROM_INSTALL_DIR:-}" ] || [ -z "${OSTROM_INSTALL_ROOT:-}" ] \
+    || fail "set OSTROM_INSTALL_ROOT (a managed installation) or OSTROM_INSTALL_DIR (the single binary), not both"
 
   work=$(mktemp -d "${TMPDIR:-/tmp}/ostrom-install.XXXXXX")
   trap 'rm -rf "$work"' EXIT INT TERM
@@ -118,9 +126,35 @@ main() {
   mkdir -p "$work/unpack"
   tar -xzf "$work/$archive" -C "$work/unpack" || fail "cannot unpack $archive"
   [ -f "$work/unpack/ostrom" ] || fail "$archive does not contain the ostrom binary"
-  mkdir -p "$INSTALL_DIR"
   chmod 755 "$work/unpack/ostrom"
-  mv -f "$work/unpack/ostrom" "$INSTALL_DIR/ostrom"
+  if [ -n "${OSTROM_INSTALL_DIR:-}" ]; then
+    install_binary "$work/unpack/ostrom"
+  else
+    hand_over "$rel" "$work" "$version" "$work/unpack/ostrom"
+  fi
+}
+
+hand_over() { # <release url> <work dir> <version> <binary>: the managed installation, done by the checked binary
+  fetch "$1/latest.json" "$2/latest.json" || fail "cannot download latest.json for $3 ($1): refusing to install"
+  fetch "$1/latest.json.sig" "$2/latest.json.sig" \
+    || fail "latest.json.sig could not be downloaded for $3: refusing to install"
+  # the command line replaces the arguments, once they are all read
+  if [ -n "${OSTROM_INSTALL_ROOT:-}" ]; then set -- "$4" install --bundle "$2" --version "$3" --root "$OSTROM_INSTALL_ROOT"
+  else set -- "$4" install --bundle "$2" --version "$3"; fi
+  [ "${OSTROM_NO_MODIFY_PATH:-}" != "1" ] || set -- "$@" --no-path
+  status=0
+  "$@" || status=$?
+  [ "$status" -eq 0 ] || { printf 'ostrom install: stopped (exit %s), see above\n' "$status" >&2; exit "$status"; }
+  if [ -e "$LEGACY" ]; then
+    say "An older ostrom is still at $LEGACY: remove it, and the line adding $(dirname "$LEGACY") to PATH in your"
+    say "shell profile, so that ostrom runs this installation."
+  fi
+  say "Then run: ostrom login"
+}
+
+install_binary() { # <binary>: the single binary in INSTALL_DIR, and INSTALL_DIR on PATH through the shell profile
+  mkdir -p "$INSTALL_DIR"
+  mv -f "$1" "$INSTALL_DIR/ostrom"
   say "Installed $INSTALL_DIR/ostrom"
 
   case ":$PATH:" in
