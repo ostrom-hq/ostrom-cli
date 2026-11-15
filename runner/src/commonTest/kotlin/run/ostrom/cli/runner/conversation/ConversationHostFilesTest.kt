@@ -139,6 +139,8 @@ class ConversationHostFilesTest {
         fail("Condition not reached")
     }
 
+    private val rejected = CloudInputStatuses.REJECTED
+
     private fun message(id: String, text: String?, vararg files: RunnerFileView, attempt: Int = 1) =
         RunnerInputView(id, CloudInputKinds.MESSAGE, text, attempt, files.toList())
 
@@ -168,7 +170,7 @@ class ConversationHostFilesTest {
             assertEquals(FileSystem.SYSTEM.canonicalize(scratch.temporary / "ostrom-501" / "s-1"), directory)
             val written = directory / "f1-shot.png"
             assertContentEquals(png, FileSystem.SYSTEM.read(written) { readByteArray() })
-            assertTrue(FileSystem.SYSTEM.listRecursively(scratch.workspace).toList().isEmpty(), "Nothing in the workdir")
+            assertTrue(FileSystem.SYSTEM.listRecursively(scratch.workspace).toList().isEmpty(), "Not in the workdir")
             if (!windows) {
                 assertEquals(0x1C0, pathStatus((scratch.temporary / "ostrom-501").toString())!!.mode, "User dir 0700")
                 assertEquals(0x1C0, pathStatus(directory.toString())!!.mode, "The session's directory is 0700")
@@ -177,7 +179,8 @@ class ConversationHostFilesTest {
 
             // The stream-json line the agent reads: the text, then one line per file with its absolute path.
             val (command, process) = started.single()
-            assertEquals("Look at this\n\n[Attached file: $written (image/png, 8 bytes)]", textOf(process.written.single()))
+            val expected = "Look at this\n\n[Attached file: $written (image/png, 8 bytes)]"
+            assertEquals(expected, textOf(process.written.single()))
             assertTrue(written.isAbsolute)
             // Claude Code reads the directory without a permission request.
             val addDir = command.arguments.indexOf("--add-dir")
@@ -210,7 +213,8 @@ class ConversationHostFilesTest {
                 "A message of files alone carries their lines only",
             )
             // The same file in another message: written once per execution, its line given again.
-            channel.inputs.send(listOf(message("in-2", null, channel.serve("f1", "a.txt", "hello".encodeToByteArray()))))
+            val again = channel.serve("f1", "a.txt", "hello".encodeToByteArray())
+            channel.inputs.send(listOf(message("in-2", null, again)))
             until { channel.acks.size == 3 }
             assertEquals(CloudInputStatuses.CONSUMED, channel.acks[2].status)
             assertEquals(1, channel.downloads)
@@ -234,7 +238,7 @@ class ConversationHostFilesTest {
             val forged = channel.serve("f1", "shot.png", png, sha256 = "0".repeat(64))
             channel.inputs.send(listOf(message("in-1", "Look", forged)))
             until { channel.acks.size == 1 }
-            assertEquals(RunnerInputAckView("in-1", CloudInputStatuses.REJECTED, "file_integrity_failed"), channel.acks[0])
+            assertEquals(RunnerInputAckView("in-1", rejected, "file_integrity_failed"), channel.acks[0])
             assertTrue(FileSystem.SYSTEM.list(uploads.directory!!).isEmpty(), "The mismatching file is removed")
 
             // Longer than announced: refused while it streams.
@@ -247,7 +251,7 @@ class ConversationHostFilesTest {
             channel.failure = IllegalStateException("network")
             channel.inputs.send(listOf(message("in-2", "Again", channel.serve("f2", "b.png", png))))
             until { channel.acks.size == 3 }
-            assertEquals(RunnerInputAckView("in-2", CloudInputStatuses.REJECTED, "file_download_failed"), channel.acks[2])
+            assertEquals(RunnerInputAckView("in-2", rejected, "file_download_failed"), channel.acks[2])
             assertEquals(2 + ConversationHost.FILE_ATTEMPTS, channel.downloads, "Retried, then the message is rejected")
 
             channel.failure = RunnerChannelException(503, "file_storage_unavailable")
@@ -258,7 +262,7 @@ class ConversationHostFilesTest {
             channel.failure = RunnerChannelException(404, "not_found")
             channel.inputs.send(listOf(message("in-3", "Once more", channel.serve("f3", "c.png", png))))
             until { channel.acks.size == 5 }
-            assertEquals(RunnerInputAckView("in-3", CloudInputStatuses.REJECTED, "file_unavailable"), channel.acks[4])
+            assertEquals(RunnerInputAckView("in-3", rejected, "file_unavailable"), channel.acks[4])
 
             channel.failure = RunnerChannelException(410, "file_expired")
             channel.inputs.send(listOf(message("in-4", "Late", channel.serve("f4", "d.png", png))))
@@ -280,7 +284,8 @@ class ConversationHostFilesTest {
             val started = mutableListOf<Pair<AgentCommand, FakeProcess>>()
             val uploads = remote(scratch)
             val job = launch { fileHost(channel, scratch, started, uploads).run() }
-            val names = listOf("../../workspace/evil.png", "..\\..\\evil.png", "/etc/passwd", "..", "-rf", ".hidden\u0000.png")
+            val names =
+                listOf("../../workspace/evil.png", "..\\..\\evil.png", "/etc/passwd", "..", "-rf", ".hidden\u0000.png")
             names.forEachIndexed { index, name ->
                 channel.inputs.send(listOf(message("in-$index", "x", channel.serve("f$index", name, png))))
             }
@@ -471,8 +476,9 @@ class ConversationHostFilesTest {
     fun anExecutionWritesAtMostItsShare() = runTest {
         val scratch = Scratch()
         try {
+            FileSystem.SYSTEM.createDirectories(scratch.temporary / "pod")
             val uploads = SessionUploads(
-                (scratch.temporary / "pod").toString().also { FileSystem.SYSTEM.createDirectories(scratch.temporary / "pod") },
+                (scratch.temporary / "pod").toString(),
                 null,
                 SessionUploads.SHARED_FILE_MODE,
                 maxBytes = 10,
@@ -480,7 +486,8 @@ class ConversationHostFilesTest {
             assertTrue(uploads.prepare {})
             val channel = FileChannel()
             uploads.write(channel.serve("f1", "a.png", png)) { receive -> channel.file("f1", 8, receive) }
-            val full = runCatchingRefusal { uploads.write(channel.serve("f2", "b.png", png)) { channel.file("f2", 8, it) } }
+            val second = channel.serve("f2", "b.png", png)
+            val full = runCatchingRefusal { uploads.write(second) { channel.file("f2", 8, it) } }
             assertEquals("uploads_full", full)
             uploads.clear()
             assertTrue(FileSystem.SYSTEM.list(scratch.temporary / "pod").isEmpty(), "The volume's content is removed")

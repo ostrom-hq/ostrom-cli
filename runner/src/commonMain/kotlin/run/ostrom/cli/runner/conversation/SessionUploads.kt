@@ -117,8 +117,9 @@ class SessionUploads(
         } catch (_: Exception) {
             throw Refused(WRITE_FAILED)
         }
-            // Already there: a message an earlier execution received but never acknowledged, offered again. Kept only
-            // when it is this user's own regular file, in the directory, with the very bytes announced; never rewritten.
+            // Already there: a message an earlier execution received but never acknowledged, offered again. Kept
+            // only when it is this user's own regular file, in the directory, with the very bytes announced; never
+            // rewritten.
             ?: return existing(target, base, file) ?: throw Refused(WRITE_FAILED)
         var complete = false
         try {
@@ -208,7 +209,7 @@ class SessionUploads(
         fileSystem.createDirectories(path.parent ?: path)
         createModeDirectory(path.toString(), DIRECTORY_MODE)
         val status = checkNotNull(pathStatus(path.toString())) { "The directory vanished." }
-        check(status.directory && !status.symlink && status.ownedByCurrentUser) { "It is not a directory of this user." }
+        check(status.directory && !status.symlink && status.ownedByCurrentUser) { "Not a directory of this user." }
         if (status.mode != 0 && status.mode != DIRECTORY_MODE) setPathMode(path.toString(), DIRECTORY_MODE)
     }
 
