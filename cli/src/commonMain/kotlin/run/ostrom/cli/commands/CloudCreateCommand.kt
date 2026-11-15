@@ -29,7 +29,7 @@ internal const val NO_PROFILES =
     "This Ostrom server does not start sessions from a cloud profile: create the session without --profile or --image."
 
 /** `ServerFeatures.RUNNERS_CLOUD_PROFILES` of ostrom-core#231, newer than the core this CLI pins. */
-private const val RUNNERS_CLOUD_PROFILES = "runners.cloud.profiles.v1"
+internal const val RUNNERS_CLOUD_PROFILES = "runners.cloud.profiles.v1"
 
 /** The shape of the profile ids the server generates (random UUIDs). */
 private val PROFILE_ID = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
@@ -129,7 +129,7 @@ internal class CloudCreateCommand(private val dependencies: CliDependencies) : C
         }
         val body = objectOf(
             "agent" to agent,
-            "profileId" to profile?.let { profileId(access, it) },
+            "profileId" to profile?.let { profileId(dependencies, access, it, onBehalfOf) },
             "image" to image,
             "name" to name,
             "model" to model,
@@ -146,13 +146,19 @@ internal class CloudCreateCommand(private val dependencies: CliDependencies) : C
 
 /**
  * `--profile`, as TeamCode's `resolveProfile`: an id is sent as is; a name is looked up among the profiles listed to
- * the caller, the exact name before the name ignoring case, so a profile not assigned to them is never found by name.
+ * the caller (or `--member`), the exact name before the name ignoring case, so a profile not assigned to them is
+ * never found by name.
  * A name no listed profile has goes as is, and the server answers `cloud_profile_not_found`.
  */
-private fun profileId(access: OrgAccess, value: String): String {
+private fun profileId(dependencies: CliDependencies, access: OrgAccess, value: String, member: String?): String {
     if (PROFILE_ID.matches(value)) return value
-    // A listing that cannot be read sends the value as an id, and the server answers (TeamCode's).
-    val answer = runBlocking { access.server.get(CLOUD_PROFILES, access.signed.token) }
+    // With --member, the name is looked up in that member's list where the server can list it (TeamCode's), in the
+    // caller's otherwise; a listing that cannot be read sends the value as an id, and the server answers.
+    val forMember = member?.takeIf {
+        dependencies.announces(access.signed.serverUrl, access.signed.token, RUNNERS_CLOUD_PROFILES_MEMBER)
+    }
+    val path = if (forMember == null) CLOUD_PROFILES else "$CLOUD_PROFILES?member=${segment(forMember)}"
+    val answer = runBlocking { access.server.get(path, access.signed.token) }
     val body = if (answer is ServerAnswer.Ok) answer.body else JsonObject(emptyMap())
     val listed = (body["profiles"] as? JsonArray).orEmpty()
         .filterIsInstance<JsonObject>()
@@ -174,7 +180,7 @@ private fun profileId(access: OrgAccess, value: String): String {
 private fun text(element: JsonElement?): String? = (element as? JsonPrimitive)?.takeIf { it.isString }?.content
 
 /** The organization's cloud profiles the caller may use. */
-private const val CLOUD_PROFILES = "/api/v1/cloud/profiles"
+internal const val CLOUD_PROFILES = "/api/v1/cloud/profiles"
 
 /**
  * A repository of `--repo`.

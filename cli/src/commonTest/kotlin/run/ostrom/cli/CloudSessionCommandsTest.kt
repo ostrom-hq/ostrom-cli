@@ -162,4 +162,33 @@ class CloudSessionCommandsTest : SetupKit() {
         assertEquals(0, run(routes(show to (200 to unnamed)), "cloud", "show", "cs1"))
         assertFalse(console.out.contains("Created by"), console.out.toString())
     }
+
+    private val ownerServed = mapOf(capabilities("runners.cloud.v1", "runners.cloud.sessions.owner.v1"))
+
+    @Test
+    fun memberAndAllListAnotherMembersOrEveryMembersSessions() {
+        val items = """{"items":[$session]}"""
+        val member = "GET /api/v1/cloud/sessions?owner=ada"
+        assertEquals(0, run(ownerServed + (member to (200 to items)), "cloud", "list", "--member", "ada"))
+        assertEquals("cs1  claude  running  acme/api  5m\n", console.out.toString())
+        console.out.clear()
+        val all = "GET /api/v1/cloud/sessions?status=paused&owner=all"
+        assertEquals(0, run(ownerServed + (all to (200 to items)), "cloud", "list", "--all", "--status", "paused"))
+        assertEquals(listOf(member, all), calls())
+    }
+
+    @Test
+    fun listingAnotherMembersSessionsIsRefusedBeforeAnyRequestWhenItWouldBeIgnoredOrMisusedAndTheServersRefusalShows() {
+        val list = "GET /api/v1/cloud/sessions"
+        assertEquals(69, run(routes(list to (200 to """{"items":[]}""")), "cloud", "list", "--all"))
+        assertErr("cannot list another member's sessions")
+        assertEquals(64, run(ownerServed, "cloud", "list", "--all", "--member", "ada"))
+        assertErr("Use --all or --member, not both.")
+        assertEquals(64, run(ownerServed, "cloud", "list", "--member", "a b"))
+        assertErr("--member is a member id or login")
+        assertTrue(calls().isEmpty(), calls().toString())
+        val refused = """{"error":{"type":"forbidden","message":"Only you can list your sessions."}}"""
+        assertEquals(77, run(ownerServed + ("$list?owner=ada" to (403 to refused)), "cloud", "list", "--member", "ada"))
+        assertErr("Only you can list your sessions.")
+    }
 }

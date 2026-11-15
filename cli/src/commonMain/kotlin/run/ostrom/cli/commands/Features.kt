@@ -37,5 +37,13 @@ internal fun CliDependencies.requireFeature(serverUrl: String, token: String, fe
     if (stop != null) throw PrintMessage("ostrom: $stop", ExitCode.UNREACHABLE.code, printError = true)
 }
 
+/**
+ * True when [serverUrl] announces [feature]; false when it does not, or says nothing readable: for a command that
+ * only chooses what to send (never one that must not be silently ignored, which uses [requireFeature]).
+ */
+internal fun CliDependencies.announces(serverUrl: String, token: String, feature: String): Boolean =
+    (runBlocking { capabilities.read(serverUrl, token) } as? CapabilitiesRead.Read)
+        ?.let { feature in it.capabilities } == true
+
 /** What `ostrom run <agent> --cloud` and `ostrom attach` say to a server that runs no cloud session. */
 internal const val NO_CLOUD = "This Ostrom server runs no cloud session: start the agent here, without --cloud."
