@@ -119,7 +119,11 @@ private fun runner(socket: String, environment: Map<String, String>): Nothing {
                 answers = HttpWaitAnswers(client, config.serverUrl))
             // The agent's hooks report its background work there, as its uid: the agent socket's directory.
             val stateJob = launch {
-                AgentState.serve(selector, config.stateSocket, runner::agentState, ::log) {
+                // A report is the end of a turn (the `Stop` hook): the one-time wait secrets it had are dropped.
+                AgentState.serve(selector, config.stateSocket, { background ->
+                    runner.agentState(background)
+                    launch { variables.endTurn() }
+                }, ::log) {
                     chmod(it, OPEN_MODE.convert())
                 }
             }

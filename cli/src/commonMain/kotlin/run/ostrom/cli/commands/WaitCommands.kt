@@ -26,6 +26,7 @@ import run.ostrom.cli.waits.WaitsServer
 import run.ostrom.cli.waits.details
 import run.ostrom.cli.waits.line
 import run.ostrom.cli.waits.pairOf
+import run.ostrom.cli.waits.readSecrets
 import run.ostrom.cli.waits.requireId
 import run.ostrom.cli.launcher.child
 import run.ostrom.cli.launcher.ServerAnswer
@@ -173,7 +174,8 @@ internal class WaitsAnswerCommand(private val dependencies: CliDependencies) : C
 
     override fun helpEpilog(context: Context) =
         "Values are converted by the type each field declares (repeat --set for a multiple choice); --set-json gives " +
-            "a JSON value as it is. The server accepts an answer only from a person signed in on the console or the " +
+            "a JSON value as it is; a secret field is given with --set-secret, read without echo (never an " +
+            "argument). The server accepts an answer only from a person signed in on the console or the " +
             "app: with the token of this device it refuses (403), and the answer is given on the console."
 
     private val id by argument("id")
@@ -181,13 +183,29 @@ internal class WaitsAnswerCommand(private val dependencies: CliDependencies) : C
     private val sets by option("--set", help = "FIELD=VALUE, as text, converted by the field's type").multiple()
     private val jsonSets by option("--set-json", help = "FIELD=JSON, used as given: 3, true, \"text\", [\"a\"]")
         .multiple()
+    private val secretSets by option(
+        "--set-secret",
+        help = "FIELD: a secret field, read without echo (never an argument); repeat for several",
+    ).multiple()
+    private val secretStdin by option(
+        "--secret-stdin",
+        help = "Read the --set-secret values from standard input: one line per field, or all of it for one field",
+    ).flag()
     private val org by orgOption()
     private val server by serverFlag()
     private val json by jsonFlag()
 
     override fun run() {
+        secretSets.forEach { requireId(it, "field id") }
+        if (secretSets.toSet().size != secretSets.size) {
+            throw stopWith(ExitCode.USAGE, "ostrom: --set-secret names each field once.")
+        }
+        val read = { fields: List<String> ->
+            val prompt = { text: String -> dependencies.console.err(text) }
+            readSecrets(fields, secretStdin, prompt, dependencies.readSecret, dependencies.readLine)
+        }
         val answered = dependencies.waits(server, org, Right.ANSWER, "No wait $id.") {
-            AnswerWaitUseCase(it)(AnswerWait(id, action, sets.map(::pairOf), jsonSets.map(::pairOf)))
+            AnswerWaitUseCase(it, read)(AnswerWait(id, action, sets.map(::pairOf), jsonSets.map(::pairOf), secretSets))
         }
         val taken = answered.child("answer")?.text("action")?.let { " with $it" }.orEmpty()
         dependencies.console.data(if (json) "$answered\n" else "Answered ${answered.text("id") ?: id}$taken.\n")
@@ -225,7 +243,9 @@ internal class WaitsAskCommand(private val dependencies: CliDependencies) : Clik
     private val refs by option("--ref", help = "artifact:ID, session:ID or url:https://…; repeatable").multiple()
     private val fields by option(
         "--field",
-        help = "ID:TYPE:LABEL[:required]; repeatable. TYPE: text, choice, confirm, number, date or info",
+        help = "ID:TYPE:LABEL[:required][:oneTime]; repeatable. TYPE: text, choice, confirm, number, date, file, " +
+            "secret (only for an agent of a cloud session, shown to you hidden, given to its shell as " +
+            "OSTROM_WAIT_<ID>; :oneTime for this turn only) or info",
     ).multiple()
     private val choices by option("--option", help = "FIELD=VALUE: a choice of a choice field; repeatable").multiple()
     private val actions by option("--action", help = "ID:LABEL; repeatable").multiple()

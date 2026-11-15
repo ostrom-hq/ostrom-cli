@@ -18,6 +18,9 @@ private const val DEFAULT_ACTION = "done"
 
 private val DATE = Regex("""\d{4}-\d{2}-\d{2}""")
 
+/** The most a secret holds, in bytes (the server's limit, `waits.secrets.v1`). */
+internal const val MAX_SECRET_BYTES = 4096
+
 /**
  * What `ostrom waits answer` is given.
  *
@@ -25,20 +28,28 @@ private val DATE = Regex("""\d{4}-\d{2}-\d{2}""")
  * @property action The action to take, or null for the only one.
  * @property sets `FIELD=VALUE`, as text, converted by the field's type.
  * @property jsonSets `FIELD=JSON`, used as given.
+ * @property secretFields The `secret` fields to answer: their values are read without echo, never an argument.
  */
 internal data class AnswerWait(
     val id: String,
     val action: String?,
     val sets: List<Pair<String, String>>,
     val jsonSets: List<Pair<String, String>>,
+    val secretFields: List<String> = emptyList(),
 )
 
 /**
  * Answers a wait: reads it, converts every value by the type its field declares, picks the action, and sends the
  * answer. An unknown field or action, a value that does not convert or a wait no longer open are refused before
  * anything is sent ([WaitInputException]).
+ *
+ * The `readSecrets` function gives the values of the fields it is given, one each, read without echo; it runs only
+ * once everything else is checked, so a typo in a field name does not cost the person a typed secret.
  */
-internal class AnswerWaitUseCase(private val server: WaitsServer) {
+internal class AnswerWaitUseCase(
+    private val server: WaitsServer,
+    private val readSecrets: (List<String>) -> Map<String, String> = { emptyMap() },
+) {
     /** The wait as the server keeps it after the answer. */
     suspend operator fun invoke(request: AnswerWait): JsonObject {
         requireId(request.id)
@@ -46,7 +57,10 @@ internal class AnswerWaitUseCase(private val server: WaitsServer) {
         val status = wait.text("status")
         if (status != "open") refuse("This wait is already ${status ?: "closed"}.")
         val question = wait.child("question") ?: JsonObject(emptyMap())
-        val values = values(question.list("fields").filterIsInstance<JsonObject>(), request.sets, request.jsonSets)
+        val fields = question.list("fields").filterIsInstance<JsonObject>()
+        // Checked before anything is read: a typo in a field name must not cost the person a typed secret.
+        values(fields, request.sets, request.jsonSets, request.secretFields.associateWith { "x" })
+        val values = values(fields, request.sets, request.jsonSets, readSecrets(request.secretFields))
         val action = action(question.list("actions").filterIsInstance<JsonObject>(), request.action)
         return server.answer(request.id, objectOf("action" to action, "values" to JsonObject(values)))
     }
@@ -55,14 +69,28 @@ internal class AnswerWaitUseCase(private val server: WaitsServer) {
         fields: List<JsonObject>,
         sets: List<Pair<String, String>>,
         jsonSets: List<Pair<String, String>>,
+        secrets: Map<String, String>,
     ): Map<String, JsonElement> {
         val byId = fields.mapNotNull { field -> field.text("id")?.let { it to field } }.toMap()
         val values = linkedMapOf<String, JsonElement>()
         sets.groupBy({ it.first }, { it.second }).forEach { (id, texts) -> values[id] = typed(known(byId, id), texts) }
         jsonSets.forEach { (id, text) ->
-            known(byId, id)
+            if (known(byId, id).text("type") == "secret") {
+                refuse("Field $id is a secret: give it with --set-secret $id, never as an argument.")
+            }
             if (id in values) refuse("Field $id is given twice: use --set or --set-json for it, not both.")
             values[id] = parsed(id, text)
+        }
+        // A secret value is never in `sets` (its type refuses it there): it comes from [secrets], read without echo.
+        secrets.forEach { (id, text) ->
+            if (known(byId, id).text("type") != "secret") {
+                refuse("Field $id is not a secret: give it with --set $id=VALUE.")
+            }
+            if (text.encodeToByteArray().size > MAX_SECRET_BYTES) {
+                refuse("The value of $id is longer than $MAX_SECRET_BYTES bytes, the most a secret holds.")
+            }
+            if (text.isEmpty()) refuse("The value of $id is empty.")
+            values[id] = JsonPrimitive(text)
         }
         return values
     }
@@ -106,18 +134,22 @@ internal class AnswerWaitUseCase(private val server: WaitsServer) {
                 "false", "no", "n" -> JsonPrimitive(false)
                 else -> refuse("Field $id is a confirmation: use true or false, not \"$text\".")
             }
-            "choice" -> {
-                val options = field.list("options").filterIsInstance<JsonPrimitive>().map { it.content }
-                if (field.flag("allowOther") != true && text !in options) {
-                    refuse(
-                        "Field $id takes one of: ${options.joinToString(", ")}. \"$text\" is not one.",
-                    )
-                }
-                JsonPrimitive(text)
-            }
+            "choice" -> choice(field, text)
+            "secret" -> refuse(
+                "Field $id is a secret: give it with --set-secret $id, which reads it without echo. " +
+                    "A secret is never an argument.",
+            )
             "info" -> refuse("Field $id only shows information and takes no value.")
             else -> JsonPrimitive(text)
         }
+    }
+
+    private fun choice(field: JsonObject, text: String): JsonElement {
+        val options = field.list("options").filterIsInstance<JsonPrimitive>().map { it.content }
+        if (field.flag("allowOther") != true && text !in options) {
+            refuse("Field ${field.text("id")} takes one of: ${options.joinToString(", ")}. \"$text\" is not one.")
+        }
+        return JsonPrimitive(text)
     }
 
     private fun number(text: String): JsonPrimitive? {

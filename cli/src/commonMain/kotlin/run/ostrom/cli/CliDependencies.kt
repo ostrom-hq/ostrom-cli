@@ -59,6 +59,7 @@ import run.ostrom.cli.platform.ProcessLauncherImpl
 import run.ostrom.cli.platform.RawTerminalImpl
 import run.ostrom.cli.platform.SecretStore
 import run.ostrom.cli.platform.currentExecutable
+import run.ostrom.cli.platform.ExcludeFromCoverage
 import run.ostrom.cli.platform.stderrIsTerminal
 import run.ostrom.cli.platform.systemSecretStore
 import run.ostrom.cli.relay.LocalRelayStarterImpl
@@ -99,6 +100,7 @@ import kotlin.time.TimeSource
  * @property sleep Waits the given milliseconds (the device flow of login; virtual in tests).
  * @property capture Runs short child processes and reads their output (`mysql` for `ostrom import teamcode`).
  * @property readLine Reads a line the developer typed, or null at the end of the input.
+ * @property readSecret Reads a line typed without echo (a secret), or null at the end of the input.
  * @property openUrl Opens a page in the developer's browser; false when it could not.
  * @property cloud Runs `ostrom run <agent> --cloud` and `ostrom attach`.
  * @property selfUpdate `ostrom update`.
@@ -131,6 +133,7 @@ class CliDependencies(
     val sleep: suspend (Long) -> Unit,
     val capture: ProcessCapture,
     val readLine: () -> String?,
+    val readSecret: () -> String? = ::hiddenLine,
     val openUrl: (String) -> Boolean,
     val cloud: CloudRunner,
     val selfUpdate: SelfUpdate,
@@ -352,3 +355,8 @@ internal fun pause(millis: Long) = runBlocking { delay(millis) }
 internal class KeptOpen(private val api: OstromApi) : OstromApi by api {
     override fun close() = Unit
 }
+
+/** One line typed without echo, on the terminal: the one place a secret is read (never an argument). */
+@ExcludeFromCoverage
+internal fun hiddenLine(): String? =
+    com.github.ajalt.mordant.terminal.Terminal().readLineOrNull(hideInput = true)

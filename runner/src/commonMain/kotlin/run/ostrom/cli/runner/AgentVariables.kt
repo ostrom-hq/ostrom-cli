@@ -21,11 +21,19 @@ import kotlin.time.Instant
  *
  * @property variables By name.
  * @property unavailable Assigned variables withheld because their value cannot be read now, by name.
+ * @property secrets The secrets of the session's answered waits (`OSTROM_WAIT_<FIELD ID>`, `waits.secrets.v1`).
+ * @property oneTime The names in [secrets] the server deleted by serving them: kept for the turn only.
  */
 @Serializable
-class EnvironmentValues(val variables: Map<String, String> = emptyMap(), val unavailable: List<String> = emptyList()) {
+class EnvironmentValues(
+    val variables: Map<String, String> = emptyMap(),
+    val unavailable: List<String> = emptyList(),
+    val secrets: Map<String, String> = emptyMap(),
+    val oneTime: List<String> = emptyList(),
+) {
     /** Names only. */
-    override fun toString(): String = "EnvironmentValues(${variables.keys.sorted()}, unavailable=$unavailable)"
+    override fun toString(): String =
+        "EnvironmentValues(${variables.keys.sorted()}, unavailable=$unavailable, secrets=${secrets.keys.sorted()})"
 }
 
 /** The server no longer serves this execution's variables: another execution holds the session, or it is refused. */
@@ -36,11 +44,17 @@ class VariablesRefusedException : Exception("The server refused the variables.")
  *
  * @property variables The variables to export.
  * @property withdrawn The names to unset.
+ * @property secrets The wait secrets to export (`OSTROM_WAIT_…`), apart from the variables.
  */
 @Serializable
-class EnvironmentAnswer(val variables: Map<String, String> = emptyMap(), val withdrawn: List<String> = emptyList()) {
+class EnvironmentAnswer(
+    val variables: Map<String, String> = emptyMap(),
+    val withdrawn: List<String> = emptyList(),
+    val secrets: Map<String, String> = emptyMap(),
+) {
     /** Names only. */
-    override fun toString(): String = "EnvironmentAnswer(names=${variables.keys.sorted()}, withdrawn=$withdrawn)"
+    override fun toString(): String =
+        "EnvironmentAnswer(names=${variables.keys.sorted()}, secrets=${secrets.keys.sorted()}, withdrawn=$withdrawn)"
 }
 
 /**
@@ -49,6 +63,11 @@ class EnvironmentAnswer(val variables: Map<String, String> = emptyMap(), val wit
  * ([forCommand]), so a rotated, added or removed variable reaches the agent's next command within that delay, and an
  * idle session costs no request. A failed read keeps the last values and is retried after [retry]; a server without
  * the route is not asked again, and a fenced or refused execution serves nothing.
+ *
+ * The session's wait secrets (TeamCode's `docs/waits.md#secrets`) arrive with the variables but are kept apart: an
+ * agent start never gets them in its process environment (they would outlive their expiry and their turn), only a Bash
+ * command does. A one-time secret, which the server deleted by serving it, is held in memory until [endTurn] and then
+ * withdrawn; the others follow the server's answer.
  *
  * @param fetch Asks the server; null on a server without the route.
  * @param clock The time.
@@ -73,6 +92,11 @@ class RunnerVariables(
     private var nextRead: Instant? = null
     private var stopped = false
     private var failing = false
+    private var lastSecretNames: Set<String> = emptySet()
+    private var secrets: Map<String, String> = emptyMap()
+
+    /** One-time secrets the server no longer holds: kept here until the turn that uses them ends. */
+    private val onceHeld = mutableMapOf<String, String>()
 
     /** Every name handed to the agent, by its environment or by a command: a name that disappears is unset. */
     private val given = mutableSetOf<String>()
@@ -94,8 +118,14 @@ class RunnerVariables(
      */
     suspend fun forCommand(): EnvironmentAnswer = lock.withLock {
         if (nextRead.let { it == null || clock.now() >= it }) read(commandWait)
-        EnvironmentAnswer(current, (given - current.keys).sorted()).also { given += current.keys }
+        val live = secrets + onceHeld
+        EnvironmentAnswer(current, (given - current.keys - live.keys).sorted(), live).also {
+            given += current.keys + live.keys
+        }
     }
+
+    /** The agent's turn ended: the one-time secrets it had are dropped, and the next command unsets them. */
+    suspend fun endTurn() = lock.withLock { onceHeld.clear() }
 
     /** Asks the server, under [lock]; any failure keeps [current]. */
     @Suppress("ReturnCount") // One per way the server may not answer.
@@ -111,6 +141,8 @@ class RunnerVariables(
         } catch (_: VariablesRefusedException) {
             stopped = true
             current = emptyMap()
+            secrets = emptyMap()
+            onceHeld.clear()
             log("the server no longer serves the variables: the agent's commands get none")
             return
         } catch (error: Exception) {
@@ -134,6 +166,15 @@ class RunnerVariables(
             log("variables changed: ${accepted.keys.joinToString(", ").ifEmpty { "none" }}")
         }
         current = accepted
+        val served = AgentEnvironment.acceptedSecrets(values.secrets)
+        secrets = served.filterKeys { it !in values.oneTime }
+        onceHeld += served.filterKeys { it in values.oneTime }
+        if (served.keys != lastSecretNames) {
+            lastSecretNames = served.keys.toSet()
+            if (served.isNotEmpty()) {
+                log("wait secrets for the agent's commands: ${served.keys.sorted().joinToString(", ")}")
+            }
+        }
         nextRead = clock.now() + maxAge
     }
 
@@ -183,6 +224,30 @@ object AgentEnvironment {
         "BASH_FUNC_",
     )
 
+    /** The name of a wait secret: `OSTROM_WAIT_` and an upper-cased field id, the one exception to `OSTROM_`. */
+    private val WAIT_SECRET = Regex("OSTROM_WAIT_[A-Z][A-Z0-9_]{0,63}")
+
+    /**
+     * Whether [name] is a wait secret's. Only [script] takes one, from the secrets it is given: a variable of that
+     * name among the plain variables is still withheld.
+     *
+     * @param name The name.
+     *
+     * @return Whether it is one.
+     */
+    fun isWaitSecret(name: String): Boolean = WAIT_SECRET.matches(name)
+
+    /**
+     * The secrets that may reach a shell: a wait secret's name and a value without a NUL, sorted by name.
+     *
+     * @param secrets The served secrets.
+     *
+     * @return Those accepted.
+     */
+    fun acceptedSecrets(secrets: Map<String, String>): Map<String, String> = secrets
+        .filter { (name, value) -> isWaitSecret(name) && '\u0000' !in value }
+        .entries.sortedBy { it.key }.associate { it.key to it.value }
+
     /**
      * Whether a variable may reach the agent.
      *
@@ -205,17 +270,26 @@ object AgentEnvironment {
         .entries.sortedBy { it.key }.associate { it.key to it.value }
 
     /**
-     * Shell code that sets [variables] and unsets [withdrawn] (names given earlier and no longer assigned).
+     * Shell code that sets [variables] and [secrets] (wait secrets) and unsets [withdrawn] (names given earlier and
+     * no longer assigned).
      *
      * @param variables The variables.
      * @param withdrawn The names to unset.
+     * @param secrets The wait secrets.
      *
      * @return The code, one line per variable.
      */
-    fun script(variables: Map<String, String>, withdrawn: Collection<String> = emptyList()): String = buildString {
+    fun script(
+        variables: Map<String, String>,
+        withdrawn: Collection<String> = emptyList(),
+        secrets: Map<String, String> = emptyMap(),
+    ): String = buildString {
         appendLine("# Written by Ostrom for this session: your assigned environment variables. Do not edit.")
-        withdrawn.filter { accepted(it) && it !in variables }.sorted().forEach { appendLine("unset $it") }
+        val given = acceptedSecrets(secrets)
+        withdrawn.filter { (accepted(it) || isWaitSecret(it)) && it !in variables && it !in given }.sorted()
+            .forEach { appendLine("unset $it") }
         accepted(variables).forEach { (name, value) -> appendLine("export $name=${quote(value)}") }
+        given.forEach { (name, value) -> appendLine("export $name=${quote(value)}") }
     }
 
     /**

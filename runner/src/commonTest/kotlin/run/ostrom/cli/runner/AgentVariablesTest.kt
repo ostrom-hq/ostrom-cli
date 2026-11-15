@@ -179,4 +179,82 @@ class AgentVariablesTest {
             "--socket '/run/ostrom/environment.sock' 2>/dev/null)\""
         assertTrue(call in file, file)
     }
+
+    @Test
+    fun waitSecretsReachOnlyACommandAndAOneTimeOneStaysUntilTheTurnEnds() = runTest {
+        val clock = FakeClock()
+        val logs = mutableListOf<String>()
+        val answers = ArrayDeque(
+            listOf(
+                EnvironmentValues(
+                    mapOf("API_KEY" to "v"),
+                    secrets = mapOf(
+                        "OSTROM_WAIT_PW" to "hunter2",
+                        "OSTROM_WAIT_KEY" to "k",
+                        "OSTROM_WAIT_BAD" to "nul\u0000",
+                        "PATH" to "/evil",
+                        "OSTROM_API" to "x",
+                    ),
+                    oneTime = listOf("OSTROM_WAIT_PW"),
+                ),
+                EnvironmentValues(mapOf("API_KEY" to "v"), secrets = mapOf("OSTROM_WAIT_KEY" to "k")),
+                EnvironmentValues(mapOf("API_KEY" to "v")),
+            ),
+        )
+        val variables = RunnerVariables({ answers.removeFirst() }, clock, { logs += it })
+        assertEquals(mapOf("API_KEY" to "v"), variables.forStart(), "an agent start never gets a secret")
+        val first = variables.forCommand()
+        assertEquals(mapOf("OSTROM_WAIT_KEY" to "k", "OSTROM_WAIT_PW" to "hunter2"), first.secrets)
+        assertFalse("hunter2" in first.toString())
+        assertEquals("wait secrets for the agent's commands: OSTROM_WAIT_KEY, OSTROM_WAIT_PW", logs.single())
+        // The server deleted the one-time secret by serving it: the runner holds it until the turn ends.
+        clock.advance(31.seconds)
+        val held = variables.forCommand()
+        assertEquals(mapOf("OSTROM_WAIT_KEY" to "k", "OSTROM_WAIT_PW" to "hunter2"), held.secrets)
+        assertEquals(emptyList(), held.withdrawn)
+        variables.endTurn()
+        val dropped = variables.forCommand()
+        assertEquals(mapOf("OSTROM_WAIT_KEY" to "k"), dropped.secrets)
+        assertEquals(listOf("OSTROM_WAIT_PW"), dropped.withdrawn)
+        clock.advance(31.seconds)
+        val ended = variables.forCommand()
+        assertEquals(emptyMap(), ended.secrets)
+        assertEquals(listOf("OSTROM_WAIT_KEY", "OSTROM_WAIT_PW"), ended.withdrawn)
+    }
+
+    @Test
+    fun aRefusedExecutionDropsTheSecretsToo() = runTest {
+        val clock = FakeClock()
+        var refuse = false
+        val variables = RunnerVariables({
+            if (refuse) throw VariablesRefusedException()
+            EnvironmentValues(secrets = mapOf("OSTROM_WAIT_PW" to "p"), oneTime = listOf("OSTROM_WAIT_PW"))
+        }, clock, {})
+        assertEquals(mapOf("OSTROM_WAIT_PW" to "p"), variables.forCommand().secrets)
+        refuse = true
+        clock.advance(31.seconds)
+        val answer = variables.forCommand()
+        assertEquals(emptyMap(), answer.secrets)
+        assertEquals(listOf("OSTROM_WAIT_PW"), answer.withdrawn)
+    }
+
+    @Test
+    fun theScriptExportsWaitSecretsAndUnsetsTheOnesNoLongerGiven() {
+        val script = AgentEnvironment.script(
+            mapOf("OSTROM_WAIT_X" to "plain-variable-refused"),
+            listOf("OSTROM_WAIT_OLD", "OSTROM_WAIT_PW", "OSTROM_OTHER"),
+            mapOf("OSTROM_WAIT_PW" to "it's", "OSTROM_WAIT_NO\u0000" to "x", "HOME" to "/"),
+        )
+        assertEquals(
+            listOf(
+                "# Written by Ostrom for this session: your assigned environment variables. Do not edit.",
+                "unset OSTROM_WAIT_OLD",
+                "export OSTROM_WAIT_PW=\"it's\"",
+            ),
+            script.lines().filter { it.isNotEmpty() },
+        )
+        assertTrue(AgentEnvironment.isWaitSecret("OSTROM_WAIT_A1_B"))
+        assertFalse(AgentEnvironment.isWaitSecret("OSTROM_WAIT_a"))
+        assertFalse(AgentEnvironment.isWaitSecret("OSTROM_WAIT_"))
+    }
 }

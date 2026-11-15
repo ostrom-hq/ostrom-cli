@@ -161,4 +161,64 @@ class AnswerWaitUseCaseTest {
         serve(wait(), status = 409)
         assertEquals(409, assertFailsWith<WaitsRefusal> { answer(ask()) }.status)
     }
+
+    @Test
+    fun aSecretComesFromTheReaderOnlyAfterEverythingElseIsChecked() = runTest {
+        val fields = listOf(field("pw", "secret"), field("note", "text")).joinToString(",", "[", "]")
+        serve(wait(fields, """[{"id":"go","label":"Go"}]"""))
+        var reads = 0
+        val use = AnswerWaitUseCase(fake.server) { names -> reads++; names.associateWith { "p@ss" } }
+        val request = AnswerWait("w1", null, listOf("note" to "n"), emptyList(), listOf("pw"))
+        use(request)
+        assertEquals(1, reads)
+        assertEquals("""{"action":"go","values":{"note":"n","pw":"p@ss"}}""", fake.calls.last().body)
+        val nope = AnswerWait("w1", null, emptyList(), emptyList(), listOf("nope"))
+        val typo = assertFailsWith<WaitInputException> { use(nope) }
+        assertEquals(1, reads, "nothing was read for a field the wait does not have")
+        assertEquals(true, typo.message.orEmpty().startsWith("This wait has no field"))
+        val note = AnswerWait("w1", null, emptyList(), emptyList(), listOf("note"))
+        val plain = assertFailsWith<WaitInputException> { use(note) }
+        assertEquals("Field note is not a secret: give it with --set note=VALUE.", plain.message)
+        assertEquals(
+            true,
+            refusal(ask("pw=x")).startsWith("Field pw is a secret: give it with --set-secret pw"),
+        )
+        assertEquals(
+            "Field pw is a secret: give it with --set-secret pw, never as an argument.",
+            refusal(ask(json = listOf("pw=\"x\""))),
+        )
+    }
+
+    @Test
+    fun aSecretIsNeitherEmptyNorLongerThanTheServerTakes() = runTest {
+        serve(wait("[" + field("pw", "secret") + "]"))
+        val empty = AnswerWaitUseCase(fake.server) { mapOf("pw" to "") }
+        assertEquals("The value of pw is empty.", assertFailsWith<WaitInputException> {
+            empty(AnswerWait("w1", null, emptyList(), emptyList(), listOf("pw")))
+        }.message)
+        val long = AnswerWaitUseCase(fake.server) { mapOf("pw" to "x".repeat(MAX_SECRET_BYTES + 1)) }
+        assertEquals(true, assertFailsWith<WaitInputException> {
+            long(AnswerWait("w1", null, emptyList(), emptyList(), listOf("pw")))
+        }.message.orEmpty().contains("longer than $MAX_SECRET_BYTES bytes"))
+    }
+
+    @Test
+    fun theSecretReaderTakesTheTerminalOrStandardInput() {
+        val prompts = mutableListOf<String>()
+        val typed = ArrayDeque(listOf("a", "b", "c\r"))
+        assertEquals(emptyMap(), readSecrets(emptyList(), false, prompts::add, { error("no") }, { error("no") }))
+        val asked = readSecrets(listOf("x", "y"), false, prompts::add, { typed.removeFirstOrNull() }, { error("no") })
+        assertEquals(mapOf("x" to "a", "y" to "b"), asked)
+        assertEquals(listOf("Secret for x (hidden): ", "Secret for y (hidden): "), prompts)
+        val missing = readSecrets(listOf("z"), false, prompts::add, { null }, { error("no") })
+        assertEquals(mapOf("z" to ""), missing)
+        val lines = ArrayDeque(listOf("one", "two", "three\r"))
+        val piped = readSecrets(listOf("p", "q"), true, prompts::add, { error("no") }, { lines.removeFirstOrNull() })
+        assertEquals(mapOf("p" to "one", "q" to "two"), piped)
+        val rest = readSecrets(listOf("k"), true, prompts::add, { error("no") }, { lines.removeFirstOrNull() })
+        assertEquals(mapOf("k" to "three"), rest)
+        val multi = ArrayDeque(listOf("-----BEGIN", "body", "-----END", ""))
+        val key = readSecrets(listOf("k"), true, prompts::add, { error("no") }, { multi.removeFirstOrNull() })
+        assertEquals(mapOf("k" to "-----BEGIN\nbody\n-----END"), key)
+    }
 }
