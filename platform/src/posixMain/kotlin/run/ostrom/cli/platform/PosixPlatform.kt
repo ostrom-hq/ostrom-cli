@@ -60,7 +60,8 @@ internal actual fun readStdin(buffer: ByteArray, offset: Int, timeoutMillis: Int
 
 internal actual fun environmentVariable(name: String): String? = getenv(name)?.toKString()
 
-internal actual fun currentUserId(): String = getuid().toString()
+/** The id of the user running the CLI (see the expect declaration). */
+actual fun currentUserId(): String = getuid().toString()
 
 internal actual fun captureOutput(
     command: List<String>,

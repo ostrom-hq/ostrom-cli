@@ -13,7 +13,11 @@ import run.ostrom.cli.CliDependencies
 import run.ostrom.cli.ExitCode
 import run.ostrom.cli.platform.Environment
 import run.ostrom.cli.platform.OperatingSystem
+import run.ostrom.cli.platform.CaptureResult
+import run.ostrom.cli.update.AutomaticUpdateCommand
+import run.ostrom.cli.update.AutomaticUpdateScheduleImpl
 import run.ostrom.cli.update.ServerApiVersion
+import run.ostrom.cli.update.automaticUpdatePlatform
 import run.ostrom.cli.update.UpdateRequest
 import kotlinx.coroutines.runBlocking
 
@@ -31,10 +35,20 @@ internal class UpdateCommand(private val dependencies: CliDependencies) : CliktC
         help = "Turn the daily update notice on or off for this device, or show it",
     ).choice("on", "off", "status")
 
+    val automatic by option(
+        "--automatic",
+        help = "Turn the hourly automatic update of this managed installation on or off, show it, or remove it",
+    ).choice("on", "off", "status", "uninstall")
+    val root by option("--root", help = "With --automatic: the managed installation's folder, instead of this one's")
+
+    // what the hourly job of --automatic runs: one attempt, when the automatic updates are on
+    val automaticRun by option("--automatic-run", hidden = true).flag()
+
     // plumbing of the update notice, started detached once a day at most: records the latest release, says nothing
     val recordLatest by option("--record-latest", hidden = true).flag()
 
     override fun run() {
+        if (automaticOptions()) return automaticUpdates()
         if (notifications != null) {
             if (listOf(rollback, check, json, recordLatest, version != null).any { it }) {
                 throw UsageError("--notifications takes no other option")
@@ -72,6 +86,58 @@ internal class UpdateCommand(private val dependencies: CliDependencies) : CliktC
         throw ProgramResult(code)
     }
 
+    /** True when automatic updates are asked for, alone; refuses them mixed with another operation. */
+    private fun automaticOptions(): Boolean {
+        val asked = automatic != null || automaticRun
+        val mixed = when {
+            listOf(notifications != null, automatic != null, automaticRun).count { it } > 1 ->
+                "Choose one of --notifications, --automatic and --automatic-run"
+            asked && listOf(rollback, check, json, recordLatest, version != null).any { it } ->
+                "Automatic updates take no other option than --root"
+            !asked && root != null -> "--root only applies to --automatic"
+            else -> null
+        }
+        if (mixed != null) throw UsageError(mixed)
+        return asked
+    }
+
+    /** `--automatic on|off|status|uninstall`, and the scheduled attempt of `--automatic-run`. */
+    private fun automaticUpdates(): Nothing {
+        val updates = dependencies.selfUpdate
+        val environment = dependencies.environment
+        val request = UpdateRequest(
+            current = BuildInfo.VERSION,
+            target = releaseTarget(environment),
+            executable = dependencies.executable,
+            releases = releasesUrl(environment),
+        )
+        val command = AutomaticUpdateCommand(
+            installations = updates.installations,
+            root = root,
+            executable = dependencies.executable,
+            platform = automaticUpdatePlatform(environment, dependencies.userId),
+            environment = environment,
+            schedule = { store ->
+                val systemRoot = environment["SystemRoot"] ?: "C:\\Windows"
+                AutomaticUpdateScheduleImpl(store.fileSystem, systemRoot) { name, arguments ->
+                    when (val ran = dependencies.capture.capture(listOf(name) + arguments, MANAGER_MILLIS)) {
+                        is CaptureResult.Exited -> ran.code
+                        else -> -1
+                    }
+                }
+            },
+            fetch = { updates.releaseCheck(request) },
+            install = { store, candidate, settings ->
+                val api = apiVersionOf(dependencies, settings.configuration)
+                updates.automaticInstall(store, request, candidate, api)
+            },
+            say = { dependencies.console.out("$it\n") },
+        )
+        val operation = automatic
+        val code = runBlocking { if (operation == null) command.attempt() else command.configure(operation) }
+        throw ProgramResult(code)
+    }
+
     /** `--notifications on|off|status`: the daily notice (it also stops for any OSTROM_DISABLE_AUTOUPDATE). */
     private fun notificationsSetting() {
         val notice = dependencies.updateNotice
@@ -89,14 +155,20 @@ internal class UpdateCommand(private val dependencies: CliDependencies) : CliktC
 }
 
 /** Asks [serverApiVersion] of [dependencies], once a binary is to be put in place. */
-internal fun apiVersionOf(dependencies: CliDependencies): suspend () -> Int = { serverApiVersion(dependencies) }
+internal fun apiVersionOf(
+    dependencies: CliDependencies,
+    directory: String? = dependencies.environment.configDirectory,
+): suspend () -> Int = { serverApiVersion(dependencies, directory) }
 
-/** The API version of the server this device is signed in to, which the binary to put in place must speak. */
-internal suspend fun serverApiVersion(dependencies: CliDependencies): Int {
-    val signedIn = dependencies.environment.configDirectory?.let { directory ->
-        val serverUrl = dependencies.serverOf(null, directory)
+/**
+ * The API version of the server the CLI folder [directory] is signed in to, which the binary to put in place must
+ * speak.
+ */
+internal suspend fun serverApiVersion(dependencies: CliDependencies, directory: String?): Int {
+    val signedIn = directory?.let { folder ->
+        val serverUrl = dependencies.serverOf(null, folder)
         // the device's token never travels in clear, not even for this read
-        serverUrl to if (inClear(serverUrl)) null else dependencies.credentials(directory).load(serverUrl)?.token
+        serverUrl to if (inClear(serverUrl)) null else dependencies.credentials(folder).load(serverUrl)?.token
     }
     val read = ServerApiVersion(dependencies.capabilities) { dependencies.console.out("$it\n") }
     return read(signedIn?.first, signedIn?.second)
@@ -120,4 +192,7 @@ internal fun releasesUrl(environment: Environment): String = environment["OSTROM
     ?: "${(environment["OSTROM_GITHUB_WEB_URL"] ?: "https://github.com").trimEnd('/')}/ostrom-hq/ostrom-cli/releases"
 
 private const val ON = "on"
+
+/** How long the system's scheduler may take to answer. */
+private const val MANAGER_MILLIS = 15_000
 private const val STATUS = "status"

@@ -13,7 +13,8 @@ import kotlinx.cinterop.wcstr
 internal actual fun systemVault(): Vault? = CredentialManagerVault
 
 // Credential Manager is always there: Windows never falls back to the encrypted file, whose key alone needs a user id.
-internal actual fun currentUserId(): String = ""
+/** The id of the user running the CLI (see the expect declaration). */
+actual fun currentUserId(): String = ""
 
 /** Windows Credential Manager: one generic credential `run.ostrom.cli:<name>` per secret, for this user. */
 internal object CredentialManagerVault : Vault {

@@ -1,9 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli
 
+import okio.use
+import run.ostrom.cli.api.Download
 import run.ostrom.cli.commands.releaseTarget
+import run.ostrom.cli.platform.CaptureResult
 import run.ostrom.cli.platform.Environment
 import run.ostrom.cli.platform.OperatingSystem
+import run.ostrom.cli.platform.ProcessCapture
+import run.ostrom.cli.update.FakeInstallationFiles
+import run.ostrom.cli.update.Installations
+import run.ostrom.cli.update.ReleaseVectors
+import run.ostrom.cli.update.stageOn
+import run.ostrom.cli.update.storeOn
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -68,5 +77,62 @@ class UpdateCommandTest : CliKit() {
             }
             assertEquals(target, releaseTarget(environment))
         }
+    }
+
+    /** A system scheduler that answers [result] to every call. */
+    private fun scheduler(result: CaptureResult) = object : ProcessCapture {
+        override fun capture(command: List<String>, timeoutMillis: Int) = result.also { scheduled += command }
+
+        override fun detach(command: List<String>) = true
+    }
+
+    private val scheduled = mutableListOf<List<String>>()
+
+    @Test
+    fun automaticUpdatesRunThroughTheManagedInstallation() {
+        val files = FakeInstallationFiles()
+        val root = "/home/maya/ostrom"
+        val home = FakeEnvironment(mapOf("HOME" to "/home/maya"))
+        managedInstallations = Installations(fileSystem, files, "linux-x64", home)
+        val store = storeOn(fileSystem, files, root)
+        store.initialize()
+        val first = stageOn(fileSystem, store, "SAME", "1.0.0")
+        store.ensureLauncher(first)
+        store.lock(exclusive = true).use { store.activate(first) }
+        val latest = "https://releases.example/latest/download/latest.json"
+        val (manifest, signature) = ReleaseVectors.MANIFESTS.getValue("LATEST")
+        releases[latest] = Download.Bytes(manifest.encodeToByteArray())
+        releases["$latest.sig"] = Download.Bytes(signature.encodeToByteArray())
+        val archive = "https://releases.example/download/9.9.9/ostrom-9.9.9-linux-x64.tar.gz"
+        releases[archive] = Download.Bytes(ReleaseVectors.ARCHIVE.encodeToByteArray())
+        val environment = mapOf("HOME" to "/home/maya", "OSTROM_RELEASES_URL" to "https://releases.example")
+        val ok = scheduler(CaptureResult.Exited(0, ""))
+        assertEquals(0, cli(environment, capture = ok).run(arrayOf("update", "--automatic", "on", "--root", root)))
+        assertOut("Automatic updates: on.\nRegistration present: yes.\n")
+        assertEquals(listOf("/usr/bin/systemctl", "--user", "link"), scheduled.first().take(3))
+        assertEquals(0, cli(environment, capture = ok).run(arrayOf("update", "--automatic-run", "--root", root)))
+        assertOut("Automatic update: UPDATED (9.9.9)")
+        assertEquals("9.9.9", store.state()?.current?.version)
+        val windows = environment + ("SystemRoot" to "D:\\Windows")
+        assertEquals(0, cli(windows, capture = ok).run(arrayOf("update", "--automatic", "status", "--root", root)))
+        val refused = scheduler(CaptureResult.Failed)
+        val off = arrayOf("update", "--automatic", "off", "--root", root)
+        assertEquals(1, cli(environment, capture = refused).run(off))
+        assertOut("The system's scheduler refused the automatic updates (automatic_manager_rejected)")
+    }
+
+    @Test
+    fun automaticUpdatesTakeNoOtherOperationAndNeedAManagedInstallation() {
+        val mixed = listOf(
+            arrayOf("update", "--automatic", "on", "--notifications", "on"),
+            arrayOf("update", "--automatic", "on", "--automatic-run"),
+            arrayOf("update", "--automatic-run", "--check"),
+            arrayOf("update", "--automatic", "status", "--version", "1.0.0"),
+            arrayOf("update", "--root", "/r"),
+        )
+        for (line in mixed) assertEquals(64, cli().run(line), line.joinToString(" "))
+        assertEquals(77, cli().run(arrayOf("update", "--automatic", "status")))
+        assertOut("Automatic updates need a managed installation")
+        assertEquals(77, cli().run(arrayOf("update", "--automatic-run")))
     }
 }

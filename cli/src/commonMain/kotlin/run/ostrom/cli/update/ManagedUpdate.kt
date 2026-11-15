@@ -26,7 +26,7 @@ internal class ManagedUpdate(
         block()
     } catch (refused: InstallationException) {
         val (code, text) = installationRefusal(refused.code)
-        stop(code, text)
+        stop(code, text, refused.code)
     } catch (failure: IOException) {
         stop(ExitCode.CANNOT_WRITE, "ostrom could not write its installation: ${failure.message}")
     }
@@ -48,9 +48,9 @@ internal class ManagedUpdate(
 
     /**
      * Installs [archive], the checked archive of [asset], into [store] and selects it, once the binary it holds
-     * answers the probe as that version speaking [apiVersion]. Caller holds the writer lock.
+     * answers the probe as that version speaking [apiVersion]; the version selected. Caller holds the writer lock.
      */
-    fun put(store: InstallationStore, asset: Asset, archive: ByteArray, apiVersion: Int) {
+    fun put(store: InstallationStore, asset: Asset, archive: ByteArray, apiVersion: Int): InstalledVersion {
         val name = store.paths.executableName
         val staged = guard {
             store.stage(asset.manifest, asset.signature, asset.version) { work -> unpacked(work, asset, archive, name) }
@@ -58,6 +58,7 @@ internal class ManagedUpdate(
         probe.refusal(store.paths.binary(staged), asset.version, apiVersion)?.let { stop(ExitCode.REFUSED, it) }
         guard { store.ensureLauncher(staged) }
         select(store, staged, rollback = false)
+        return staged
     }
 
     /** Selects [version] ([rollback]: the previous one) under the exclusive activity lock, then collects garbage. */

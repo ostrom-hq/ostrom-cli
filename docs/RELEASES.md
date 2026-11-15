@@ -247,6 +247,27 @@ linked as `~/.local/bin/ostrom` (macOS, Linux; a name held by another file is le
 the user PATH (Windows). A single binary installed by the installers keeps updating in place, with
 `ostrom.previous` for `--rollback`.
 
+### Automatic updates (`ostrom update --automatic`)
+
+A managed installation can update itself every hour, once you opt in with `ostrom update --automatic on` (`off`,
+`status`, `uninstall`; `--root` names another installation). Nothing else ever registers the job. It is a user job of
+the system's own scheduler, separate from any session: a LaunchAgent in `~/Library/LaunchAgents` on macOS, a systemd
+user timer and service in `$XDG_CONFIG_HOME/systemd/user` (`~/.config/systemd/user`) on Linux, a Task Scheduler task
+running as the user who registered it on Windows. It runs the stable launcher `bin/ostrom` of the installation, and
+ostrom manages only the exact definitions it recorded: one changed by hand is refused, never overwritten.
+
+- `automatic-update.json`, in the installation's folder, holds paths and identity only (the CLI folder, the launcher,
+  the job's definition, the system, the user id), never a token or a login. `on` records it disabled before
+  registering the job, so a setup that fails leaves the updates off; `off` never stops an attempt under way.
+- Each attempt goes through the same checks as a managed `ostrom update`: the signature, the floors, the archive's
+  checksum, the probe of the new binary, never inside an agent's session. It installs the latest release only when it
+  is newer and not a prerelease (a version with a `-`), within 15 minutes, one attempt at a time.
+- `automatic-update-result.json` records the last attempt: `STARTED`, `NO_UPDATE`, `UPDATED`, `DEFERRED` (another
+  install, update or attempt is running, or an agent's session; `automatic_worker_busy` when another attempt holds the
+  worker's lock) or `FAILED`, with a diagnostic code and never a remote body. `ostrom update --automatic status`
+  shows it.
+- Never for root. With any non-empty `OSTROM_DISABLE_AUTOUPDATE`, an attempt does nothing, and the status says so.
+
 ## Signing the binaries themselves
 
 macOS (Developer ID + notarisation) and Windows (Authenticode) run in the `build-macos` and `package` jobs only when
