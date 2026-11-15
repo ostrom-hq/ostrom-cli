@@ -295,7 +295,7 @@ class RelayActivityTest {
     }
 
     private suspend fun TestScope.report(client: HttpClient): ActivityOutcome = try {
-        val forwarder = ActivityForwarder(relayConfig(), client, AgentSession(), backgroundScope)
+        val forwarder = ActivityForwarder(relayConfig(), client, AgentSession(), backgroundScope, timeout = 60.seconds)
         forwarder.send("claude-session-1~r2", "working", "2026-11-15T00:00:00Z")
     } finally {
         client.close()
