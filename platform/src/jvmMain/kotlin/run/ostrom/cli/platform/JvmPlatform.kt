@@ -87,7 +87,8 @@ internal actual fun currentArchitecture(): String = when (val arch = System.getP
 @ExcludeFromCoverage
 internal actual fun restrictToOwnerExecutable(path: String) {
     val file = Paths.get(path)
-    if (Files.getFileStore(file).supportsFileAttributeView("posix")) {
+    // a missing file or folder (tests on okio's FakeFileSystem) is left alone, as by chmod in the native actual
+    if (Files.exists(file) && Files.getFileStore(file).supportsFileAttributeView("posix")) {
         Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rwx------"))
     }
 }

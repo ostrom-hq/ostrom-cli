@@ -22,6 +22,7 @@ import run.ostrom.cli.commands.HelpCommand
 import run.ostrom.cli.commands.HookCommand
 import run.ostrom.cli.commands.ImportTeamCodeCommand
 import run.ostrom.cli.commands.InboxCommand
+import run.ostrom.cli.commands.InstallCommand
 import run.ostrom.cli.commands.LoginCommand
 import run.ostrom.cli.commands.LogoutCommand
 import run.ostrom.cli.commands.McpCommand
@@ -194,6 +195,7 @@ class OstromCli(private val dependencies: CliDependencies) {
             LoginCommand(dependencies),
             WhoAmICommand(dependencies),
             ConfigureCommand(dependencies),
+            InstallCommand(dependencies),
             UpdateCommand(dependencies),
             VerifyReleaseCommand(dependencies),
             LogoutCommand(dependencies),

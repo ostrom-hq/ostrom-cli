@@ -58,13 +58,17 @@ import run.ostrom.cli.platform.ProcessCaptureImpl
 import run.ostrom.cli.platform.ProcessLauncherImpl
 import run.ostrom.cli.platform.RawTerminalImpl
 import run.ostrom.cli.platform.SecretStore
+import run.ostrom.cli.platform.SystemInstallationFiles
 import run.ostrom.cli.platform.currentExecutable
 import run.ostrom.cli.platform.ExcludeFromCoverage
 import run.ostrom.cli.platform.stderrIsTerminal
 import run.ostrom.cli.platform.systemSecretStore
 import run.ostrom.cli.relay.LocalRelayStarterImpl
 import run.ostrom.cli.telemetry.UsageStatistics
+import run.ostrom.cli.commands.releaseTarget
 import run.ostrom.cli.update.AgentSessions
+import run.ostrom.cli.update.SystemCommandPath
+import run.ostrom.cli.update.Installations
 import run.ostrom.cli.update.AgentSessionsImpl
 import run.ostrom.cli.update.InstallationProbeImpl
 import run.ostrom.cli.update.ReleaseTrust
@@ -190,7 +194,9 @@ class CliDependencies(
             val temporary = FileSystem.SYSTEM_TEMPORARY_DIRECTORY.toString()
             val files = FileStoreImpl()
             val secrets = { systemSecretStore(environment, files) }
-            val self = currentExecutable()
+            val installations = installations(environment)
+            // a managed installation's stable launcher, never one of its payloads (gone two updates later)
+            val self = installations.stable(currentExecutable())
             val sessions = AgentSessionsImpl(environment, FileSystem.SYSTEM, temporary, LoopbackHttpImpl())
             return CliDependencies(
                 console = console,
@@ -225,7 +231,7 @@ class CliDependencies(
                 readLine = ::readlnOrNull,
                 openUrl = BrowserOpener(ProcessLauncherImpl(), environment.operatingSystem)::open,
                 cloud = cloudRunner(console, api),
-                selfUpdate = selfUpdate(environment, console, sessions),
+                selfUpdate = selfUpdate(environment, console, sessions, installations),
                 updateNotice = updateNotice(environment, files, self, sessions),
                 stderrIsTerminal = ::stderrIsTerminal,
                 postHogKey = BuildInfo.POSTHOG_KEY,
@@ -267,8 +273,17 @@ class CliDependencies(
             return GateWait(relay, { started.elapsedNow().inWholeMilliseconds }, ::pause, console::err)
         }
 
+        /** The managed installations of `ostrom install` on this system. */
+        private fun installations(environment: Environment) =
+            Installations(FileSystem.SYSTEM, SystemInstallationFiles, releaseTarget(environment), environment)
+
         /** `ostrom update`, on this binary and the system's own files. */
-        private fun selfUpdate(environment: Environment, console: Console, sessions: AgentSessions) = SelfUpdate(
+        private fun selfUpdate(
+            environment: Environment,
+            console: Console,
+            sessions: AgentSessions,
+            installations: Installations,
+        ) = SelfUpdate(
             DownloadsImpl(USER_AGENT),
             FileSystem.SYSTEM,
             TarUnpacker(ProcessLauncherImpl(), environment["SystemRoot"]),
@@ -276,6 +291,8 @@ class CliDependencies(
             sessions,
             InstallationProbeImpl(ProcessCaptureImpl()),
             ReleaseTrust(floor = BuildInfo.FLOOR),
+            installations,
+            SystemCommandPath(environment),
         )
 
         /** `ostrom run <agent> --cloud` and `ostrom attach`: the session runs in Ostrom's cloud, its terminal here. */

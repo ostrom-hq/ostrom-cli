@@ -5,6 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import okio.FileSystem
 import run.ostrom.cli.cloud.CloudHooks
+import run.ostrom.cli.commands.releaseTarget
 import run.ostrom.cli.cloud.CloudMcp
 import run.ostrom.cli.hooks.HookKind
 import run.ostrom.cli.hooks.runtime.GateTexts
@@ -12,11 +13,16 @@ import run.ostrom.cli.hooks.runtime.HookReplies
 import run.ostrom.cli.platform.ConsoleImpl
 import run.ostrom.cli.platform.EnvironmentImpl
 import run.ostrom.cli.platform.ProcessCaptureImpl
+import run.ostrom.cli.platform.SystemInstallationFiles
+import run.ostrom.cli.platform.currentExecutable
 import run.ostrom.cli.platform.exitOnCrash
+import run.ostrom.cli.platform.replaceProcess
 import run.ostrom.cli.runner.CloudProcess
 import run.ostrom.cli.runner.cloudMcpClient
 import run.ostrom.cli.runner.runCloudProcess
+import run.ostrom.cli.update.Installations
 import run.ostrom.cli.update.installationProbeExit
+import run.ostrom.cli.update.launchInstalled
 import run.ostrom.core.api.models.ServerFeatures
 import kotlin.system.exitProcess
 
@@ -26,10 +32,15 @@ import kotlin.system.exitProcess
  * help, asked by a person, goes through the tree.
  */
 fun main(args: Array<String>) {
+    // the launcher of a managed installation (`ostrom install`) runs the selected version in its place
+    val environment = EnvironmentImpl()
+    val target = releaseTarget(environment)
+    val installations = Installations(FileSystem.SYSTEM, SystemInstallationFiles, target, environment)
+    launchInstalled(args.asList(), currentExecutable(), installations, ::replaceProcess, ConsoleImpl()::err)
+        ?.let(::exitProcess)
     // `ostrom update` asks a new binary, before putting it in place, whether it runs here as that version and API
     installationProbeExit(args.asList(), BuildInfo.VERSION, ServerFeatures.SUPPORTED_API_VERSIONS)?.let(::exitProcess)
     if (args.firstOrNull() == "hook" && args.getOrNull(1) !in HELP) {
-        val environment = EnvironmentImpl()
         if (args.getOrNull(1) == HookKind.GATE.command) {
             // a crash no catch sees (a stack overflow, an abort) refuses the tool too: any other code lets it run.
             // Not set on Windows (false): a crash there is a structured exception, not a signal (security audit M1).

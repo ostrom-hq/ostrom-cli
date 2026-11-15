@@ -1,5 +1,5 @@
 package = run.ostrom.cli.platform.interop
-linkerOpts = -lkernel32 -ladvapi32 -lws2_32
+linkerOpts = -lkernel32 -ladvapi32 -lws2_32 -luser32
 ---
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0A00
@@ -525,3 +525,88 @@ static inline int ostrom_symlink_w(const unsigned short *target, const unsigned 
     return CreateSymbolicLinkW((LPCWSTR)link, (LPCWSTR)target, flags) ? 1 : 0;
 }
 
+
+/*
+ * The managed installation of `ostrom install` (TeamCode's windows_support.h, without its ACL checks: the profile is
+ * private, as for every other file of the CLI). A path is acceptable when it is not a reparse point and is a folder or
+ * a file as asked.
+ */
+static inline int ostrom_install_private_path_w(const unsigned short *path, int directory) {
+    DWORD flags = GetFileAttributesW((LPCWSTR)path);
+    return flags != INVALID_FILE_ATTRIBUTES && !(flags & FILE_ATTRIBUTE_REPARSE_POINT) &&
+        (((flags & FILE_ATTRIBUTE_DIRECTORY) != 0) == (directory != 0));
+}
+
+/*
+ * Takes, without waiting, the shared or exclusive lock of the one-byte region of the lock file at `path` (shared for
+ * reading and writing, never a reparse point). Returns 1 and sets *handle, 0 when another process holds it, -1 on
+ * failure.
+ */
+static inline int ostrom_install_lock_w(const unsigned short *path, int exclusive, void **handle) {
+    HANDLE file = CreateFileW((LPCWSTR)path, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                              OPEN_ALWAYS, FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+    if (file == INVALID_HANDLE_VALUE) return -1;
+    BY_HANDLE_FILE_INFORMATION information;
+    if (!GetFileInformationByHandle(file, &information) || information.nNumberOfLinks != 1 ||
+        (information.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))) {
+        CloseHandle(file);
+        return -1;
+    }
+    OVERLAPPED position;
+    ZeroMemory(&position, sizeof position);
+    if (!LockFileEx(file, LOCKFILE_FAIL_IMMEDIATELY | (exclusive ? LOCKFILE_EXCLUSIVE_LOCK : 0), 0, 1, 0, &position)) {
+        DWORD error = GetLastError();
+        CloseHandle(file);
+        return error == ERROR_LOCK_VIOLATION ? 0 : -1;
+    }
+    *handle = file;
+    return 1;
+}
+
+static inline void ostrom_install_unlock_w(void *handle) { CloseHandle((HANDLE)handle); }
+
+/* Flushes a verified regular file to disk. Returns 0, or -1. */
+static inline int ostrom_install_seal_w(const unsigned short *path) {
+    HANDLE file = CreateFileW((LPCWSTR)path, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_EXISTING,
+                              FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+    if (file == INVALID_HANDLE_VALUE) return -1;
+    BY_HANDLE_FILE_INFORMATION information;
+    int valid = GetFileInformationByHandle(file, &information) && information.nNumberOfLinks == 1 &&
+        !(information.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) &&
+        FlushFileBuffers(file);
+    CloseHandle(file);
+    return valid ? 0 : -1;
+}
+
+/*
+ * The current user's PATH (HKCU\Environment). Returns 1 and a NUL-terminated value of at most `capacity` characters,
+ * 0 when it is absent, -1 on failure; *expandable is 1 for REG_EXPAND_SZ.
+ */
+static inline int ostrom_user_path_read_w(unsigned short *buffer, DWORD capacity, int *expandable) {
+    HKEY key;
+    LONG status = RegOpenKeyExW(HKEY_CURRENT_USER, L"Environment", 0, KEY_QUERY_VALUE, &key);
+    if (status == ERROR_FILE_NOT_FOUND) return 0;
+    if (status != ERROR_SUCCESS) return -1;
+    DWORD type = 0, size = capacity * sizeof(wchar_t);
+    status = RegQueryValueExW(key, L"Path", NULL, &type, (LPBYTE)buffer, &size);
+    RegCloseKey(key);
+    if (status == ERROR_FILE_NOT_FOUND) return 0;
+    if (status != ERROR_SUCCESS || (type != REG_SZ && type != REG_EXPAND_SZ)) return -1;
+    buffer[size / sizeof(wchar_t) < capacity ? size / sizeof(wchar_t) : capacity] = 0;
+    *expandable = type == REG_EXPAND_SZ;
+    return 1;
+}
+
+/* Replaces the current user's PATH, then tells running applications (Explorer, new terminals). Returns 1, or -1. */
+static inline int ostrom_user_path_write_w(const unsigned short *value, int expandable) {
+    HKEY key;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Environment", 0, NULL, 0, KEY_SET_VALUE, NULL, &key, NULL) != ERROR_SUCCESS)
+        return -1;
+    LONG status = RegSetValueExW(key, L"Path", 0, expandable ? REG_EXPAND_SZ : REG_SZ, (const BYTE *)value,
+                                 (DWORD)((wcslen((const wchar_t *)value) + 1) * sizeof(wchar_t)));
+    RegCloseKey(key);
+    if (status != ERROR_SUCCESS) return -1;
+    DWORD_PTR ignored;
+    SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, 0, (LPARAM)L"Environment", SMTO_ABORTIFHUNG, 5000, &ignored);
+    return 1;
+}

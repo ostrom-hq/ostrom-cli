@@ -185,6 +185,12 @@ private val GUIDES: Map<String, Guide> = AGENT_GUIDES + mapOf(
     "telemetry status" to guide("security", "ostrom telemetry status" to "whether usage statistics are on"),
     "telemetry enable" to guide("security", "ostrom telemetry enable" to "send anonymous usage statistics"),
     "telemetry disable" to guide("security", "ostrom telemetry disable" to "stop sending them"),
+    "install" to guide(
+        "install",
+        "ostrom install" to "install the latest signed version for this user, with its launcher",
+        "ostrom install --bundle ./release" to "install offline from a signed release folder",
+        "ostrom install --no-path" to "without linking ~/.local/bin/ostrom",
+    ),
     "update" to guide(
         "install",
         "ostrom update" to "install the latest signed version",

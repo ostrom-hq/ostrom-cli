@@ -223,6 +223,30 @@ Both installers check the signature of `SHA256SUMS` before the archive's checksu
 or, without it, `openssl`. With neither, it installs nothing: the checksum alone comes from the same place as the
 archive. Nothing skips the signature check; install cosign or openssl instead. `install.ps1` always has .NET to check it.
 
+### The managed installation (`ostrom install`)
+
+`ostrom install` installs a signed release for the current user, with the same checks as `ostrom update` (the
+`latest.json` signature, the floor, the archive's SHA-256, the probe of the new binary, never inside an agent's
+session), into a private folder: `~/.local/share/ostrom` on Linux (`$XDG_DATA_HOME/ostrom`),
+`~/Library/Application Support/Ostrom` on macOS, `%LOCALAPPDATA%\Ostrom` on Windows, or `--root`. Its layout follows
+TeamCode's:
+
+- `bin/ostrom`: the launcher, copied once from the first version installed and never changed; it runs the selected
+  version in its place. `bin/launcher.json` attests it.
+- `versions/<SHA-256 of latest.json>/`: one folder per release, with its binary, the exact `latest.json` and
+  `latest.json.sig`, and `installed.json` (the binary's SHA-256 and size, written once the archive was checked).
+- `current.json`: the selected version and the previous one, switched atomically; `transaction.json` while a switch is
+  under way, so that an interrupted one is put back by the next launch. Every launch checks the selected binary
+  against its attestation before running it.
+- `writer.lock` (one installer at a time) and `installation.lock` (a switch or a recovery).
+
+`ostrom update` and `ostrom update --rollback` run from such an installation add a version folder and switch the
+selection; the versions that are neither selected nor the previous one are removed. `--bundle <folder>` installs
+offline from a folder holding `latest.json`, `latest.json.sig` and the archive. Unless `--no-path`, the launcher is
+linked as `~/.local/bin/ostrom` (macOS, Linux; a name held by another file is left alone) or its folder appended to
+the user PATH (Windows). A single binary installed by the installers keeps updating in place, with
+`ostrom.previous` for `--rollback`.
+
 ## Signing the binaries themselves
 
 macOS (Developer ID + notarisation) and Windows (Authenticode) run in the `build-macos` and `package` jobs only when
