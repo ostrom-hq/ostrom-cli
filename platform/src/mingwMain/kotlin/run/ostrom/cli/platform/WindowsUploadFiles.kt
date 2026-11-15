@@ -24,11 +24,13 @@ import platform.posix.errno
 // Windows has no permission bits: the uploads live under the member's own temporary directory, which only that
 // account (and administrators) can read.
 
+/** [path] as `lstat` reads it, or null when nothing is there. */
 actual fun pathStatus(path: String): PathStatus? {
     val metadata = FileSystem.SYSTEM.metadataOrNull(path.toPath()) ?: return null
     return PathStatus(metadata.isDirectory, metadata.symlinkTarget != null, true, 0)
 }
 
+/** Creates the directory [path] with [mode]; false when it exists. */
 actual fun createModeDirectory(path: String, mode: Int): Boolean = try {
     FileSystem.SYSTEM.createDirectory(path.toPath(), mustCreate = true)
     true
@@ -37,8 +39,10 @@ actual fun createModeDirectory(path: String, mode: Int): Boolean = try {
     false
 }
 
+/** Sets the permission bits of [path]. */
 actual fun setPathMode(path: String, mode: Int) = Unit
 
+/** Creates [path] only where nothing is, with exactly [mode]; null when something is. */
 actual fun createExclusiveFile(path: String, mode: Int): ExclusiveFile? {
     val fd = _wopen(path.wcstr, O_WRONLY or O_CREAT or O_EXCL or O_BINARY or O_NOINHERIT, S_IREAD or S_IWRITE)
     if (fd < 0) {

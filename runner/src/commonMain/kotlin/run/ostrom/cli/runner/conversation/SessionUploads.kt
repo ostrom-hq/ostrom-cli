@@ -154,9 +154,8 @@ class SessionUploads(
     /** [target] when it is a regular file of this user inside [base] whose size and SHA-256 are [file]'s, else null. */
     private fun existing(target: Path, base: Path, file: RunnerFileView): Path? = try {
         val status = pathStatus(target.toString())
-        if (status == null || status.directory || status.symlink || !status.ownedByCurrentUser ||
-            fileSystem.canonicalize(target).parent != base
-        ) {
+        val regular = status != null && !status.directory && !status.symlink
+        if (!regular || status?.ownedByCurrentUser != true || fileSystem.canonicalize(target).parent != base) {
             null
         } else if (fileSystem.metadataOrNull(target)?.size != file.size) {
             null
@@ -217,13 +216,13 @@ class SessionUploads(
     private fun sweep(directory: Path, keepNewer: Boolean, keep: Path? = null) {
         val limit = now() - MAX_AGE_MILLIS
         val entries = fileSystem.listOrNull(directory) ?: return
-        for (entry in entries) {
-            if (entry == keep) continue
+        for (entry in entries.filter { it != keep }) {
             try {
-                val modified = fileSystem.metadataOrNull(entry)?.lastModifiedAtMillis ?: continue
-                if (keepNewer && modified >= limit) continue
-                fileSystem.deleteRecursively(entry)
-                written.entries.removeAll { (_, path) -> path == entry }
+                val modified = fileSystem.metadataOrNull(entry)?.lastModifiedAtMillis
+                if (modified != null && (!keepNewer || modified < limit)) {
+                    fileSystem.deleteRecursively(entry)
+                    written.entries.removeAll { (_, path) -> path == entry }
+                }
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {

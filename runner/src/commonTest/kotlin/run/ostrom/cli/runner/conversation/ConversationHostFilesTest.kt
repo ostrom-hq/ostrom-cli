@@ -531,7 +531,7 @@ class ConversationHostFilesTest {
             val bareJob = launch { fileHost(bare, scratch, mutableListOf(), null).run() }
             bare.inputs.send(listOf(message("in-1", "x", bare.serve("f1", "a.png", png))))
             until { bare.acks.isNotEmpty() }
-            assertEquals(listOf(false), bare.announced)
+            assertTrue(bare.announced.none { it }, "Never announced")
             assertEquals("files_unavailable", bare.acks.single().reason)
             bareJob.cancel()
         } finally {

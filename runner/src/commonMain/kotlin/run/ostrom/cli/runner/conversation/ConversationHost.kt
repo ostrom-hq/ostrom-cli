@@ -523,25 +523,31 @@ class ConversationHost(
                 } catch (error: SessionUploads.Refused) {
                     log("a message file was refused (${error.reason})")
                     return Attachment.Refused(error.reason)
-                } catch (error: Exception) {
-                    if (error is RunnerChannelException) {
-                        if (error.code == EXECUTION_FENCED || error.statusCode == 401 || error.statusCode == 403) {
-                            handle(error)
-                            return Attachment.Fenced
-                        }
-                        // Not offered to this execution any more (acknowledged, expired): retrying cannot help.
-                        if (error.statusCode == 404) return Attachment.Refused(SessionUploads.NOT_FOUND)
-                        if (error.statusCode in 400..499) return Attachment.Refused(SessionUploads.DOWNLOAD_FAILED)
-                    }
-                    if (++attempt >= FILE_ATTEMPTS) {
-                        log("a message file could not be downloaded")
-                        return Attachment.Refused(SessionUploads.DOWNLOAD_FAILED)
-                    }
-                    sleep(1_000L * attempt)
+                } catch (error: RunnerChannelException) {
+                    refusal(error)?.let { return it }
+                } catch (_: Exception) {
+                    // Unreachable or failed on the way: retried below.
                 }
+                if (++attempt >= FILE_ATTEMPTS) {
+                    log("a message file could not be downloaded")
+                    return Attachment.Refused(SessionUploads.DOWNLOAD_FAILED)
+                }
+                sleep(1_000L * attempt)
             }
         }
         return Attachment.Written(lines)
+    }
+
+    /** What a refused download means for the message; null when retrying may help (a 5xx). */
+    private fun refusal(error: RunnerChannelException): Attachment? = when {
+        error.code == EXECUTION_FENCED || error.statusCode == 401 || error.statusCode == 403 -> {
+            handle(error)
+            Attachment.Fenced
+        }
+        // Not offered to this execution any more (acknowledged, expired): retrying cannot help.
+        error.statusCode == 404 -> Attachment.Refused(SessionUploads.NOT_FOUND)
+        error.statusCode in 400..499 -> Attachment.Refused(SessionUploads.DOWNLOAD_FAILED)
+        else -> null
     }
 
     /** The execution's first message: recorded in the transcript as the member's, then handed to the agent. */

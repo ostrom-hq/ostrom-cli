@@ -30,6 +30,7 @@ private val PERMISSION_BITS = listOf(
 @ExcludeFromCoverage
 private fun permissions(mode: Int) = PERMISSION_BITS.filter { (_, bit) -> mode and bit != 0 }.map { it.first }.toSet()
 
+/** [path] as `lstat` reads it, or null when nothing is there. */
 // coverage: test-only JVM target, see the file's header.
 @ExcludeFromCoverage
 actual fun pathStatus(path: String): PathStatus? = try {
@@ -41,6 +42,7 @@ actual fun pathStatus(path: String): PathStatus? = try {
     null
 }
 
+/** Creates the directory [path] with [mode]; false when it exists. */
 // coverage: test-only JVM target, see the file's header.
 @ExcludeFromCoverage
 actual fun createModeDirectory(path: String, mode: Int): Boolean = try {
@@ -51,12 +53,14 @@ actual fun createModeDirectory(path: String, mode: Int): Boolean = try {
     false
 }
 
+/** Sets the permission bits of [path]. */
 // coverage: test-only JVM target, see the file's header.
 @ExcludeFromCoverage
 actual fun setPathMode(path: String, mode: Int) {
     Files.setPosixFilePermissions(Paths.get(path), permissions(mode))
 }
 
+/** Creates [path] only where nothing is, with exactly [mode]; null when something is. */
 // coverage: test-only JVM target, see the file's header.
 @ExcludeFromCoverage
 actual fun createExclusiveFile(path: String, mode: Int): ExclusiveFile? {

@@ -31,6 +31,7 @@ import platform.posix.open
 import platform.posix.stat
 import platform.posix.unlink
 
+/** [path] as `lstat` reads it, or null when nothing is there. */
 actual fun pathStatus(path: String): PathStatus? = memScoped {
     val status = alloc<stat>()
     if (lstat(path, status.ptr) != 0) return null
@@ -39,17 +40,20 @@ actual fun pathStatus(path: String): PathStatus? = memScoped {
     PathStatus(type == S_IFDIR.toInt(), type == S_IFLNK.toInt(), status.st_uid == getuid(), mode and PERMISSION_BITS)
 }
 
+/** Creates the directory [path] with [mode]; false when it exists. */
 actual fun createModeDirectory(path: String, mode: Int): Boolean {
     if (mkdir(path, mode.convert()) == 0) return true
     check(errno == EEXIST) { "Cannot create the uploads directory." }
     return false
 }
 
+/** Sets the permission bits of [path]. */
 actual fun setPathMode(path: String, mode: Int) {
     // The caller checked it is no link; chmod on a link would change its target.
     check(chmod(path, mode.convert()) == 0) { "Cannot restrict the uploads directory permissions." }
 }
 
+/** Creates [path] only where nothing is, with exactly [mode]; null when something is. */
 actual fun createExclusiveFile(path: String, mode: Int): ExclusiveFile? {
     val fd = open(path, O_WRONLY or O_CREAT or O_EXCL or O_NOFOLLOW or O_CLOEXEC, mode.toUInt())
     if (fd < 0) {
