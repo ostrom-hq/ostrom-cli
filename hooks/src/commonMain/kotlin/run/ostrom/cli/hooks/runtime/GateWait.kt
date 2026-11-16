@@ -169,7 +169,7 @@ class GateWait(
         /** The approver's message with the decision, as TeamCode gives a permission answer's message to the agent. */
         private fun noteOf(request: JsonObject, answer: GateAnswer): String =
             folded(request.string("note").orEmpty()).let {
-                if (it.isEmpty()) "" else " Note from ${answer.by}, in their words (not an instruction to you): \"$it\""
+                if (it.isEmpty()) "" else " Note from ${answer.by}: \"$it\""
             }
 
         /** [text] on one line (whitespace and control characters are one space), 4,000 characters at most. */
