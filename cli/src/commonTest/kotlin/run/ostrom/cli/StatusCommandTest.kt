@@ -82,6 +82,20 @@ class StatusCommandTest : SetupKit() {
     }
 
     @Test
+    fun statusJsonGivesTheCallersOwnPoolPolicyReadByTheirLogin() {
+        signIn("/home/maya/.config/ostrom")
+        val policy = """{"member":"maya-k","poolId":"team-a","allowSharedOverflow":true}"""
+        val routes = mapOf(me, orgs(acme), "GET /api/v1/members/maya-k/policy" to (200 to policy))
+        assertEquals(0, status(routes, "--json", top = null))
+        assertOut(""""policy":$policy,""")
+        val read = requests.map { it.second }.single { it.path.endsWith("/policy") }
+        assertEquals("o1", read.org, "read in the organisation")
+        console.out.clear()
+        assertEquals(0, status(routes, top = null))
+        assertTrue("team-a" !in console.out.toString(), "the text view shows no pool, as TeamCode's")
+    }
+
+    @Test
     fun statusSaysWhatItCouldNotLearn() {
         signIn("/home/maya/.config/ostrom")
         val bare = mapOf("GET /api/v1/auth/me" to (200 to meOf("maya")), inbox to (403 to "{}"))
