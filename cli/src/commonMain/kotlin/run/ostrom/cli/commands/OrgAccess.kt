@@ -20,6 +20,9 @@ import run.ostrom.cli.platform.Console
 import run.ostrom.cli.platform.RemoteUrls
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.jsonObject
+import run.ostrom.core.api.OstromJson
 
 /**
  * An organisation of the signed-in person, as `GET /api/v1/orgs` lists it (`OrgView` of the contract).
@@ -84,6 +87,13 @@ internal class OrgAccess(
     /** [typed], as the JSON object the server sent. */
     inline fun <reified T> typedJson(notFound: String, noinline call: suspend OstromClient.() -> T): JsonObject =
         asJson(typed(notFound, call))
+
+    /**
+     * [typed], as the JSON the server writes (no default value added): the document a command sends back, which the
+     * server would hold against what it keeps.
+     */
+    inline fun <reified T> typedServed(notFound: String, noinline call: suspend OstromClient.() -> T): JsonObject =
+        OstromJson.encodeToJsonElement(typed(notFound, call)).jsonObject
 
     /** [call] on the typed client, or null on a 404: as [readIfServed], for a route the server may not have. */
     fun <T : Any> typedIfServed(call: suspend OstromClient.() -> T): T? =

@@ -188,7 +188,7 @@ internal class HarnessEnforceCommand(private val dependencies: CliDependencies) 
     override fun run() {
         dependencies.outsideSessions("harness enforce")
         val access = dependencies.orgAccess(server, org)
-        val current = access.typedJson("No workflow $id in ${access.org.slug}.") { workflows.get(id) }
+        val current = access.typedServed("No workflow $id in ${access.org.slug}.") { workflows.get(id) }
         val name = current.required("name")
         if (current.required("status") in ENFORCED) {
             dependencies.console.out("$name is already enforced.\n")
@@ -215,7 +215,7 @@ internal class HarnessUpdateCommand(private val dependencies: CliDependencies) :
         dependencies.outsideSessions("harness update")
         val document = dependencies.workflowFile(file)
         val access = dependencies.orgAccess(server, org)
-        val current = access.typedJson("No workflow $id in ${access.org.slug}.") { workflows.get(id) }
+        val current = access.typedServed("No workflow $id in ${access.org.slug}.") { workflows.get(id) }
         val next = saved(document, "id" to id, "status" to (document.text("status") ?: current.text("status")))
         dependencies.console.out("Before  ${line(current)}\nAfter   ${line(next)}\n")
         if (!yes && !dependencies.confirm("Save it?")) throw stopWith(ExitCode.INCOMPLETE, "Nothing was changed.")
