@@ -10,6 +10,16 @@ import run.ostrom.core.api.models.DeviceCode
 import run.ostrom.core.client.OstromClient
 import kotlin.text.RegexOption.IGNORE_CASE
 
+/**
+ * What a sign-in says of this installation, so the server registers the workstation as one device (TeamCode's
+ * `teamcode login`, docs/devices.md): every later sign-in from it lands on the same device.
+ *
+ * @property id The installation id ([InstallationIdStore]).
+ * @property deviceName The name of the device this sign-in registers; a device already registered keeps its own.
+ * @property platform The system, one of `DevicePlatforms`.
+ */
+data class Installation(val id: String, val deviceName: String, val platform: String)
+
 /** How a sign-in ended. */
 sealed interface LoginOutcome {
     /**
@@ -56,10 +66,18 @@ class DeviceLogin(
 ) {
     /**
      * Signs in on [serverUrl]; with [scopes], asks for those scopes, which the browser's page shows to the person who
-     * approves (`ostrom login --admin`).
+     * approves (`ostrom login --admin`). With [installation], the server registers this workstation as a device (a
+     * server without devices ignores it).
      */
-    suspend fun signIn(serverUrl: String, scopes: List<String> = emptyList()): LoginOutcome {
-        return when (val start = typedAnswer { client.auth.startDeviceLogin(scopes) }) {
+    suspend fun signIn(
+        serverUrl: String,
+        scopes: List<String> = emptyList(),
+        installation: Installation? = null,
+    ): LoginOutcome {
+        val start = typedAnswer {
+            client.auth.startDeviceLogin(scopes, installation?.id, installation?.deviceName, installation?.platform)
+        }
+        return when (start) {
             is TypedAnswer.Failed -> LoginOutcome.Stopped(codeOf(start.failure), messageOf(start.failure, serverUrl))
             is TypedAnswer.Ok -> started(start.value, serverUrl)
         }

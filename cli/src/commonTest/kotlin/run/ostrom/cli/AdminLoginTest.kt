@@ -72,7 +72,9 @@ class AdminLoginTest : SetupKit() {
         }
         // the ordinary sign-in asks for no scope; the same person then gets no warning
         assertEquals(0, cli(environment = withServer, api = serverOf(deviceFlow)).run(arrayOf("login")))
-        assertEquals("{}", requests.last { it.second.path == "/api/v1/auth/device" }.second.body)
+        val ordinary = requests.last { it.second.path == "/api/v1/auth/device" }.second.body.orEmpty()
+        assertFalse(ordinary.contains("scopes"), ordinary)
+        assertTrue(ordinary.contains("installationId"), "the device's own sign-in registers it: $ordinary")
         console.err.clear()
         assertEquals(0, login(admin(null)))
         assertFalse(console.err.contains("The admin token is"), console.err.toString())

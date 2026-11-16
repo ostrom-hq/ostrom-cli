@@ -7,6 +7,7 @@ import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.Context
 import com.github.ajalt.clikt.core.PrintMessage
 import com.github.ajalt.clikt.core.ProgramResult
+import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import run.ostrom.cli.BuildInfo
@@ -27,10 +28,15 @@ import run.ostrom.cli.launcher.join
 import run.ostrom.cli.launcher.objectOf
 import run.ostrom.cli.login.AdminTokens
 import run.ostrom.cli.login.DeviceLogin
+import run.ostrom.cli.login.Installation
+import run.ostrom.cli.login.InstallationIdException
+import run.ostrom.cli.login.InstallationIdStore
 import run.ostrom.cli.login.LoginOutcome
 import run.ostrom.cli.platform.ConfigKey
 import run.ostrom.cli.platform.ConfigStoreImpl
 import run.ostrom.cli.platform.FileWriteException
+import run.ostrom.cli.platform.OperatingSystem
+import run.ostrom.core.api.models.DevicePlatforms
 import run.ostrom.core.client.OstromClient
 import kotlinx.coroutines.runBlocking
 import okio.IOException
@@ -55,6 +61,16 @@ internal fun refuseInClear(url: String, what: String) {
             "Use https:// (http:// only for localhost, 127.0.0.1 or [::1])"
         throw PrintMessage(message, ExitCode.USAGE.code, true)
     }
+}
+
+/** The name a workstation's device takes at its first sign-in without `--device` (TeamCode's "TeamCode CLI"). */
+internal const val DEFAULT_DEVICE_NAME = "Ostrom CLI"
+
+/** The contract's name of [system] (`DeviceLoginStart.platform`). */
+internal fun platformOf(system: OperatingSystem): String = when (system) {
+    OperatingSystem.MACOS -> DevicePlatforms.MACOS
+    OperatingSystem.LINUX -> DevicePlatforms.LINUX
+    OperatingSystem.WINDOWS -> DevicePlatforms.WINDOWS
 }
 
 private val HTTPS = Regex("https://.*", RegexOption.IGNORE_CASE)
@@ -96,6 +112,10 @@ internal class LoginCommand(private val dependencies: CliDependencies) : CliktCo
         "--admin",
         help = "Ask for an 8-hour token that changes the policy and the harness (an owner or admin approves it)",
     ).flag()
+    val device by option(
+        "--device",
+        help = "Name of this workstation when it is registered for the first time; an existing name is kept",
+    ).default(DEFAULT_DEVICE_NAME)
 
     override fun run() {
         dependencies.outsideSessions("login")
@@ -116,13 +136,37 @@ internal class LoginCommand(private val dependencies: CliDependencies) : CliktCo
             dependencies.console.err("! Asking for an admin token: ${scopes.joinToString(", ")}. An owner or admin " +
                 "approves it in the browser; it lasts 8 hours at most and is never renewed.\n")
         }
-        when (val outcome = runBlocking { login.signIn(serverUrl, scopes) }) {
+        // the admin token may be another person's (an owner approves it): only the device's own sign-in registers it
+        val installation = if (admin) null else installation(directory)
+        when (val outcome = runBlocking { login.signIn(serverUrl, scopes, installation) }) {
             is LoginOutcome.Stopped -> throw PrintMessage(outcome.message, outcome.exitCode, printError = true)
             is LoginOutcome.SignedIn -> {
                 runBlocking { checkServer(serverUrl, outcome.credentials.token) }
                 if (admin) keepAdmin(directory, serverUrl, outcome) else keepDevice(directory, serverUrl, outcome)
             }
         }
+    }
+
+    /**
+     * This workstation as the sign-in names it (TeamCode's `teamcode login`): the installation id kept in the CLI
+     * folder [directory], the name a new device takes, and the system. An identity that cannot be read or written is
+     * exit 73, nothing sent.
+     */
+    @Suppress("SwallowedException") // its message, or the path it could not write, is said
+    private fun installation(directory: String): Installation {
+        val store = InstallationIdStore(dependencies.files, join(directory, "installation-id"), dependencies.sleep)
+        val id = try {
+            runBlocking { store.id() }
+        } catch (e: InstallationIdException) {
+            throw PrintMessage(
+                "ostrom: ${e.message}: remove it, then run ostrom login again",
+                ExitCode.CANNOT_WRITE.code,
+                printError = true,
+            )
+        } catch (e: FileWriteException) {
+            throw PrintMessage("ostrom: cannot write ${e.path}", ExitCode.CANNOT_WRITE.code, printError = true)
+        }
+        return Installation(id, device, platformOf(dependencies.environment.operatingSystem))
     }
 
     /**
