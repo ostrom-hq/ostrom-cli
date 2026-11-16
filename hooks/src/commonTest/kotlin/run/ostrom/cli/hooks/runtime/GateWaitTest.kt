@@ -36,6 +36,26 @@ class GateWaitTest {
     private fun request(fields: String) = ok("""{"gate":{$fields}}""")
 
     @Test
+    fun theApproversNoteGoesToTheAgentWithTheirDecision() {
+        val yes = request(""""status":"approved","decidedBy":"@lena","receiptId":"R1","note":"only the docs branch"""")
+        val no = request(""""status":"rejected","decidedBy":"@omar","receiptId":"R2","note":"freeze until Monday"""")
+        val blank = request(""""status":"approved","decidedBy":"@lena","receiptId":"R1","note":"  """")
+        assertEquals(
+            "approved by @lena (receipt R1). Run the same command again now. Note from @lena: only the docs branch",
+            await(FakeCalls().on("/api/v1/gates/g1", yes)).line,
+        )
+        assertEquals(
+            "rejected by @omar (receipt R2). Do not run the command; tell the user. " +
+                "Note from @omar: freeze until Monday",
+            await(FakeCalls().on("/api/v1/gates/g1", no)).line,
+        )
+        assertEquals(
+            "approved by @lena (receipt R1). Run the same command again now.",
+            await(FakeCalls().on("/api/v1/gates/g1", blank)).line,
+        )
+    }
+
+    @Test
     fun aYesWhoseReceiptIsNotWrittenYetSaysSo() {
         val yes = request(""""status":"approved","decidedBy":"@lena"""")
         val line = "approved by @lena (receipt pending). Run the same command again now."

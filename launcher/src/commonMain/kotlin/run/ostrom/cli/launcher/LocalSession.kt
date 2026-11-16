@@ -4,7 +4,6 @@ package run.ostrom.cli.launcher
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-import run.ostrom.core.api.models.CloudAgentKind
 import run.ostrom.core.api.models.CloudHost
 import run.ostrom.core.api.models.CreateCloudSessionRequest
 
@@ -141,7 +140,7 @@ class LocalSession private constructor(
             say: (String) -> Unit,
         ): LocalSession? {
             val request = CreateCloudSessionRequest(
-                agent = CloudAgentKind.entries.first { it.value == agent.command },
+                agent = agent.command,
                 name = nameOf(agent, directory),
                 kind = LOCAL,
                 launchId = launchId,

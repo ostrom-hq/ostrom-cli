@@ -13,7 +13,6 @@ import io.ktor.utils.io.ByteReadChannel
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.SerializationException
 import okio.ByteString.Companion.toByteString
-import run.ostrom.core.api.models.CloudAgentKind
 import run.ostrom.core.api.models.CreateCloudSessionRequest
 import run.ostrom.core.client.CloudFileSource
 import run.ostrom.core.client.OstromException
@@ -32,7 +31,7 @@ class TypedClientTest {
         fake["POST /api/v1/cloud/sessions"] = 201 to cloudJson("cs1")
         fake["POST /api/v1/cloud/sessions/cs1/pause"] = 202 to cloudJson("cs1", "status" to "pausing")
         val client = typedClient(fake, "tok", "o1")
-        val created = client.cloudSessions.create(CreateCloudSessionRequest(CloudAgentKind.CLAUDE), "key-1")
+        val created = client.cloudSessions.create(CreateCloudSessionRequest("claude"), "key-1")
         assertEquals("cs1", created.id)
         client.cloudSessions.pause("cs1", onBehalfOf = "ada")
         val (create, pause) = fake.requests

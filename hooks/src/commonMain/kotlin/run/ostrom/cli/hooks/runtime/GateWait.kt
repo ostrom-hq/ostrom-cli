@@ -75,13 +75,15 @@ class GateWait(
             "pending" -> null
             "approved" -> WaitOutcome(
                 0,
-                "approved by ${answer.by} (receipt ${answer.receiptId ?: "pending"}). Run the same command again now.",
+                "approved by ${answer.by} (receipt ${answer.receiptId ?: "pending"}). Run the same command again now." +
+                    noteOf(request, answer),
             )
             "shadow", "ungated" ->
                 WaitOutcome(0, "no yes needed (the gate does not hold it). Run the same command again now.")
             "rejected" -> WaitOutcome(
                 REJECTED,
-                "rejected by ${answer.by} (receipt ${answer.receiptId ?: "-"}). Do not run the command; tell the user.",
+                "rejected by ${answer.by} (receipt ${answer.receiptId ?: "-"}). " +
+                    "Do not run the command; tell the user." + noteOf(request, answer),
             )
             // a yes Ostrom has already used (its push landed) is no yes for a new run of the command
             "consumed" -> WaitOutcome(
@@ -163,6 +165,10 @@ class GateWait(
          */
         fun tokenOf(variable: (String) -> String?): String? =
             variable("OSTROM_RELAY_TOKEN")?.takeIf { it.isNotEmpty() } ?: variable("OSTROM_RELAY_CLIENT")
+
+        /** The approver's message with the decision, as TeamCode gives a permission answer's message to the agent. */
+        private fun noteOf(request: JsonObject, answer: GateAnswer): String =
+            request.string("note")?.takeIf { it.isNotBlank() }?.let { " Note from ${answer.by}: $it" }.orEmpty()
 
         private fun answerOf(request: JsonObject): GateAnswer = GateAnswer.of(request, "", ANY_GATE)
     }

@@ -7,7 +7,6 @@ import run.ostrom.cli.launcher.ServerJson
 import run.ostrom.cli.launcher.TypedAnswer
 import run.ostrom.cli.launcher.asServerAnswer
 import run.ostrom.cli.launcher.typedAnswer
-import run.ostrom.core.api.models.CloudAgentKind
 import run.ostrom.core.api.models.CreateCloudSessionRequest
 import run.ostrom.cli.launcher.child
 import run.ostrom.cli.launcher.objectOf
@@ -66,7 +65,7 @@ class CloudSessionUseCase(
             return USAGE
         }
         val request = CreateCloudSessionRequest(
-            agent = CloudAgentKind.entries.first { it.value == start.agent.command },
+            agent = start.agent.command,
             model = start.model,
             repo = repo,
         )

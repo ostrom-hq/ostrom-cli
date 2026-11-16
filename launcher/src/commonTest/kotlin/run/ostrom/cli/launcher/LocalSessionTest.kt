@@ -63,6 +63,16 @@ class LocalSessionTest {
     }
 
     @Test
+    fun anAgentTheCloudKindsLackSendsItsOwnName() = runTest {
+        serveASession()
+        listOf(Agent.GROK, Agent.HERMES, Agent.PI).forEach { assertNotNull(open(agent = it)) }
+        val sent = server.sent("POST $SESSIONS").map { it.body.orEmpty() }
+        listOf("grok", "hermes", "pi").forEachIndexed { at, name ->
+            assertTrue("\"agent\":\"$name\"" in sent[at], sent[at])
+        }
+    }
+
+    @Test
     fun theSessionIsNamedAfterTheDirectoryOrTheAgent() = runTest {
         serveASession()
         open("C:\\work\\shop\\", Agent.CODEX)
