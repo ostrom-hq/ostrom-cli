@@ -41,10 +41,18 @@ class GhRun(val status: String?, val conclusion: String?, val workflowName: Stri
  */
 class GitHub(private val capture: ProcessCapture) {
 
-    /** `gh <arguments>`'s output, or null when it failed, timed out or could not start. */
+    /**
+     * `gh <arguments>`'s output, or null when it failed, timed out or could not start. An answer cut at the capture's
+     * bound is unknown, said as what it is, never parsed (TeamCode #284).
+     */
     private fun gh(vararg arguments: String): String? {
         val result = capture.capture(listOf("gh") + arguments, GH_TIMEOUT_MILLIS)
-        return (result as? CaptureResult.Exited)?.takeIf { it.code == 0 }?.output
+        val answer = (result as? CaptureResult.Exited)?.takeIf { it.code == 0 } ?: return null
+        if (answer.truncated) {
+            throw UnknownCheck("gh printed more than $MAX_OUTPUT_MIB MiB; the answer was cut and cannot be read " +
+                "(${arguments.take(2).joinToString(" ")})")
+        }
+        return answer.output
     }
 
     /** The token's login, asked once: a PR found by its marker must be the agent's own. */
@@ -67,11 +75,18 @@ class GitHub(private val capture: ProcessCapture) {
 
     private fun searched(list: Todo, item: TodoItem, repo: String): GhPullRequest? {
         val marker = marker(list, item.id)
-        // the search narrows the candidates; the exact marker in the body decides, so another list's PR is never taken
+        // the search narrows the candidates; the exact marker in the body decides, so another list's PR is never taken.
+        // gh does that filtering (`--jq`) and drops the bodies (TeamCode #284): 20 pull requests with their review
+        // sections and proofs can be over what the capture keeps, and a cut JSON could not be read. An answer that
+        // still carries a body (a gh that ignored the filter) is checked here.
         val search = "${list.id.take(LIST_PREFIX)} ${item.id} in:body"
+        val filter = "[.[] | select((.body // \"\") | contains(${jqString(marker)})) | del(.body)]"
         val answer = gh("pr", "list", "--repo", repo, "--state", "all", "--search", search, "--json", "$PR_FIELDS,body",
-            "--limit", SEARCH_LIMIT) ?: throw UnknownCheck("gh could not search the pull requests of $repo")
-        val found = objects(answer).map(::pullRequestOf).filter { it.body.orEmpty().contains(marker) }
+            "--limit", SEARCH_LIMIT, "--jq", filter)
+            ?: throw UnknownCheck("gh could not search the pull requests of $repo")
+        val found = objects(answer)
+            .filter { "body" !in it || it.text("body").orEmpty().contains(marker) }
+            .map(::pullRequestOf)
         if (found.isEmpty()) return null
         // only the agent's own PR: when the token's login cannot be read, nothing found can be told apart
         val login = login ?: throw UnknownCheck("gh could not say whose token this is (gh api user)")
@@ -127,10 +142,14 @@ class GitHub(private val capture: ProcessCapture) {
         /** The marker of an item's pull request, as `startTodoItem` returns it. */
         fun marker(list: Todo, itemId: String) = "<!-- ostrom-todo: ${list.id.take(LIST_PREFIX)}/$itemId -->"
 
+        /** A jq string literal: the marker is ours, but it is quoted properly all the same. */
+        private fun jqString(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
         /** The address every pull request of [repo] starts with. */
         private fun pullsOf(repo: String) = "https://github.com/$repo/pull/"
 
         private const val GH_TIMEOUT_MILLIS = 20_000
+        private const val MAX_OUTPUT_MIB = ProcessCapture.MAX_OUTPUT_BYTES shr 20
         private const val LIST_PREFIX = 8
         private const val MAX_COMPARES = 15
         private const val PR_FIELDS = "number,state,url,mergeCommit,author"

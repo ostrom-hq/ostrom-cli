@@ -123,7 +123,7 @@ internal actual fun captureOutput(
     } else {
         reader.join(timeoutMillis.toLong())
         val bytes = synchronized(output) { output.toByteArray() }
-        CaptureResult.Exited(process.exitValue(), bytes.decodeToString())
+        CaptureResult.Exited(process.exitValue(), bytes.decodeToString(), truncated = bytes.size >= capacity)
     }
 } catch (_: IOException) {
     // the JDK's wording of a missing program changes between versions: a child that cannot start is not found
