@@ -181,7 +181,7 @@ def make_handler(state):
                 # the id this server gives the session: the hooks name it so afterwards (gates, end)
                 session = body.get("sessionId") or "seg-1"
                 with state["lock"]:
-                    fields = {"id": session, "agent": body.get("agent"), "dev": "maya", "repo": body.get("repo"),
+                    fields = {"id": session, "agent": body.get("agent") or "claude-code", "dev": "maya", "repo": body.get("repo"),
                               "model": body.get("model"), "startedAt": now_stamp(), "gates": []}
                     # the server leaves out what it does not know, never a null
                     state["sessions"].setdefault(session, {k: v for k, v in fields.items() if v is not None})
@@ -229,7 +229,9 @@ def make_handler(state):
                     session = dict(session) if session else None
                 if session is None:
                     return 404, {"error": {"type": "not_found", "message": "Session not found."}}
-                return 200, {"session": session, "receipt": {"id": "R-e2e", "nodes": [
+                return 200, {"session": session, "receipt": {"id": "R-e2e", "subject": {
+                    "kind": "session", "id": match.group(1), "digest": "sha256:e2e"}, "initiator": "maya",
+                    "rules": [], "decisions": [], "createdAt": now_stamp(), "signature": "e2e", "nodes": [
                     {"id": "n1", "workflowId": "w1", "kind": "check", "label": "Run the tests", "outcome": "passed",
                      "attestation": "workstation_declared"}]}}
             if path.startswith("/api/v1/gates/"):
