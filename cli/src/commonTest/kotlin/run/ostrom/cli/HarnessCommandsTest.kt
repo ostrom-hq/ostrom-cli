@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli
 
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -8,13 +12,27 @@ import kotlin.test.assertTrue
 
 /** `ostrom harness`: the organisation's workflows, on trial or enforced. */
 class HarnessCommandsTest : SetupKit() {
-    private val safety = """{"id":"w1","name":"git-safety","status":"proposed","version":3,""" +
-        """"description":"No push to main without a yes","nodes":[{"kind":"trigger","label":"git push"},""" +
-        """{"kind":"gate","label":"Push to main","approvers":["lena","@tom"]},{"kind":"notify"}],""" +
-        """"updatedBy":"lena","updatedAt":"2026-10-30T08:00:00Z"}"""
-    private val tests = """{"id":"w2","name":"tests","status":"accepted","nodes":[{"kind":"check","label":"tests"}]}"""
+    private val safety = workflowJson(
+        "w1",
+        "git-safety",
+        "status" to "proposed",
+        "version" to "3",
+        "description" to "No push to main without a yes",
+        "nodes" to "[" + listOf(
+            nodeJson("n1", "trigger", "git push"),
+            nodeJson("n2", "gate", "Push to main", "approvers" to """["lena","@tom"]"""),
+            nodeJson("n3", "notify", "Heads-up"),
+        ).joinToString(",") + "]",
+        "updatedAt" to "2026-10-30T08:00:00Z",
+        "updatedBy" to "lena",
+    )
+    private val tests = workflowJson("w2", "tests", "nodes" to "[" + nodeJson("n1", "check", "tests") + "]")
     private val file = """{"name":"deploy","description":"Deploys need a yes",""" +
         """"nodes":[{"kind":"gate","label":"Deploy"},{"kind":"step","label":"ship"}]}"""
+
+    /** The ids of the workflows in [json]: an object with `items`. */
+    private fun idsOf(json: String) = Json.parseToJsonElement(json).jsonObject.getValue("items").jsonArray
+        .map { it.jsonObject.getValue("id").jsonPrimitive.content }
 
     private fun writeFile(path: String, text: String) {
         fileSystem.createDirectories(path.toPath().parent!!)
@@ -29,15 +47,16 @@ class HarnessCommandsTest : SetupKit() {
         assertOut("  tests  enforced  1 step  w2\nNext: ostrom harness show <id>\n")
         console.out.clear()
         assertEquals(0, run(list, "harness", "list", "--repo", "api", "--json"))
-        assertEquals("""{"items":[$safety,$tests]}""" + "\n", console.out.toString())
+        assertEquals(listOf("w1", "w2"), idsOf(console.out.toString()))
         console.out.clear()
-        val two = """{"name":"two","nodes":[{"kind":"gate"},{"kind":"gate"}]}"""
-        val edited = """{"name":"three","status":"edited","nodes":[]}"""
-        val archived = """{"name":"four","status":"archived","nodes":[]}"""
+        val nodes = listOf(nodeJson("n1", "gate", "a"), nodeJson("n2", "gate", "b")).joinToString(",")
+        val two = workflowJson("w3", "two", "nodes" to "[$nodes]")
+        val edited = workflowJson("w4", "three", "status" to "edited")
+        val archived = workflowJson("w5", "four", "status" to "rejected")
         val all = mapOf("GET /api/v1/workflows" to (200 to """{"items":[$two,$edited,$archived]}"""))
         assertEquals(0, run(all, "harness", "list", "--all", "--repo", "api"))
-        assertOut("Harness of Acme\n  two  enforced  2 steps  2 approvals\n  three  enforced  0 steps\n")
-        assertOut("  four  archived  0 steps\n")
+        assertOut("Harness of Acme\n  two  enforced  2 steps  2 approvals  w3\n  three  enforced  0 steps  w4\n")
+        assertOut("  four  rejected  0 steps  w5\n")
         console.out.clear()
         // A second page is read after the first one's `next`, the repository kept.
         val paged = mapOf(
@@ -45,7 +64,7 @@ class HarnessCommandsTest : SetupKit() {
             "GET /api/v1/workflows?repo=api&after=w1" to (200 to """{"items":[$tests]}"""),
         )
         assertEquals(0, run(paged, "harness", "list", "--repo", "api", "--json"))
-        assertEquals("""{"items":[$safety,$tests]}""" + "\n", console.out.toString())
+        assertEquals(listOf("w1", "w2"), idsOf(console.out.toString()))
     }
 
     @Test
@@ -53,14 +72,14 @@ class HarnessCommandsTest : SetupKit() {
         val one = mapOf("GET /api/v1/workflows/w1" to (200 to safety))
         assertEquals(0, run(one, "harness", "show", "w1"))
         assertOut("git-safety  v3  trial run  3 steps  1 approval  w1\n  No push to main without a yes\n")
-        assertOut("  trigger  git push\n  gate  Push to main  (@lena or @tom)\n  notify\n")
+        assertOut("  trigger  git push\n  gate  Push to main  (@lena or @tom)\n  notify  Heads-up\n")
         assertOut("On trial: it never blocks. ostrom harness enforce w1\n")
         console.out.clear()
         assertEquals(0, run(mapOf("GET /api/v1/workflows/w2" to (200 to tests)), "harness", "show", "w2"))
         assertEquals("tests  enforced  1 step  w2\n  check  tests\n", console.out.toString())
         console.out.clear()
         assertEquals(0, run(one, "harness", "show", "w1", "--json"))
-        assertEquals("$safety\n", console.out.toString())
+        assertEquals(listOf("w1"), idsOf("""{"items":[${console.out}]}"""))
         assertEquals(66, run(emptyMap(), "harness", "show", "w404"))
         assertErr("No workflow w404 in acme.\n")
     }
@@ -69,7 +88,7 @@ class HarnessCommandsTest : SetupKit() {
     fun addProposesAWorkflowOnTrialUnlessEnforced() {
         writeFile("/work/acme/deploy.json", file)
         val post = "POST /api/v1/workflows"
-        val routes = mapOf(post to (201 to """{"id":"w9","name":"deploy","status":"proposed"}"""))
+        val routes = mapOf(post to (201 to workflowJson("w9", "deploy", "status" to "proposed")))
         assertEquals(0, run(routes, "harness", "add", "deploy.json", "--yes"))
         assertEquals(
             """{"name":"deploy","description":"Deploys need a yes","nodes":[{"kind":"gate","label":"Deploy"},""" +
@@ -113,10 +132,11 @@ class HarnessCommandsTest : SetupKit() {
     @Test
     fun enforceEndsTheTrialAtTheVersionRead() {
         val put = "PUT /api/v1/workflows/w1"
-        val routes = mapOf("GET /api/v1/workflows/w1" to (200 to safety), put to (200 to "{}"))
+        val routes = mapOf("GET /api/v1/workflows/w1" to (200 to safety), put to (200 to safety))
         assertEquals(0, run(routes, "harness", "enforce", "w1"))
         val body = bodyOf(put).orEmpty()
-        assertTrue(body.startsWith("""{"workflow":{"id":"w1","name":"git-safety","status":"accepted","""), body)
+        assertTrue(body.startsWith("""{"workflow":{"id":"w1","name":"git-safety","domain":"Git","""), body)
+        assertTrue(""""status":"accepted"""" in body, body)
         assertTrue(body.endsWith(""""expectedVersion":3}"""), body)
         assertTrue("updatedBy" !in body && "\"version\"" !in body, body)
         assertOut("✓ git-safety is now enforced in Acme.\n")
@@ -124,16 +144,17 @@ class HarnessCommandsTest : SetupKit() {
         assertEquals(0, run(mapOf("GET /api/v1/workflows/w2" to (200 to tests)), "harness", "enforce", "w2"))
         assertEquals("tests is already enforced.\n", console.out.toString())
         // another status is enforced like a proposed one; without a version nothing is saved
-        val archived = """{"id":"w5","name":"old","status":"archived","version":7}"""
+        val archived = workflowJson("w5", "old", "status" to "rejected", "version" to "7")
         val routes5 = mapOf(
             "GET /api/v1/workflows/w5" to (200 to archived),
-            "PUT /api/v1/workflows/w5" to (200 to "{}"),
+            "PUT /api/v1/workflows/w5" to (200 to archived),
         )
         assertEquals(0, run(routes5, "harness", "enforce", "w5"))
         assertTrue(bodyOf("PUT /api/v1/workflows/w5").orEmpty().endsWith(""""expectedVersion":7}"""))
-        val unversioned = mapOf("GET /api/v1/workflows/w6" to (200 to """{"id":"w6","status":"proposed"}"""))
+        val bare = workflowJson("w6", "bare", "status" to "proposed")
+        val unversioned = mapOf("GET /api/v1/workflows/w6" to (200 to bare))
         assertEquals(1, run(unversioned, "harness", "enforce", "w6"))
-        assertErr("Ostrom did not say which version of the workflow it holds: nothing was saved")
+        assertErr("Ostrom did not say which version of bare it holds: nothing was saved")
         assertEquals(1, sent().count { it == put })
     }
 
@@ -141,7 +162,13 @@ class HarnessCommandsTest : SetupKit() {
     fun updateShowsBeforeAndAfterAndKeepsTheMode() {
         writeFile("/work/acme/deploy.json", file)
         val put = "PUT /api/v1/workflows/w1"
-        val stored = """{"id":"w1","name":"deploy","status":"proposed","version":4,"nodes":[{"kind":"gate"}]}"""
+        val stored = workflowJson(
+            "w1",
+            "deploy",
+            "status" to "proposed",
+            "version" to "4",
+            "nodes" to "[" + nodeJson("n1", "gate", "Deploy") + "]",
+        )
         val routes = mapOf("GET /api/v1/workflows/w1" to (200 to safety), put to (200 to stored))
         assertEquals(0, run(routes, "harness", "update", "w1", "deploy.json", "--yes"))
         assertOut("Before  git-safety  v3  trial run  3 steps  1 approval  w1\n")
@@ -178,9 +205,8 @@ class HarnessCommandsTest : SetupKit() {
         typed += "git"
         assertEquals(2, run(routes, "harness", "remove", "w1"))
         assertErr("Nothing was removed.\n")
-        val nameless = mapOf("GET /api/v1/workflows/w1" to (200 to "{}"), delete to (204 to ""))
-        assertEquals(0, run(nameless, "harness", "remove", "w1", "--yes"))
-        assertOut("✓ w1 was removed.")
+        assertEquals(0, run(routes, "harness", "remove", "w1", "--yes"))
+        assertOut("✓ git-safety was removed.")
         assertEquals(2, sent().count { it == delete })
     }
 }

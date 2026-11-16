@@ -50,7 +50,8 @@ val generateReleaseTrust by tasks.registering {
 }
 
 // The API contract this build speaks: ostrom-core's, from the checkout next to this one that CI and local builds use
-// (ostrom.core.local, settings.gradle.kts). ContractRoutesTest checks the routes; its version goes in BuildInfo.
+// (ostrom.core.local, settings.gradle.kts), when it still has one: ostrom-core#306 removed api/openapi.yaml, so the
+// version is blank and `ostrom doctor` compares nothing; the routes are the typed client's and docs-truth's.
 val apiContractFile = rootDir.resolve("../ostrom-core/api/openapi.yaml")
 
 /** `  version: 0.1.0` in the `info:` block, quoted or not, with or without a comment after it. */
@@ -111,13 +112,6 @@ val generateBuildInfo by tasks.registering {
             |""".trimMargin(),
         )
     }
-}
-
-val apiContract = apiContractFile.absolutePath
-tasks.withType<Test>().configureEach {
-    systemProperty("ostrom.contract", apiContract)
-    // an input of the tests, so that a new contract runs them again (files() accepts a missing file: the test says so)
-    inputs.files(apiContract).withPropertyName("apiContract").withPathSensitivity(PathSensitivity.NONE)
 }
 
 kotlin {

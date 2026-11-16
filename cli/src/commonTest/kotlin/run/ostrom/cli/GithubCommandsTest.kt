@@ -74,10 +74,9 @@ class GithubCommandsTest : SetupKit() {
     @Test
     fun linksListsEveryMembersAccount() {
         val body = """{"items":[{"memberId":"m1","state":"linked","appConfigured":true,"login":"maya-k"},""" +
-            """{"memberId":"m2","state":"reconnect_required","appConfigured":true},{"login":"ghost"}]}"""
+            """{"memberId":"m2","state":"reconnect_required","appConfigured":true}]}"""
         assertEquals(0, github(mapOf(links to (200 to body)), "github", "links"))
-        assertOut("Acme · 3 members with a GitHub link\n  m1  @maya-k  linked\n  m2  -  reconnect_required\n")
-        assertOut("  -  @ghost  -\n")
+        assertOut("Acme · 2 members with a GitHub link\n  m1  @maya-k  linked\n  m2  -  reconnect_required\n")
         console.out.clear()
         val one = """{"items":[{"memberId":"m1","state":"linked","appConfigured":true,"login":"maya-k"}]}"""
         assertEquals(0, github(mapOf(links to (200 to one)), "github", "links"))
@@ -157,11 +156,10 @@ class GithubCommandsTest : SetupKit() {
         opened.clear()
         waits.clear()
         val elsewhere = started.replace("https://github.com/login/device", "https://evil.example/login")
-            .replace(",\"interval\":7", "")
         val other = mapOf(start to (201 to elsewhere), poll to (200 to """{"status":"linked"}"""))
         assertEquals(0, github(other, "github", "link"))
         assertTrue(opened.isEmpty(), "only GitHub's pages are opened")
-        assertEquals(listOf(5_000L), waits, "five seconds when the server gives no pace")
+        assertEquals(listOf(7_000L), waits, "the server's pace")
     }
 
     @Test
@@ -197,9 +195,15 @@ class GithubCommandsTest : SetupKit() {
             """"message":"Device Flow is off: link from the console."}}"""
         assertEquals(64, github(mapOf(start to (409 to off)), "github", "link"))
         assertErr("link from the console.")
-        val whole = """{"id":"gd1","userCode":"A-B","verificationUri":"https://github.com/login/device"}"""
-        for (body in listOf("{}", whole.replace("\"id\":\"gd1\",", ""), whole.replace("\"userCode\":\"A-B\",", ""),
-            whole.replace(",\"verificationUri\":\"https://github.com/login/device\"", ""))) {
+        val whole = """{"id":"gd1","userCode":"A-B","verificationUri":"https://github.com/login/device",""" +
+            """"expiresAt":"2026-11-13T10:15:00Z","interval":7}"""
+        for (body in listOf("{}", whole.replace("\"id\":\"gd1\",", ""), whole.replace("\"userCode\":\"A-B\",", ""))) {
+            console.err.clear()
+            assertEquals(69, github(mapOf(start to (201 to body)), "github", "link"), body)
+            assertErr("its answer cannot be read")
+        }
+        val noPage = whole.replace("https://github.com/login/device", "")
+        for (body in listOf(whole.replace("\"id\":\"gd1\"", "\"id\":\"\""), whole.replace("A-B", ""), noPage)) {
             console.err.clear()
             assertEquals(69, github(mapOf(start to (201 to body)), "github", "link"), body)
             assertErr("answered without a code")
@@ -211,7 +215,7 @@ class GithubCommandsTest : SetupKit() {
     fun cloudGithubSetsTheSessionsAccess() {
         for (mode in listOf("owner", "shared", "none")) {
             console.out.clear()
-            val routes = mapOf(access to (200 to """{"id":"cs1","githubAccess":"$mode"}"""))
+            val routes = mapOf(access to (200 to cloudJson("cs1", "githubAccess" to mode)))
             assertEquals(0, github(routes, "cloud", "github", "cs1", "--access", mode))
             assertEquals("""{"access":"$mode"}""", bodyOf(access))
             assertOut("✓ GitHub access of session cs1 is now $mode.\n")

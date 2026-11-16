@@ -13,17 +13,15 @@ import run.ostrom.cli.capabilities.incompatibility
 import run.ostrom.cli.capabilities.tooOld
 import run.ostrom.cli.launch.ApiServerTransport
 import run.ostrom.cli.launcher.Credentials
-import run.ostrom.cli.launcher.ServerAnswer
-import run.ostrom.cli.launcher.ServerJson
-import run.ostrom.cli.launcher.child
-import run.ostrom.cli.launcher.text
+import run.ostrom.cli.launcher.TypedAnswer
+import run.ostrom.cli.launcher.typedAnswer
+import run.ostrom.cli.launcher.typedClient
 import run.ostrom.cli.platform.ConfigKey
 import run.ostrom.cli.platform.ConfigStoreImpl
 import run.ostrom.cli.platform.FileWriteException
 import kotlinx.coroutines.runBlocking
 import okio.IOException
 
-private const val ME = "/api/v1/auth/me"
 private const val UNAUTHORIZED = 401
 
 /**
@@ -91,9 +89,11 @@ internal class ConfigureCommand(private val dependencies: CliDependencies) : Cli
 
     /** The login the token belongs to when the server says it (a service key may not read it), else none. */
     private suspend fun loginOf(serverUrl: String, token: String): String {
-        val answer = ServerJson(ApiServerTransport(dependencies.api(serverUrl))).get(ME, token)
-        if (answer !is ServerAnswer.Ok) return UNKNOWN_LOGIN
-        return answer.body.child("dev")?.text("login") ?: UNKNOWN_LOGIN
+        val answer = typedAnswer { typedClient(ApiServerTransport(dependencies.api(serverUrl)), token).auth.me() }
+        return when (answer) {
+            is TypedAnswer.Ok -> answer.value.dev.login
+            is TypedAnswer.Failed -> UNKNOWN_LOGIN
+        }
     }
 
     private fun usage(what: String) = PrintMessage("ostrom: $what", ExitCode.USAGE.code, printError = true)

@@ -3,6 +3,7 @@ package run.ostrom.cli.waits
 
 import run.ostrom.cli.launcher.ServerCall
 import run.ostrom.cli.launcher.ServerJson
+import run.ostrom.cli.launcher.typedClient
 import run.ostrom.cli.launcher.ServerReply
 import run.ostrom.cli.launcher.ServerTransport
 import kotlinx.serialization.json.Json
@@ -23,7 +24,7 @@ internal class FakeWaitsServer : ServerTransport {
         routes[route] = ServerReply(status, body)
     }
 
-    val server get() = WaitsServer(ServerJson(this), "tok")
+    val server get() = WaitsServer(ServerJson(this), "tok", typedClient(this, "tok"))
 
     fun bodyOf(index: Int): JsonObject = Json.parseToJsonElement(calls[index].body.orEmpty()) as JsonObject
 }
@@ -36,7 +37,8 @@ internal fun waitJson(
     actions: String = "[]",
 ): JsonObject {
     val state = status?.let { """"status":"$it",""" }.orEmpty()
-    val text = """{"id":"$id",$state"kind":"question","assignee":"m1","createdAt":"2026-11-13T10:00:00Z",""" +
+    val text = """{"id":"$id",$state"kind":"question","assignee":"m1","createdBy":"m1",""" +
+        """"createdAt":"2026-11-13T10:00:00Z",""" +
         """"question":{"title":"Which region?","fields":$fields,"actions":$actions}}"""
     return Json.parseToJsonElement(text) as JsonObject
 }

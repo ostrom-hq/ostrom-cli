@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli.commands
 
+import run.ostrom.cli.launcher.asJson
+import run.ostrom.cli.launcher.asServerAnswer
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.Context
 import com.github.ajalt.clikt.core.PrintMessage
@@ -21,9 +23,11 @@ import run.ostrom.cli.launcher.objectOf
 import run.ostrom.cli.launcher.text
 import run.ostrom.cli.platform.StandardInput
 import run.ostrom.cli.platform.StandardInputFailure
+import run.ostrom.cli.required
 import run.ostrom.cli.workflows.DEFAULT_INTERVAL
 import run.ostrom.cli.workflows.DEFAULT_TIMEOUT
 import run.ostrom.cli.workflows.MAX_DEFINITION_BYTES
+import run.ostrom.cli.launcher.typedAnswer
 import run.ostrom.cli.workflows.MAX_LISTED_RUNS
 import run.ostrom.cli.workflows.MIN_INTERVAL
 import run.ostrom.cli.workflows.RunFollower
@@ -69,8 +73,6 @@ private const val RUNS = "/api/v1/runs"
 private const val START_MILLIS = 15_000L
 
 private fun workflowPath(id: String) = "$WORKFLOWS/${segment(id)}"
-
-private fun runPath(id: String) = "$RUNS/${segment(id)}"
 
 /**
  * Runs [block] against the organisation: the organisation, then the server's `workflows.v1` feature, then the
@@ -164,7 +166,7 @@ internal class WorkflowsShowCommand(private val dependencies: CliDependencies) :
 
     override fun run() {
         val body = dependencies.workflows(server, org) {
-            it.read(workflowPath(id), "No workflow $id in ${it.org.slug}.")
+            it.typedJson("No workflow $id in ${it.org.slug}.") { workflows.get(id) }
         }
         dependencies.console.data((if (json) body.toString() else body.workflowDetails()) + "\n")
     }
@@ -306,7 +308,7 @@ internal class WorkflowsRunCommand(private val dependencies: CliDependencies) : 
         }
         dependencies.workflows(server, org) { access ->
             val notFound = "No workflow $id in ${access.org.slug}."
-            val definition = access.read(workflowPath(id), notFound)
+            val definition = access.typedJson(notFound) { workflows.get(id) }
             val request = objectOf(
                 "inputs" to resolveInputs(definition, inputs),
                 "repository" to repository?.let(::requireRepository),
@@ -318,8 +320,8 @@ internal class WorkflowsRunCommand(private val dependencies: CliDependencies) : 
             val token = access.signed.token
             val answer = runBlocking { access.server.call("POST", path, request, token, START_MILLIS, key) }
             val started = answer.orStop(access.signed.serverUrl, notFound)
-            val name = definition.text("name") ?: id
-            val runId = started.text("id") ?: "?"
+            val name = definition.required("name")
+            val runId = started.required("id")
             if (wait) follow(access, started, runId, name) else announce(started, runId, name)
         }
     }
@@ -328,7 +330,7 @@ internal class WorkflowsRunCommand(private val dependencies: CliDependencies) : 
         if (json) {
             dependencies.console.data("$started\n")
         } else {
-            val version = started["workflowVersion"]?.let { " (v$it)" }.orEmpty()
+            val version = " (v${started.getValue("workflowVersion")})"
             dependencies.console.out(
                 "Started run $runId of $name$version.\nFollow it: ostrom workflows run-show $runId   " +
                     "Stop it: ostrom workflows cancel $runId\n",
@@ -342,9 +344,8 @@ internal class WorkflowsRunCommand(private val dependencies: CliDependencies) : 
             "Started run $runId of $name. Following it; Ctrl-C stops following and leaves the run running " +
                 "(ostrom workflows run-show $runId).\n",
         )
-        val token = access.signed.token
         val follower = RunFollower(
-            read = { access.server.get(runPath(runId), token) },
+            read = { typedAnswer { access.client.workflows.run(runId) }.asServerAnswer() },
             pause = dependencies.sleep,
             emit = { line -> if (json) console.err("$line\n") else console.out("$line\n") },
         )
@@ -434,7 +435,9 @@ internal class WorkflowsRunShowCommand(private val dependencies: CliDependencies
     private val json by jsonFlag()
 
     override fun run() {
-        val run = dependencies.workflows(server, org) { it.read(runPath(id), "No run $id in ${it.org.slug}.") }
+        val run = dependencies.workflows(server, org) {
+            it.typedJson("No run $id in ${it.org.slug}.") { workflows.run(id) }
+        }
         dependencies.console.data((if (json) run.toString() else run.runDetails(dependencies.clock())) + "\n")
     }
 }
@@ -453,10 +456,13 @@ internal class WorkflowsCancelCommand(private val dependencies: CliDependencies)
 
     override fun run() {
         val run = dependencies.workflows(server, org) {
-            it.write("POST", "${runPath(id)}/cancel", null, "No run $id in ${it.org.slug}.")
+            asJson(it.typedWrite("No run $id in ${it.org.slug}.") { workflows.cancel(id) })
         }
-        val name = run.text("workflowName")?.let { " of $it" }.orEmpty()
-        val said = if (json) "$run" else "Run ${run.text("id") ?: id}$name is ${run.text("status")}."
+        val said = if (json) {
+            "$run"
+        } else {
+            "Run ${run.required("id")} of ${run.required("workflowName")} is ${run.required("status")}."
+        }
         dependencies.console.data(said + "\n")
     }
 }

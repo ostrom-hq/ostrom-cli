@@ -15,7 +15,9 @@ import kotlin.test.assertTrue
 /** `ostrom configure`, as TeamCode's `teamcode configure`. */
 class ConfigureCommandTest : CliKit() {
     private val home = "/home/maya/.config/ostrom"
-    private val me = "GET /api/v1/auth/me" to (200 to """{"dev":{"login":"ci-bot"}}""")
+    private val me = "GET /api/v1/auth/me" to (
+        200 to """{"dev":{"login":"ci-bot","verified":true,"via":"device"},"capabilities":[]}"""
+    )
     private val env = mapOf("HOME" to "/home/maya")
 
     private fun run(routes: Map<String, Pair<Int, String>>, vararg args: String, env: Map<String, String> = this.env) =

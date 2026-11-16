@@ -30,7 +30,7 @@ class ServerCapabilitiesTest {
         val expected = CapabilitiesRead.Read(Capabilities(1, "1.4.0", listOf("runners.cloud.v1")))
         assertEquals(expected, capabilities.read("https://ostrom.example/", "ost_1"))
         assertEquals(expected, capabilities.read("https://ostrom.example", "ost_1"), "the same server")
-        val read = ServerRequest("GET", "/api/v1/capabilities", token = "ost_1")
+        val read = ServerRequest("GET", "/api/v1/capabilities", token = "ost_1", timeoutMillis = 30_000)
         assertEquals(listOf("https://ostrom.example" to read), asked)
         capabilities.read("https://ostrom.example", "ost_adm")
         capabilities.read("https://other.example", "ost_1")
@@ -52,15 +52,14 @@ class ServerCapabilitiesTest {
         answer = { ServerResponse(401, """{"error":{"type":"unauthorized","message":"token revoked"}}""", 1) }
         assertEquals(CapabilitiesRead.Failed(401, "token revoked"), capabilities.read("https://o.example", "t"))
         answer = { ServerResponse(502, "<html>bad gateway</html>", 1) }
-        assertEquals(CapabilitiesRead.Failed(502, "HTTP 502"), capabilities.read("https://o.example", "t"))
-        answer = { ServerResponse(101, "", 1) }
-        assertEquals(CapabilitiesRead.Failed(101, "HTTP 101"), capabilities.read("https://o.example", "t"))
+        val failed = CapabilitiesRead.Failed(502, "Ostrom answered HTTP 502.")
+        assertEquals(failed, capabilities.read("https://o.example", "t"))
         answer = { ServerResponse(200, """{"apiVersion":"one"}""", 1) }
-        val unreadable = CapabilitiesRead.Failed(200, "its capabilities cannot be read")
+        val unreadable = CapabilitiesRead.Failed(502, "its answer cannot be read")
         assertEquals(unreadable, capabilities.read("https://o.example", "t"))
         answer = { throw ServerUnreachableException("https://o.example", IOException("connection refused")) }
         assertEquals(CapabilitiesRead.Failed(null, "connection refused"), capabilities.read("https://o.example", "t"))
-        assertEquals(4, asked.size, "each failure asked again (the unreachable one never answered)")
+        assertEquals(3, asked.size, "each failure asked again (the unreachable one never answered)")
     }
 
     @Test

@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+@file:Suppress("TooManyFunctions") // the commands of the account, with the helpers they share
+
 package run.ostrom.cli.commands
 
 import com.github.ajalt.clikt.core.CliktCommand
@@ -18,6 +20,9 @@ import run.ostrom.cli.launcher.CredentialStore
 import run.ostrom.cli.launcher.LaunchVariables
 import run.ostrom.cli.launcher.ServerAnswer
 import run.ostrom.cli.launcher.ServerJson
+import run.ostrom.cli.launcher.TypedAnswer
+import run.ostrom.cli.launcher.typedAnswer
+import run.ostrom.cli.launcher.typedClient
 import run.ostrom.cli.launcher.join
 import run.ostrom.cli.launcher.objectOf
 import run.ostrom.cli.login.AdminTokens
@@ -26,6 +31,7 @@ import run.ostrom.cli.login.LoginOutcome
 import run.ostrom.cli.platform.ConfigKey
 import run.ostrom.cli.platform.ConfigStoreImpl
 import run.ostrom.cli.platform.FileWriteException
+import run.ostrom.core.client.OstromClient
 import kotlinx.coroutines.runBlocking
 import okio.IOException
 import kotlin.time.Instant
@@ -100,7 +106,7 @@ internal class LoginCommand(private val dependencies: CliDependencies) : CliktCo
         val console = dependencies.environment["OSTROM_CONSOLE_URL"]
             ?: serverUrl.replaceFirst("://api.", "://app.", ignoreCase = true)
         val login = DeviceLogin(
-            ServerJson(ApiServerTransport(dependencies.api(serverUrl))),
+            typedClient(ApiServerTransport(dependencies.api(serverUrl)), null),
             (dependencies.environment["OSTROM_GITHUB_WEB_URL"] ?: "https://github.com").trimEnd('/'),
             console,
             dependencies.sleep,
@@ -150,7 +156,7 @@ internal class LoginCommand(private val dependencies: CliDependencies) : CliktCo
 
     /** Revokes [token] on [serverUrl], as best it can: its answer changes nothing here. */
     private suspend fun signedOut(serverUrl: String, token: String) {
-        ServerJson(ApiServerTransport(dependencies.api(serverUrl))).post(LOGOUT_PATH, objectOf(), token)
+        dependencies.revoke(serverUrl, token)
     }
 
     /**
@@ -224,8 +230,7 @@ internal class LogoutCommand(private val dependencies: CliDependencies) : CliktC
             refuseInClear(serverUrl, "the token")
         }
         // made only when there is something to revoke
-        val api by lazy { ServerJson(ApiServerTransport(dependencies.api(serverUrl))) }
-        if (admin != null) runBlocking { api.post(LOGOUT_PATH, objectOf(), admin) }
+        if (admin != null) runBlocking { dependencies.revoke(serverUrl, admin) }
         tokens.forget(serverUrl)
         if (credentials == null) {
             // S2-32: a token left only in the other store (the encrypted file of an SSH session) is forgotten too
@@ -233,11 +238,11 @@ internal class LogoutCommand(private val dependencies: CliDependencies) : CliktC
             dependencies.console.out("Not signed in. Nothing to do.\n")
             throw ProgramResult(ExitCode.OK.code)
         }
-        val answer = runBlocking { api.post(LOGOUT_PATH, objectOf(), credentials.token) }
+        val answer = runBlocking { dependencies.revoke(serverUrl, credentials.token) }
         store.forget(serverUrl)
         // a session already expired or revoked (401) has nothing left to revoke
-        if (answer is ServerAnswer.Failed && answer.status != UNAUTHORIZED) {
-            val why = answer.message
+        if (answer is TypedAnswer.Failed && answer.failure.status != UNAUTHORIZED) {
+            val why = answer.failure.message
             dependencies.console.err("! The server could not be told ($why). The session expires on its own.\n")
         }
         val receipts = join(directory, "receipts")
@@ -251,8 +256,9 @@ internal class LogoutCommand(private val dependencies: CliDependencies) : CliktC
 
 private const val DEFAULT_SERVER = "https://api.ostrom.run"
 
-/** `POST`: revokes the token it is sent with (served). */
-private const val LOGOUT_PATH = "/api/v1/auth/logout"
+/** Revokes [token] on [serverUrl] (`auth.logout`); a failure is the answer, not an exception. */
+private suspend fun CliDependencies.revoke(serverUrl: String, token: String): TypedAnswer<Unit> =
+    typedAnswer { typedClient(ApiServerTransport(api(serverUrl)), token).auth.logout() }
 
 /**
  * The signed-in device for a command that reads or writes on the server.
@@ -260,9 +266,36 @@ private const val LOGOUT_PATH = "/api/v1/auth/logout"
  * @property serverUrl The server, without a trailing slash.
  * @property token The device token.
  * @property login The developer's GitHub login.
- * @property server The server's JSON API.
+ * @property server The server's JSON API, for the routes ostrom-core's typed client does not cover.
+ * @property client The typed client of the server, with the device token.
  */
-internal class SignedIn(val serverUrl: String, val token: String, val login: String, val server: ServerJson)
+internal class SignedIn(
+    val serverUrl: String,
+    val token: String,
+    val login: String,
+    val server: ServerJson,
+    val client: OstromClient,
+)
+
+/** [call] on the typed client, or the exit code and message the spec gives its failure; [notFound] is said on a 404. */
+internal fun <T> SignedIn.typed(notFound: String, call: suspend OstromClient.() -> T): T =
+    runBlocking { typedOrStop(serverUrl, notFound) { client.call() } }
+
+/** The value of a successful answer, or the exit code and message the spec gives its failure; see [typedOrStop]. */
+internal fun <T> TypedAnswer<T>.orStop(serverUrl: String, notFound: String): T = when (this) {
+    is TypedAnswer.Ok -> value
+    is TypedAnswer.Failed -> throw failure.refusal(serverUrl, notFound)
+}
+
+/**
+ * [call]'s value, or the exit code and message the spec gives its failure (CLI.md § 2.4); [notFound] is said on a
+ * 404.
+ */
+internal suspend fun <T> typedOrStop(serverUrl: String, notFound: String, call: suspend () -> T): T =
+    when (val answer = typedAnswer(call)) {
+        is TypedAnswer.Ok -> answer.value
+        is TypedAnswer.Failed -> throw answer.failure.refusal(serverUrl, notFound)
+    }
 
 /** The device signed in to the server of [option], or exit 65 with `ostrom login` to run. */
 internal fun CliDependencies.signedIn(option: String?): SignedIn {
@@ -273,5 +306,12 @@ internal fun CliDependencies.signedIn(option: String?): SignedIn {
         ExitCode.SIGN_IN_REQUIRED.code,
         printError = true,
     )
-    return SignedIn(serverUrl, credentials.token, credentials.login, ServerJson(ApiServerTransport(api(serverUrl))))
+    val transport = ApiServerTransport(api(serverUrl))
+    return SignedIn(
+        serverUrl,
+        credentials.token,
+        credentials.login,
+        ServerJson(transport),
+        typedClient(transport, credentials.token),
+    )
 }

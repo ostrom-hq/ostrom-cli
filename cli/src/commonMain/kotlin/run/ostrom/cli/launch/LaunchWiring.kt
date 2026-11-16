@@ -29,7 +29,7 @@ class ApiServerTransport(private val api: OstromApi, private val org: String? = 
                 call.body,
                 call.token,
                 call.timeoutMillis,
-                org,
+                call.org ?: org,
                 call.idempotencyKey,
                 call.onBehalfOf,
                 call.bytes,

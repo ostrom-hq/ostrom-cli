@@ -100,7 +100,7 @@ class ConfirmationWaitTest : SetupKit() {
         assertErr("✓ Confirmed on the console.\n")
         assertOut("No force push")
         // a deletion returns nothing: confirmed all the same; a 202 without its link is confirmed on the console
-        val safety = """{"id":"w1","name":"git-safety","status":"accepted","version":3}"""
+        val safety = workflowJson("w1", "git-safety", "version" to "3")
         polls += answer(200, """{"status":"confirmed"}""")
         val remove = mapOf("GET /api/v1/workflows/w1" to (200 to safety), "DELETE /api/v1/workflows/w1" to (202 to
             """{"confirmationId":"c1","expiresAt":"1970-01-11T00:15:00Z"}"""))

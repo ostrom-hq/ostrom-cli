@@ -7,15 +7,8 @@ import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
 import run.ostrom.cli.CliDependencies
-import run.ostrom.cli.launcher.flag
-import run.ostrom.cli.launcher.list
-import run.ostrom.cli.launcher.objectOf
-import run.ostrom.cli.launcher.text
-import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.json.JsonObject
-
-private const val DEVICES = "/api/v1/devices"
-private const val WRITE_MILLIS = 15_000L
+import run.ostrom.cli.launcher.CliJson
+import run.ostrom.core.api.models.DevicePage
 
 // TeamCode's `teamcode devices list|rename|revoke` ("an interactive login is required"): the person's own
 // `ostrom login`. A server without devices answers 404: orStop says so.
@@ -38,16 +31,15 @@ internal class DevicesListCommand(private val dependencies: CliDependencies) : C
 
 private fun CliDependencies.listDevices(server: String?, json: Boolean) {
     val signed = signedIn(server)
-    val answer = runBlocking { signed.server.get(DEVICES, signed.token) }
-        .orStop(signed.serverUrl, "No devices here.")
+    val page = signed.typed("No devices here.") { devices.list() }
     if (json) {
-        console.data("$answer\n")
+        console.data(CliJson.encodeToString(DevicePage.serializer(), page) + "\n")
         return
     }
-    answer.list("items").filterIsInstance<JsonObject>().forEach { device ->
-        val active = device["activeSessions"] ?: 0
-        val current = if (device.flag("current") == true) "\tcurrent" else ""
-        console.out("${device.text("id")}\t${device.text("name")}\t$active active sessions$current\n")
+    page.items.forEach { device ->
+        val active = device.activeSessions ?: 0
+        val current = if (device.current == true) "\tcurrent" else ""
+        console.out("${device.id}\t${device.name}\t$active active sessions$current\n")
     }
 }
 
@@ -62,9 +54,7 @@ internal class DevicesRenameCommand(private val dependencies: CliDependencies) :
     override fun run() {
         dependencies.outsideSessions("devices rename")
         val signed = dependencies.signedIn(server)
-        val body = objectOf("name" to name)
-        runBlocking { signed.server.call("PATCH", "$DEVICES/$id", body, signed.token, WRITE_MILLIS) }
-            .orStop(signed.serverUrl, "No device $id.")
+        signed.typed("No device $id.") { devices.rename(id, name) }
         dependencies.console.out("Device renamed.\n")
     }
 }
@@ -79,8 +69,7 @@ internal class DevicesRevokeCommand(private val dependencies: CliDependencies) :
     override fun run() {
         dependencies.outsideSessions("devices revoke")
         val signed = dependencies.signedIn(server)
-        runBlocking { signed.server.call("DELETE", "$DEVICES/$id", null, signed.token, WRITE_MILLIS) }
-            .orStop(signed.serverUrl, "No device $id.")
+        signed.typed("No device $id.") { devices.delete(id) }
         dependencies.console.out("Device removed and its sessions signed out.\n")
     }
 }

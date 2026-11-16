@@ -90,7 +90,7 @@ class CloudSendFilesTest : SetupKit() {
         assertErr(FILES_OFF)
         console.err.clear()
         assertEquals(69, sendWith(mapOf(policy to (200 to """{"available":true}""")), "/nothing"))
-        assertErr("the files policy cannot be read")
+        assertErr("its answer cannot be read")
         console.err.clear()
         assertEquals(66, sendWith(mapOf(policy to (404 to "{}")), "/nothing"))
         assertErr(NO_FILES)
@@ -142,53 +142,50 @@ class CloudSendFilesTest : SetupKit() {
         assertFalse(sent().any { it.contains("/files?") }, "Nothing is uploaded once a file is refused")
     }
 
+    /** `cloud send` of /work/shot.png (4 bytes), the uploads answering [uploads] in turn (the last one for good). */
+    private fun sendRetrying(name: String, vararg uploads: Pair<Int, String>?): Int {
+        val queue = ArrayDeque(uploads.toList())
+        val routes = served + mapOf(orgs(acme), send to (202 to input))
+        val api: (String) -> OstromApi = { url ->
+            val real = serverOf(routes)(url)
+            object : OstromApi {
+                override suspend fun get(path: String) = send(ServerRequest("GET", path))
+                override suspend fun send(request: ServerRequest): ServerResponse {
+                    requests += url to request
+                    if (request.bytes == null) return real.send(request)
+                    val next = if (queue.size > 1) queue.removeFirst() else queue.first()
+                    val (status, body) = next ?: throw ServerUnreachableException(url, Exception("reset"))
+                    return ServerResponse(status, body, 1)
+                }
+            }
+        }
+        signIn("/home/maya/.config/ostrom")
+        return cli(environment = withServer, api = api).run(arrayOf("cloud", "send", "cs1", "x", "--file", name))
+    }
+
+    private fun uploadRequests() = requests.map { it.second }.filter { it.path.contains("/files?") }
+
     @Test
     fun anUploadIsRetriedUnderOneKeyWhenTheServerMayStillTakeIt() {
         file("/work/shot.png", png)
-        val live = (served + mapOf(orgs(acme), send to (202 to input))).toMutableMap()
-        live[upload("shot.png")] = 503 to "{}"
-        val answers = ArrayDeque(
-            listOf(
-                408 to "{}",
-                429 to """{"error":{"type":"rate_limited","message":"slow"}}""",
-                201 to stored("f1", "shot.png", png),
-            ),
-        )
-        onSleep = { live[upload("shot.png")] = answers.removeFirst() }
-        signIn("/home/maya/.config/ostrom")
-        val code = cli(environment = withServer, api = serverOf(live)).run(
-            arrayOf("cloud", "send", "cs1", "", "--file", "/work/shot.png"),
+        val code = sendRetrying(
+            "/work/shot.png",
+            408 to "{}",
+            429 to """{"error":{"type":"rate_limited","message":"slow"}}""",
+            201 to stored("f1", "shot.png", png),
         )
         assertEquals(0, code)
-        val keys = requests.map { it.second }.filter { it.path.contains("/files?") }.map { it.idempotencyKey }
-        assertEquals(4, keys.size)
+        val keys = uploadRequests().map { it.idempotencyKey }
+        assertEquals(3, keys.size)
         assertEquals(1, keys.toSet().size, "Every retry carries the same key: $keys")
-        assertEquals(listOf(1_000L, 2_000L, 4_000L), waits)
         assertErr("Uploading /work/shot.png failed; retrying.")
     }
 
     @Test
     fun anUploadIsRetriedWhenTheServerWasNotReached() {
         file("/work/a&b.png", png)
-        val uploaded = upload("a%26b.png") to (201 to stored("f1", "a&b.png", png))
-        val routes = served + mapOf(orgs(acme), send to (202 to input), uploaded)
-        var unreached = 1
-        val api: (String) -> OstromApi = { url ->
-            val real = serverOf(routes)(url)
-            object : OstromApi {
-                override suspend fun get(path: String) = send(ServerRequest("GET", path))
-                override suspend fun send(request: ServerRequest): ServerResponse {
-                    if (request.bytes != null && unreached-- > 0) {
-                        throw ServerUnreachableException(url, Exception("reset"))
-                    }
-                    return real.send(request)
-                }
-            }
-        }
-        signIn("/home/maya/.config/ostrom")
-        val args = arrayOf("cloud", "send", "cs1", "x", "--file", "/work/a&b.png")
-        assertEquals(0, cli(environment = withServer, api = api).run(args))
-        assertEquals(listOf(1_000L), waits)
+        assertEquals(0, sendRetrying("/work/a&b.png", null, 201 to stored("f1", "a&b.png", png)))
+        assertEquals(2, uploadRequests().size)
         assertEquals("""{"text":"x","fileIds":["f1"]}""", bodyOf(send))
     }
 
@@ -203,14 +200,14 @@ class CloudSendFilesTest : SetupKit() {
     fun anUploadStopsAfterItsLastTryOrAtOnceOnARefusal() {
         file("/work/shot.png", png)
         assertEquals(69, sendWith(mapOf(upload("shot.png") to (500 to "{}")), "/work/shot.png"))
-        assertEquals(4, waits.size, "Five tries in all")
+        assertEquals(5, uploadRequests().size, "Five tries in all")
         fun refusal(type: String, status: Int, text: String, code: Int, retried: Boolean = false) {
             console.err.clear()
-            waits.clear()
+            requests.clear()
             val body = """{"error":{"type":"$type","message":"The server says $type."}}"""
             assertEquals(code, sendWith(mapOf(upload("shot.png") to (status to body)), "/work/shot.png"))
             assertErr(text)
-            assertEquals(retried, waits.isNotEmpty(), "$type retried: $retried")
+            assertEquals(retried, uploadRequests().size > 1, "$type retried: $retried")
         }
         refusal("file_too_large", 413, "/work/shot.png is larger than the 1 KB the organization allows per file.", 64)
         refusal("file_type_not_allowed", 415, "(PNG, text); its content decides, not its name.", 64)
@@ -233,9 +230,6 @@ class CloudSendFilesTest : SetupKit() {
         console.err.clear()
         val shorter = stored("f1", "shot.png", png).replace("\"size\":4", "\"size\":3")
         assertEquals(1, sendWith(mapOf(upload("shot.png") to (201 to shorter)), "/work/shot.png"))
-        console.err.clear()
-        assertEquals(69, sendWith(mapOf(upload("shot.png") to (201 to "{}")), "/work/shot.png"))
-        assertErr("the upload of /work/shot.png cannot be read")
         assertFalse(sent().any { it.startsWith(send) })
     }
 

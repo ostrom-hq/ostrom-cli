@@ -12,6 +12,9 @@ import run.ostrom.cli.ExitCode
 import run.ostrom.cli.launch.ApiServerTransport
 import run.ostrom.cli.launcher.Routes
 import run.ostrom.cli.launcher.ServerAnswer
+import run.ostrom.cli.launcher.TypedAnswer
+import run.ostrom.cli.launcher.typedAnswer
+import run.ostrom.cli.launcher.typedClient
 import run.ostrom.cli.launcher.ServerJson
 import run.ostrom.cli.launcher.ServerKeyPins
 import run.ostrom.cli.launcher.child
@@ -44,21 +47,26 @@ internal class StatusCommand(private val dependencies: CliDependencies) : CliktC
         val serverUrl = signed.serverUrl.replace(USER_INFO, "//")
         val kid = pinnedKid(dependencies, dependencies.directory(), signed.serverUrl)
         val device = Device(serverUrl, kid)
-        val me = runBlocking { signed.server.get(ME, signed.token) }
+        val me = runBlocking { typedAnswer { signed.client.auth.me() } }
         failing(me)?.let { down(it, Facts(signed.login, null, device)) }
         val caller = me.orStop(signed.serverUrl, "No account on ${signed.serverUrl}.")
-        // the contract's Me names the developer under `dev`; the Profile the server answers today, at the top
-        val login = caller.child("dev")?.text("login") ?: caller.text("login") ?: signed.login
+        val login = caller.dev.login
         val orgs = runBlocking { signed.server.get(ORGS, signed.token) }
         val org = (orgs as? ServerAnswer.Ok)?.let { organisationOf(it.body) }
-        val scoped = org?.let { ServerJson(ApiServerTransport(dependencies.api(signed.serverUrl), it.id)) }
+        val scope = org?.let {
+            val transport = ApiServerTransport(dependencies.api(signed.serverUrl), it.id)
+            Pair(ServerJson(transport), typedClient(transport, signed.token, it.id))
+        }
+        val scoped = scope?.first
         val repository = dependencies.currentRepo()
         val (harness, waiting, capacity) = runBlocking {
             coroutineScope {
                 val harness = async { harnessOf(scoped ?: signed.server, signed.token, repository) }
                 val waiting = async { waitingOf(scoped ?: signed.server, signed.token) }
                 // the capacity is the organisation's: without one, not read
-                val capacity = async { scoped?.let { readCapacity(it, signed.token, dependencies.clock()) } }
+                val capacity = async {
+                    scope?.let { (server, client) -> readCapacity(server, client, signed.token, dependencies.clock()) }
+                }
                 Triple(harness.await(), waiting.await(), capacity.await())
             }
         }
@@ -124,7 +132,6 @@ internal class StatusCommand(private val dependencies: CliDependencies) : CliktC
     }
 
     private companion object {
-        const val ME = "/api/v1/auth/me"
         const val ORGS = "/api/v1/orgs"
         const val PACKAGE = "${Routes.PACKAGE}?repo="
         const val INBOX = "/api/v1/approvals?mine=true&status=pending"
@@ -136,6 +143,10 @@ internal class StatusCommand(private val dependencies: CliDependencies) : CliktC
         /** A failure of the server itself (unreachable, 5xx), or null for an answer or a refusal. */
         fun failing(answer: ServerAnswer): ServerAnswer.Failed? =
             (answer as? ServerAnswer.Failed)?.takeIf { (it.status ?: SERVER_ERROR) >= SERVER_ERROR }
+
+        /** [failing] for a typed answer. */
+        fun failing(answer: TypedAnswer<*>): ServerAnswer.Failed? =
+            (answer as? TypedAnswer.Failed)?.let { failing(it.failure) }
     }
 }
 

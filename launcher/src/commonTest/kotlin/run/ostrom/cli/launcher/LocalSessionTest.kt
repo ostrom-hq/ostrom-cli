@@ -23,10 +23,10 @@ class LocalSessionTest {
         LocalSession.open(ServerJson(server), "dev-token", "L1", agent, directory) { said += it }
 
     private fun serveASession(epoch: Long = 1) {
-        server["POST $SESSIONS"] = 202 to """{"id":"cs1","owner":"m1","agent":"claude","status":"creating"}"""
-        server["POST $SESSIONS/cs1/host"] = 200 to """{"orgId":"o1","epoch":$epoch,"session":{"id":"cs1"}}"""
+        server["POST $SESSIONS"] = 202 to cloudJson("cs1", "status" to "creating")
+        server["POST $SESSIONS/cs1/host"] = 200 to """{"orgId":"o1","epoch":$epoch,"session":${cloudJson("cs1")}}"""
         server["POST $HEARTBEAT"] = 200 to """{"instruction":"run","state":"running"}"""
-        server["DELETE $SESSIONS/cs1"] = 200 to """{"id":"cs1"}"""
+        server["DELETE $SESSIONS/cs1"] = 200 to cloudJson("cs1", "status" to "terminated")
     }
 
     @Test
@@ -85,7 +85,7 @@ class LocalSessionTest {
         assertNull(open())
         assertTrue("HTTP 409 session_not_running" in said.single(), said.single())
         assertEquals(1, server.sent("DELETE $SESSIONS/cs1").size)
-        server["POST $SESSIONS/cs1/host"] = 200 to """{"orgId":"o1","epoch":1,"session":{"id":"cs1"}}"""
+        server["POST $SESSIONS/cs1/host"] = 200 to """{"orgId":"o1","epoch":1,"session":${cloudJson("cs1")}}"""
         server["POST $HEARTBEAT"] = 409 to """{"error":{"type":"execution_fenced","message":"no"}}"""
         assertNull(open())
         assertEquals(2, server.sent("DELETE $SESSIONS/cs1").size)
@@ -94,13 +94,13 @@ class LocalSessionTest {
     @Test
     fun anAnswerWithoutAnIdOrAnEpochOpensNothing() = runTest {
         serveASession()
-        server["POST $SESSIONS/cs1/host"] = 200 to """{"orgId":"o1","session":{"id":"cs1"}}"""
+        server["POST $SESSIONS/cs1/host"] = 200 to """{"orgId":"o1","session":${cloudJson("cs1")}}"""
         assertNull(open())
         assertEquals(1, server.sent("DELETE $SESSIONS/cs1").size)
         server["POST $SESSIONS"] = 202 to """{"owner":"m1"}"""
         assertNull(open())
         assertEquals(2, said.size)
-        assertTrue(said.all { "the server did not host it" in it }, said.toString())
+        assertTrue(said.all { "unreadable_answer" in it }, said.toString())
     }
 
     @Test
@@ -131,7 +131,7 @@ class LocalSessionTest {
         advanceTimeBy(10_001)
         assertEquals(4, server.sent("POST $SESSIONS/cs1/host").size, "retried with backoff while the network is down")
         server.unreachable = emptySet()
-        server["POST $SESSIONS/cs1/host"] = 200 to """{"orgId":"o1","epoch":2,"session":{"id":"cs1"}}"""
+        server["POST $SESSIONS/cs1/host"] = 200 to """{"orgId":"o1","epoch":2,"session":${cloudJson("cs1")}}"""
         server["POST $HEARTBEAT"] = 200 to """{"instruction":"run","state":"running"}"""
         advanceTimeBy(20_001)
         assertEquals("ostrom: the local session is back.", said.last())
@@ -157,7 +157,7 @@ class LocalSessionTest {
         serveASession()
         val session = assertNotNull(open())
         server["POST $HEARTBEAT"] = 409 to "{}"
-        server["POST $SESSIONS/cs1/host"] = 200 to """{"orgId":"o1","session":{"id":"cs1"}}"""
+        server["POST $SESSIONS/cs1/host"] = 200 to """{"orgId":"o1","session":${cloudJson("cs1")}}"""
         val hosted = launch { session.keepHosted(everyMillis = 1_000) }
         advanceTimeBy(5_001)
         assertEquals(3, server.sent("POST $SESSIONS/cs1/host").size)

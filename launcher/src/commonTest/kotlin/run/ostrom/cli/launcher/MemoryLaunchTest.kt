@@ -11,7 +11,7 @@ import kotlin.test.assertTrue
 class MemoryLaunchTest : AgentLaunchKit() {
     private fun announce(vararg features: String) {
         server["GET ${Routes.CAPABILITIES}"] = 200 to
-            """{"apiVersion":1,"features":[${features.joinToString(",") { "\"$it\"" }}]}"""
+            """{"apiVersion":1,"serverVersion":"1.4.0","features":[${features.joinToString(",") { "\"$it\"" }}]}"""
     }
 
     private fun servers() = filesWhileRunning[join(temporary, "mcp.json")].orEmpty()
@@ -27,7 +27,11 @@ class MemoryLaunchTest : AgentLaunchKit() {
 
     @Test
     fun aServerThatDoesNotOrCannotSaySoGetsNone() = runTest {
-        for (answer in listOf(200 to """{"apiVersion":1,"features":["waits.v1"]}""", 500 to "{}")) {
+        val answers = listOf(
+            200 to """{"apiVersion":1,"serverVersion":"1.4.0","features":["waits.v1"]}""",
+            500 to "{}",
+        )
+        for (answer in answers) {
             serveALaunch()
             server["GET ${Routes.CAPABILITIES}"] = answer
             start()

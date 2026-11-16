@@ -14,7 +14,7 @@ object Routes {
     /** `GET ?repo=`: the signed session package of a repository. */
     const val PACKAGE = "/api/v1/packages/current"
 
-    /** `GET`: the public keys of the instance. */
+    /** `GET`: the public keys of the instance (the typed client's `receipts.keys()` calls it). */
     const val KEYS = "/api/v1/receipts/keys"
 
     /** `GET`, unauthenticated: every signing key of the instance, which signs the hooks' gate policy (S2-20). */
@@ -33,7 +33,7 @@ object Routes {
     /** `GET`: the models of the inference gateway; a 2xx with models means the organisation relays inference. */
     const val INFERENCE_MODELS = "/api/v1/inference/v1/models"
 
-    /** `GET`: what the server speaks and serves (the keys of `ServerFeatures`). */
+    /** `GET`: what the server speaks and serves (the typed client's `capabilities()` calls it). */
     const val CAPABILITIES = "/api/v1/capabilities"
 
     /** `GET`, with the device token: the team skills the member receives (`SkillManifest`). */

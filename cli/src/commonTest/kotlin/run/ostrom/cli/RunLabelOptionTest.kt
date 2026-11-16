@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli
 
+import run.ostrom.cli.api.OstromApi
+import run.ostrom.cli.api.ServerRequest
+import run.ostrom.cli.api.ServerResponse
+import run.ostrom.cli.api.ServerUnreachableException
 import run.ostrom.cli.launcher.Agent
 import run.ostrom.cli.launcher.LaunchRequest
 import run.ostrom.cli.launcher.SESSIONS_LABELS
@@ -45,12 +49,41 @@ class RunLabelOptionTest : CliKit() {
         now = 0
         val asked = "GET /api/v1/sessions?dev=maya&label=team%3Dcore&label=env%3Dci"
         val items = """{"items":[{"id":"s1","agent":"claude","startedAt":"1970-01-01T00:00:00Z",""" +
-            """"labels":{"team":"core","env":"ci"}},{"id":"s2","labels":{"odd":{}}}]}"""
+            """"labels":{"team":"core","env":"ci"}},{"labels":{"odd":{}}}]}"""
         val routes = mapOf(asked to (200 to items), capabilities(ServerFeatures.SESSIONS_LABELS))
         val arguments = arrayOf("sessions", "list", "--label", "team=core", "--label", "env=ci")
         assertEquals(0, cli(environment = withServer, api = serverOf(routes)).run(arguments))
-        val lines = "s1  claude  -  running  0s  env=ci  team=core\ns2  -  -  running  ?  odd=\n"
+        val lines = "s1  claude  -  running  0s  env=ci  team=core\n?  -  -  running  ?  odd=\n"
         assertEquals(lines, console.out.toString())
+    }
+
+    /** [routes] served, except [broken], which is unreachable. */
+    private fun breaking(routes: Map<String, Pair<Int, String>>, broken: String): (String) -> OstromApi = { url ->
+        val served = serverOf(routes)(url)
+        object : OstromApi {
+            override suspend fun get(path: String) = send(ServerRequest("GET", path))
+            override suspend fun send(request: ServerRequest): ServerResponse {
+                if (request.path.startsWith(broken)) throw ServerUnreachableException(url, Exception("refused"))
+                return served.send(request)
+            }
+        }
+    }
+
+    @Test
+    fun theLabelledListCarriesEveryOptionAndASessionlessServerIsRefused() {
+        signIn("/home/maya/.config/ostrom")
+        val asked = "GET /api/v1/sessions?repo=a%2Fb&open=true&before=s9&label=x%3Dy"
+        val routes = mapOf(asked to (200 to """{"items":[]}"""), capabilities(ServerFeatures.SESSIONS_LABELS))
+        val arguments = arrayOf(
+            "sessions", "list", "--all", "--repo", "a/b", "--open", "--before", "s9", "--label", "x=y",
+        )
+        assertEquals(0, cli(environment = withServer, api = serverOf(routes)).run(arguments))
+        val missing = mapOf(capabilities(ServerFeatures.SESSIONS_LABELS))
+        assertEquals(69, cli(environment = withServer, api = serverOf(missing)).run(arguments))
+        val down = breaking(routes, "/api/v1/sessions")
+        assertEquals(69, cli(environment = withServer, api = down).run(arguments))
+        val failing = missing + (asked to (500 to "{}"))
+        assertTrue(cli(environment = withServer, api = serverOf(failing)).run(arguments) != 0)
     }
 
     @Test

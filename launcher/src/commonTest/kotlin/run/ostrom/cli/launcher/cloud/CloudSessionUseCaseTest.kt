@@ -3,6 +3,7 @@ package run.ostrom.cli.launcher.cloud
 
 import run.ostrom.cli.launcher.Agent
 import run.ostrom.cli.launcher.ServerCall
+import run.ostrom.cli.launcher.cloudJson
 import run.ostrom.cli.launcher.ServerJson
 import run.ostrom.cli.launcher.ServerReply
 import run.ostrom.cli.launcher.ServerTransport
@@ -123,13 +124,13 @@ class CloudSessionUseCaseTest {
 
     @Test
     fun aSessionIsStartedWaitedForThenShownInThisTerminal() = runTest {
-        on("POST /api/v1/cloud/sessions", 201 to """{"id":"cs1","status":"creating"}""")
+        on("POST /api/v1/cloud/sessions", 201 to cloudJson("cs1", "status" to "creating"))
         on(
             "GET /api/v1/cloud/sessions/cs1",
-            200 to """{"id":"cs1","status":"creating","phase":"cloning"}""",
-            200 to """{"id":"cs1","status":"creating","phase":"cloning"}""",
-            200 to """{"id":"cs1","status":"creating"}""",
-            200 to """{"id":"cs1","status":"running","phase":"ready"}""",
+            200 to cloudJson("cs1", "status" to "creating", "phase" to "cloning"),
+            200 to cloudJson("cs1", "status" to "creating", "phase" to "cloning"),
+            200 to cloudJson("cs1", "status" to "creating"),
+            200 to cloudJson("cs1", "status" to "running", "phase" to "ready"),
         )
         socket.closeCode = 1000
         assertEquals(0, useCase().start(claude, "device"))
@@ -147,7 +148,7 @@ class CloudSessionUseCaseTest {
 
     @Test
     fun keysGoToTheSessionAndCtrlBracketDetachesLeavingItRunning() = runTest {
-        on("GET /api/v1/cloud/sessions/cs1", 200 to """{"status":"running"}""")
+        on("GET /api/v1/cloud/sessions/cs1", 200 to cloudJson("x", "status" to "running"))
         socket = Socket(emptyList(), endsOnItsOwn = false)
         terminal = Terminal(
             ArrayDeque(listOf("ls\r", "ab\u001Dignored")),
@@ -164,7 +165,7 @@ class CloudSessionUseCaseTest {
 
     @Test
     fun detachingAsTheFirstKeySendsNothing() = runTest {
-        on("GET /api/v1/cloud/sessions/cs1", 200 to """{"status":"running"}""")
+        on("GET /api/v1/cloud/sessions/cs1", 200 to cloudJson("x", "status" to "running"))
         socket = Socket(emptyList(), endsOnItsOwn = false)
         terminal = Terminal(ArrayDeque(listOf("\u001D")), ArrayDeque(listOf(null)))
         assertEquals(0, useCase().attach("cs1", "device"))
@@ -173,7 +174,7 @@ class CloudSessionUseCaseTest {
 
     @Test
     fun theRunnerLosingItsMachineIsSaidInTheTerminal() = runTest {
-        on("GET /api/v1/cloud/sessions/cs1", 200 to """{"status":"running"}""")
+        on("GET /api/v1/cloud/sessions/cs1", 200 to cloudJson("x", "status" to "running"))
         socket = Socket(
             listOf(
                 TerminalOutput.Control("""{"type":"runner","connected":true}"""),
@@ -194,7 +195,7 @@ class CloudSessionUseCaseTest {
 
     @Test
     fun theSessionsEndStopsAnIdleKeyboard() = runTest {
-        on("GET /api/v1/cloud/sessions/cs1", 200 to """{"status":"running"}""")
+        on("GET /api/v1/cloud/sessions/cs1", 200 to cloudJson("x", "status" to "running"))
         terminal.idle = true
         assertEquals(0, useCase().attach("cs1", "device"), "the pump ends without a key")
         assertEquals("Session cs1 ended.", said.last())
@@ -208,7 +209,7 @@ class CloudSessionUseCaseTest {
             503 to """{"error":{"type":"unavailable","message":"busy"}}""",
             null to "refused",
             429 to """{"error":{"type":"rate_limited","message":"slow down"}}""",
-            200 to """{"status":"running"}""",
+            200 to cloudJson("x", "status" to "running"),
         )
         assertEquals(0, useCase().attach("cs1", "device"))
         assertEquals(3, slept.size)
@@ -217,7 +218,7 @@ class CloudSessionUseCaseTest {
 
     @Test
     fun theCloseCodeSaysWhyTheTerminalClosed() = runTest {
-        on("GET /api/v1/cloud/sessions/cs1", 200 to """{"status":"running"}""")
+        on("GET /api/v1/cloud/sessions/cs1", 200 to cloudJson("x", "status" to "running"))
         val lost = "ostrom: The connection to session cs1 was lost; it keeps running. Attach again with " +
             "`ostrom attach cs1`."
         val cases = mapOf(
@@ -236,17 +237,21 @@ class CloudSessionUseCaseTest {
 
     @Test
     fun aSessionThatCannotRunIsSaidWithoutAttaching() = runTest {
-        val failed = """{"status":"failed","failure":{"code":"start_failed","message":"no image"}}"""
+        val failed = cloudJson(
+            "f",
+            "status" to "failed",
+            "failure" to """{"code":"start_failed","message":"no image"}""",
+        )
         on("GET /api/v1/cloud/sessions/f", 200 to failed)
-        on("GET /api/v1/cloud/sessions/t", 200 to """{"status":"terminated"}""")
-        on("GET /api/v1/cloud/sessions/p", 200 to """{"status":"paused"}""")
+        on("GET /api/v1/cloud/sessions/t", 200 to cloudJson("x", "status" to "terminated"))
+        on("GET /api/v1/cloud/sessions/p", 200 to cloudJson("x", "status" to "paused"))
         assertEquals(1, useCase().attach("f", "device"))
         assertEquals("ostrom: session f is failed: no image", said.last())
         assertEquals(1, useCase().attach("t", "device"))
         assertEquals("ostrom: session t is terminated", said.last())
         assertEquals(1, useCase().attach("p", "device"))
         assertEquals("ostrom: session p is paused: resume it from Ostrom's console, then attach again", said.last())
-        on("GET /api/v1/cloud/sessions/q", 200 to """{"status":"pausing"}""")
+        on("GET /api/v1/cloud/sessions/q", 200 to cloudJson("x", "status" to "pausing"))
         assertEquals(1, useCase().attach("q", "device"))
         assertEquals("ostrom: session q is paused: resume it from Ostrom's console, then attach again", said.last())
         assertEquals(emptyList(), opened)
@@ -254,7 +259,7 @@ class CloudSessionUseCaseTest {
 
     @Test
     fun aSessionThatNeverStartsIsGivenUpOnAfterTenMinutes() = runTest {
-        on("GET /api/v1/cloud/sessions/cs1", 200 to """{"status":"creating"}""")
+        on("GET /api/v1/cloud/sessions/cs1", 200 to cloudJson("x", "status" to "creating"))
         assertEquals(69, useCase().attach("cs1", "device"))
         assertEquals("ostrom: session cs1 did not start within 10 minutes", said.last())
         assertEquals(300, slept.size)
@@ -300,7 +305,7 @@ class CloudSessionUseCaseTest {
 
     @Test
     fun aSocketThatCannotOpenIsUnreachable() = runTest {
-        on("GET /api/v1/cloud/sessions/cs1", 200 to """{"status":"running"}""")
+        on("GET /api/v1/cloud/sessions/cs1", 200 to cloudJson("x", "status" to "running"))
         refuseSocket = true
         assertEquals(69, useCase().attach("cs1", "device"))
         assertEquals("ostrom: could not attach to session cs1 (TLS handshake failed)", said.last())
@@ -314,9 +319,9 @@ class CloudSessionUseCaseTest {
         assertEquals(listOf("claude", "codex", "opencode", "gemini"), CloudSessionUseCase.CLOUD_AGENTS)
         assertTrue(calls.isEmpty())
         on("POST /api/v1/cloud/sessions", 201 to "{}")
-        assertEquals(69, useCase().start(CloudStart(Agent.CODEX, null, null), "device"))
+        assertEquals(1, useCase().start(CloudStart(Agent.CODEX, null, null), "device"))
         assertEquals("""{"agent":"codex"}""", calls.last().body)
-        assertEquals("ostrom: Ostrom answered without a session", said.last())
+        assertEquals("ostrom: its answer cannot be read", said.last())
     }
 
     @Test
@@ -352,7 +357,7 @@ class CloudSessionUseCaseTest {
 
     @Test
     fun theEndOfTheKeyboardLeavesTheSessionToEndOnItsOwn() = runTest {
-        on("GET /api/v1/cloud/sessions/cs1", 200 to """{"status":"running"}""")
+        on("GET /api/v1/cloud/sessions/cs1", 200 to cloudJson("x", "status" to "running"))
         socket = Socket(emptyList(), endsOnItsOwn = false)
         // "" is a read that timed out; the same size again sends no resize
         terminal = Terminal(ArrayDeque(listOf("x", "")), ArrayDeque(listOf(null, TerminalSize(80, 24))))
@@ -366,7 +371,7 @@ class CloudSessionUseCaseTest {
 
     @Test
     fun aCancelledAttachGivesTheTerminalBack() = runTest {
-        on("GET /api/v1/cloud/sessions/cs1", 200 to """{"status":"running"}""")
+        on("GET /api/v1/cloud/sessions/cs1", 200 to cloudJson("x", "status" to "running"))
         for (raw in listOf(true, false)) {
             socket = Socket(emptyList(), endsOnItsOwn = false)
             terminal = Terminal(ArrayDeque(), ArrayDeque(listOf(null)))
@@ -382,8 +387,8 @@ class CloudSessionUseCaseTest {
     fun theRealClockAndKeyboardThreadAreTheDefaults() = runTest {
         on(
             "GET /api/v1/cloud/sessions/cs1",
-            200 to """{"status":"creating"}""",
-            200 to """{"status":"running"}""",
+            200 to cloudJson("x", "status" to "creating"),
+            200 to cloudJson("x", "status" to "running"),
         )
         val plain = CloudSessionUseCase(ServerJson(transport), { _, _ -> socket }, terminal, { said += it })
         assertEquals(0, plain.attach("cs1", "device"))

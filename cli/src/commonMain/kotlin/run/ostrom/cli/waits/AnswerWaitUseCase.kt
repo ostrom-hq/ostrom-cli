@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli.waits
 
+import kotlinx.serialization.json.jsonObject
 import run.ostrom.cli.launcher.child
 import run.ostrom.cli.launcher.flag
 import run.ostrom.cli.launcher.list
@@ -12,6 +13,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import run.ostrom.cli.required
 
 /** The action of a wait that declares none. */
 private const val DEFAULT_ACTION = "done"
@@ -54,15 +56,15 @@ internal class AnswerWaitUseCase(
     suspend operator fun invoke(request: AnswerWait): JsonObject {
         requireId(request.id)
         val wait = server.get(request.id)
-        val status = wait.text("status")
-        if (status != "open") refuse("This wait is already ${status ?: "closed"}.")
-        val question = wait.child("question") ?: JsonObject(emptyMap())
+        val status = wait.required("status")
+        if (status != "open") refuse("This wait is already $status.")
+        val question = wait.getValue("question").jsonObject
         val fields = question.list("fields").filterIsInstance<JsonObject>()
         // Checked before anything is read: a typo in a field name must not cost the person a typed secret.
         values(fields, request.sets, request.jsonSets, request.secretFields.associateWith { "x" })
         val action = action(question.list("actions").filterIsInstance<JsonObject>(), request.action)
         val values = values(fields, request.sets, request.jsonSets, readSecrets(request.secretFields))
-        return server.answer(request.id, objectOf("action" to action, "values" to JsonObject(values)))
+        return server.answer(request.id, action, values)
     }
 
     private fun values(
@@ -71,7 +73,7 @@ internal class AnswerWaitUseCase(
         jsonSets: List<Pair<String, String>>,
         secrets: Map<String, String>,
     ): Map<String, JsonElement> {
-        val byId = fields.mapNotNull { field -> field.text("id")?.let { it to field } }.toMap()
+        val byId = fields.associateBy { it.required("id") }
         val values = linkedMapOf<String, JsonElement>()
         sets.groupBy({ it.first }, { it.second }).forEach { (id, texts) -> values[id] = typed(known(byId, id), texts) }
         jsonSets.forEach { (id, text) ->

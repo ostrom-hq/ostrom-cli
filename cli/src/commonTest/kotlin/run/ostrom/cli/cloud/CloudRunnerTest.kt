@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli.cloud
 
+import run.ostrom.cli.cloudJson
 import run.ostrom.cli.api.OstromApi
 import run.ostrom.cli.api.ServerRequest
 import run.ostrom.cli.api.ServerResponse
@@ -53,8 +54,8 @@ class CloudRunnerTest {
             override suspend fun send(request: ServerRequest): ServerResponse {
                 requests += url to request
                 return when (request.method) {
-                    "POST" -> ServerResponse(201, """{"id":"cs1"}""", 1)
-                    else -> ServerResponse(200, """{"status":"running"}""", 1)
+                    "POST" -> ServerResponse(201, cloudJson("cs1", "status" to "creating"), 1)
+                    else -> ServerResponse(200, cloudJson("cs1"), 1)
                 }
             }
         }

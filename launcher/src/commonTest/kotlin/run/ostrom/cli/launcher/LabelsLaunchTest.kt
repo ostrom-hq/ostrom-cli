@@ -11,7 +11,8 @@ import kotlin.test.assertTrue
 class LabelsLaunchTest : AgentLaunchKit() {
     private fun announce(vararg features: String) {
         val listed = features.joinToString(",") { "\"$it\"" }
-        server["GET ${Routes.CAPABILITIES}"] = 200 to """{"apiVersion":1,"features":[$listed]}"""
+        server["GET ${Routes.CAPABILITIES}"] =
+            200 to """{"apiVersion":1,"serverVersion":"1.4.0","features":[$listed]}"""
     }
 
     @Test

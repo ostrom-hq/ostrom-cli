@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli.launcher
 
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
@@ -150,8 +151,9 @@ class PackageTrust(
 
     private suspend fun pin(asked: Asked, kid: String, path: String): Pin {
         val serverUrl = asked.serverUrl
-        val answer = server.get(Routes.KEYS, null)
-        val pem = if (answer is ServerAnswer.Ok) ServerKeyPins.publishedKey(answer.body, kid) else null
+        val keys = (typedAnswer { server.client(null).receipts.keys() } as? TypedAnswer.Ok)?.value
+        val published = keys?.let { JsonObject(mapOf("keys" to JsonArray(it.map(::asJson)))) }
+        val pem = published?.let { ServerKeyPins.publishedKey(it, kid) }
         if (pem == null) return Pin.Refused("the server does not publish the key $kid")
         if (asked.keep) {
             // read again after the network: another ostrom may have pinned a server meanwhile

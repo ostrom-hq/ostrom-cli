@@ -1,18 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli.guidance
 
-import run.ostrom.cli.launcher.ServerAnswer
-import run.ostrom.cli.launcher.ServerJson
-import run.ostrom.core.api.OstromJson
+import run.ostrom.cli.launcher.TypedAnswer
+import run.ostrom.cli.launcher.typedAnswer
+import run.ostrom.core.client.OstromClient
 import run.ostrom.core.api.models.Directive
 import run.ostrom.core.api.models.DirectiveClaim
-import run.ostrom.core.api.models.DirectiveClaimRequest
 import run.ostrom.core.api.models.DirectiveReceipt
-import run.ostrom.core.api.models.DirectiveResponse
 import run.ostrom.core.api.models.DirectiveStage
-import kotlinx.serialization.KSerializer
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.jsonObject
 import kotlin.time.Instant
 
 /** The capacity advice could not be read or confirmed: no answer, a refusal, or a body of another shape. */
@@ -22,43 +17,26 @@ internal class GuidanceUnavailableException : Exception("the capacity advice is 
  * The capacity controller's advice for the signed-in member (`capacity.pacing.v1`), TeamCode's `directive`,
  * `claimDirective` and `acknowledgeDirective` of `teamcode agents`.
  *
- * @param server The organisation's JSON API.
- * @param token The device's token (it holds `guidance`).
+ * @param client The organisation's typed client, with the device's token (it holds `guidance`).
  */
-internal class GuidanceReads(private val server: ServerJson, private val token: String) {
+internal class GuidanceReads(private val client: OstromClient) {
     /** The member-wide advice, or null when there is none. */
-    suspend fun current(): Directive? = decode(server.get(CURRENT, token), DirectiveResponse.serializer()).directive
+    suspend fun current(): Directive? = unavailable { client.pacing.current() }.directive
 
     /** Claims the delivery of [session]'s new advice at [stage]: both fields are null when nothing new is to say. */
-    suspend fun claim(session: String, stage: DirectiveStage): DirectiveClaim {
-        val asked = body(DirectiveClaimRequest(session, stage), DirectiveClaimRequest.serializer())
-        return decode(server.post(CLAIM, asked, token), DirectiveClaim.serializer())
-    }
+    suspend fun claim(session: String, stage: DirectiveStage): DirectiveClaim =
+        unavailable { client.pacing.claim(session, stage) }
 
     /** Records that an advice reached a stage of its delivery. */
     suspend fun acknowledge(receipt: DirectiveReceipt) {
-        if (server.post(RECEIPT, body(receipt, DirectiveReceipt.serializer()), token) !is ServerAnswer.Ok) {
-            throw GuidanceUnavailableException()
+        unavailable { client.pacing.receipt(receipt.id, receipt.stage, receipt.sessionId, receipt.claimId) }
+    }
+
+    private suspend fun <T> unavailable(call: suspend () -> T): T =
+        when (val answer = typedAnswer(call)) {
+            is TypedAnswer.Ok -> answer.value
+            is TypedAnswer.Failed -> throw GuidanceUnavailableException()
         }
-    }
-
-    private fun <T> body(value: T, serializer: KSerializer<T>): JsonObject =
-        OstromJson.encodeToJsonElement(serializer, value).jsonObject
-
-    private fun <T> decode(answer: ServerAnswer, serializer: KSerializer<T>): T {
-        val body = if (answer is ServerAnswer.Ok) answer.body else throw GuidanceUnavailableException()
-        return try {
-            OstromJson.decodeFromJsonElement(serializer, body)
-        } catch (_: IllegalArgumentException) {
-            throw GuidanceUnavailableException()
-        }
-    }
-
-    private companion object {
-        const val CURRENT = "/api/v1/directives/current"
-        const val CLAIM = "/api/v1/directives/claim"
-        const val RECEIPT = "/api/v1/directives/receipt"
-    }
 }
 
 /** Whether the advice is still in force at [nowMillis]; an unreadable expiry counts as expired. */

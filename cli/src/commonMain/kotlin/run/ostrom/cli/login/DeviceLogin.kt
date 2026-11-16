@@ -3,13 +3,11 @@ package run.ostrom.cli.login
 
 import run.ostrom.cli.launcher.Credentials
 import run.ostrom.cli.launcher.ServerAnswer
-import run.ostrom.cli.launcher.ServerJson
-import run.ostrom.cli.launcher.list
-import run.ostrom.cli.launcher.objectOf
-import run.ostrom.cli.launcher.text
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.intOrNull
+import run.ostrom.cli.launcher.TypedAnswer
+import run.ostrom.cli.launcher.typedAnswer
+import run.ostrom.core.api.models.AuthToken
+import run.ostrom.core.api.models.DeviceCode
+import run.ostrom.core.client.OstromClient
 import kotlin.text.RegexOption.IGNORE_CASE
 
 /** How a sign-in ended. */
@@ -50,7 +48,7 @@ sealed interface LoginOutcome {
  * @param say Prints a line for the developer.
  */
 class DeviceLogin(
-    private val server: ServerJson,
+    private val client: OstromClient,
     private val githubWeb: String,
     private val console: String,
     private val sleep: suspend (Long) -> Unit,
@@ -61,18 +59,17 @@ class DeviceLogin(
      * approves (`ostrom login --admin`).
      */
     suspend fun signIn(serverUrl: String, scopes: List<String> = emptyList()): LoginOutcome {
-        val body = if (scopes.isEmpty()) objectOf() else objectOf("scopes" to scopes)
-        return when (val start = server.post(START, body, null)) {
-            is ServerAnswer.Failed -> LoginOutcome.Stopped(codeOf(start), messageOf(start, serverUrl))
-            is ServerAnswer.Ok -> started(start.body, serverUrl)
+        return when (val start = typedAnswer { client.auth.startDeviceLogin(scopes) }) {
+            is TypedAnswer.Failed -> LoginOutcome.Stopped(codeOf(start.failure), messageOf(start.failure, serverUrl))
+            is TypedAnswer.Ok -> started(start.value, serverUrl)
         }
     }
 
     /** Shows the code of a started flow, then waits for GitHub's yes. */
-    private suspend fun started(body: JsonObject, serverUrl: String): LoginOutcome {
-        val deviceCode = body.text("deviceCode").orEmpty()
-        val userCode = body.text("userCode").orEmpty()
-        val page = body.text("verificationUri") ?: "$githubWeb/login/device"
+    private suspend fun started(code: DeviceCode, serverUrl: String): LoginOutcome {
+        val deviceCode = code.deviceCode
+        val userCode = code.userCode
+        val page = code.verificationUri.ifEmpty { "$githubWeb/login/device" }
         // the code and the page go to the terminal: GitHub's page or one of the server's own origin (S2-35, decision of
         // 30/10/2026), and no control character in either
         val refusal = when {
@@ -87,10 +84,8 @@ class DeviceLogin(
         say("! Copy your one-time code: $userCode")
         say("  Open $page and enter it.")
         // a server's interval of 0 would ask GitHub in a tight loop, and a huge expiry would never end
-        val interval = ((body["interval"] as? JsonPrimitive)?.intOrNull ?: DEFAULT_INTERVAL_SECONDS)
-            .coerceAtLeast(1).coerceAtMost(MAX_INTERVAL_SECONDS)
-        val expiresIn = ((body["expiresIn"] as? JsonPrimitive)?.intOrNull ?: DEFAULT_EXPIRY_SECONDS)
-            .coerceAtLeast(1).coerceAtMost(MAX_EXPIRY_SECONDS)
+        val interval = code.interval.coerceAtLeast(1).coerceAtMost(MAX_INTERVAL_SECONDS)
+        val expiresIn = code.expiresIn.coerceAtLeast(1).coerceAtMost(MAX_EXPIRY_SECONDS)
         return poll(deviceCode, interval * MILLIS, expiresIn * MILLIS, serverUrl)
     }
 
@@ -110,10 +105,11 @@ class DeviceLogin(
             } else {
                 sleep(pause)
                 waited += pause
-                val answer = server.post(TOKEN, objectOf("deviceCode" to deviceCode), null)
-                lost = (answer as? ServerAnswer.Failed)?.takeIf(::isTransient)
+                val answer = typedAnswer { client.auth.pollDeviceLogin(deviceCode) }
+                val failure = (answer as? TypedAnswer.Failed)?.failure
+                lost = failure?.takeIf(::isTransient)
                 outcome = if (lost == null) outcomeOf(answer, serverUrl) else null
-                if (answer is ServerAnswer.Failed && answer.type == "slow_down") pause += SLOW_DOWN_MILLIS
+                if (failure?.type == "slow_down") pause += SLOW_DOWN_MILLIS
             }
         }
         return outcome
@@ -125,9 +121,9 @@ class DeviceLogin(
     private fun isControl(char: Char): Boolean = char < ' ' || char == '\u007f'
 
     /** The outcome of one poll, or null to poll again. */
-    private fun outcomeOf(answer: ServerAnswer, serverUrl: String): LoginOutcome? = when (answer) {
-        is ServerAnswer.Ok -> signedIn(answer)
-        is ServerAnswer.Failed -> refusal(answer, serverUrl)
+    private fun outcomeOf(answer: TypedAnswer<AuthToken>, serverUrl: String): LoginOutcome? = when (answer) {
+        is TypedAnswer.Ok -> signedIn(answer.value)
+        is TypedAnswer.Failed -> refusal(answer.failure, serverUrl)
     }
 
     private fun refusal(answer: ServerAnswer.Failed, serverUrl: String): LoginOutcome? = when {
@@ -137,16 +133,12 @@ class DeviceLogin(
         else -> LoginOutcome.Stopped(codeOf(answer), messageOf(answer, serverUrl))
     }
 
-    private fun signedIn(answer: ServerAnswer.Ok): LoginOutcome {
-        val token = answer.body.text("token")
-        val login = answer.body.text("login")
-        return if (token.isNullOrEmpty() || login.isNullOrEmpty()) {
+    private fun signedIn(answer: AuthToken): LoginOutcome =
+        if (answer.token.isEmpty() || answer.login.isEmpty()) {
             LoginOutcome.Stopped(UNREACHABLE, "Ostrom answered without a token. Try again later.")
         } else {
-            val scopes = answer.body.list("scopes").filterIsInstance<JsonPrimitive>().map { it.content }
-            LoginOutcome.SignedIn(Credentials(token, login), scopes, answer.body.text("expiresAt"))
+            LoginOutcome.SignedIn(Credentials(answer.token, answer.login), answer.scopes, answer.expiresAt)
         }
-    }
 
     private fun codeOf(answer: ServerAnswer.Failed): Int = if (answer.status == FORBIDDEN) REFUSED else UNREACHABLE
 
@@ -184,11 +176,7 @@ class DeviceLogin(
 
         private fun secure(origin: String) = origin.startsWith("https://") || THIS_MACHINE.matches(origin)
 
-        private const val START = "/api/v1/auth/device"
-        private const val TOKEN = "/api/v1/auth/device/token"
         private const val MILLIS = 1_000L
-        private const val DEFAULT_INTERVAL_SECONDS = 5
-        private const val DEFAULT_EXPIRY_SECONDS = 900
         private const val SLOW_DOWN_MILLIS = 5_000L
         private const val MAX_INTERVAL_SECONDS = 60
         private const val MAX_EXPIRY_SECONDS = 1_800
