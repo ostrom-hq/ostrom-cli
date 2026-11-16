@@ -581,21 +581,17 @@ class DeviceDaemonTest {
         val features = listOf(DAEMON_CAPABILITY, "runners.cloud.remote.resume.v1")
         assertEquals(
             LocalResume.Unavailable(LocalResumeReasons.DAEMON_OFFLINE),
-            localResumeTarget(server, features, hosting = true),
+            localResumeTarget(server, features),
             "Without its daemon, this device starts no session that continues a conversation",
         )
         val daemon = f.start(this)
         waitUntil { f.server.daemonOnline }
         val serverUnsupported = LocalResume.Unavailable(LocalResumeReasons.SERVER_UNSUPPORTED)
-        assertEquals(serverUnsupported, localResumeTarget(server, listOf(DAEMON_CAPABILITY), hosting = true))
-        assertEquals(serverUnsupported, localResumeTarget(server, listOf("runners.cloud.remote.resume.v1"), true))
-        assertEquals(LocalResume.Ready("d1"), localResumeTarget(server, features, hosting = true))
-        assertEquals(
-            LocalResume.Unavailable(LocalResumeReasons.PLATFORM_UNSUPPORTED),
-            localResumeTarget(server, features, hosting = false),
-        )
+        assertEquals(serverUnsupported, localResumeTarget(server, listOf(DAEMON_CAPABILITY)))
+        assertEquals(serverUnsupported, localResumeTarget(server, listOf("runners.cloud.remote.resume.v1")))
+        assertEquals(LocalResume.Ready("d1"), localResumeTarget(server, features))
         f.server.deviceFeatures = emptyList()
-        assertEquals(LocalResume.Unavailable(LocalResumeReasons.DAEMON_TOO_OLD), localResumeTarget(server, features, true))
+        assertEquals(LocalResume.Unavailable(LocalResumeReasons.DAEMON_TOO_OLD), localResumeTarget(server, features))
         f.stopAndJoin(daemon)
     }
 

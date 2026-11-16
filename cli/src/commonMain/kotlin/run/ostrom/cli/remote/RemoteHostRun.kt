@@ -63,7 +63,7 @@ import kotlin.uuid.Uuid
 /**
  * What hosting a remote session needs of this machine, replaced by fakes in tests.
  *
- * @property processes Starts the agent on pipes in a session of its own; null on a platform that hosts none (Windows).
+ * @property processes Starts the agent on pipes, out of the terminal's reach ([localAgentProcesses]).
  * @property environment This process's environment, which the agent inherits less Ostrom's own variables.
  * @property http The runner channel's HTTP client (long polls: no request timeout under a minute).
  * @property relays The loopback relay of the agent's model calls, its notices said with the given function.
@@ -79,7 +79,7 @@ import kotlin.uuid.Uuid
  */
 @Suppress("LongParameterList") // the host's ports, one each, named at the call sites
 internal class RemoteHostPorts(
-    val processes: ProcessStarter?,
+    val processes: ProcessStarter,
     val environment: () -> Map<String, String>,
     val http: () -> HttpClient,
     val relays: ((String) -> Unit) -> LocalRelayStarter,
@@ -93,7 +93,7 @@ internal class RemoteHostPorts(
     val uploads: (String) -> SessionUploads,
 )
 
-/** The real ports: POSIX processes, the platform's HTTP engine, the relay module, the OS's signals. */
+/** The real ports: the platform's processes, its HTTP engine, the relay module, the OS's signals. */
 // coverage: the OS wiring of the host; each port is tested where it lives (runner, relay, platform).
 @ExcludeFromCoverage
 internal fun systemRemoteHostPorts(): RemoteHostPorts = RemoteHostPorts(
@@ -134,7 +134,7 @@ internal suspend fun hostRemoteSession(
     report: (String) -> Unit,
     acceptedEpoch: Long? = null,
 ): Int {
-    val processes = requireHosting(ports)
+    val processes = ports.processes
     val sessionId = Uuid.parseOrNull(record.sessionId)
         ?: throw stopWith(ExitCode.USAGE, "ostrom: ${record.sessionId} is not a session id.")
     val hosted = if (acceptedEpoch == null) {
@@ -167,12 +167,6 @@ internal suspend fun hostRemoteSession(
         withContext(NonCancellable) { client.close() }
     }
 }
-
-/** The agent starter of this platform, or the refusal of one that hosts no remote session. */
-internal fun requireHosting(ports: RemoteHostPorts): ProcessStarter = ports.processes ?: throw stopWith(
-    ExitCode.NOT_IMPLEMENTED,
-    "ostrom: this version hosts remote sessions on macOS and Linux only; host it from one of those devices.",
-)
 
 /** One execution of the host, between the opened epoch and its end. */
 @Suppress("LongParameterList") // what the execution was opened with
