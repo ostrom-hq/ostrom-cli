@@ -9,38 +9,32 @@ import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 /** A background process on Windows: its output appended to its log, its exit code read once it ended. */
 class DetachedProcessWindowsTest {
     private val system = "${environmentVariable("SystemRoot") ?: "C:\\Windows"}\\System32"
     private val cmd = "$system\\cmd.exe"
 
-    // PowerShell reads its arguments the standard way; cmd.exe does not take a quoted "/c", and every argument of a
-    // detached process is quoted.
-    private val powershell = "$system\\WindowsPowerShell\\v1.0\\powershell.exe"
+    // whoami.exe: an ordinary console program, as ostrom.exe. cmd.exe and powershell.exe run nothing without a console
+    // of their own (DETACHED_PROCESS): both ended at once, 1 and 0, with no output (full validation runs 43777898018,
+    // 43786372119), whereas whoami wrote its answer and its error and gave its exit code (run 43789726924).
+    private val whoami = "$system\\whoami.exe"
 
     @Test
     fun aBackgroundProcessWritesToItsLogAndItsEndIsRead() = runBlocking {
         val log = FileSystem.SYSTEM_TEMPORARY_DIRECTORY / "ostrom-detached-${Random.nextLong().toULong()}.log"
         try {
             FileSystem.SYSTEM.write(log) { writeUtf8("before\n") }
-            val script = "Write-Output out; [Console]::Error.WriteLine('err'); exit 3"
-            val process = startDetachedProcess(listOf(powershell, "-NoProfile", "-Command", script), log.toString())
-            val code = ended(process)
-            val written = FileSystem.SYSTEM.read(log) { readUtf8() }
-            val bare = startDetachedProcess(listOf(powershell, "-NoProfile", "-Command", "exit 3"), log.toString())
-            val bareCode = ended(bare)
-            val whoami = "$system\\whoami.exe"
-            val plain = ended(startDetachedProcess(listOf(whoami), log.toString()))
-            val afterPlain = FileSystem.SYSTEM.read(log) { readUtf8() }
-            val bogus = ended(startDetachedProcess(listOf(whoami, "/bogus"), log.toString()))
-            val afterBogus = FileSystem.SYSTEM.read(log) { readUtf8() }
-            val said = "exit $code (bare exit 3: $bareCode), log: [$written]; whoami: $plain [$afterPlain]; " +
-                "whoami /bogus: $bogus [$afterBogus]"
-            assertEquals(3, code, said)
-            assertEquals(3, process.exitCode(), "read again once ended")
-            val lines = written.lines().map { it.trim() }.filter { it.isNotEmpty() }
-            assertEquals(listOf("before", "out", "err"), lines, "stdout and stderr appended")
+            val answered = startDetachedProcess(listOf(whoami), log.toString())
+            assertEquals(0, ended(answered))
+            assertEquals(0, answered.exitCode(), "read again once ended")
+            val refused = startDetachedProcess(listOf(whoami, "/bogus"), log.toString())
+            assertEquals(1, ended(refused), "its argument reached it")
+            val lines = FileSystem.SYSTEM.read(log) { readUtf8() }.lines().map { it.trim() }.filter { it.isNotEmpty() }
+            assertEquals("before", lines.first(), "appended, never truncated")
+            assertTrue(lines[1].contains('\\'), "stdout appended: ${lines[1]}")
+            assertTrue(lines.drop(2).any { "/bogus" in it }, "stderr appended: $lines")
         } finally {
             FileSystem.SYSTEM.delete(log, mustExist = false)
         }
