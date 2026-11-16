@@ -112,12 +112,12 @@ suspend fun <T> typedAnswer(call: suspend () -> T): TypedAnswer<T> = try {
     TypedAnswer.Failed(ServerAnswer.Failed(e.status.takeIf { it > 0 }, e.type, "${e.message}"))
 } catch (e: ServerUnreachable) {
     TypedAnswer.Failed(ServerAnswer.Failed(null, "unreachable", e.reason))
-} catch (e: HttpRequestTimeoutException) {
-    timedOut(e)
-} catch (e: ConnectTimeoutException) {
-    timedOut(e)
-} catch (e: SocketTimeoutException) {
-    timedOut(e)
+} catch (_: HttpRequestTimeoutException) {
+    timedOut()
+} catch (_: ConnectTimeoutException) {
+    timedOut()
+} catch (_: SocketTimeoutException) {
+    timedOut()
 } catch (_: IllegalArgumentException) {
     unreadable()
 } catch (_: IllegalStateException) {
@@ -126,8 +126,8 @@ suspend fun <T> typedAnswer(call: suspend () -> T): TypedAnswer<T> = try {
     unreadable()
 }
 
-private fun timedOut(e: Exception) =
-    TypedAnswer.Failed(ServerAnswer.Failed(null, "unreachable", e.message ?: "the call timed out"))
+private fun timedOut() =
+    TypedAnswer.Failed(ServerAnswer.Failed(null, "unreachable", "the call timed out"))
 
 private fun unreadable() = TypedAnswer.Failed(ServerAnswer.Failed(BAD_GATEWAY, UNREADABLE, UNREADABLE_MESSAGE))
 
