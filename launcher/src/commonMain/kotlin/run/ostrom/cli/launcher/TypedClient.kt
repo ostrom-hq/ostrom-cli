@@ -6,6 +6,9 @@ import io.ktor.client.engine.HttpClientEngineBase
 import io.ktor.client.engine.HttpClientEngineCapability
 import io.ktor.client.engine.HttpClientEngineConfig
 import io.ktor.client.engine.callContext
+import io.ktor.client.network.sockets.ConnectTimeoutException
+import io.ktor.client.network.sockets.SocketTimeoutException
+import io.ktor.client.plugins.HttpRequestTimeoutException
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.HttpTimeoutCapability
 import io.ktor.client.request.HttpRequestData
@@ -96,7 +99,8 @@ sealed interface TypedAnswer<out T> {
 
 /**
  * Runs [call]: a refusal ([OstromException]) is its status, type and message; an unreachable server
- * ([ServerUnreachable]) is a failure without status; an answer or a request that cannot be read or built (an
+ * ([ServerUnreachable]) or a call that timed out is a failure without status; an answer or a request that cannot be
+ * read or built (an
  * [IllegalArgumentException] or [IllegalStateException]) is an unreadable answer, so that a best-effort call degrades
  * rather than throws. A cancellation goes through.
  */
@@ -108,6 +112,12 @@ suspend fun <T> typedAnswer(call: suspend () -> T): TypedAnswer<T> = try {
     TypedAnswer.Failed(ServerAnswer.Failed(e.status.takeIf { it > 0 }, e.type, "${e.message}"))
 } catch (e: ServerUnreachable) {
     TypedAnswer.Failed(ServerAnswer.Failed(null, "unreachable", e.reason))
+} catch (e: HttpRequestTimeoutException) {
+    timedOut(e)
+} catch (e: ConnectTimeoutException) {
+    timedOut(e)
+} catch (e: SocketTimeoutException) {
+    timedOut(e)
 } catch (_: IllegalArgumentException) {
     unreadable()
 } catch (_: IllegalStateException) {
@@ -115,6 +125,9 @@ suspend fun <T> typedAnswer(call: suspend () -> T): TypedAnswer<T> = try {
 } catch (_: ContentConvertException) {
     unreadable()
 }
+
+private fun timedOut(e: Exception) =
+    TypedAnswer.Failed(ServerAnswer.Failed(null, "unreachable", e.message ?: "the call timed out"))
 
 private fun unreadable() = TypedAnswer.Failed(ServerAnswer.Failed(BAD_GATEWAY, UNREADABLE, UNREADABLE_MESSAGE))
 

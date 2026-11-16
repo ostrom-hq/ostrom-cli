@@ -177,6 +177,18 @@ class TypedClientTest {
     }
 
     @Test
+    fun aCallThatTimedOutIsAnUnreachableServer() = runTest {
+        fake.timedOut = setOf("GET /api/v1/cloud/sessions/cs1")
+        val answer = typedAnswer { typedClient(fake, "tok").cloudSessions.get("cs1") } as TypedAnswer.Failed
+        assertNull(answer.failure.status)
+        assertEquals("unreachable", answer.failure.type)
+        val connect = typedAnswer { throw io.ktor.client.network.sockets.ConnectTimeoutException("slow", null) }
+        assertEquals("unreachable", (connect as TypedAnswer.Failed).failure.type)
+        val socket = typedAnswer { throw io.ktor.client.network.sockets.SocketTimeoutException("slow") }
+        assertEquals("unreachable", (socket as TypedAnswer.Failed).failure.type)
+    }
+
+    @Test
     fun aValueThatIsNoObjectIsAnUnreadableAnswer() {
         val answer = TypedAnswer.Ok(listOf(1)).asServerAnswer()
         assertEquals(ServerAnswer.Failed(502, UNREADABLE, "its answer cannot be read"), answer)

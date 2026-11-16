@@ -534,10 +534,13 @@ class AgentLaunchUseCaseTest : AgentLaunchKit() {
         server.unreachable = setOf(capabilities)
         start()
         server.unreachable = emptySet()
+        server.timedOut = setOf(capabilities)
+        start()
+        server.timedOut = emptySet()
         server[capabilities] = 200 to """{"apiVersion":1,"serverVersion":"1.4.0","features":["$WAITS_WAKE"]}"""
         start(Agent.CODEX)
-        assertEquals(listOf(true, false, false, false, false, false), wakes)
-        assertEquals(6, server.sent(capabilities).size, "asked once a launch, Codex too: the todo is for every agent")
+        assertEquals(listOf(true, false, false, false, false, false, false), wakes)
+        assertEquals(7, server.sent(capabilities).size, "asked once a launch, Codex too: the todo is for every agent")
     }
 
     @Test

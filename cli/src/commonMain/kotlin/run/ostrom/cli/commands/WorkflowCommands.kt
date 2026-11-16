@@ -321,7 +321,7 @@ internal class WorkflowsRunCommand(private val dependencies: CliDependencies) : 
             val answer = runBlocking { access.server.call("POST", path, request, token, START_MILLIS, key) }
             val started = answer.orStop(access.signed.serverUrl, notFound)
             val name = definition.required("name")
-            val runId = started.text("id") ?: "?"
+            val runId = started.required("id")
             if (wait) follow(access, started, runId, name) else announce(started, runId, name)
         }
     }
