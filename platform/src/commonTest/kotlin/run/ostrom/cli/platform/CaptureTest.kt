@@ -11,6 +11,8 @@ class CaptureTest {
         val output = "hello".encodeToByteArray() + ByteArray(5)
         assertEquals(CaptureResult.Exited(3, "hel"), captureResultOf(3, 3, output))
         assertEquals(CaptureResult.Exited(0, ""), captureResultOf(0, 0, output))
+        // An output that filled the buffer is said to be cut.
+        assertEquals(true, (captureResultOf(10, 0, output) as CaptureResult.Exited).truncated)
         assertEquals(CaptureResult.NotFound, captureResultOf(-1, 0, output))
         assertEquals(CaptureResult.TimedOut, captureResultOf(-2, 0, output))
         assertEquals(CaptureResult.Failed, captureResultOf(-3, 0, output))

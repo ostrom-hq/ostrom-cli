@@ -32,7 +32,8 @@ class TodoChecksTest {
                     ghPr(5, "MERGED", body = "fixes ${marker("fix")}", oid = "1234567890abc"),
                     ghPr(2, "CLOSED", body = marker("fix")),
                     ghPr(1, "OPEN", body = marker("fix"), author = null),
-                    ghPr(6, "MERGED"),
+                    // what a gh that ignored the filter prints: the body still decides
+                    ghPr(6, "MERGED", body = "another item"),
                 ).joinToString(",") + "]",
             ),
             "gh api user" to printed("maya\n"),
@@ -47,11 +48,36 @@ class TodoChecksTest {
         assertEquals(
             listOf(
                 "gh", "pr", "list", "--repo", "acme/web", "--state", "all", "--search", "01234567 fix in:body",
-                "--json", "number,state,url,mergeCommit,author,body", "--limit", "20",
+                "--json", "number,state,url,mergeCommit,author,body", "--limit", "20", "--jq",
+                "[.[] | select((.body // \"\") | contains(\"<!-- ostrom-todo: 01234567/fix -->\")) | del(.body)]",
             ),
             capture.commands.first(),
         )
         assertEquals(20_000, capture.timeouts.first(), "gh is bounded")
+    }
+
+    @Test
+    fun theSearchLetsGhDropTheBodiesSoTheAnswerStaysSmall() {
+        // TeamCode #284: what gh prints once its own filter kept the matching pull request and removed its body.
+        val capture = FakeCapture(
+            // and a null body, which a gh that ignored the filter may print: no marker, not taken
+            "gh pr list" to printed(
+                "[${ghPr(1310, "MERGED", oid = "4e1c9a2f00")}," +
+                    "${ghPr(1311, "MERGED", oid = "b").dropLast(1)},\"body\":null}]",
+            ),
+            "gh api user" to printed("maya\n"),
+        )
+        assertEquals(listOf(true to "PR #1310 MERGED"), observed(capture, item("fix", merged)))
+        val filter = capture.commands.first().let { it[it.indexOf("--jq") + 1] }
+        assertTrue(marker("fix") in filter && "del(.body)" in filter, filter)
+    }
+
+    @Test
+    fun anAnswerOverTheCapturesBoundIsUnknownAndSaysWhy() {
+        val cut = CaptureResult.Exited(0, "[" + "x".repeat(64 * 1024), truncated = true)
+        val (passed, text) = observed(FakeCapture("gh pr list" to cut), item("fix", merged)).single()
+        assertEquals(null, passed, "unknown, not a failure")
+        assertEquals("unknown: gh printed more than 1 MiB; the answer was cut and cannot be read (pr list)", text)
     }
 
     @Test

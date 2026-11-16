@@ -48,7 +48,10 @@ internal fun interface HostLauncher {
  * @property pollWaitMillis The long poll's wait.
  * @property tickMillis Between two supervision rounds.
  * @property stopWaitMillis How long a stop waits for the hosts to checkpoint.
- * @property maxStarts The most starts of one session in [startWindowMillis].
+ * @property startBackoffMillis The wait before a host that stopped starts again, doubled with each start of the last
+ *   [startWindowMillis].
+ * @property maxStartBackoffMillis The longest of those waits.
+ * @property startWindowMillis How far back the starts that grow the wait are counted.
  * @property retryMillis Before an order that failed is tried again.
  * @property maxBackoffMillis The longest wait after failed polls.
  * @property lostCheckMillis Between two checks of a host that runs, which may have stopped answering.
@@ -57,7 +60,8 @@ internal data class DaemonTiming(
     val pollWaitMillis: Long = 20_000,
     val tickMillis: Long = 2_000,
     val stopWaitMillis: Long = 540_000,
-    val maxStarts: Int = 3,
+    val startBackoffMillis: Long = 2_000,
+    val maxStartBackoffMillis: Long = 300_000,
     val startWindowMillis: Long = 600_000,
     val retryMillis: Long = 30_000,
     val maxBackoffMillis: Long = 60_000,
@@ -80,11 +84,13 @@ internal data class DaemonTiming(
  *   accepted while the session is `creating`, its conversation id is stored for the host, which forks it
  *   (`--resume ID --fork-session`) at its first start. A `resuming` session continues its own conversation.
  * - **Supervision.** A host that exits while its session should still run on that epoch is started again on a new
- *   epoch, at most [DaemonTiming.maxStarts] times in [DaemonTiming.startWindowMillis]; the session is then refused
- *   (`host_failed`) if it is still queued. A host that stops answering without exiting (or a previous daemon's host)
- *   is checked on the server every [DaemonTiming.lostCheckMillis]: once the server paused its session for the lost
- *   host (`host_offline`, on that epoch), the daemon resumes it, within the same limit. A host whose session paused,
- *   ended or moved to another host is forgotten.
+ *   epoch after a wait that doubles with each start of the last [DaemonTiming.startWindowMillis] (from
+ *   [DaemonTiming.startBackoffMillis], at most [DaemonTiming.maxStartBackoffMillis]); there is no number of starts
+ *   after which it is given up or the session refused (TeamCode #282, #283: `host_failed` ended the session for
+ *   good). A host that stops answering without exiting (or a previous daemon's host) is checked on the server every
+ *   [DaemonTiming.lostCheckMillis]: once the server paused its session for the lost host (`host_offline`, on that
+ *   epoch), the daemon resumes it, and the queue gives it a new host (after the same growing wait). A host whose
+ *   session paused, ended or moved to another host is forgotten.
  * - **Stop.** It stops polling, asks the server to pause every session it hosts, waits for them up to
  *   [DaemonTiming.stopWaitMillis], then says it is offline (`DELETE /devices/current/daemon`). The next daemon
  *   resumes the sessions it paused ([DaemonSessions]).
@@ -204,16 +210,36 @@ internal class DeviceDaemon(
             check is OrderCheck.Refused -> check.reason
             resume != null && !continues(order.agent, (check as OrderCheck.Accepted).directory, resume) ->
                 RefusalReasons.RESUME_NOT_FOUND
-            !startAllowed(id) -> RefusalReasons.HOST_FAILED
             else -> null
         }
-        if (reason != null) {
-            refuse(id, reason)
-        } else {
-            accept(id, (check as OrderCheck.Accepted).directory, order.agent, resume)
+        return when {
+            reason != null -> {
+                refuse(id, reason)
+                true
+            }
+            deferred(id) -> false
+            else -> {
+                accept(id, (check as OrderCheck.Accepted).directory, order.agent, resume)
+                true
+            }
         }
-        return true
     }
+
+    /**
+     * A host that keeps stopping before it is ready (a device that is still starting, an update in progress) does not
+     * end the session: it stays queued, and is tried again after a growing wait. True while it waits.
+     */
+    private fun deferred(id: String): Boolean {
+        val wait = startWaitMillis(id)
+        if (wait > 0) {
+            report("The host of session $id keeps stopping before it is ready; trying again in ${seconds(wait)} s.")
+            retryAt[id] = now() + wait
+        }
+        return wait > 0
+    }
+
+    /** A wait as the seconds a person reads: whole seconds plus one, never under it (TeamCode's wording). */
+    private fun seconds(millis: Long) = millis / MILLIS_PER_SECOND + 1
 
     private fun continues(agent: String, directory: String, resume: String): Boolean =
         agent == CLAUDE && transcripts.belongs(directory, resume)
@@ -259,11 +285,21 @@ internal class DeviceDaemon(
         }
     }
 
-    private fun startAllowed(id: String): Boolean {
+    /**
+     * How long to wait before this session's host starts again: nothing for the first start, then the wait doubles with
+     * each start of the last [DaemonTiming.startWindowMillis] (from [DaemonTiming.startBackoffMillis], at most
+     * [DaemonTiming.maxStartBackoffMillis]). There is no number of starts after which the session is given up: a host
+     * that keeps stopping because its device is still starting or being updated is tried again, slowly, until it runs;
+     * a host that ran for the whole window starts afresh.
+     */
+    private fun startWaitMillis(id: String): Long {
         val now = now()
         val recent = starts.getOrPut(id) { mutableListOf() }
         recent.removeAll { now - it > timing.startWindowMillis }
-        return recent.size < timing.maxStarts
+        if (recent.isEmpty()) return 0
+        val backoff = (timing.startBackoffMillis shl (recent.size - 1).coerceAtMost(MAX_START_SHIFT))
+            .coerceAtMost(timing.maxStartBackoffMillis)
+        return (recent.max() + backoff - now).coerceAtLeast(0)
     }
 
     /** Opens the session's epoch on this device, records it, and starts its host. */
@@ -288,7 +324,7 @@ internal class DeviceDaemon(
             launcher.start(id, host.epoch, host.orgId, records.log(id))
         } catch (_: IOException) {
             report("The host of session $id could not start.")
-            // Supervised as a host that exited at once: started again within the limit, then given up.
+            // Supervised as a host that exited at once: started again after a growing wait.
             DetachedProcess { FAILED_START }
         }
         hosted[id] = Hosted(id, host.epoch, process)
@@ -382,23 +418,30 @@ internal class DeviceDaemon(
     private suspend fun watchHosts() {
         for (entry in hosted.values.toList()) {
             val code = entry.process?.exitCode()
+            // A host that stopped waits out its growing delay before the server is asked about it again.
+            if (code != null && backingOff(entry.sessionId)) continue
             // A host still running (or a previous daemon's) is asked about every lostCheckMillis only: it may be
             // silent.
             if (code == null && !checkDue(entry.sessionId)) continue
-            val view = try {
-                server.session(entry.sessionId)
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                if (refusedWith(error, NOT_FOUND)) forget(entry.sessionId)
-                continue
-            }
+            val view = viewOf(entry.sessionId) ?: continue
             when {
                 view.paused && view.failureCode == HOST_OFFLINE && view.epoch == entry.epoch -> resumeLost(entry)
                 code != null -> exited(entry, view, code)
             }
         }
     }
+
+    /** The session as the server sees it now; null when it cannot say (forgotten once it no longer exists). */
+    private suspend fun viewOf(id: String): SessionState? = try {
+        server.session(id)
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        if (refusedWith(error, NOT_FOUND)) forget(id)
+        null
+    }
+
+    private fun backingOff(id: String): Boolean = retryAt[id]?.let { now() < it } == true
 
     private fun checkDue(id: String): Boolean {
         val now = now()
@@ -407,21 +450,39 @@ internal class DeviceDaemon(
         return true
     }
 
-    /** A host exited: started again on a new epoch while its session should still run here, within the limit. */
+    /** A host exited: started again on a new epoch while its session should still run here, after a growing wait. */
     private suspend fun exited(entry: Hosted, view: SessionState, code: Int) {
         val stillOurs = view.desiredStatus == SessionState.RUNNING && !view.ended && view.epoch == entry.epoch
         if (!stillOurs) {
             forget(entry.sessionId)
             return
         }
-        val record = records.load(entry.sessionId)
-        hosted.remove(entry.sessionId)
-        if (record == null || !startAllowed(entry.sessionId)) {
-            report("The host of session ${entry.sessionId} stopped (exit code $code); not starting it again.")
-            sessions.remove(entry.sessionId)
-        } else {
-            report("The host of session ${entry.sessionId} stopped (exit code $code); starting it again.")
-            accept(entry.sessionId, record.directory, record.agent)
+        restart(entry.sessionId, code)
+    }
+
+    /** Starts a stopped host again, after its growing wait; never once its record is gone. */
+    private suspend fun restart(id: String, code: Int) {
+        val record = records.load(id)
+        val wait = if (record == null) 0 else startWaitMillis(id)
+        when {
+            record == null -> {
+                hosted.remove(id)
+                report(
+                    "The host of session $id stopped (exit code $code) and its record is gone; not starting it again.",
+                )
+                sessions.remove(id)
+            }
+            // Growing wait instead of giving up: the entry stays, and this tick leaves it for a later one. Said once:
+            // watchHosts skips the entry until the wait is over, and then it starts at once.
+            wait > 0 -> {
+                report("The host of session $id stopped (exit code $code); starting it again in ${seconds(wait)} s.")
+                retryAt[id] = now() + wait
+            }
+            else -> {
+                hosted.remove(id)
+                report("The host of session $id stopped (exit code $code); starting it again.")
+                accept(id, record.directory, record.agent)
+            }
         }
     }
 
@@ -431,9 +492,8 @@ internal class DeviceDaemon(
      */
     private suspend fun resumeLost(entry: Hosted) {
         val id = entry.sessionId
-        val recent = starts[id].orEmpty().count { now() - it <= timing.startWindowMillis }
-        if (records.load(id) == null || recent >= timing.maxStarts) {
-            report("The host of session $id stopped answering; not starting it again.")
+        if (records.load(id) == null) {
+            report("The host of session $id stopped answering and its record is gone; not starting it again.")
             forget(id)
             return
         }
@@ -516,6 +576,11 @@ internal class DeviceDaemon(
         const val BACKOFF_UNIT_MILLIS = 1_000L
         const val FAILED_START = 127
         const val MAX_SHIFT = 6
+
+        /** The most doublings of the start wait (TeamCode's 16), so the shift never overflows. */
+        const val MAX_START_SHIFT = 16
+
+        const val MILLIS_PER_SECOND = 1_000L
         const val HOST_OFFLINE = "host_offline"
         const val CREATING = "creating"
         const val CLAUDE = "claude"

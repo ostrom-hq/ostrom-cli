@@ -100,7 +100,13 @@ class DeviceDaemonEdgesTest {
 
     @Test
     fun startsOlderThanTheWindowNoLongerCount() = test { f ->
-        f.timing = f.timing.copy(lostCheckMillis = 20, startWindowMillis = 100, maxStarts = 1)
+        // A start inside the window would wait for ever (far past the test's timeout): the first one is out of it.
+        f.timing = f.timing.copy(
+            lostCheckMillis = 20,
+            startWindowMillis = 100,
+            startBackoffMillis = 10_000_000,
+            maxStartBackoffMillis = 10_000_000,
+        )
         val folder = f.folder("project")
         f.server.queue("s1", folder.id, "project")
         f.hosts.hang += "s1"
@@ -129,7 +135,7 @@ class DeviceDaemonEdgesTest {
         val daemon = f.start(this)
         waitUntil { "GET /api/v1/cloud/sessions/s1" in f.server.calls }
         f.server.loseHost("s1")
-        waitUntil(f) { f.reports.any { "session s1 stopped answering; not starting it again" in it } }
+        waitUntil(f) { f.reports.any { "session s1 stopped answering and its record is gone; not starting it" in it } }
         f.stopAndJoin(daemon)
         assertTrue(f.state.read().isEmpty())
         assertFalse("resume s1" in f.server.events)

@@ -281,26 +281,47 @@ class DeviceDaemonTest {
     }
 
     @Test
-    fun aHostThatDiesIsStartedAgainThenGivenUpAfterThreeStarts() = test { f ->
+    fun aHostThatKeepsDyingIsStartedAgainWithoutLimitAfterAGrowingWait() = test { f ->
         val folder = f.folder("project")
         f.server.queue("s1", folder.id, "project")
         val daemon = f.start(this)
         waitUntil { f.hosts.started.size == 1 }
+        // TeamCode #283: far more than the three starts that used to end it, every crash followed by a new epoch.
+        val startedAt = mutableListOf(testScheduler.currentTime)
+        for (round in 2..8) {
+            f.hosts.crash += "s1"
+            waitUntil { f.hosts.started.size == round }
+            startedAt += testScheduler.currentTime
+            assertEquals(round.toLong(), f.hosts.started.last().second, "A new epoch for the new host")
+        }
+        // The wait doubles from 2 s with each start of the last ten minutes.
+        val gaps = startedAt.zipWithNext { a, b -> b - a }
+        val expected = listOf(2_000L, 4_000L, 8_000L, 16_000L, 32_000L, 64_000L, 128_000L)
+        assertTrue(gaps.zip(expected).all { (gap, wait) -> gap in wait - 20..wait + 20 }, "From 2 s, doubling: $gaps")
+        assertTrue(f.reports.any { "stopped (exit code 1); starting it again in " in it }, f.reports.toString())
+        assertTrue(f.server.events.none { it.startsWith("refuse s1") }, "Never refused for a host that kept stopping")
+        assertTrue(f.reports.none { "not starting it again" in it }, "Never given up")
+        f.stopAndJoin(daemon)
+    }
+
+    @Test
+    fun aQueuedSessionWhoseHostKeepsStoppingWaitsInsteadOfBeingRefused() = test { f ->
+        val folder = f.folder("project")
+        f.server.queue("s1", folder.id, "project")
+        val daemon = f.start(this)
+        waitUntil { f.hosts.started.size == 1 }
+        f.records.prune(setOf("s1"))
         f.hosts.crash += "s1"
-        waitUntil { f.hosts.started.size == 2 }
-        assertEquals(2L, f.hosts.started.last().second, "A new epoch for the new host")
-        f.hosts.crash += "s1"
-        waitUntil { f.hosts.started.size == 3 }
-        f.hosts.crash += "s1"
-        waitUntil { f.reports.any { "not starting it again" in it } }
-        assertEquals(3, f.hosts.started.size, "At most three starts in the window")
-        assertTrue(f.state.read().isEmpty())
-        // Back in the queue later (its epoch was lost before it was ready): refused instead of looping.
+        waitUntil { f.reports.any { "its record is gone; not starting it again" in it } }
+        // TeamCode #282: back in the queue (its epoch was lost before it was ready), it waits and is hosted again; a
+        // refusal (`host_failed`) would have ended the session for good.
         f.server.sessions.getValue("s1").apply {
             waiting = true
             status = "creating"
         }
-        waitUntil { "refuse s1 host_failed" in f.server.events }
+        waitUntil(f) { f.reports.any { "keeps stopping before it is ready; trying again in " in it } }
+        waitUntil(f) { f.hosts.started.size == 2 }
+        assertTrue(f.server.events.none { it.startsWith("refuse s1") })
         f.stopAndJoin(daemon)
     }
 
@@ -358,22 +379,22 @@ class DeviceDaemonTest {
     }
 
     @Test
-    fun aSilentHostIsReplacedAtMostThreeTimesInTheWindow() = test { f ->
+    fun aSilentHostIsReplacedEveryTimeTheServerPausesItsSession() = test { f ->
         f.timing = f.timing.copy(lostCheckMillis = 20)
         val folder = f.folder("project")
         f.server.queue("s1", folder.id, "project")
         f.hosts.hang += "s1"
         val daemon = f.start(this)
-        for (count in 1..3) {
+        // TeamCode #283: more than the three replacements that used to be the most; the session is never given up.
+        for (count in 1..6) {
             waitUntil { f.hosts.started.size == count }
             f.server.loseHost("s1")
         }
-        waitUntil { f.reports.any { "stopped answering; not starting it again" in it } }
+        waitUntil { f.hosts.started.size == 7 }
         f.hosts.hang.clear()
         f.stopAndJoin(daemon)
-        assertEquals(3, f.hosts.started.size)
-        assertEquals(2, f.server.events.count { it == "resume s1" })
-        assertTrue(f.state.read().isEmpty())
+        assertEquals(6, f.server.events.count { it == "resume s1" })
+        assertTrue(f.reports.none { "not starting it again" in it })
     }
 
     @Test
@@ -498,11 +519,11 @@ class DeviceDaemonTest {
         val daemon = f.start(this)
         waitUntil { f.reports.any { "The host of session s1 could not start." in it } }
         assertTrue(f.reports.any { "not bound to this device" in it }, f.reports.toString())
-        // Supervised as a host that exited at once: started again within the limit, then given up.
-        waitUntil { f.reports.any { "The host of session s1 stopped (exit code 127); not starting it again." in it } }
-        assertEquals(3, f.server.events.count { it.startsWith("host s1 ") })
+        // Supervised as a host that exited at once: started again after a growing wait, never given up.
+        waitUntil { f.reports.any { "The host of session s1 stopped (exit code 127); starting it again in" in it } }
+        waitUntil { f.server.events.count { it.startsWith("host s1 ") } == 4 }
+        assertTrue(f.reports.none { "not starting it again" in it })
         f.stopAndJoin(daemon)
-        assertEquals(emptyList(), f.state.read(), "Nothing left to resume")
     }
 
     @Test

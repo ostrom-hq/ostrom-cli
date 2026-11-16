@@ -3,8 +3,11 @@ package run.ostrom.cli.platform
 
 /** What became of a child process whose output was captured by [ProcessCapture.capture]. */
 sealed interface CaptureResult {
-    /** The child ended with [code] and printed [output] on stdout (cut at [ProcessCapture.MAX_OUTPUT_BYTES]). */
-    data class Exited(val code: Int, val output: String) : CaptureResult
+    /**
+     * The child ended with [code] and printed [output] on stdout (cut at [ProcessCapture.MAX_OUTPUT_BYTES]).
+     * [truncated]: the output reached that bound, so [output] may be cut and must not be parsed (TeamCode #284).
+     */
+    data class Exited(val code: Int, val output: String, val truncated: Boolean = false) : CaptureResult
 
     /** No executable of that name was found on the PATH. */
     data object NotFound : CaptureResult
@@ -59,7 +62,8 @@ class ProcessCaptureImpl : ProcessCapture {
 
 /** Reads the result codes of the native capture shim (count, -1 not found, -2 deadline, else failed). */
 internal fun captureResultOf(count: Int, exitCode: Int, output: ByteArray): CaptureResult = when {
-    count >= 0 -> CaptureResult.Exited(exitCode, output.decodeToString(0, count))
+    // An output that filled the buffer was cut there: the shim reads and drops the rest.
+    count >= 0 -> CaptureResult.Exited(exitCode, output.decodeToString(0, count), truncated = count >= output.size)
     count == CAPTURE_NOT_FOUND -> CaptureResult.NotFound
     count == CAPTURE_TIMED_OUT -> CaptureResult.TimedOut
     else -> CaptureResult.Failed
