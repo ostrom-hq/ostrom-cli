@@ -238,7 +238,7 @@ internal class DeviceDaemon(
         return wait > 0
     }
 
-    /** A wait as the whole seconds a person reads, rounded up. */
+    /** A wait as the seconds a person reads: whole seconds plus one, never under it (TeamCode's wording). */
     private fun seconds(millis: Long) = millis / MILLIS_PER_SECOND + 1
 
     private fun continues(agent: String, directory: String, resume: String): Boolean =
