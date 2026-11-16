@@ -30,7 +30,13 @@ class DetachedProcessWindowsTest {
             val written = FileSystem.SYSTEM.read(log) { readUtf8() }
             val bare = startDetachedProcess(listOf(powershell, "-NoProfile", "-Command", "exit 3"), log.toString())
             val bareCode = ended(bare)
-            val said = "exit $code (bare exit 3: $bareCode), log: $written"
+            val whoami = "$system\\whoami.exe"
+            val plain = ended(startDetachedProcess(listOf(whoami), log.toString()))
+            val afterPlain = FileSystem.SYSTEM.read(log) { readUtf8() }
+            val bogus = ended(startDetachedProcess(listOf(whoami, "/bogus"), log.toString()))
+            val afterBogus = FileSystem.SYSTEM.read(log) { readUtf8() }
+            val said = "exit $code (bare exit 3: $bareCode), log: [$written]; whoami: $plain [$afterPlain]; " +
+                "whoami /bogus: $bogus [$afterBogus]"
             assertEquals(3, code, said)
             assertEquals(3, process.exitCode(), "read again once ended")
             val lines = written.lines().map { it.trim() }.filter { it.isNotEmpty() }
