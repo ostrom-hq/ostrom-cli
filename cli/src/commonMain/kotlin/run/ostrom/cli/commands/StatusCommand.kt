@@ -65,7 +65,9 @@ internal class StatusCommand(private val dependencies: CliDependencies) : CliktC
                 val waiting = async { waitingOf(scoped ?: signed.server, signed.token) }
                 // the capacity is the organisation's: without one, not read
                 val capacity = async {
-                    scope?.let { (server, client) -> readCapacity(server, client, signed.token, dependencies.clock()) }
+                    scope?.let { (server, client) ->
+                        readCapacity(server, client, signed.token, login, dependencies.clock())
+                    }
                 }
                 Triple(harness.await(), waiting.await(), capacity.await())
             }

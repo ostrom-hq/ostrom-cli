@@ -2,6 +2,7 @@
 package run.ostrom.cli
 
 import run.ostrom.cli.commands.CapacityReport
+import run.ostrom.cli.commands.UNEXPECTED
 import run.ostrom.cli.commands.bar
 import run.ostrom.cli.commands.duration
 import run.ostrom.cli.launcher.typedClient
@@ -32,7 +33,9 @@ class StatusCapacityTest {
     }
 
     private suspend fun readCapacity(fake: Fake, token: String, now: Long) =
-        run.ostrom.cli.commands.readCapacity(fake.server, fake.client, token, now)
+        run.ostrom.cli.commands.readCapacity(fake.server, fake.client, token, "maya k", now)
+
+    private val policy = "/api/v1/members/maya%20k/policy"
 
     private val accounts = """{"items":[""" +
         """{"label":"Account 1","provider":"claude","status":"ready","paused":false,"windows":[""" +
@@ -54,6 +57,7 @@ class StatusCapacityTest {
                     """"maxConcurrent":2,"minIntervalMillis":5000,"message":"m","createdAt":"x",""" +
                     """"expiresAt":"2026-11-15T10:03:00Z"}}"""),
                 "/api/v1/accounts" to (200 to accounts),
+                policy to (200 to """{"member":"maya k","poolId":"team-a","allowSharedOverflow":true}"""),
             ),
             "ost_1",
             now,
@@ -82,7 +86,7 @@ class StatusCapacityTest {
         assertTrue(rows.any { it.endsWith("no, cooling down until 2026-11-15 10:05 UTC, in 5m") })
         assertTrue(rows.any { it.startsWith("  Account 4") && it.endsWith("yes") }, "its rest is over")
         assertTrue(rows.any { it.startsWith("  -") && it.endsWith("no, reconnect required") })
-        assertTrue(report.json().keys == setOf("queue", "budget", "pacing", "accounts", "unavailable"))
+        assertTrue(report.json().keys == setOf("queue", "budget", "pacing", "accounts", "policy", "unavailable"))
     }
 
     @Test
@@ -109,7 +113,10 @@ class StatusCapacityTest {
             "ost_1",
             now,
         )
-        assertEquals(mapOf("queue" to "unexpected_response", "budget" to "read_failed"), report.unavailable)
+        assertEquals(
+            mapOf("queue" to "unexpected_response", "budget" to "read_failed", "policy" to "not_served"),
+            report.unavailable,
+        )
         assertEquals(
             "Queue       unavailable (unexpected response from the server)\n" +
                 "Budget      unavailable (the read failed; try again)\n" +
@@ -128,7 +135,10 @@ class StatusCapacityTest {
             now,
         )
         assertEquals(
-            mapOf("pacing" to "unexpected_response", "accounts" to "unexpected_response", "budget" to "read_failed"),
+            mapOf(
+                "pacing" to "unexpected_response", "accounts" to "unexpected_response", "budget" to "read_failed",
+                "policy" to "not_served",
+            ),
             odd.unavailable,
         )
         val text = odd.text()
@@ -176,9 +186,34 @@ class StatusCapacityTest {
             now,
         )
         assertEquals(
-            mapOf("queue" to "not_served", "budget" to "unexpected_response", "accounts" to "unexpected_response"),
+            mapOf(
+                "queue" to "not_served", "budget" to "unexpected_response", "accounts" to "unexpected_response",
+                "policy" to "not_served",
+            ),
             absent.unavailable,
         )
+    }
+
+    @Test
+    fun theCallersPoolAndOverflowAreTheServersAnswerInTheJsonOnly() = runTest {
+        val answer = """{"member":"maya k","poolId":"team-a","allowSharedOverflow":true}"""
+        val report = readCapacity(server(policy to (200 to answer)), "ost_1", now)
+        assertEquals(parse(answer), report.json()["policy"])
+        assertTrue(report.text().lines().none { "team-a" in it }, "TeamCode's status text shows no pool")
+        val alone = """{"member":"maya k","allowSharedOverflow":false}"""
+        val none = readCapacity(server(policy to (200 to alone)), "ost_1", now)
+        assertEquals(null, none.unavailable["policy"], "a member in no pool")
+        assertEquals(parse(alone), none.policy)
+    }
+
+    @Test
+    fun aPoolPolicyTheServerDoesNotServeOrGivesInAnotherShapeSaysWhy() = runTest {
+        assertEquals("not_served", readCapacity(server(), "ost_1", now).unavailable["policy"], "an older server")
+        assertEquals("not_served", readCapacity(server(policy to (403 to "{}")), "ost_1", now).unavailable["policy"])
+        assertEquals("read_failed", readCapacity(server(policy to (500 to "{}")), "ost_1", now).unavailable["policy"])
+        val odd = readCapacity(server(policy to (200 to """{"poolId":"team-a"}""")), "ost_1", now)
+        assertEquals(UNEXPECTED, odd.unavailable["policy"])
+        assertEquals(kotlinx.serialization.json.JsonNull, odd.json()["policy"])
     }
 
     @Test

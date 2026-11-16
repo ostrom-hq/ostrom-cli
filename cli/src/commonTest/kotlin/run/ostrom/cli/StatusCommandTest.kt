@@ -21,7 +21,8 @@ class StatusCommandTest : SetupKit() {
 
     private companion object {
         const val NOT_SERVED = "unavailable from this server or credential (ostrom login again if your token is older)"
-        const val NO_CAPACITY = """"queue":null,"budget":null,"pacing":null,"accounts":null,"unavailable":{}"""
+        const val NO_CAPACITY =
+            """"queue":null,"budget":null,"pacing":null,"accounts":null,"policy":null,"unavailable":{}"""
     }
 
     /** `ostrom status args` against [routes], in the git repository whose top is [top] (null: outside one). */
@@ -73,10 +74,25 @@ class StatusCommandTest : SetupKit() {
             """{"login":"maya-k","organization":"Acme","role":"admin","server":"https://ostrom.example",""" +
                 """"repository":"acme","harness":"p2026-3","waiting":2,"waitingComplete":true,""" +
                 """"version":"$version","pinnedKey":"a1b2c3d4",""" +
-                """"queue":null,"budget":null,"pacing":null,"accounts":null,"unavailable":{"queue":"not_served",""" +
-                """"budget":"not_served","pacing":"not_served","accounts":"not_served"}}""" + "\n",
+                """"queue":null,"budget":null,"pacing":null,"accounts":null,"policy":null,""" +
+                """"unavailable":{"queue":"not_served","budget":"not_served","pacing":"not_served",""" +
+                """"accounts":"not_served","policy":"not_served"}}""" + "\n",
             console.out.toString(),
         )
+    }
+
+    @Test
+    fun statusJsonGivesTheCallersOwnPoolPolicyReadByTheirLogin() {
+        signIn("/home/maya/.config/ostrom")
+        val policy = """{"member":"maya-k","poolId":"team-a","allowSharedOverflow":true}"""
+        val routes = mapOf(me, orgs(acme), "GET /api/v1/members/maya-k/policy" to (200 to policy))
+        assertEquals(0, status(routes, "--json", top = null))
+        assertOut(""""policy":$policy,""")
+        val read = requests.map { it.second }.single { it.path.endsWith("/policy") }
+        assertEquals("o1", read.org, "read in the organisation")
+        console.out.clear()
+        assertEquals(0, status(routes, top = null))
+        assertTrue("team-a" !in console.out.toString(), "the text view shows no pool, as TeamCode's")
     }
 
     @Test
