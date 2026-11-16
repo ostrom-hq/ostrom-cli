@@ -6,6 +6,7 @@ import io.ktor.client.engine.HttpClientEngineBase
 import io.ktor.client.engine.HttpClientEngineCapability
 import io.ktor.client.engine.HttpClientEngineConfig
 import io.ktor.client.engine.callContext
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.HttpTimeoutCapability
 import io.ktor.client.request.HttpRequestData
 import io.ktor.client.request.HttpResponseData
@@ -20,6 +21,7 @@ import io.ktor.utils.io.ByteChannel
 import io.ktor.utils.io.InternalAPI
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.readRemaining
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -27,7 +29,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.CoroutineStart
 import io.ktor.serialization.ContentConvertException
 import kotlinx.io.readByteArray
-import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.encodeToJsonElement
@@ -53,13 +54,30 @@ class ServerUnreachable(val reason: String) : IOException(reason)
  *
  * @param token The bearer token of the calls, or null for anonymous ones.
  * @param org The organization the calls act in (`Ostrom-Org`), or null.
+ * @param timeoutMillis How long a call may take, in place of the core client's 30 s (a call that sets its own, an
+ *   upload, keeps it), or null.
  */
-fun typedClient(transport: ServerTransport, token: String?, org: String? = null): OstromClient =
+fun typedClient(
+    transport: ServerTransport,
+    token: String?,
+    org: String? = null,
+    timeoutMillis: Long? = null,
+): OstromClient =
     OstromClient(
         serverUrl = TRANSPORT_ORIGIN,
         token = { token },
         organization = { org },
-        createHttpClient = { configure -> HttpClient(TransportEngine(transport)) { configure(this) } },
+        createHttpClient = { configure ->
+            HttpClient(TransportEngine(transport)) {
+                configure(this)
+                if (timeoutMillis != null) {
+                    install(HttpTimeout) {
+                        requestTimeoutMillis = timeoutMillis
+                        socketTimeoutMillis = timeoutMillis
+                    }
+                }
+            }
+        },
     )
 
 /**
@@ -78,24 +96,32 @@ sealed interface TypedAnswer<out T> {
 
 /**
  * Runs [call]: a refusal ([OstromException]) is its status, type and message; an unreachable server
- * ([ServerUnreachable]) is a failure without status. Any other failure, a cancellation included, goes through.
+ * ([ServerUnreachable]) is a failure without status; an answer or a request that cannot be read or built (an
+ * [IllegalArgumentException] or [IllegalStateException]) is an unreadable answer, so that a best-effort call degrades
+ * rather than throws. A cancellation goes through.
  */
 suspend fun <T> typedAnswer(call: suspend () -> T): TypedAnswer<T> = try {
     TypedAnswer.Ok(call())
+} catch (e: CancellationException) {
+    throw e
 } catch (e: OstromException) {
     TypedAnswer.Failed(ServerAnswer.Failed(e.status.takeIf { it > 0 }, e.type, "${e.message}"))
 } catch (e: ServerUnreachable) {
     TypedAnswer.Failed(ServerAnswer.Failed(null, "unreachable", e.reason))
-} catch (_: SerializationException) {
-    TypedAnswer.Failed(ServerAnswer.Failed(BAD_GATEWAY, UNREADABLE, UNREADABLE_MESSAGE))
+} catch (_: IllegalArgumentException) {
+    unreadable()
+} catch (_: IllegalStateException) {
+    unreadable()
 } catch (_: ContentConvertException) {
-    TypedAnswer.Failed(ServerAnswer.Failed(BAD_GATEWAY, UNREADABLE, UNREADABLE_MESSAGE))
+    unreadable()
 }
+
+private fun unreadable() = TypedAnswer.Failed(ServerAnswer.Failed(BAD_GATEWAY, UNREADABLE, UNREADABLE_MESSAGE))
 
 /** The `type` of the failure of an answer this ostrom cannot read (a server of another API, a proxy's page). */
 const val UNREADABLE = "unreadable_answer"
-private const val UNREADABLE_MESSAGE = "its answer cannot be read"
-private const val BAD_GATEWAY = 502
+internal const val UNREADABLE_MESSAGE = "its answer cannot be read"
+internal const val BAD_GATEWAY = 502
 
 /**
  * [OstromJson] for what the CLI shows: a default value is written (a session's `githubAccess: owner` is a fact the
@@ -111,9 +137,17 @@ inline fun <reified T> asJson(value: T): JsonObject = CliJson.encodeToJsonElemen
 
 /** A typed answer as the untyped one it replaces: its value as the JSON the server sent, or its failure. */
 inline fun <reified T> TypedAnswer<T>.asServerAnswer(): ServerAnswer = when (this) {
-    is TypedAnswer.Ok -> ServerAnswer.Ok(asJson(value))
+    is TypedAnswer.Ok -> try {
+        ServerAnswer.Ok(asJson(value))
+    } catch (_: IllegalArgumentException) {
+        unreadableAnswer()
+    }
     is TypedAnswer.Failed -> failure
 }
+
+/** The failure of a typed value that cannot be shown as JSON. */
+@PublishedApi
+internal fun unreadableAnswer(): ServerAnswer.Failed = ServerAnswer.Failed(BAD_GATEWAY, UNREADABLE, UNREADABLE_MESSAGE)
 
 /** The value of a successful call, else null. */
 fun <T> TypedAnswer<T>.valueOrNull(): T? = (this as? TypedAnswer.Ok)?.value

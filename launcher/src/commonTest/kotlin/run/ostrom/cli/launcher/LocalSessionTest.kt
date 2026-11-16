@@ -53,6 +53,16 @@ class LocalSessionTest {
     }
 
     @Test
+    fun theCallsOfTheOpeningTakeFiveSecondsAtMost() = runTest {
+        serveASession()
+        server["POST $SESSIONS/cs1/host"] = 409 to """{"error":{"type":"session_not_running","message":"no"}}"""
+        open()
+        val calls = server.requests.filter { it.path.startsWith(SESSIONS) }
+        assertEquals(3, calls.size, "create, host, stop")
+        assertEquals(setOf(5_000L), calls.map { it.timeoutMillis }.toSet())
+    }
+
+    @Test
     fun theSessionIsNamedAfterTheDirectoryOrTheAgent() = runTest {
         serveASession()
         open("C:\\work\\shop\\", Agent.CODEX)

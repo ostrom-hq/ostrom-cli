@@ -115,8 +115,12 @@ class ServerJson(private val transport: ServerTransport) {
         return ServerAnswer.Failed(status, error?.text("type"), message)
     }
 
-    /** The typed client of ostrom-core over the same transport, with [token] and the organization [org] if any. */
-    fun client(token: String?, org: String? = null): OstromClient = typedClient(transport, token, org)
+    /**
+     * The typed client of ostrom-core over the same transport, with [token] and the organization [org] if any; each
+     * call takes [timeoutMillis] at most when given (the core client's 30 s otherwise).
+     */
+    fun client(token: String?, org: String? = null, timeoutMillis: Long? = null): OstromClient =
+        typedClient(transport, token, org, timeoutMillis)
 
     /** `GET` [path]. */
     suspend fun get(path: String, token: String?, timeoutMillis: Long = DEFAULT_MILLIS): ServerAnswer =

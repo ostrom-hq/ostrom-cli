@@ -44,6 +44,7 @@ internal data class Org(val id: String, val slug: String, val name: String, val 
  * @property org The organisation the command acts in.
  * @property server The server's JSON API, every call carrying `Ostrom-Org`.
  * @property client The typed client of the server with the device token, every call carrying `Ostrom-Org`.
+ * @property writeClient [client] with the longer bound of a write.
  * @property console The console of the server, where what the CLI cannot do is done.
  * @property consoleToken True when the token is `OSTROM_TOKEN` (a token made on the console), not the device's.
  * @param dependencies The tokens of `ostrom login --admin`, and the clock, the terminal and the pause a governance
@@ -55,6 +56,7 @@ internal class OrgAccess(
     val org: Org,
     val server: ServerJson,
     val client: OstromClient,
+    val writeClient: OstromClient,
     val console: String,
     val consoleToken: Boolean,
     private val dependencies: CliDependencies,
@@ -112,7 +114,7 @@ internal class OrgAccess(
      * [notFound] is said on a 404.
      */
     fun <T> typedWrite(notFound: String, call: suspend OstromClient.() -> T): T =
-        when (val answer = runBlocking { typedAnswer { client.call() } }) {
+        when (val answer = runBlocking { typedAnswer { writeClient.call() } }) {
             is TypedAnswer.Ok -> answer.value
             is TypedAnswer.Failed -> {
                 refused(answer.failure, false, null)
@@ -272,8 +274,9 @@ internal fun CliDependencies.orgAccess(
     val consoleToken = environment[LaunchVariables.LAUNCH_ID].isNullOrEmpty() &&
         !environment[LaunchVariables.DEVICE_TOKEN].isNullOrEmpty()
     val transport = ApiServerTransport(api(signed.serverUrl), org.id)
-    val client = typedClient(transport, signed.token, org.id)
-    return OrgAccess(signed, org, ServerJson(transport), client, console, consoleToken, this)
+    val client = typedClient(transport, signed.token, org.id, TYPED_READ_MILLIS)
+    val writeClient = typedClient(transport, signed.token, org.id, TYPED_WRITE_MILLIS)
+    return OrgAccess(signed, org, ServerJson(transport), client, writeClient, console, consoleToken, this)
 }
 
 /** The organisations the caller is a member of (`GET /api/v1/orgs`). */

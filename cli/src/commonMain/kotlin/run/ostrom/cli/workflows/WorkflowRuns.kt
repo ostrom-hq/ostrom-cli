@@ -5,7 +5,6 @@ import run.ostrom.cli.launcher.Routes
 import run.ostrom.cli.launcher.ServerAnswer
 import run.ostrom.cli.launcher.list
 import run.ostrom.cli.launcher.text
-import run.ostrom.cli.required
 import run.ostrom.core.api.OstromJson
 import run.ostrom.core.api.models.RunStatus
 import run.ostrom.core.api.models.WorkflowInput
@@ -46,7 +45,7 @@ internal fun inputsOf(workflow: JsonObject): List<WorkflowInput> =
  * named here, so that nothing reaches the server. An input with a default is left to the server.
  */
 internal fun resolveInputs(workflow: JsonObject, given: List<Pair<String, String>>): Map<String, String> {
-    val name = workflow.required("name")
+    val name = workflow.text("name") ?: "The workflow"
     val declared = inputsOf(workflow).associateBy { it.id }
     val values = linkedMapOf<String, String>()
     given.forEach { (key, value) ->

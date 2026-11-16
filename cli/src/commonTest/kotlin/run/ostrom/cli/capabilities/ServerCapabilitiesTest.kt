@@ -30,7 +30,7 @@ class ServerCapabilitiesTest {
         val expected = CapabilitiesRead.Read(Capabilities(1, "1.4.0", listOf("runners.cloud.v1")))
         assertEquals(expected, capabilities.read("https://ostrom.example/", "ost_1"))
         assertEquals(expected, capabilities.read("https://ostrom.example", "ost_1"), "the same server")
-        val read = ServerRequest("GET", "/api/v1/capabilities", token = "ost_1", timeoutMillis = 30_000)
+        val read = ServerRequest("GET", "/api/v1/capabilities", token = "ost_1")
         assertEquals(listOf("https://ostrom.example" to read), asked)
         capabilities.read("https://ostrom.example", "ost_adm")
         capabilities.read("https://other.example", "ost_1")

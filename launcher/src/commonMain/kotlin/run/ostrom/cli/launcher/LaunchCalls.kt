@@ -322,7 +322,8 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
      * one) announces none: what depends on a feature is then left out of the session.
      */
     private suspend fun features(site: LaunchSite): Set<String> {
-        val answer = typedAnswer { dependencies.server.client(site.credentials.token).capabilities() }
+        val client = dependencies.server.client(site.credentials.token, timeoutMillis = CAPABILITIES_MILLIS)
+        val answer = typedAnswer { client.capabilities() }
         return answer.valueOrNull()?.features.orEmpty().toSet()
     }
 
@@ -357,6 +358,7 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
         private const val KEYS_MILLIS = 5_000L
         private const val END_MILLIS = 5_000L
         private const val INFERENCE_MILLIS = 3_000L
+        private const val CAPABILITIES_MILLIS = 3_000L
         private const val INFERENCE_VARIABLE = "OSTROM_INFERENCE"
         private val ON = setOf("on", "1", "true")
         private val OFF = setOf("off", "0", "false")

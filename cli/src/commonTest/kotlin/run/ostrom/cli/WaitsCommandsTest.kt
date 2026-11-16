@@ -117,6 +117,13 @@ class WaitsCommandsTest : SetupKit() {
     }
 
     @Test
+    fun anAnsweredWaitWithoutItsAnswerIsStillSaidAnswered() {
+        val both = routes(show to (200 to wait), answerRoute to (200 to resolved))
+        assertEquals(0, run(both, "waits", "answer", "w1", "--set", "region=eu"))
+        assertOut("Answered w1.\n")
+    }
+
+    @Test
     fun anAnswerThatDoesNotFitIsRefusedBeforeAnythingIsSent() {
         val both = routes(show to (200 to wait))
         assertEquals(64, run(both, "waits", "answer", "w1", "--set", "region=asia"))

@@ -11,10 +11,8 @@ import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
 import com.github.ajalt.clikt.parameters.types.choice
 import com.github.ajalt.clikt.parameters.types.int
-import kotlinx.serialization.json.jsonObject
 import run.ostrom.cli.CliDependencies
 import run.ostrom.cli.ExitCode
-import run.ostrom.cli.required
 import run.ostrom.cli.waits.AnswerWait
 import run.ostrom.cli.waits.AnswerWaitUseCase
 import run.ostrom.cli.waits.AskWait
@@ -209,8 +207,8 @@ internal class WaitsAnswerCommand(private val dependencies: CliDependencies) : C
         val answered = dependencies.waits(server, org, Right.ANSWER, "No wait $id.") {
             AnswerWaitUseCase(it, read)(AnswerWait(id, action, sets.map(::pairOf), jsonSets.map(::pairOf), secretSets))
         }
-        val taken = answered.getValue("answer").jsonObject.required("action")
-        dependencies.console.data(if (json) "$answered\n" else "Answered ${answered.required("id")} with $taken.\n")
+        val taken = answered.child("answer")?.text("action")?.let { " with $it" }.orEmpty()
+        dependencies.console.data(if (json) "$answered\n" else "Answered ${answered.text("id") ?: id}$taken.\n")
     }
 }
 

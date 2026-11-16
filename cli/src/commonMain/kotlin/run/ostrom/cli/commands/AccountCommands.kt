@@ -275,11 +275,22 @@ internal class SignedIn(
     val login: String,
     val server: ServerJson,
     val client: OstromClient,
+    val writeClient: OstromClient,
 )
 
 /** [call] on the typed client, or the exit code and message the spec gives its failure; [notFound] is said on a 404. */
 internal fun <T> SignedIn.typed(notFound: String, call: suspend OstromClient.() -> T): T =
     runBlocking { typedOrStop(serverUrl, notFound) { client.call() } }
+
+/** [typed] for a write: it takes [TYPED_WRITE_MILLIS] at most, as before the typed client. */
+internal fun <T> SignedIn.typedWrite(notFound: String, call: suspend OstromClient.() -> T): T =
+    runBlocking { typedOrStop(serverUrl, notFound) { writeClient.call() } }
+
+/** The longest a read of the server takes (the CLI's way before the typed client). */
+internal const val TYPED_READ_MILLIS = 10_000L
+
+/** The longest a write to the server takes. */
+internal const val TYPED_WRITE_MILLIS = 15_000L
 
 /** The value of a successful answer, or the exit code and message the spec gives its failure; see [typedOrStop]. */
 internal fun <T> TypedAnswer<T>.orStop(serverUrl: String, notFound: String): T = when (this) {
@@ -312,6 +323,7 @@ internal fun CliDependencies.signedIn(option: String?): SignedIn {
         credentials.token,
         credentials.login,
         ServerJson(transport),
-        typedClient(transport, credentials.token),
+        typedClient(transport, credentials.token, timeoutMillis = TYPED_READ_MILLIS),
+        typedClient(transport, credentials.token, timeoutMillis = TYPED_WRITE_MILLIS),
     )
 }

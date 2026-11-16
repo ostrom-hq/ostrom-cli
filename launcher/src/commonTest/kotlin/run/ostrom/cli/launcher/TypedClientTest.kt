@@ -158,4 +158,28 @@ class TypedClientTest {
         val failed = typedAnswer { sessions.get("cs9") }.asServerAnswer()
         assertEquals(ServerAnswer.Failed(404, "not_found", "no GET /api/v1/cloud/sessions/cs9"), failed)
     }
+
+    @Test
+    fun aClientWithABoundGivesItToEveryCallAndTheDefaultIsThirtySeconds() = runTest {
+        fake["GET /api/v1/cloud/sessions/cs1"] = 200 to cloudJson("cs1")
+        typedClient(fake, "tok", timeoutMillis = 3_000L).cloudSessions.get("cs1")
+        typedClient(fake, "tok").cloudSessions.get("cs1")
+        assertEquals(listOf(3_000L, 30_000L), fake.requests.map { it.timeoutMillis })
+    }
+
+    @Test
+    fun aStrayExceptionIsAFailureButACancellationGoesThrough() = runTest {
+        val unreadable = TypedAnswer.Failed(ServerAnswer.Failed(502, UNREADABLE, "its answer cannot be read"))
+        assertEquals(unreadable, typedAnswer { throw IllegalArgumentException("bad body") })
+        assertEquals(unreadable, typedAnswer { throw IllegalStateException("no such body") })
+        assertFailsWith<kotlinx.coroutines.CancellationException> {
+            typedAnswer { throw kotlinx.coroutines.CancellationException("stop") }
+        }
+    }
+
+    @Test
+    fun aValueThatIsNoObjectIsAnUnreadableAnswer() {
+        val answer = TypedAnswer.Ok(listOf(1)).asServerAnswer()
+        assertEquals(ServerAnswer.Failed(502, UNREADABLE, "its answer cannot be read"), answer)
+    }
 }

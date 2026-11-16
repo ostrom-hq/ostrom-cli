@@ -170,7 +170,7 @@ internal class GithubLinkCommand(private val dependencies: CliDependencies) : Cl
         while (true) {
             access.pause(seconds * MILLIS)
             waited += seconds * MILLIS
-            val answer = runBlocking { typedAnswer { access.client.githubLink.pollDevice(id) } }
+            val answer = runBlocking { typedAnswer { access.writeClient.githubLink.pollDevice(id) } }
             if (answer is TypedAnswer.Failed && !transient(answer.failure)) {
                 throw answer.failure.refusal(access.signed.serverUrl, OVER)
             }
@@ -226,7 +226,7 @@ internal class CloudGithubCommand(private val dependencies: CliDependencies) : C
         dependencies.requireFeature(
             access.signed.serverUrl, access.signed.token, ServerFeatures.RUNNERS_CLOUD_GITHUB, NO_SESSION_ACCESS,
         )
-        val answer = runBlocking { typedAnswer { access.client.cloudSessions.setGitHubAccess(session, mode) } }
+        val answer = runBlocking { typedAnswer { access.writeClient.cloudSessions.setGitHubAccess(session, mode) } }
         if (answer is TypedAnswer.Failed && answer.failure.type == "session_not_paused") {
             throw stopWith(
                 ExitCode.USAGE,

@@ -146,7 +146,7 @@ class LocalSession private constructor(
                 kind = LOCAL,
                 launchId = launchId,
             )
-            val created = typedAnswer { server.client(token).cloudSessions.create(request, idempotencyKey = launchId) }
+            val created = typedAnswer { server.bounded(token).cloudSessions.create(request, idempotencyKey = launchId) }
             val id = created.valueOrNull()?.id
             val hostAnswer = id?.let { host(server, it, token) }
             val epoch = hostAnswer?.valueOrNull()?.epoch
@@ -172,11 +172,13 @@ class LocalSession private constructor(
                 .filterNot { it.isISOControl() }
         }
 
+        private fun ServerJson.bounded(token: String) = client(token, timeoutMillis = CALL_MILLIS)
+
         private suspend fun stop(server: ServerJson, id: String, token: String) =
-            typedAnswer { server.client(token).cloudSessions.stop(id) }
+            typedAnswer { server.bounded(token).cloudSessions.stop(id) }
 
         private suspend fun host(server: ServerJson, id: String, token: String): TypedAnswer<CloudHost> =
-            typedAnswer { server.client(token).cloudSessions.host(id) }
+            typedAnswer { server.bounded(token).cloudSessions.host(id) }
     }
 }
 

@@ -54,7 +54,7 @@ internal class DevicesRenameCommand(private val dependencies: CliDependencies) :
     override fun run() {
         dependencies.outsideSessions("devices rename")
         val signed = dependencies.signedIn(server)
-        signed.typed("No device $id.") { devices.rename(id, name) }
+        signed.typedWrite("No device $id.") { devices.rename(id, name) }
         dependencies.console.out("Device renamed.\n")
     }
 }
@@ -69,7 +69,7 @@ internal class DevicesRevokeCommand(private val dependencies: CliDependencies) :
     override fun run() {
         dependencies.outsideSessions("devices revoke")
         val signed = dependencies.signedIn(server)
-        signed.typed("No device $id.") { devices.delete(id) }
+        signed.typedWrite("No device $id.") { devices.delete(id) }
         dependencies.console.out("Device removed and its sessions signed out.\n")
     }
 }

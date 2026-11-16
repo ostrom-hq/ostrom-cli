@@ -23,7 +23,6 @@ import run.ostrom.cli.launcher.objectOf
 import run.ostrom.cli.launcher.text
 import run.ostrom.cli.platform.StandardInput
 import run.ostrom.cli.platform.StandardInputFailure
-import run.ostrom.cli.required
 import run.ostrom.cli.workflows.DEFAULT_INTERVAL
 import run.ostrom.cli.workflows.DEFAULT_TIMEOUT
 import run.ostrom.cli.workflows.MAX_DEFINITION_BYTES
@@ -320,8 +319,8 @@ internal class WorkflowsRunCommand(private val dependencies: CliDependencies) : 
             val token = access.signed.token
             val answer = runBlocking { access.server.call("POST", path, request, token, START_MILLIS, key) }
             val started = answer.orStop(access.signed.serverUrl, notFound)
-            val name = definition.required("name")
-            val runId = started.required("id")
+            val name = definition.text("name") ?: id
+            val runId = started.text("id") ?: "?"
             if (wait) follow(access, started, runId, name) else announce(started, runId, name)
         }
     }
@@ -330,7 +329,7 @@ internal class WorkflowsRunCommand(private val dependencies: CliDependencies) : 
         if (json) {
             dependencies.console.data("$started\n")
         } else {
-            val version = " (v${started.getValue("workflowVersion")})"
+            val version = started["workflowVersion"]?.let { " (v$it)" }.orEmpty()
             dependencies.console.out(
                 "Started run $runId of $name$version.\nFollow it: ostrom workflows run-show $runId   " +
                     "Stop it: ostrom workflows cancel $runId\n",
@@ -461,7 +460,8 @@ internal class WorkflowsCancelCommand(private val dependencies: CliDependencies)
         val said = if (json) {
             "$run"
         } else {
-            "Run ${run.required("id")} of ${run.required("workflowName")} is ${run.required("status")}."
+            val name = run.text("workflowName")?.let { " of $it" }.orEmpty()
+            "Run ${run.text("id") ?: id}$name is ${run.text("status")}."
         }
         dependencies.console.data(said + "\n")
     }

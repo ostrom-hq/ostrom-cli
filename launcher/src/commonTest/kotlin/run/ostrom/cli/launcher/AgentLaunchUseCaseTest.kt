@@ -528,6 +528,7 @@ class AgentLaunchUseCaseTest : AgentLaunchKit() {
         start()
         server[capabilities] = 200 to """{"apiVersion":1}"""
         start()
+        assertEquals(setOf(3_000L), server.sent(capabilities).map { it.timeoutMillis }.toSet())
         server[capabilities] = 500 to """{"error":{"type":"internal","message":"x"}}"""
         start()
         server.unreachable = setOf(capabilities)

@@ -62,7 +62,7 @@ class ServerCapabilitiesImpl(private val api: (String) -> OstromApi) : ServerCap
     }
 
     private suspend fun fetch(serverUrl: String, token: String): CapabilitiesRead =
-        when (val answer = typedAnswer { typedClient(ApiServerTransport(api(serverUrl)), token).capabilities() }) {
+        when (val answer = typedAnswer { client(serverUrl, token).capabilities() }) {
             is TypedAnswer.Ok -> CapabilitiesRead.Read(answer.value)
             is TypedAnswer.Failed -> when (answer.failure.status) {
                 NOT_FOUND -> CapabilitiesRead.Unknown
@@ -70,8 +70,12 @@ class ServerCapabilitiesImpl(private val api: (String) -> OstromApi) : ServerCap
             }
         }
 
+    private fun client(serverUrl: String, token: String) =
+        typedClient(ApiServerTransport(api(serverUrl)), token, timeoutMillis = READ_MILLIS)
+
     private companion object {
         const val NOT_FOUND = 404
+        const val READ_MILLIS = 10_000L
     }
 }
 

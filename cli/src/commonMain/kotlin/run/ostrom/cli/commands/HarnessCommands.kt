@@ -16,7 +16,6 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import okio.Path.Companion.toPath
-import run.ostrom.cli.required
 
 // The harness is what an agent starts with: the organisation's workflows (rules, checks, approvals), compiled into the
 // signed package of each session (ostrom-server#43). A workflow only proposed is on trial: Ostrom notes what it would
@@ -38,14 +37,14 @@ private fun JsonObject.version(): Int? = (this["version"] as? JsonPrimitive)?.le
 private val ENFORCED = setOf("accepted", "edited")
 
 /** `trial run` for a workflow only proposed, `enforced` once accepted or edited; another status as it is. */
-private fun JsonObject.mode(): String = when (val status = required("status")) {
+private fun JsonObject.mode(): String = when (val status = text("status")) {
     "proposed" -> "trial run"
-    in ENFORCED -> "enforced"
+    null, in ENFORCED -> "enforced"
     else -> status
 }
 
 /** The version [name] was read at, sent back with a save so that no one's change is overwritten. */
-private fun JsonObject.expectedVersion(name: String): Int = version() ?: throw stopWith(
+private fun JsonObject.expectedVersion(name: String?): Int = version() ?: throw stopWith(
     ExitCode.FAILED,
     "Ostrom did not say which version of $name it holds: nothing was saved, so that no one's " +
         "change is overwritten.",
@@ -189,8 +188,8 @@ internal class HarnessEnforceCommand(private val dependencies: CliDependencies) 
         dependencies.outsideSessions("harness enforce")
         val access = dependencies.orgAccess(server, org)
         val current = access.typedServed("No workflow $id in ${access.org.slug}.") { workflows.get(id) }
-        val name = current.required("name")
-        if (current.required("status") in ENFORCED) {
+        val name = current.text("name")
+        if (current.text("status") in ENFORCED) {
             dependencies.console.out("$name is already enforced.\n")
             return
         }
@@ -219,7 +218,7 @@ internal class HarnessUpdateCommand(private val dependencies: CliDependencies) :
         val next = saved(document, "id" to id, "status" to (document.text("status") ?: current.text("status")))
         dependencies.console.out("Before  ${line(current)}\nAfter   ${line(next)}\n")
         if (!yes && !dependencies.confirm("Save it?")) throw stopWith(ExitCode.INCOMPLETE, "Nothing was changed.")
-        val body = objectOf("workflow" to next, "expectedVersion" to current.expectedVersion(current.required("name")))
+        val body = objectOf("workflow" to next, "expectedVersion" to current.expectedVersion(current.text("name")))
         val notFound = "No workflow $id in ${access.org.slug}."
         val stored = access.write("PUT", workflow(id), body, notFound, governance = true)
         dependencies.console.out("✓ Saved ${line(stored)}\n")
@@ -238,7 +237,7 @@ internal class HarnessRemoveCommand(private val dependencies: CliDependencies) :
     override fun run() {
         dependencies.outsideSessions("harness remove")
         val access = dependencies.orgAccess(server, org)
-        val name = access.typedJson("No workflow $id in ${access.org.slug}.") { workflows.get(id) }.required("name")
+        val name = access.typedJson("No workflow $id in ${access.org.slug}.") { workflows.get(id) }.text("name") ?: id
         val question = "Type $name to remove it from every repository of ${access.org.name}: "
         if (!yes && dependencies.ask(question, "--yes") != name) {
             throw stopWith(ExitCode.INCOMPLETE, "Nothing was removed.")
