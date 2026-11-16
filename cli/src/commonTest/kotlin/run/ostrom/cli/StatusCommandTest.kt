@@ -21,7 +21,8 @@ class StatusCommandTest : SetupKit() {
 
     private companion object {
         const val NOT_SERVED = "unavailable from this server or credential (ostrom login again if your token is older)"
-        const val NO_CAPACITY = """"queue":null,"budget":null,"pacing":null,"accounts":null,"unavailable":{}"""
+        const val NO_CAPACITY =
+            """"queue":null,"budget":null,"pacing":null,"accounts":null,"policy":null,"unavailable":{}"""
     }
 
     /** `ostrom status args` against [routes], in the git repository whose top is [top] (null: outside one). */
@@ -73,8 +74,9 @@ class StatusCommandTest : SetupKit() {
             """{"login":"maya-k","organization":"Acme","role":"admin","server":"https://ostrom.example",""" +
                 """"repository":"acme","harness":"p2026-3","waiting":2,"waitingComplete":true,""" +
                 """"version":"$version","pinnedKey":"a1b2c3d4",""" +
-                """"queue":null,"budget":null,"pacing":null,"accounts":null,"unavailable":{"queue":"not_served",""" +
-                """"budget":"not_served","pacing":"not_served","accounts":"not_served"}}""" + "\n",
+                """"queue":null,"budget":null,"pacing":null,"accounts":null,"policy":null,""" +
+                """"unavailable":{"queue":"not_served","budget":"not_served","pacing":"not_served",""" +
+                """"accounts":"not_served","policy":"not_served"}}""" + "\n",
             console.out.toString(),
         )
     }
