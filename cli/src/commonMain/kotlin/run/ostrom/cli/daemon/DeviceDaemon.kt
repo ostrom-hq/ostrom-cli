@@ -472,12 +472,10 @@ internal class DeviceDaemon(
                 )
                 sessions.remove(id)
             }
-            // Growing wait instead of giving up: the entry stays, and this tick leaves it for a later one.
+            // Growing wait instead of giving up: the entry stays, and this tick leaves it for a later one. Said once:
+            // watchHosts skips the entry until the wait is over, and then it starts at once.
             wait > 0 -> {
-                if (retryAt[id] == null) {
-                    val after = seconds(wait)
-                    report("The host of session $id stopped (exit code $code); starting it again in $after s.")
-                }
+                report("The host of session $id stopped (exit code $code); starting it again in ${seconds(wait)} s.")
                 retryAt[id] = now() + wait
             }
             else -> {
