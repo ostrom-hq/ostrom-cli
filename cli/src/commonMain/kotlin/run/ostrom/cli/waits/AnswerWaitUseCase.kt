@@ -12,6 +12,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import run.ostrom.cli.required
 
 /** The action of a wait that declares none. */
 private const val DEFAULT_ACTION = "done"
@@ -54,9 +55,9 @@ internal class AnswerWaitUseCase(
     suspend operator fun invoke(request: AnswerWait): JsonObject {
         requireId(request.id)
         val wait = server.get(request.id)
-        val status = wait.text("status")
-        if (status != "open") refuse("This wait is already ${status ?: "closed"}.")
-        val question = wait.child("question") ?: JsonObject(emptyMap())
+        val status = wait.required("status")
+        if (status != "open") refuse("This wait is already $status.")
+        val question = wait.questionOrEmpty()
         val fields = question.list("fields").filterIsInstance<JsonObject>()
         // Checked before anything is read: a typo in a field name must not cost the person a typed secret.
         values(fields, request.sets, request.jsonSets, request.secretFields.associateWith { "x" })
@@ -71,7 +72,7 @@ internal class AnswerWaitUseCase(
         jsonSets: List<Pair<String, String>>,
         secrets: Map<String, String>,
     ): Map<String, JsonElement> {
-        val byId = fields.mapNotNull { field -> field.text("id")?.let { it to field } }.toMap()
+        val byId = fields.associateBy { it.required("id") }
         val values = linkedMapOf<String, JsonElement>()
         sets.groupBy({ it.first }, { it.second }).forEach { (id, texts) -> values[id] = typed(known(byId, id), texts) }
         jsonSets.forEach { (id, text) ->
@@ -175,3 +176,6 @@ internal class AnswerWaitUseCase(
         )
     }
 }
+
+/** The question of a wait as the server gave it; none, when it gave none, is a question without fields or actions. */
+internal fun JsonObject.questionOrEmpty(): JsonObject = child("question") ?: JsonObject(emptyMap())

@@ -2,6 +2,9 @@
 package run.ostrom.cli.waits
 
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -221,5 +224,12 @@ class AnswerWaitUseCaseTest {
         val multi = ArrayDeque(listOf("-----BEGIN", "body", "-----END", ""))
         val key = readSecrets(listOf("k"), true, prompts::add, { error("no") }, { multi.removeFirstOrNull() })
         assertEquals(mapOf("k" to "-----BEGIN\nbody\n-----END"), key)
+    }
+
+    @Test
+    fun aWaitWithoutItsQuestionAsksNothing() {
+        assertEquals(JsonObject(emptyMap()), JsonObject(emptyMap()).questionOrEmpty())
+        val asked = Json.parseToJsonElement(wait()).jsonObject
+        assertEquals(asked["question"], asked.questionOrEmpty())
     }
 }

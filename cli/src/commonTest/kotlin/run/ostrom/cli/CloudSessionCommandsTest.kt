@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli
 
-import kotlinx.serialization.json.JsonObject
-import run.ostrom.cli.commands.cloudLine
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -12,11 +10,6 @@ import kotlin.test.assertTrue
 class CloudSessionCommandsTest : SetupKit() {
     private val served = mapOf(capabilities("runners.cloud.v1"))
     private fun routes(vararg more: Pair<String, Pair<Int, String>>) = served + more
-
-    @Test
-    fun aRowWhoseFieldsAreAbsentStillPrints() {
-        assertTrue(JsonObject(emptyMap()).cloudLine(0L).startsWith("?  -  ?  -  "))
-    }
 
     private val session = cloudJson(
         "cs1",

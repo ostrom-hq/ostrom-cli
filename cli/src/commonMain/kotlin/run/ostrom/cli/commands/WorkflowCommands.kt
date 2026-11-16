@@ -23,6 +23,7 @@ import run.ostrom.cli.launcher.objectOf
 import run.ostrom.cli.launcher.text
 import run.ostrom.cli.platform.StandardInput
 import run.ostrom.cli.platform.StandardInputFailure
+import run.ostrom.cli.required
 import run.ostrom.cli.workflows.DEFAULT_INTERVAL
 import run.ostrom.cli.workflows.DEFAULT_TIMEOUT
 import run.ostrom.cli.workflows.MAX_DEFINITION_BYTES
@@ -319,7 +320,7 @@ internal class WorkflowsRunCommand(private val dependencies: CliDependencies) : 
             val token = access.signed.token
             val answer = runBlocking { access.server.call("POST", path, request, token, START_MILLIS, key) }
             val started = answer.orStop(access.signed.serverUrl, notFound)
-            val name = definition.text("name") ?: id
+            val name = definition.required("name")
             val runId = started.text("id") ?: "?"
             if (wait) follow(access, started, runId, name) else announce(started, runId, name)
         }
@@ -460,8 +461,7 @@ internal class WorkflowsCancelCommand(private val dependencies: CliDependencies)
         val said = if (json) {
             "$run"
         } else {
-            val name = run.text("workflowName")?.let { " of $it" }.orEmpty()
-            "Run ${run.text("id") ?: id}$name is ${run.text("status")}."
+            "Run ${run.required("id")} of ${run.required("workflowName")} is ${run.required("status")}."
         }
         dependencies.console.data(said + "\n")
     }

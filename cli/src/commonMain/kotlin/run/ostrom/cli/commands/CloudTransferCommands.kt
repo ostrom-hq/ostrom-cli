@@ -22,6 +22,7 @@ import run.ostrom.cli.launcher.flag as booleanField
 import run.ostrom.cli.launcher.list
 import run.ostrom.cli.launcher.objectOf
 import run.ostrom.cli.launcher.text
+import run.ostrom.cli.required
 import run.ostrom.core.api.models.CloudTransferStates
 import run.ostrom.core.api.models.CreateCloudTransferRequest
 import run.ostrom.core.api.models.ServerFeatures
@@ -52,7 +53,7 @@ private fun JsonObject.offerExpiry(): String? {
     return if (at != null && text("state") == CloudTransferStates.OFFERED) at else null
 }
 
-private fun JsonObject.field(key: String): String = text(key) ?: "?"
+private fun JsonObject.field(key: String): String = required(key)
 
 /** `ct_1  offered  cs_1  m1 -> m2  expires 2026-...`: one row of the transfers list, as TeamCode's. */
 internal fun JsonObject.transferLine(): String {
@@ -132,8 +133,7 @@ internal class CloudTransferCommand(private val dependencies: CliDependencies) :
             )
         }
         val labels = sessions.map {
-            val name = it.text("name") ?: it.text("id")
-            "$name  ${it.text("status")} · ${it.text("agent") ?: "-"} · ${it.text("id")}"
+            "${it.required("name")}  ${it.required("status")} · ${it.required("agent")} · ${it.required("id")}"
         }
         return sessions[choose("Which session do you transfer?", labels, "SESSION")].field("id")
     }

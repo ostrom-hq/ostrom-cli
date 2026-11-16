@@ -13,6 +13,7 @@ import run.ostrom.cli.ExitCode
 import run.ostrom.cli.launcher.child
 import run.ostrom.cli.launcher.list
 import run.ostrom.cli.launcher.text
+import run.ostrom.cli.required
 import run.ostrom.cli.waits.age
 import run.ostrom.core.api.models.ServerFeatures
 import kotlinx.serialization.json.JsonArray
@@ -99,9 +100,9 @@ internal fun CliDependencies.onBehalfOf(
 
 /** `cs_1  claude  running  acme/api  5m`: one row of `ostrom cloud list`, its age from [now]. */
 internal fun JsonObject.cloudLine(now: Long): String = listOf(
-    text("id") ?: "?",
-    text("agent") ?: "-",
-    text("status") ?: "?",
+    required("id"),
+    required("agent"),
+    required("status"),
     text("repo") ?: "-",
     age(text("createdAt"), now),
 ).joinToString("  ")
@@ -189,9 +190,9 @@ internal class CloudShowCommand(private val dependencies: CliDependencies) : Cli
             "Repository" to listOfNotNull(shown.text("repo"), shown.text("ref")).joinToString(" @ "),
             // TeamCode's `Owner: ID (created by ID)`: only a session created on its owner's behalf says it.
             "Created by" to shown.child("createdBy")
-                ?.let { by -> by.text("initiatorId").takeIf { it != shown.text("owner") } }.orEmpty(),
-            "GitHub" to shown.text("githubAccess").orEmpty(),
-            "Created" to shown.text("createdAt").orEmpty(),
+                ?.let { by -> by.required("initiatorId").takeIf { it != shown.text("owner") } }.orEmpty(),
+            "GitHub" to shown.required("githubAccess"),
+            "Created" to shown.required("createdAt"),
             "Last active" to shown.text("lastActivityAt").orEmpty(),
             "Paused" to shown.text("pausedAt").orEmpty(),
             "Expires" to shown.text("expiresAt").orEmpty(),
