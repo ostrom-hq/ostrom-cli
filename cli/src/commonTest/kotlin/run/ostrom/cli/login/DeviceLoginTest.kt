@@ -73,6 +73,19 @@ class DeviceLoginTest {
     }
 
     @Test
+    fun theInstallationIsNamedAtTheStartSoTheServerRegistersTheDevice() = runTest {
+        polls += token()
+        val installation = Installation("0f1e2d3c-4b5a-4968-8778-a1b2c3d4e5f6", "Maya's laptop", "macos")
+        val login = DeviceLogin(typedClient(transport, null), "https://github.com", CONSOLE, { waits += it }) { }
+        assertTrue(login.signIn("https://api.ostrom.run", installation = installation) is LoginOutcome.SignedIn)
+        assertEquals(
+            """{"installationId":"0f1e2d3c-4b5a-4968-8778-a1b2c3d4e5f6","deviceName":"Maya's laptop",""" +
+                """"platform":"macos"}""",
+            calls.first().body,
+        )
+    }
+
+    @Test
     fun slowDownWaitsLongerAndAnExpiredCodeStops() = runTest {
         polls += ServerReply(400, """{"error":{"type":"slow_down","message":"slow"}}""")
         polls += pending()
