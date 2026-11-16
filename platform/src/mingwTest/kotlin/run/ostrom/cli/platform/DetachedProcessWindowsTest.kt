@@ -26,16 +26,24 @@ class DetachedProcessWindowsTest {
             FileSystem.SYSTEM.write(log) { writeUtf8("before\n") }
             val script = "Write-Output out; [Console]::Error.WriteLine('err'); exit 3"
             val process = startDetachedProcess(listOf(powershell, "-NoProfile", "-Command", script), log.toString())
-            var code: Int? = null
-            repeat(1_200) { if (code == null) code = process.exitCode() ?: null.also { delay(25) } }
-            assertEquals(3, code)
+            val code = ended(process)
+            val written = FileSystem.SYSTEM.read(log) { readUtf8() }
+            val bare = startDetachedProcess(listOf(powershell, "-NoProfile", "-Command", "exit 3"), log.toString())
+            val bareCode = ended(bare)
+            val said = "exit $code (bare exit 3: $bareCode), log: $written"
+            assertEquals(3, code, said)
             assertEquals(3, process.exitCode(), "read again once ended")
-            val written = FileSystem.SYSTEM.read(log) { readUtf8() }.lines().map { it.trim() }
-            val lines = written.filter { it.isNotEmpty() }
+            val lines = written.lines().map { it.trim() }.filter { it.isNotEmpty() }
             assertEquals(listOf("before", "out", "err"), lines, "stdout and stderr appended")
         } finally {
             FileSystem.SYSTEM.delete(log, mustExist = false)
         }
+    }
+
+    private suspend fun ended(process: DetachedProcess): Int? {
+        var code: Int? = null
+        repeat(1_200) { if (code == null) code = process.exitCode() ?: null.also { delay(25) } }
+        return code
     }
 
     @Test
