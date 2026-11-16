@@ -35,8 +35,9 @@ class State:
         self.lock = threading.Lock()
         self.models = {"allowed": ["sonnet"], "default": "sonnet"}
         self.workflows = [{"id": "w1", "name": "git-safety", "status": "proposed", "version": 1,
-                           "nodes": [{"kind": "trigger", "label": "git push"},
-                                     {"kind": "gate", "label": "Push to main", "approvers": ["lena"]}]}]
+                           "domain": "engineering", "edges": [], "foundAt": "2026-10-01T09:00:00Z",
+                           "nodes": [{"id": "n1", "kind": "trigger", "label": "git push"},
+                                     {"id": "n2", "kind": "gate", "label": "Push to main", "approvers": ["lena"]}]}]
         self.rules = [{"id": "r1", "statement": "No push to main", "status": "proposed", "strength": "required"},
                       {"id": "r2", "statement": "Tests before push", "status": "proposed", "strength": "recommended"}]
 
@@ -94,6 +95,12 @@ def make_handler(state):
                 return self._answer(200, {"items": state.workflows})
             if route == ("POST", "/api/v1/workflows"):
                 saved = dict(body, id=f"w{len(state.workflows) + 1}", version=1)
+                # a workflow as the server keeps it: a domain, edges, a status, when it was found, a node id each
+                saved.setdefault("domain", "engineering")
+                saved.setdefault("edges", [])
+                saved.setdefault("status", "proposed")
+                saved.setdefault("foundAt", "2026-10-01T09:00:00Z")
+                saved["nodes"] = [dict(n, id=n.get("id", f"n{i}")) for i, n in enumerate(saved.get("nodes", []), 1)]
                 state.workflows.append(saved)
                 return self._answer(201, saved)
             if path.startswith("/api/v1/workflows/"):
@@ -129,6 +136,11 @@ def make_handler(state):
                     return self._error(409, "the workflow changed")
                 found.clear()
                 found.update(body["workflow"], version=body["expectedVersion"] + 1)
+                found.setdefault("domain", "engineering")
+                found.setdefault("edges", [])
+                found.setdefault("status", "proposed")
+                found.setdefault("foundAt", "2026-10-01T09:00:00Z")
+                found["nodes"] = [dict(n, id=n.get("id", f"n{i}")) for i, n in enumerate(found.get("nodes", []), 1)]
                 return self._answer(200, found)
             return self._error(405, "method")
 

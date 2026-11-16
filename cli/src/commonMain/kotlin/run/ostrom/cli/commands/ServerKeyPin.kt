@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli.commands
 
-import run.ostrom.cli.launcher.Routes
-import run.ostrom.cli.launcher.ServerAnswer
+import run.ostrom.cli.launcher.asJson
 import run.ostrom.cli.launcher.ServerKeyPins
 import run.ostrom.cli.launcher.child
 import run.ostrom.cli.launcher.pretty
 import run.ostrom.cli.launcher.text
+import run.ostrom.cli.launcher.typedAnswer
+import run.ostrom.cli.launcher.valueOrNull
 import run.ostrom.cli.platform.Console
 import run.ostrom.cli.platform.FileStore
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlin.time.Clock
 
@@ -58,11 +60,12 @@ internal class ServerKeyPin(
     /** Pins [kid] for the server of [signed] from its public key list; the problem said, or null once pinned. */
     private fun firstUse(signed: SignedIn, kid: String, path: String): String? {
         // read before the lock: a slow server never holds the file for the other ostrom processes
-        val answer = runBlocking { signed.server.get(Routes.KEYS, null) }
-        val pem = if (answer is ServerAnswer.Ok) ServerKeyPins.publishedKey(answer.body, kid) else null
+        val keys = runBlocking { typedAnswer { signed.server.client(null).receipts.keys() } }.valueOrNull()
+        val published = keys?.let { JsonObject(mapOf("keys" to JsonArray(it.map(::asJson)))) }
+        val pem = published?.let { ServerKeyPins.publishedKey(it, kid) }
         return if (pem == null) {
             "${signed.serverUrl} does not publish the key $kid of this receipt: `ostrom verify` needs it with " +
-                "--key FILE (GET ${Routes.KEYS} of your Ostrom)"
+                "--key FILE (GET /api/v1/receipts/keys of your Ostrom)"
         } else {
             files.exclusive(path) {
                 // read again under the lock: another process may have pinned servers meanwhile, and a pin it made for

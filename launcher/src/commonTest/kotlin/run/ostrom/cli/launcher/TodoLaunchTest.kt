@@ -16,7 +16,8 @@ class TodoLaunchTest : AgentLaunchKit() {
     @Test
     fun aServerThatServesTheTodoGetsItsHooksAndServer() = runTest {
         serveALaunch()
-        server["GET ${Routes.CAPABILITIES}"] = 200 to """{"apiVersion":1,"features":["waits.v1",{"x":1},"$TODOS"]}"""
+        server["GET ${Routes.CAPABILITIES}"] =
+            200 to """{"apiVersion":1,"serverVersion":"1.4.0","features":["waits.v1","$TODOS"]}"""
         start()
         assertTrue("hook todo-stop" in hooks() && "hook todo-context" in hooks(), hooks())
         assertTrue("\"ostrom-todo\"" in servers(), servers())
@@ -25,7 +26,11 @@ class TodoLaunchTest : AgentLaunchKit() {
 
     @Test
     fun aServerThatDoesNotOrCannotSaySoGetsNone() = runTest {
-        for (answer in listOf(200 to """{"apiVersion":1,"features":["waits.v1"]}""", 500 to "{}")) {
+        val answers = listOf(
+            200 to """{"apiVersion":1,"serverVersion":"1.4.0","features":["waits.v1"]}""",
+            500 to "{}",
+        )
+        for (answer in answers) {
             serveALaunch()
             server["GET ${Routes.CAPABILITIES}"] = answer
             start()

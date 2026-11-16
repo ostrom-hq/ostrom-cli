@@ -322,9 +322,9 @@ internal class LaunchCalls(private val dependencies: LaunchDependencies) {
      * one) announces none: what depends on a feature is then left out of the session.
      */
     private suspend fun features(site: LaunchSite): Set<String> {
-        val answer = dependencies.server.get(Routes.CAPABILITIES, site.credentials.token, CAPABILITIES_MILLIS)
-        if (answer !is ServerAnswer.Ok) return emptySet()
-        return answer.body.list("features").mapNotNull { (it as? JsonPrimitive)?.content }.toSet()
+        val client = dependencies.server.client(site.credentials.token, timeoutMillis = CAPABILITIES_MILLIS)
+        val answer = typedAnswer { client.capabilities() }
+        return answer.valueOrNull()?.features.orEmpty().toSet()
     }
 
     private suspend fun inferenceRelayed(request: LaunchRequest, site: LaunchSite, launch: Launch): Boolean {

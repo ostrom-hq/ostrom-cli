@@ -48,8 +48,8 @@ class WorkflowsCommandsTest : SetupKit() {
         """"nodes":[{"id":"s","kind":"step","label":"S"}],"edges":[{"from":"s","to":null}]}"""
     private val bare = """{"id":"b","name":"Bare","domain":"Ops","status":"proposed","foundAt":"x","nodes":[],""" +
         """"edges":[],"updatedAt":"1970-01-10T21:00:00Z"}"""
-    private val unnamed = """{"id":"deploy"}"""
-    private val odd = """{"id":"odd","kind":"notify","label":"Odd","run":{"message":"hi"},"wait":{},""" +
+    private val unnamed = workflowJson("deploy", "The workflow")
+    private val odd = """{"id":"odd","kind":"notify","label":"Odd","run":{"message":"hi"},""" +
         """"detail":"${"long ".repeat(30)}"}"""
     private val shown = stored.replace("""}],"edges":""", """},$odd],"edges":""")
 
@@ -121,7 +121,7 @@ class WorkflowsCommandsTest : SetupKit() {
         assertEquals(listOf(list), calls())
         console.out.clear()
         assertEquals(0, run(routes(list to (200 to """{"items":[$bare]}""")), "workflows", "list", "--json"))
-        assertEquals("[$bare]\n", console.out.toString())
+        assertJsonCovers("[$bare]", console.out.toString())
         console.out.clear()
         assertEquals(0, run(routes(list to (200 to """{"items":[]}""")), "workflows", "list"))
         assertEquals("", console.out.toString())
@@ -135,7 +135,7 @@ class WorkflowsCommandsTest : SetupKit() {
             "$list?after=deploy" to (200 to """{"items":[$bare]}"""),
         )
         assertEquals(0, run(pages, "workflows", "list", "--json"))
-        assertEquals("[$stored,$bare]\n", console.out.toString())
+        assertJsonCovers("[$stored,$bare]", console.out.toString())
         assertEquals(listOf(list, "$list?after=deploy"), calls())
     }
 
@@ -192,7 +192,7 @@ class WorkflowsCommandsTest : SetupKit() {
         assertFalse(console.out.contains("Updated"), console.out.toString())
         console.out.clear()
         assertEquals(0, run(routes(show to (200 to stored)), "workflows", "show", "deploy", "--json"))
-        assertEquals("$stored\n", console.out.toString())
+        assertJsonCovers(stored, console.out.toString())
         assertEquals(66, run(routes(), "workflows", "show", "deploy"))
         assertErr("No workflow deploy in acme.\n")
     }
@@ -379,12 +379,12 @@ class WorkflowsCommandsTest : SetupKit() {
         val second = requests.last { it.second.path == "/api/v1/workflows/deploy/runs" }.second
         assertNotEquals(first.idempotencyKey, second.idempotencyKey)
         assertNull(requests.first { it.second.path == "/api/v1/capabilities" }.second.idempotencyKey)
-        // an answer without a version or an id still says what it can
         console.out.clear()
-        val bareRun = routes(show to (200 to unnamed), start to (201 to "{}"))
+        val bareRun = routes(show to (200 to unnamed), start to (201 to runJson("r9")))
         assertEquals(0, run(bareRun, "workflows", "run", "deploy"))
         assertEquals(
-            "Started run ? of deploy.\nFollow it: ostrom workflows run-show ?   Stop it: ostrom workflows cancel ?\n",
+            "Started run r9 of The workflow (v3).\n" +
+                "Follow it: ostrom workflows run-show r9   Stop it: ostrom workflows cancel r9\n",
             console.out.toString(),
         )
     }
@@ -452,7 +452,7 @@ class WorkflowsCommandsTest : SetupKit() {
     fun withJsonTheStepsGoToStandardErrorAndTheFinalRunToStandardOutput() {
         val done = runJson(status = "succeeded", visits = visit(1, "done"))
         assertEquals(0, following(200 to done, args = listOf("--json", "--interval", "5")))
-        assertEquals("$done\n", console.out.toString())
+        assertJsonCovers(done, console.out.toString())
         assertErr("step 1: build (agent) started\nstep 1: build done\nRun r1 succeeded.\n")
         assertEquals(listOf(5_000L), waits)
     }
@@ -471,7 +471,7 @@ class WorkflowsCommandsTest : SetupKit() {
         val text = runJson(status = "failed", extra = ""","failure":"No cloud runner is free.","output":"partial"""")
         assertEquals(1, following(200 to text, args = listOf("--json")))
         assertErr("Run r1 failed: No cloud runner is free.\n")
-        assertEquals("$text\n", console.out.toString())
+        assertJsonCovers(text, console.out.toString())
     }
 
     @Test
@@ -484,7 +484,7 @@ class WorkflowsCommandsTest : SetupKit() {
         assertEquals(listOf(30_000L, 30_000L), waits)
         console.out.clear()
         assertEquals(75, following(running, args = listOf("--timeout", "1", "--interval", "30", "--json")))
-        assertEquals(running.second + "\n", console.out.toString())
+        assertJsonCovers(running.second, console.out.toString())
     }
 
     @Test
@@ -528,7 +528,7 @@ class WorkflowsCommandsTest : SetupKit() {
         )
         console.out.clear()
         assertEquals(0, run(page, "workflows", "runs", "--json"))
-        assertEquals("[$failed,$going,$noKind,$odd]\n", console.out.toString())
+        assertJsonCovers("[$failed,$going,$noKind,$odd]", console.out.toString())
         console.out.clear()
         assertEquals(0, run(routes(runs to (200 to """{"items":[]}""")), "workflows", "runs"))
         assertEquals("", console.out.toString())
@@ -599,7 +599,7 @@ class WorkflowsCommandsTest : SetupKit() {
         )
         console.out.clear()
         assertEquals(0, run(routes(runShow to (200 to body)), "workflows", "run-show", "r1", "--json"))
-        assertEquals("$body\n", console.out.toString())
+        assertJsonCovers(body, console.out.toString())
         assertEquals(66, run(routes(), "workflows", "run-show", "r1"))
         assertErr("No run r1 in acme.\n")
     }
@@ -641,10 +641,8 @@ class WorkflowsCommandsTest : SetupKit() {
         assertEquals("Run r1 of Deploy is cancelled.\n", console.out.toString())
         console.out.clear()
         assertEquals(0, run(routes(cancel to (200 to cancelled)), "workflows", "cancel", "r1", "--json"))
-        assertEquals("$cancelled\n", console.out.toString())
+        assertJsonCovers(cancelled, console.out.toString())
         console.out.clear()
-        assertEquals(0, run(routes(cancel to (200 to """{"status":"cancelling"}""")), "workflows", "cancel", "r1"))
-        assertEquals("Run r1 is cancelling.\n", console.out.toString())
         assertEquals(66, run(routes(), "workflows", "cancel", "r1"))
         assertErr("No run r1 in acme.\n")
         val ended = routes(cancel to (409 to error("run_ended", "The run already ended.")))

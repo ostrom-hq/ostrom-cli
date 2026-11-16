@@ -45,14 +45,14 @@ class CloudTransferCommandsTest : SetupKit() {
 
     @Test
     fun theSessionAndTheRecipientAreChosenFromLists() {
-        val sessions = """{"items":[{"id":"cs9","status":"terminated"},""" +
-            """{"id":"cs7","status":"paused","transferId":"ct0"},""" +
-            """{"id":"cs1","name":"Fix CI","status":"paused","agent":"claude"}],"next":"cs0"}"""
+        val sessions = """{"items":[${cloudJson("cs9", "status" to "terminated")},""" +
+            """${cloudJson("cs7", "status" to "paused", "transferId" to "ct0")},""" +
+            """${cloudJson("cs1", "name" to "Fix CI", "status" to "paused")}],"next":"cs0"}"""
         val members = """{"recipients":[{"id":"m1","login":"maya","administrator":false},""" +
             """{"id":"m2","login":"noor","administrator":true}]}"""
         val chosen = routes(
             "GET /api/v1/cloud/sessions" to (200 to sessions),
-            "GET /api/v1/cloud/sessions/cs1" to (200 to """{"id":"cs1","owner":"m1"}"""),
+            "GET /api/v1/cloud/sessions/cs1" to (200 to cloudJson("cs1")),
             "GET /api/v1/cloud/transfer-recipients" to (200 to members),
             post to (202 to offered),
         )
@@ -62,7 +62,7 @@ class CloudTransferCommandsTest : SetupKit() {
         assertEquals(0, run(chosen, "cloud", "transfer"))
         assertTrue(console.out.contains("1. Fix CI  paused"), console.out.toString())
         assertTrue(console.out.contains("1. noor  administrator · m2"), console.out.toString())
-        assertEquals("""{"toMemberId":"m2","resume":false}""", bodyOf(post))
+        assertEquals("""{"toMemberId":"m2"}""", bodyOf(post))
         console.out.clear()
         typed += "7"
         assertEquals(64, run(chosen, "cloud", "transfer"))
@@ -75,31 +75,39 @@ class CloudTransferCommandsTest : SetupKit() {
     @Test
     fun withoutATerminalTheMissingValueIsAskedFor() {
         val older = routes(
-            "GET /api/v1/cloud/sessions" to (200 to """{"items":[{"id":"cs9","status":"failed"}],"next":"cs9"}"""),
-            "GET /api/v1/cloud/sessions?before=cs9" to (200 to """{"items":[{"id":"cs1","status":"paused"}]}"""),
+            "GET /api/v1/cloud/sessions" to (
+                200 to """{"items":[${cloudJson("cs9", "status" to "failed")}],"next":"cs9"}"""
+            ),
+            "GET /api/v1/cloud/sessions?before=cs9" to (
+                200 to """{"items":[${cloudJson("cs1", "status" to "paused")}]}"""
+            ),
             "GET /api/v1/cloud/transfer-recipients" to (200 to recipients("m1", "maya")),
-            "GET /api/v1/cloud/sessions/cs1" to (200 to """{"id":"cs1","owner":"maya"}"""),
+            "GET /api/v1/cloud/sessions/cs1" to (200 to cloudJson("cs1", "owner" to "maya")),
         )
         console.isInteractive = true
         typed += "1"
         assertEquals(66, run(older, "cloud", "transfer"))
         assertErr("no other member")
         console.isInteractive = false
-        val none = routes("GET /api/v1/cloud/sessions" to (200 to """{"items":[{"id":"cs9","status":"terminated"}]}"""))
+        val none = routes("GET /api/v1/cloud/sessions" to (
+            200 to """{"items":[${cloudJson("cs9", "status" to "terminated")}]}""")
+        )
         assertEquals(66, run(none, "cloud", "transfer"))
         assertErr("no cloud session that can be transferred")
-        val one = routes("GET /api/v1/cloud/sessions" to (200 to """{"items":[{"id":"cs1","status":"running"}]}"""))
+        val one = routes("GET /api/v1/cloud/sessions" to (
+            200 to """{"items":[${cloudJson("cs1", "status" to "running")}]}""")
+        )
         assertEquals(64, run(one, "cloud", "transfer"))
         assertErr("add SESSION")
         val alone = routes(
-            "GET /api/v1/cloud/sessions/cs1" to (200 to """{"id":"cs1","owner":"m1"}"""),
+            "GET /api/v1/cloud/sessions/cs1" to (200 to cloudJson("cs1")),
             "GET /api/v1/cloud/transfer-recipients" to (200 to recipients("m1", "maya")),
         )
         assertEquals(66, run(alone, "cloud", "transfer", "cs1"))
         assertErr("no other member")
         console.isInteractive = true
         val two = routes(
-            "GET /api/v1/cloud/sessions/cs1" to (200 to """{"id":"cs1","owner":"m1"}"""),
+            "GET /api/v1/cloud/sessions/cs1" to (200 to cloudJson("cs1")),
             "GET /api/v1/cloud/transfer-recipients" to (200 to recipients("m2", "noor")),
         )
         assertEquals(64, run(two, "cloud", "transfer", "cs1", "--json"))
@@ -131,13 +139,14 @@ class CloudTransferCommandsTest : SetupKit() {
     }
 
     @Test
-    fun aSparseTransferGetsQuestionMarksAndOnlyOffersExpire() {
-        val sparse = """{"id":"ct3","state":"accepted","expiresAt":"2026-11-16T10:00:00Z"}"""
-        val rows = routes("GET /api/v1/cloud/transfers?limit=50" to (200 to """{"items":[{},$sparse]}"""))
+    fun onlyOffersExpire() {
+        val accepted = offered.replace("\"offered\"", "\"accepted\"").replace("ct1", "ct3")
+        val rows = routes("GET /api/v1/cloud/transfers?limit=50" to (200 to """{"items":[$accepted]}"""))
         assertEquals(0, run(rows, "cloud", "transfers", "list"))
-        assertEquals("?\t?\t?\t? -> ?\tupdated ?\nct3\taccepted\t?\t? -> ?\tupdated ?\n", console.out.toString())
+        assertEquals("ct3\taccepted\tcs1\tm1 -> m2\tupdated 2026-11-15T10:00:00Z\n", console.out.toString())
         console.out.clear()
-        val done = """{"id":"ct4","state":"completed","completedAt":"2026-11-15T11:00:00Z"}"""
+        val done = offered.replace("\"offered\"", "\"completed\"").replace("ct1", "ct4")
+            .replace(",\"expiresAt\":\"2026-11-16T10:00:00Z\"", ",\"completedAt\":\"2026-11-15T11:00:00Z\"")
         val shown = routes("GET /api/v1/cloud/transfers/ct4" to (200 to done))
         assertEquals(0, run(shown, "cloud", "transfers", "show", "ct4"))
         assertTrue(console.out.contains("Completed:    2026-11-15T11:00:00Z\n"), console.out.toString())

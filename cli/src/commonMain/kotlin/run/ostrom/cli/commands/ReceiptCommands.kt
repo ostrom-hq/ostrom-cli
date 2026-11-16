@@ -13,7 +13,8 @@ import run.ostrom.cli.CliDependencies
 import run.ostrom.cli.ExitCode
 import run.ostrom.cli.launcher.Routes
 import run.ostrom.cli.launcher.ServerKeyPins
-import run.ostrom.cli.launcher.ServerAnswer
+import run.ostrom.cli.launcher.TypedAnswer
+import run.ostrom.cli.launcher.typedAnswer
 import run.ostrom.cli.launcher.child
 import run.ostrom.cli.launcher.join
 import run.ostrom.cli.launcher.list
@@ -40,7 +41,6 @@ import kotlinx.serialization.json.JsonObject
 // `ostrom verify` and `ostrom receipts` (CLI.md § 2.2): a receipt is checked offline, with the keys pinned on this
 // device; the server is only asked for the list, a receipt this device does not keep, and a bundle to keep.
 
-private const val RECEIPTS = "/api/v1/receipts"
 private const val SERVER_HELP = "Ostrom server URL (else OSTROM_URL, else the one of ostrom login)"
 
 /** The most pages of receipts `ostrom receipts list` reads, so that a server's endless cursor ends. */
@@ -104,15 +104,19 @@ private fun CliDependencies.remoteReceipts(server: String?, kept: Int): List<Jso
     var cursor: String? = null
     var page = 0
     do {
-        val path = if (cursor == null) RECEIPTS else "$RECEIPTS?before=${Routes.encode(cursor)}"
-        val answer = runBlocking { signed.server.get(path, signed.token) }
-        if (answer is ServerAnswer.Failed && answer.status == null) {
+        val before = cursor
+        val answer = runBlocking { typedAnswer { signed.client.receipts.listRaw(before) } }
+        if (answer is TypedAnswer.Failed && answer.failure.status == null) {
             val local = "ostrom receipts list --local"
             throw refuse(ExitCode.UNREACHABLE, "Offline: $kept receipts kept on this device. $local")
         }
-        val body = answer.orStop(signed.serverUrl, "No receipts on ${signed.serverUrl}.")
-        items += body.list("items").filterIsInstance<JsonObject>()
-        cursor = body.text("next")?.takeIf { it.isNotEmpty() }
+        val body = when (answer) {
+            is TypedAnswer.Ok -> answer.value
+            is TypedAnswer.Failed ->
+                throw answer.failure.refusal(signed.serverUrl, "No receipts on ${signed.serverUrl}.")
+        }
+        items += body.items
+        cursor = body.next?.takeIf { it.isNotEmpty() }
         page++
     } while (cursor != null && page < MAX_PAGES)
     return items
@@ -176,8 +180,7 @@ internal class ReceiptsShowCommand(private val dependencies: CliDependencies) : 
 
     private fun fetch(id: String): JsonObject {
         val signed = dependencies.signedIn(server)
-        val answer = runBlocking { signed.server.get("$RECEIPTS/${Routes.encode(id)}", signed.token) }
-        return answer.orStop(signed.serverUrl, "No receipt $id.")
+        return signed.typed("No receipt $id.") { receipts.getRaw(id) }
     }
 }
 

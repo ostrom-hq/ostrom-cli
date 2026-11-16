@@ -15,7 +15,7 @@ import kotlin.test.assertTrue
 class ArtifactsLaunchTest : AgentLaunchKit() {
     private fun announce(vararg features: String) {
         server["GET ${Routes.CAPABILITIES}"] = 200 to
-            """{"apiVersion":1,"features":[${features.joinToString(",") { "\"$it\"" }}]}"""
+            """{"apiVersion":1,"serverVersion":"1.4.0","features":[${features.joinToString(",") { "\"$it\"" }}]}"""
     }
 
     private fun policy(body: String, status: Int = 200) {

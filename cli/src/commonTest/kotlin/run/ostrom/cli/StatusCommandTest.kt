@@ -13,7 +13,8 @@ import kotlin.test.assertTrue
 
 /** `ostrom status`, and the home screen that says who is signed in. */
 class StatusCommandTest : SetupKit() {
-    private val me = "GET /api/v1/auth/me" to (200 to """{"id":"u1","login":"maya-k","displayName":"Maya"}""")
+    private val me = "GET /api/v1/auth/me" to (200 to meOf("maya-k"))
+    private fun meOf(login: String) = """{"dev":{"login":"$login","verified":true,"via":"device"},"capabilities":[]}"""
     private val inbox = "GET /api/v1/approvals?mine=true&status=pending"
     private val pack = "GET /api/v1/packages/current?repo=acme"
     private val version = BuildInfo.VERSION
@@ -81,7 +82,7 @@ class StatusCommandTest : SetupKit() {
     @Test
     fun statusSaysWhatItCouldNotLearn() {
         signIn("/home/maya/.config/ostrom")
-        val bare = mapOf("GET /api/v1/auth/me" to (200 to "{}"), inbox to (403 to "{}"))
+        val bare = mapOf("GET /api/v1/auth/me" to (200 to meOf("maya")), inbox to (403 to "{}"))
         assertEquals(0, status(bare, top = null))
         assertEquals(
             "Signed in   @maya · ostrom.example\nRepository  not in a git repository\nWaiting     unknown\n" +
@@ -96,7 +97,7 @@ class StatusCommandTest : SetupKit() {
                 """"version":"$version","pinnedKey":null,$NO_CAPACITY}""" + "\n",
             console.out.toString(),
         )
-        for ((body, login) in listOf("""{"dev":{"login":"maya-k"}}""" to "maya-k", """{"dev":{}}""" to "maya")) {
+        for ((body, login) in listOf(meOf("maya-k") to "maya-k")) {
             console.out.clear()
             assertEquals(0, status(mapOf("GET /api/v1/auth/me" to (200 to body)), top = null))
             assertOut("Signed in   @$login · ostrom.example\n")

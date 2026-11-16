@@ -6,9 +6,12 @@ import okio.IOException
 import okio.Path
 
 /** A server answering by `METHOD path` (query included); anything else is a 404. Records every request. */
-class FakeServer(private val routes: MutableMap<String, ServerReply> = mutableMapOf()) : ServerTransport {
+open class FakeServer(private val routes: MutableMap<String, ServerReply> = mutableMapOf()) : ServerTransport {
     val requests = mutableListOf<ServerCall>()
     var unreachable: Set<String> = emptySet()
+
+    /** Routes whose call the HTTP stack gives up on: the client's own timer won. */
+    var timedOut: Set<String> = emptySet()
 
     /** How long each answer takes, in (virtual) milliseconds: a round trip to a server far away. */
     var roundTripMillis = 0L
@@ -25,6 +28,7 @@ class FakeServer(private val routes: MutableMap<String, ServerReply> = mutableMa
         val route = "${call.method} ${call.path}"
         val wait = roundTripMillis + (slower[route] ?: 0L)
         if (wait > 0) delay(wait)
+        if (route in timedOut) throw io.ktor.client.plugins.HttpRequestTimeoutException("https://x$route", 3_000L)
         if (route in unreachable) return ServerReply(null, "connection refused")
         return routes[route] ?: ServerReply(NOT_FOUND, """{"error":{"type":"not_found","message":"no $route"}}""")
     }

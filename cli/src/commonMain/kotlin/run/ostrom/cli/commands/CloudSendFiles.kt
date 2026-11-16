@@ -5,13 +5,13 @@
 // check), for `ostrom cloud send --file`.
 package run.ostrom.cli.commands
 
-import kotlinx.serialization.SerializationException
-import kotlinx.serialization.json.JsonObject
-import okio.ByteString.Companion.toByteString
 import run.ostrom.cli.CliDependencies
 import run.ostrom.cli.ExitCode
 import run.ostrom.cli.launcher.ServerAnswer
-import run.ostrom.core.api.OstromJson
+import run.ostrom.cli.launcher.TypedAnswer
+import run.ostrom.cli.launcher.typedAnswer
+import run.ostrom.core.client.CloudFileSource
+import run.ostrom.core.client.CloudFilesClient
 import run.ostrom.core.api.models.CloudFile
 import run.ostrom.core.api.models.CloudFilePolicy
 import run.ostrom.core.api.models.CloudFiles
@@ -31,8 +31,7 @@ internal suspend fun CliDependencies.uploadFiles(
     if (paths.isEmpty()) return emptyList()
     if (paths.size > CloudFiles.MAX_FILES_PER_MESSAGE) refuseFile(tooMany(CloudFiles.MAX_FILES_PER_MESSAGE))
     requireFeature(access.signed.serverUrl, access.signed.token, ServerFeatures.RUNNERS_CLOUD_FILES, NO_FILES)
-    val read = access.server.get(FILES_POLICY, access.signed.token)
-    val policy = policyOf(read.orStop(access.signed.serverUrl, NO_FILES))
+    val policy = access.typed(NO_FILES) { cloudFiles.policy() }
     if (!policy.available) halt(ExitCode.REFUSED, FILES_OFF)
     if (paths.size > policy.maxFilesPerMessage) refuseFile(tooMany(policy.maxFilesPerMessage))
     val files = paths.map { readLocalFile(it, policy) }
@@ -56,12 +55,6 @@ internal fun filesRefusal(type: String?): String? = when (type) {
     else -> null
 }
 
-private fun policyOf(body: JsonObject): CloudFilePolicy = try {
-    OstromJson.decodeFromJsonElement(CloudFilePolicy.serializer(), body)
-} catch (_: SerializationException) {
-    halt(ExitCode.UNREACHABLE, "Ostrom could not answer: the files policy cannot be read.")
-}
-
 private fun tooMany(max: Int) = "A message carries $max files at most."
 
 /**
@@ -74,43 +67,37 @@ private suspend fun CliDependencies.upload(
     file: LocalFile,
     policy: CloudFilePolicy,
 ): CloudFile {
-    val path = "${cloudSessionPath(session)}/files?name=${segment(file.name)}"
     val key = Uuid.random().toString()
-    var wait = FIRST_UPLOAD_RETRY
-    var answer = access.server.upload(path, file.bytes, access.signed.token, UPLOAD_MILLIS, key)
-    var attempts = 1
-    while (answer is ServerAnswer.Failed && answer.retried() && attempts < UPLOAD_ATTEMPTS) {
-        console.err("Uploading ${file.shown} failed; retrying.\n")
-        sleep(wait)
-        wait *= 2
-        attempts++
-        answer = access.server.upload(path, file.bytes, access.signed.token, UPLOAD_MILLIS, key)
+    val answer = typedAnswer {
+        access.client.cloudFiles.upload(
+            session,
+            file.name,
+            CloudFileSource.of(file.bytes),
+            key,
+            attempts = UPLOAD_ATTEMPTS,
+            onRetry = { console.err("Uploading ${file.shown} failed; retrying.\n") },
+        )
     }
-    val stored = storedOf(file, answer, policy, access.signed.serverUrl)
-    val digest = file.bytes.toByteString().sha256().hex()
-    if (stored.size != file.bytes.size.toLong() || !stored.sha256.equals(digest, ignoreCase = true)) {
+    if (answer is TypedAnswer.Failed && answer.failure.type == CloudFilesClient.FILE_INTEGRITY_FAILED) {
         halt(ExitCode.FAILED, "The server stored other bytes than ${file.shown}; the message was not sent.")
     }
+    val stored = storedOf(file, answer, policy, access.signed.serverUrl)
     val renamed = if (stored.name != file.name) " as ${stored.name.printable()}" else ""
     console.err("Uploaded ${file.shown} (${sizeLabel(stored.size)})$renamed.\n")
     return stored
 }
 
 /** The file the server stored, or the stop its refusal calls for. */
-private fun storedOf(file: LocalFile, answer: ServerAnswer, policy: CloudFilePolicy, serverUrl: String): CloudFile =
+private fun storedOf(
+    file: LocalFile,
+    answer: TypedAnswer<CloudFile>,
+    policy: CloudFilePolicy,
+    serverUrl: String,
+): CloudFile =
     when (answer) {
-        is ServerAnswer.Failed -> uploadRefusal(file.shown, answer, policy, serverUrl)
-        is ServerAnswer.Ok -> try {
-            OstromJson.decodeFromJsonElement(CloudFile.serializer(), answer.body)
-        } catch (_: SerializationException) {
-            halt(ExitCode.UNREACHABLE, "Ostrom could not answer: the upload of ${file.shown} cannot be read.")
-        }
+        is TypedAnswer.Failed -> uploadRefusal(file.shown, answer.failure, policy, serverUrl)
+        is TypedAnswer.Ok -> answer.value
     }
-
-private fun ServerAnswer.Failed.retried(): Boolean {
-    val code = status ?: return true
-    return code == TIMEOUT || (code == TOO_MANY && type != CloudFiles.UPLOAD_QUOTA) || code >= SERVER_ERRORS
-}
 
 private fun uploadRefusal(
     shown: String,
@@ -131,8 +118,6 @@ private fun uploadRefusal(
         else -> throw answer.refusal(serverUrl, "No cloud session.")
     }
 
-private const val FILES_POLICY = "/api/v1/cloud/files/policy"
-
 /** What `send --file` says to a server without `runners.cloud.files.v1`. */
 internal const val NO_FILES =
     "This Ostrom server does not take files (it lacks runners.cloud.files.v1); it needs an update first."
@@ -141,9 +126,4 @@ internal const val NO_FILES =
 internal const val FILES_OFF =
     "Files are off for this organization: an administrator has to configure and test its artifact storage first."
 
-private const val FIRST_UPLOAD_RETRY = 1_000L
 private const val UPLOAD_ATTEMPTS = 5
-private const val UPLOAD_MILLIS = 120_000L
-private const val TIMEOUT = 408
-private const val TOO_MANY = 429
-private const val SERVER_ERRORS = 500

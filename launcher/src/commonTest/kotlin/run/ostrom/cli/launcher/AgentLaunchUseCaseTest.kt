@@ -24,6 +24,7 @@ private val SOURCES = listOf("--setting-sources", "user", "--add-dir", "/work/ac
 
 /** `ostrom run <agent>` end to end against fakes: what reaches the server, the agent and the developer. */
 @OptIn(ExperimentalCoroutinesApi::class)
+@Suppress("LargeClass") // every way an agent is launched, against one set of fakes
 class AgentLaunchUseCaseTest : AgentLaunchKit() {
     @Test
     fun aBackgroundLaunchTellsItsRelay() = runTest {
@@ -103,7 +104,13 @@ class AgentLaunchUseCaseTest : AgentLaunchKit() {
             200 to """{"allowed":true,"note":"metered by your organisation"}"""
         server["GET ${Routes.PACKAGE}?repo=acme-api"] = 200 to PackageVector.ENVELOPE
         server["GET ${Routes.KEYS}"] = 200 to objectOf(
-            "keys" to listOf(mapOf("kid" to PackageVector.KID, "publicKeyPem" to PackageVector.PUBLIC_KEY_PEM)),
+            "keys" to listOf(
+                mapOf(
+                    "kid" to PackageVector.KID,
+                    "alg" to "ed25519",
+                    "publicKeyPem" to PackageVector.PUBLIC_KEY_PEM,
+                ),
+            ),
         ).toString()
         server["GET ${Routes.MCP_MINE}"] = 200 to
             """{"items":[{"name":"github"},{"name":"off","enabled":false},{"name":"bad name!"},{"x":1},"s"]}"""
@@ -141,7 +148,13 @@ class AgentLaunchUseCaseTest : AgentLaunchKit() {
         server["GET ${Routes.POLICY}?agent=claude-code&dev=alice&model=opus"] = 200 to """{"allowed":true}"""
         server["GET ${Routes.PACKAGE}?repo=acme-api"] = 200 to PackageVector.ENVELOPE
         server["GET ${Routes.KEYS}"] = 200 to objectOf(
-            "keys" to listOf(mapOf("kid" to PackageVector.KID, "publicKeyPem" to PackageVector.PUBLIC_KEY_PEM)),
+            "keys" to listOf(
+                mapOf(
+                    "kid" to PackageVector.KID,
+                    "alg" to "ed25519",
+                    "publicKeyPem" to PackageVector.PUBLIC_KEY_PEM,
+                ),
+            ),
         ).toString()
         server["GET ${Routes.MCP_MINE}"] = 200 to """{"items":[{"name":"linear"}]}"""
         val before = files.texts.toMap()
@@ -508,21 +521,26 @@ class AgentLaunchUseCaseTest : AgentLaunchKit() {
             }
         }
         val capabilities = "GET ${Routes.CAPABILITIES}"
-        server[capabilities] = 200 to """{"apiVersion":1,"features":["waits.v1",[1],7,"$WAITS_WAKE"]}"""
+        server[capabilities] =
+            200 to """{"apiVersion":1,"serverVersion":"1.4.0","features":["waits.v1","$WAITS_WAKE"]}"""
         start()
-        server[capabilities] = 200 to """{"apiVersion":1,"features":["waits.v1"]}"""
+        server[capabilities] = 200 to """{"apiVersion":1,"serverVersion":"1.4.0","features":["waits.v1"]}"""
         start()
         server[capabilities] = 200 to """{"apiVersion":1}"""
         start()
+        assertEquals(setOf(3_000L), server.sent(capabilities).map { it.timeoutMillis }.toSet())
         server[capabilities] = 500 to """{"error":{"type":"internal","message":"x"}}"""
         start()
         server.unreachable = setOf(capabilities)
         start()
         server.unreachable = emptySet()
-        server[capabilities] = 200 to """{"apiVersion":1,"features":["$WAITS_WAKE"]}"""
+        server.timedOut = setOf(capabilities)
+        start()
+        server.timedOut = emptySet()
+        server[capabilities] = 200 to """{"apiVersion":1,"serverVersion":"1.4.0","features":["$WAITS_WAKE"]}"""
         start(Agent.CODEX)
-        assertEquals(listOf(true, false, false, false, false, false), wakes)
-        assertEquals(6, server.sent(capabilities).size, "asked once a launch, Codex too: the todo is for every agent")
+        assertEquals(listOf(true, false, false, false, false, false, false), wakes)
+        assertEquals(7, server.sent(capabilities).size, "asked once a launch, Codex too: the todo is for every agent")
     }
 
     @Test
@@ -536,10 +554,10 @@ class AgentLaunchUseCaseTest : AgentLaunchKit() {
         server["GET ${Routes.skill("review", "1")}"] = 200 to artifact
         server["PUT ${Routes.SKILL_INSTALLATIONS}"] = 204 to ""
         val capabilities = "GET ${Routes.CAPABILITIES}"
-        server[capabilities] = 200 to """{"apiVersion":1,"features":["waits.v1"]}"""
+        server[capabilities] = 200 to """{"apiVersion":1,"serverVersion":"1.4.0","features":["waits.v1"]}"""
         assertEquals(3, start())
         assertTrue(server.sent("GET ${Routes.SKILL_DELIVERY}").isEmpty(), "not served: not asked")
-        server[capabilities] = 200 to """{"apiVersion":1,"features":["$TEAM_SKILLS"]}"""
+        server[capabilities] = 200 to """{"apiVersion":1,"serverVersion":"1.4.0","features":["$TEAM_SKILLS"]}"""
         assertEquals(3, start())
         val skillFile = join("/home/dev", ".claude", "skills", "review", "SKILL.md").toPath()
         assertEquals("# Review\n", skillFiles.read(skillFile) { readUtf8() })

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli.commands
 
+import run.ostrom.cli.launcher.asJson
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.Context
 import com.github.ajalt.clikt.parameters.arguments.argument
@@ -12,6 +13,7 @@ import run.ostrom.cli.ExitCode
 import run.ostrom.cli.launcher.child
 import run.ostrom.cli.launcher.list
 import run.ostrom.cli.launcher.text
+import run.ostrom.cli.required
 import run.ostrom.cli.waits.age
 import run.ostrom.core.api.models.ServerFeatures
 import kotlinx.serialization.json.JsonArray
@@ -98,9 +100,9 @@ internal fun CliDependencies.onBehalfOf(
 
 /** `cs_1  claude  running  acme/api  5m`: one row of `ostrom cloud list`, its age from [now]. */
 internal fun JsonObject.cloudLine(now: Long): String = listOf(
-    text("id") ?: "?",
-    text("agent") ?: "-",
-    text("status") ?: "?",
+    required("id"),
+    required("agent"),
+    required("status"),
     text("repo") ?: "-",
     age(text("createdAt"), now),
 ).joinToString("  ")
@@ -136,23 +138,20 @@ internal class CloudListCommand(private val dependencies: CliDependencies) : Cli
                 NO_SESSIONS_OWNER,
             )
         }
-        val query = listOfNotNull(
-            status?.let { "status=$it" },
-            before?.let { "before=${segment(it)}" },
-            owner?.let { "owner=${segment(it)}" },
-        )
-        val path = if (query.isEmpty()) CLOUD_SESSIONS else "$CLOUD_SESSIONS?" + query.joinToString("&")
-        val page = access.read(path, "No cloud sessions on ${access.signed.serverUrl}.")
-        val items = page.list("items").filterIsInstance<JsonObject>()
+        val filtered = listOfNotNull(status, before, owner).isNotEmpty()
+        val page = access.typed("No cloud sessions on ${access.signed.serverUrl}.") {
+            cloudSessions.list(status = status, before = before, owner = owner)
+        }
+        val items = page.items.map { asJson(it) }
         val console = dependencies.console
         if (json) {
             console.data(JsonArray(items).toString() + "\n")
         } else {
             items.forEach { console.out(it.cloudLine(dependencies.clock()) + "\n") }
-            val none = if (query.isEmpty()) "No cloud sessions. Start one: ostrom run claude --cloud" else "None match."
+            val none = if (!filtered) "No cloud sessions. Start one: ostrom run claude --cloud" else "None match."
             if (items.isEmpty()) console.err("$none\n")
         }
-        page.text("next")?.let { console.err("More exist: ostrom cloud list --before $it\n") }
+        page.next?.let { console.err("More exist: ostrom cloud list --before $it\n") }
     }
 }
 
@@ -167,7 +166,7 @@ internal class CloudShowCommand(private val dependencies: CliDependencies) : Cli
 
     override fun run() {
         val access = dependencies.cloudAccess(server, org)
-        val shown = access.read(cloudSessionPath(session), "No cloud session $session.")
+        val shown = access.typedJson("No cloud session $session.") { cloudSessions.get(session) }
         if (json) {
             dependencies.console.data(shown.toString() + "\n")
             return
@@ -190,10 +189,10 @@ internal class CloudShowCommand(private val dependencies: CliDependencies) : Cli
                 .joinToString(" · "),
             "Repository" to listOfNotNull(shown.text("repo"), shown.text("ref")).joinToString(" @ "),
             // TeamCode's `Owner: ID (created by ID)`: only a session created on its owner's behalf says it.
-            "Created by" to shown.child("createdBy")?.text("initiatorId")
-                ?.takeIf { it != shown.text("owner") }.orEmpty(),
-            "GitHub" to shown.text("githubAccess").orEmpty(),
-            "Created" to shown.text("createdAt").orEmpty(),
+            "Created by" to shown.child("createdBy")
+                ?.let { by -> by.required("initiatorId").takeIf { it != shown.text("owner") } }.orEmpty(),
+            "GitHub" to shown.required("githubAccess"),
+            "Created" to shown.required("createdAt"),
             "Last active" to shown.text("lastActivityAt").orEmpty(),
             "Paused" to shown.text("pausedAt").orEmpty(),
             "Expires" to shown.text("expiresAt").orEmpty(),
@@ -229,9 +228,14 @@ internal class CloudChangeCommand(
         checkMember(member)
         val access = dependencies.cloudAccess(server, org)
         val onBehalfOf = dependencies.onBehalfOf(access, member)
-        val path = "${cloudSessionPath(session)}/$action"
-        val changed = access.write("POST", path, null, "No cloud session $session.", onBehalfOf = onBehalfOf)
-        dependencies.console.out(changed.cloudLine(dependencies.clock()) + "\n")
+        val changed = access.typedWrite("No cloud session $session.") {
+            if (action == "pause") {
+                cloudSessions.pause(session, onBehalfOf)
+            } else {
+                cloudSessions.resume(session, onBehalfOf)
+            }
+        }
+        dependencies.console.out(asJson(changed).cloudLine(dependencies.clock()) + "\n")
     }
 }
 
@@ -256,7 +260,9 @@ internal class CloudDeleteCommand(private val dependencies: CliDependencies) : C
         checkMember(member)
         val access = dependencies.cloudAccess(server, org)
         val onBehalfOf = dependencies.onBehalfOf(access, member)
-        access.write("DELETE", cloudSessionPath(session), null, "No cloud session $session.", onBehalfOf = onBehalfOf)
+        access.typedWrite("No cloud session $session.") {
+            cloudSessions.stop(session, onBehalfOf)
+        }
         dependencies.console.out("Session $session is being deleted.\n")
     }
 }

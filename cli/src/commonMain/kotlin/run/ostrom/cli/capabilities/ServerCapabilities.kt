@@ -2,15 +2,12 @@
 package run.ostrom.cli.capabilities
 
 import run.ostrom.cli.api.OstromApi
-import run.ostrom.cli.api.ServerRequest
-import run.ostrom.cli.api.ServerUnreachableException
-import run.ostrom.cli.api.apiError
-import run.ostrom.core.api.OstromJson
+import run.ostrom.cli.launch.ApiServerTransport
+import run.ostrom.cli.launcher.TypedAnswer
+import run.ostrom.cli.launcher.typedAnswer
+import run.ostrom.cli.launcher.typedClient
 import run.ostrom.core.api.models.Capabilities
 import run.ostrom.core.api.models.ServerFeatures
-
-/** The route that says what a server speaks and serves (ostrom-core `api/openapi.yaml`, `capabilities`). */
-internal const val CAPABILITIES_ROUTE = "/api/v1/capabilities"
 
 /** What reading a server's capabilities gave. */
 sealed interface CapabilitiesRead {
@@ -64,35 +61,21 @@ class ServerCapabilitiesImpl(private val api: (String) -> OstromApi) : ServerCap
         return read
     }
 
-    private suspend fun fetch(serverUrl: String, token: String): CapabilitiesRead {
-        val response = try {
-            api(serverUrl).send(ServerRequest("GET", CAPABILITIES_ROUTE, token = token))
-        } catch (e: ServerUnreachableException) {
-            return CapabilitiesRead.Failed(null, e.reason)
-        }
-        return when (response.status) {
-            in OK..LAST_SUCCESS -> decoded(response.body)?.let { CapabilitiesRead.Read(it) }
-                ?: CapabilitiesRead.Failed(response.status, "its capabilities cannot be read")
-            NOT_FOUND -> CapabilitiesRead.Unknown
-            else -> {
-                val error = response.apiError()
-                val reason = if (error == null) "HTTP ${response.status}" else error.message
-                CapabilitiesRead.Failed(response.status, reason)
+    private suspend fun fetch(serverUrl: String, token: String): CapabilitiesRead =
+        when (val answer = typedAnswer { client(serverUrl, token).capabilities() }) {
+            is TypedAnswer.Ok -> CapabilitiesRead.Read(answer.value)
+            is TypedAnswer.Failed -> when (answer.failure.status) {
+                NOT_FOUND -> CapabilitiesRead.Unknown
+                else -> CapabilitiesRead.Failed(answer.failure.status, answer.failure.message)
             }
         }
-    }
 
-    private fun decoded(body: String): Capabilities? = try {
-        OstromJson.decodeFromString(Capabilities.serializer(), body)
-    } catch (_: IllegalArgumentException) {
-        // A body that is not the contract's is a SerializationException, which is an IllegalArgumentException.
-        null
-    }
+    private fun client(serverUrl: String, token: String) =
+        typedClient(ApiServerTransport(api(serverUrl)), token, timeoutMillis = READ_MILLIS)
 
     private companion object {
-        const val OK = 200
-        const val LAST_SUCCESS = 299
         const val NOT_FOUND = 404
+        const val READ_MILLIS = 10_000L
     }
 }
 

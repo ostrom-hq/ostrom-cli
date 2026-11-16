@@ -175,6 +175,6 @@ open class AgentLaunchKit {
     protected companion object {
         const val NO_ORIGIN = "ostrom: no origin with an owner/name here"
         const val ROUND_TRIP = 100L
-        const val KEYS = """{"keys":[{"keyId":"k1","algorithm":"ed25519","publicKeyPem":"pem"}]}"""
+        const val KEYS = """{"keys":[{"kid":"k1","alg":"ed25519","publicKeyPem":"pem"}]}"""
     }
 }

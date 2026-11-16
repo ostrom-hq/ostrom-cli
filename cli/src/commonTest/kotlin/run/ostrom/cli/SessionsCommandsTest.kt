@@ -22,8 +22,10 @@ class SessionsCommandsTest : CliKit() {
     private val session = "/api/v1/sessions/ses_41b2"
     private val started = """"id":"ses_41b2","agent":"claude","dev":"maya-k","repo":"acme/api",""" +
         """"model":"claude-sonnet-4","harnessVersion":"2026.10.30-3","startedAt":"2026-10-30T14:02:11Z""""
-    private val receipt = """"receipt":{"id":"rcp_1","nodes":[""" +
-        """{"kind":"check","label":"Run the tests before any push","outcome":"passed"}]}"""
+    private val receipt = """"receipt":{"id":"rcp_1","subject":{"kind":"session","id":"ses_41b2","digest":"d"},""" +
+        """"initiator":"maya-k","rules":[],"decisions":[],"nodes":[{"id":"n1","workflowId":"w1","kind":"check",""" +
+        """"label":"Run the tests before any push","outcome":"passed"}],""" +
+        """"createdAt":"2026-10-30T14:09:00Z","signature":"s"}"""
     private val running = """{"session":{$started,"gates":["g_7d1e"]},$receipt}"""
     private val ended = """{"session":{$started,"gates":["g_7d1e"],"endedAt":"2026-10-30T14:09:00Z",""" +
         """"endedBy":"stop","exitCode":0},$receipt}"""
@@ -41,17 +43,20 @@ class SessionsCommandsTest : CliKit() {
     fun theListSaysEachSessionOnALineNewestFirst() {
         signIn("/home/maya/.config/ostrom")
         now = Instant.parse("2026-10-30T14:07:11Z").toEpochMilliseconds()
-        val items = """{"items":[{"id":"ses_41b2","agent":"claude","repo":"acme/api",""" +
-            """"startedAt":"2026-10-30T14:02:11Z"},{"id":"ses_9","agent":"codex",""" +
-            """"startedAt":"2026-10-30T12:07:11Z","endedAt":"2026-10-30T13:00:00Z"},""" +
-            """{"id":"ses_8","lost":true},{},{"id":"w","activity":"waiting_for_human"},""" +
-            """{"id":"k","activity":"working"},{"id":"e","endedAt":"2026-10-30T13:00:00Z","activity":"working"}],""" +
+        val ended = "2026-10-30T13:00:00Z"
+        val first = sessionJson("ses_41b2", "repo" to "acme/api", "startedAt" to "2026-10-30T14:02:11Z")
+        val items = """{"items":[$first,""" +
+            """${sessionJson("ses_9", "agent" to "codex", "endedAt" to "2026-10-30T13:00:00Z")},""" +
+            """${sessionJson("ses_8", "agent" to "codex", "lost" to "true")},""" +
+            """${sessionJson("w", "agent" to "codex", "activity" to "waiting_for_human")},""" +
+            """${sessionJson("k", "agent" to "codex", "activity" to "working")},""" +
+            """${sessionJson("e", "agent" to "codex", "endedAt" to ended, "activity" to "working")}],""" +
             """"next":"ses_8"}"""
         val routes = mapOf("GET /api/v1/sessions?dev=maya" to (200 to items))
         assertEquals(0, serving(routes).run(arrayOf("sessions", "list")))
         assertEquals(
-            "ses_41b2  claude  acme/api  running  5m\nses_9  codex  -  ended  2h\nses_8  -  -  lost  ?\n" +
-                "?  -  -  running  ?\nw  -  -  waiting for a person  ?\nk  -  -  working  ?\ne  -  -  ended  ?\n",
+            "ses_41b2  claude  acme/api  running  5m\nses_9  codex  -  ended  2h\nses_8  codex  -  lost  2h\n" +
+                "w  codex  -  waiting for a person  2h\nk  codex  -  working  2h\ne  codex  -  ended  2h\n",
             console.out.toString(),
         )
         assertEquals("More exist: ostrom sessions list --before ses_8\n", console.err.toString())
@@ -61,10 +66,10 @@ class SessionsCommandsTest : CliKit() {
     fun theListAsksForWhatItsOptionsSay() {
         signIn("/home/maya/.config/ostrom")
         val asked = "GET /api/v1/sessions?repo=acme%2Fapi&open=true&before=ses_8"
-        val routes = mapOf(asked to (200 to """{"items":[{"id":"ses_1"}]}"""))
+        val routes = mapOf(asked to (200 to """{"items":[${sessionJson("ses_1")}]}"""))
         val arguments = arrayOf("sessions", "list", "--all", "--repo", "acme/api", "--open", "--before", "ses_8")
         assertEquals(0, serving(routes).run(arguments + "--json"))
-        assertEquals("""[{"id":"ses_1"}]""" + "\n", console.out.toString())
+        assertJsonCovers("[${sessionJson("ses_1")}]", console.out.toString())
         val none = mapOf("GET /api/v1/sessions" to (200 to """{"items":[]}"""))
         assertEquals(0, serving(none).run(arrayOf("sessions", "list", "--all")))
         assertEquals("No sessions yet. Start one: ostrom run claude\n", console.err.toString())
@@ -73,7 +78,7 @@ class SessionsCommandsTest : CliKit() {
         assertEquals(0, serving(emptyPage).run(arrayOf("sessions", "list", "--before", "ses_8")))
         assertEquals("No sessions match.\n", console.err.toString())
         console.err.clear()
-        val noRepo = mapOf("GET /api/v1/sessions?dev=maya&repo=a%2Fb" to (200 to """{"items":[]}"""))
+        val noRepo = mapOf("GET /api/v1/sessions?repo=a%2Fb&dev=maya" to (200 to """{"items":[]}"""))
         assertEquals(0, serving(noRepo).run(arrayOf("sessions", "list", "--repo", "a/b")))
         val noOpen = mapOf("GET /api/v1/sessions?dev=maya&open=true" to (200 to """{"items":[]}"""))
         assertEquals(0, serving(noOpen).run(arrayOf("sessions", "list", "--open")))
@@ -122,8 +127,8 @@ class SessionsCommandsTest : CliKit() {
             """"at":"2026-10-30T14:05:41Z"}}"""
         val routes = mapOf(
             "GET /api/v1/sessions?dev=maya" to (
-                200 to """{"items":[{"agent":"codex"},{"id":"ses_old","startedAt":"2026-10-29T09:00:00Z"},""" +
-                    """{"id":"ses_41b2","startedAt":"2026-10-30T14:02:11Z"},{"id":"ses_undated"}]}"""
+                200 to """{"items":[${sessionJson("ses_old", "startedAt" to "2026-10-29T09:00:00Z")},""" +
+                    """${sessionJson("ses_41b2", "startedAt" to "2026-10-30T14:02:11Z")}]}"""
                 ),
             "GET $session" to (200 to running),
             "GET /api/v1/gates/g_7d1e" to (200 to pending),
@@ -224,7 +229,7 @@ class SessionsCommandsTest : CliKit() {
         val routes = mapOf("GET $session" to (200 to ended), "GET /api/v1/gates/g_7d1e" to (200 to gate))
         assertEquals(0, serving(routes).run(show("ses_41b2", "--json")))
         val printed = json(console.out.toString())
-        assertEquals(json(ended)["session"], printed["session"])
+        assertJsonCovers(json(ended).getValue("session").toString(), printed.getValue("session").toString())
         assertEquals("""[${json(gate)["gate"]}]""", printed["gates"].toString())
         assertTrue(console.out.endsWith("}\n"))
         assertEquals(64, cli(environment = withServer).run(show("--json", "--follow")))
@@ -271,7 +276,7 @@ class SessionsCommandsTest : CliKit() {
     fun yourOnlySessionIsYourLastAndAGateWithoutItsRequestIsShownByItsId() {
         signIn("/home/maya/.config/ostrom")
         val routes = mapOf(
-            "GET /api/v1/sessions?dev=maya" to (200 to """{"items":[{"id":"ses_41b2"}]}"""),
+            "GET /api/v1/sessions?dev=maya" to (200 to """{"items":[${sessionJson("ses_41b2")}]}"""),
             "GET $session" to (200 to ended),
             "GET /api/v1/gates/g_7d1e" to (200 to "{}"),
         )
@@ -280,9 +285,20 @@ class SessionsCommandsTest : CliKit() {
     }
 
     @Test
+    fun aSessionWhoseStartCannotBeReadIsNotTheLastOne() {
+        signIn("/home/maya/.config/ostrom")
+        val items = """{"items":[${sessionJson("ses_x", "startedAt" to "soon")},${sessionJson("ses_41b2")}]}"""
+        val routes = mapOf(
+            "GET /api/v1/sessions?dev=maya" to (200 to items),
+            "GET $session" to (200 to ended),
+        )
+        assertEquals(0, serving(routes).run(show()))
+    }
+
+    @Test
     fun aGateTheServerDoesNotGiveIsShownByItsId() {
         signIn("/home/maya/.config/ostrom")
-        val odd = """{"session":{$started,"gates":["g_gone",{"not":"an id"}]}}"""
+        val odd = """{"session":{$started,"gates":["g_gone"]}}"""
         assertEquals(0, serving(mapOf("GET $session" to (200 to odd))).run(show("ses_41b2")))
         assertOut("          asked for a yes    g_gone\n")
         val refused = mapOf("GET $session" to (200 to odd), "GET /api/v1/gates/g_gone" to (403 to "{}"))
@@ -293,12 +309,8 @@ class SessionsCommandsTest : CliKit() {
         assertEquals(65, serving(signedOut).run(show("ses_41b2")), "signed out stops")
         console.out.clear()
         assertEquals(69, serving(mapOf("GET /api/v1/sessions/s0" to (200 to "{}"))).run(show("s0", "-f")))
-        assertTrue(console.err.contains("answered without the session s0"), console.err.toString())
+        assertTrue(console.err.contains("its answer cannot be read"), console.err.toString())
         assertTrue(waits.isEmpty(), "never followed")
-        val bare = """{"session":{}}"""
-        assertEquals(0, serving(mapOf("GET /api/v1/sessions/s0" to (200 to bare))).run(show("s0")))
-        val said = "Session ?\n          session started\nStill running. Follow it: ostrom sessions show s0 --follow\n"
-        assertEquals(said, console.out.toString())
         val notYours = mapOf("GET /api/v1/sessions/s0" to (403 to "{}"))
         assertEquals(77, serving(notYours).run(show("s0")), "a session the caller may not read")
     }

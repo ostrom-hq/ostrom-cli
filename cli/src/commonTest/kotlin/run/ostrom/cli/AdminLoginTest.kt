@@ -120,7 +120,7 @@ class AdminLoginTest : SetupKit() {
         val gates = mapOf("PUT /api/v1/gates/policy" to (200 to "{}"))
         assertEquals(0, run(gates, "policy", "set", "self-approval", "never"))
         assertEquals("ost_adm", requests.last().second.token)
-        val workflow = """{"id":"w1","name":"git-safety","status":"proposed","version":3}"""
+        val workflow = workflowJson("w1", "git-safety", "status" to "proposed", "version" to "3")
         val enforce =
             mapOf("GET /api/v1/workflows/w1" to (200 to workflow), "PUT /api/v1/workflows/w1" to (200 to "{}"))
         assertEquals(0, run(enforce, "harness", "enforce", "w1"))

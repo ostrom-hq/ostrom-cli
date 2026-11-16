@@ -4,7 +4,8 @@ package run.ostrom.cli
 import run.ostrom.cli.commands.CapacityReport
 import run.ostrom.cli.commands.bar
 import run.ostrom.cli.commands.duration
-import run.ostrom.cli.commands.readCapacity
+import run.ostrom.cli.launcher.typedClient
+import run.ostrom.core.client.OstromClient
 import run.ostrom.cli.commands.text
 import run.ostrom.cli.launcher.ServerJson
 import run.ostrom.cli.launcher.ServerReply
@@ -20,12 +21,18 @@ import kotlin.time.Instant
 class StatusCapacityTest {
     private val now = Instant.parse("2026-11-15T10:00:00Z").toEpochMilliseconds()
 
-    private fun server(vararg routes: Pair<String, Pair<Int?, String>>) = ServerJson(
-        ServerTransport { call ->
+    private class Fake(val server: ServerJson, val client: OstromClient)
+
+    private fun server(vararg routes: Pair<String, Pair<Int?, String>>): Fake {
+        val transport = ServerTransport { call ->
             val (status, body) = routes.toMap()[call.path] ?: (404 to "{}")
             ServerReply(status, body)
-        },
-    )
+        }
+        return Fake(ServerJson(transport), typedClient(transport, "ost_1"))
+    }
+
+    private suspend fun readCapacity(fake: Fake, token: String, now: Long) =
+        run.ostrom.cli.commands.readCapacity(fake.server, fake.client, token, now)
 
     private val accounts = """{"items":[""" +
         """{"label":"Account 1","provider":"claude","status":"ready","paused":false,"windows":[""" +
@@ -129,6 +136,15 @@ class StatusCapacityTest {
         assertTrue("Pacing      unavailable (unexpected response from the server)\n" in text, text)
         val bare = CapacityReport(pacing = parse("""{"pace":"normal"}"""), nowMillis = now).text()
         assertTrue("Pacing      normal: no concurrency cap, 0 ms between calls\n" in bare, bare)
+    }
+
+    @Test
+    fun aPacingTheServerDoesNotServeOrFailsToGiveSaysWhy() = runTest {
+        val directive = "/api/v1/directives/current"
+        val notServed = readCapacity(server(directive to (403 to "{}")), "ost_1", now)
+        assertEquals("not_served", notServed.unavailable["pacing"])
+        val failed = readCapacity(server(directive to (500 to "{}")), "ost_1", now)
+        assertEquals("read_failed", failed.unavailable["pacing"])
     }
 
     @Test

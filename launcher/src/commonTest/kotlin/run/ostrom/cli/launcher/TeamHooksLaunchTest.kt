@@ -35,7 +35,8 @@ class TeamHooksLaunchTest : AgentLaunchKit() {
     private fun serve(vararg entries: String = arrayOf(Hooks.entry()), features: String = "\"$TEAM_HOOKS\"") {
         serveALaunch()
         server["GET ${Routes.POLICY}?agent=codex&dev=alice"] = 200 to """{"allowed":true}"""
-        server["GET ${Routes.CAPABILITIES}"] = 200 to """{"apiVersion":1,"features":[$features]}"""
+        server["GET ${Routes.CAPABILITIES}"] =
+            200 to """{"apiVersion":1,"serverVersion":"1.4.0","features":[$features]}"""
         server[manifest] = 200 to """{"memberId":"m1","hooks":[${entries.joinToString(",")}]}"""
         server[artifact] = 200 to Hooks.artifact()
     }
@@ -106,11 +107,13 @@ class TeamHooksLaunchTest : AgentLaunchKit() {
         installed["gemini"] = "/usr/bin/gemini"
         start(Agent.GEMINI)
         assertEquals(emptyList(), hooks())
-        server["GET ${Routes.CAPABILITIES}"] = 200 to """{"apiVersion":1,"features":["waits.v1"]}"""
+        server["GET ${Routes.CAPABILITIES}"] =
+            200 to """{"apiVersion":1,"serverVersion":"1.4.0","features":["waits.v1"]}"""
         start()
         assertEquals(emptyList(), hooks())
         assertTrue(server.sent(manifest).isEmpty())
-        server["GET ${Routes.CAPABILITIES}"] = 200 to """{"apiVersion":1,"features":["$TEAM_HOOKS"]}"""
+        server["GET ${Routes.CAPABILITIES}"] =
+            200 to """{"apiVersion":1,"serverVersion":"1.4.0","features":["$TEAM_HOOKS"]}"""
         server[manifest] = 200 to """{"memberId":"m1","hooks":[]}"""
         start()
         assertEquals(emptyList(), hooks())

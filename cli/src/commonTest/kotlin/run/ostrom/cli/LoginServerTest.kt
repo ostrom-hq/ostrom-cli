@@ -52,17 +52,16 @@ class LoginServerTest : CliKit() {
     fun theSignInPageMustBeOnTheGitHubConfigured() {
         // S2-35: OSTROM_GITHUB_WEB_URL names the GitHub of a GitHub Enterprise; github.com's page is then refused
         val enterprise = withServer + ("OSTROM_GITHUB_WEB_URL" to "https://ghe.acme.example/")
-        val page = """{"deviceCode":"dc","userCode":"X","verificationUri":"https://ghe.acme.example/login/device"}"""
+        val page = deviceCodeJson("X", "https://ghe.acme.example/login/device")
         val flow = deviceFlow + ("POST /api/v1/auth/device" to (200 to page))
         assertEquals(0, cli(environment = enterprise, api = serverOf(flow)).run(arrayOf("login")))
         assertTrue(console.err.contains("Open https://ghe.acme.example/login/device"), console.err.toString())
-        val github = """{"deviceCode":"dc","verificationUri":"https://github.com/login/device"}"""
+        val github = deviceCodeJson("X", "https://github.com/login/device")
         val elsewhere = deviceFlow + ("POST /api/v1/auth/device" to (200 to github))
         assertEquals(69, cli(environment = enterprise, api = serverOf(elsewhere)).run(arrayOf("login")))
         assertTrue(console.err.contains("a sign-in page that is neither GitHub's nor its own"), console.err.toString())
         // the console of OSTROM_CONSOLE_URL is a page of Ostrom's own: the server sends there
-        val consolePage = """{"deviceCode":"dc","userCode":"X",""" +
-            """"verificationUri":"https://console.ostrom.example/device"}"""
+        val consolePage = deviceCodeJson("X", "https://console.ostrom.example/device")
         val consoleFlow = deviceFlow + ("POST /api/v1/auth/device" to (200 to consolePage))
         val withConsole = withServer + ("OSTROM_CONSOLE_URL" to "https://console.ostrom.example/")
         assertEquals(0, cli(environment = withConsole, api = serverOf(consoleFlow)).run(arrayOf("login")))

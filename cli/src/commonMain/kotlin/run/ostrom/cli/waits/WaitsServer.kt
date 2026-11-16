@@ -4,7 +4,14 @@ package run.ostrom.cli.waits
 import run.ostrom.cli.launcher.Routes
 import run.ostrom.cli.launcher.ServerAnswer
 import run.ostrom.cli.launcher.ServerJson
+import run.ostrom.cli.launcher.TypedAnswer
+import run.ostrom.cli.launcher.typedAnswer
+import run.ostrom.core.api.OstromJson
+import run.ostrom.core.client.OstromClient
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.jsonObject
 
 /** `GET`/`POST`: the waits of the caller's organisation (served, feature `waits.v1`). */
 internal const val WAITS = "/api/v1/waits"
@@ -26,23 +33,35 @@ internal class WaitInputException(message: String) : Exception(message)
 /** Stops the command with [message], a usage error (exit 64): nothing is sent. */
 internal fun refuse(message: String): Nothing = throw WaitInputException(message)
 
+/** [value] as the JSON object the server sent for it. */
+private inline fun <reified T> asJson(value: T): JsonObject = OstromJson.encodeToJsonElement(value).jsonObject
+
 /** The waits routes of the server, called with one token; a failure is a [WaitsRefusal]. */
-internal class WaitsServer(private val server: ServerJson, private val token: String) {
+internal class WaitsServer(
+    private val server: ServerJson,
+    private val token: String,
+    private val client: OstromClient,
+) {
     /** `GET /api/v1/waits` with [query] (empty, or starting with `?`): `{items, next}`. */
     suspend fun page(query: String): JsonObject = call("GET", "$WAITS$query", null, null)
 
-    /** `GET /api/v1/waits/{id}`. */
-    suspend fun get(id: String): JsonObject = call("GET", "$WAITS/${Routes.encode(id)}", null, null)
+    /** `waits.get`: `GET /api/v1/waits/{id}`, as the JSON object the server sent. */
+    suspend fun get(id: String): JsonObject = typed { asJson(client.waits.get(id)) }
 
-    /** `POST /api/v1/waits/{id}/answer`. */
-    suspend fun answer(id: String, body: JsonObject): JsonObject =
-        call("POST", "$WAITS/${Routes.encode(id)}/answer", body, null)
+    /** `waits.answer`: `POST /api/v1/waits/{id}/answer` with the [action] chosen and the [values] of the fields. */
+    suspend fun answer(id: String, action: String, values: Map<String, JsonElement>): JsonObject =
+        typed { asJson(client.waits.answer(id, action, values)) }
 
     /** `POST /api/v1/waits/{id}/cancel`. */
     suspend fun cancel(id: String): JsonObject = call("POST", "$WAITS/${Routes.encode(id)}/cancel", null, null)
 
     /** `POST /api/v1/waits`, a replay of [key] answering the wait first created. */
     suspend fun create(body: JsonObject, key: String): JsonObject = call("POST", WAITS, body, key)
+
+    private suspend fun <T> typed(call: suspend () -> T): T = when (val answer = typedAnswer(call)) {
+        is TypedAnswer.Ok -> answer.value
+        is TypedAnswer.Failed -> throw WaitsRefusal(answer.failure.status, answer.failure.type, answer.failure.message)
+    }
 
     private suspend fun call(method: String, path: String, body: JsonObject?, key: String?): JsonObject =
         when (val answer = server.call(method, path, body, token, MILLIS, key)) {

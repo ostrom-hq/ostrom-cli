@@ -33,7 +33,7 @@ dependencyResolutionManagement {
 if (providers.gradleProperty("ostrom.core.local").orNull == "true") {
     includeBuild("../ostrom-core") {
         dependencySubstitution {
-            for (module in listOf("api", "receipts", "telemetry")) {
+            for (module in listOf("api", "client", "receipts", "telemetry")) {
                 substitute(module("run.ostrom:ostrom-$module")).using(project(":$module"))
             }
         }

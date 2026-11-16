@@ -157,9 +157,14 @@ open class CliKit {
             OstromJson.encodeToString(Capabilities.serializer(), it)
         })
 
+    /** A started device sign-in as the server gives it: every field, [fields] (JSON members) over the defaults. */
+    protected fun deviceCodeJson(userCode: String = "4F2C-9B1D", page: String = "https://github.com/login/device") =
+        """{"deviceCode":"dc","userCode":"$userCode","verificationUri":"$page","interval":1,"expiresIn":20,""" +
+            """"verificationUriComplete":"$page"}"""
+
     protected val deviceFlow = mapOf(
-        "POST /api/v1/auth/device" to (200 to """{"deviceCode":"dc","userCode":"4F2C-9B1D","interval":1}"""),
-        "POST /api/v1/auth/device/token" to (200 to """{"token":"ost_new","login":"maya-k"}"""),
+        "POST /api/v1/auth/device" to (200 to deviceCodeJson()),
+        "POST /api/v1/auth/device/token" to (200 to """{"token":"ost_new","login":"maya-k","scopes":[]}"""),
         capabilities(),
     )
 

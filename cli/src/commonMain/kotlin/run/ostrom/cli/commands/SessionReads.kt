@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli.commands
 
+import run.ostrom.cli.launcher.asJson
 import com.github.ajalt.clikt.core.PrintMessage
 import run.ostrom.cli.ExitCode
 import run.ostrom.cli.launcher.Routes
 import run.ostrom.cli.launcher.ServerAnswer
+import run.ostrom.cli.launcher.TypedAnswer
+import run.ostrom.cli.launcher.typedAnswer
+import run.ostrom.core.api.models.SessionResponse
 import run.ostrom.cli.launcher.child
 import run.ostrom.cli.launcher.list
 import run.ostrom.cli.launcher.text
@@ -51,10 +55,10 @@ internal suspend fun readSession(signed: SignedIn, id: String, kept: MutableMap<
  * The server's answer for session [id]. A 404 is no such session only when the list of sessions is served: a server
  * that does not serve the sessions' reads stops with 69 ([served]).
  */
-private suspend fun sessionAnswer(signed: SignedIn, id: String): ServerAnswer {
-    val answer = signed.server.get(sessionPath(id), signed.token)
-    if (answer is ServerAnswer.Failed && answer.status == NOT_FOUND) {
-        served(signed, signed.server.get(mine(signed), signed.token))
+private suspend fun sessionAnswer(signed: SignedIn, id: String): TypedAnswer<SessionResponse> {
+    val answer = typedAnswer { signed.client.sessions.get(id) }
+    if (answer is TypedAnswer.Failed && answer.failure.status == NOT_FOUND) {
+        served(signed, typedAnswer { signed.client.sessions.list(dev = signed.login) })
     }
     return answer
 }
@@ -63,8 +67,8 @@ private suspend fun sessionAnswer(signed: SignedIn, id: String): ServerAnswer {
  * Stops with 69 when [list], the answer of `GET /api/v1/sessions`, is a 404: the server does not serve the sessions'
  * reads yet (an older or partial Ostrom), which no developer can fix by naming another session.
  */
-private fun served(signed: SignedIn, list: ServerAnswer) {
-    if (list is ServerAnswer.Failed && list.status == NOT_FOUND) {
+private fun served(signed: SignedIn, list: TypedAnswer<*>) {
+    if (list is TypedAnswer.Failed && list.failure.status == NOT_FOUND) {
         throw PrintMessage(
             "ostrom: ${signed.serverUrl} does not serve the sessions' reads (GET $SESSIONS): " +
                 "ostrom sessions needs a newer Ostrom server. Ask your admin to update it.",
@@ -73,8 +77,6 @@ private fun served(signed: SignedIn, list: ServerAnswer) {
         )
     }
 }
-
-private fun mine(signed: SignedIn) = "$SESSIONS?dev=${Routes.encode(signed.login)}"
 
 /**
  * What `ostrom sessions list` asks for: the sessions of [dev] (everyone's when null), of [repo], only those still
@@ -87,7 +89,10 @@ internal data class SessionsQuery(
     val before: String?,
     val labels: List<String> = emptyList(),
 ) {
-    /** The route with its query, only the parameters given. */
+    /**
+     * The route with its query, only the parameters given: what [labels] need, which the typed client has no
+     * parameter for.
+     */
     fun path(): String {
         val parameters = listOfNotNull(
             dev?.let { "dev=${Routes.encode(it)}" },
@@ -95,7 +100,7 @@ internal data class SessionsQuery(
             "open=true".takeIf { open },
             before?.let { "before=${Routes.encode(it)}" },
         ) + labels.map { "label=${Routes.encode(it)}" }
-        return if (parameters.isEmpty()) SESSIONS else "$SESSIONS?" + parameters.joinToString("&")
+        return "$SESSIONS?" + parameters.joinToString("&")
     }
 }
 
@@ -104,10 +109,24 @@ internal class SessionsPage(val items: List<JsonObject>, val next: String?)
 
 /** The page of sessions [query] asks for; 69 on a server that does not serve them, 65 once signed out. */
 internal suspend fun listSessions(signed: SignedIn, query: SessionsQuery): SessionsPage {
-    val answer = signed.server.get(query.path(), signed.token)
+    if (query.labels.isNotEmpty()) {
+        // `label` is no parameter of the typed client's list: asked by hand, until it has one
+        val answer = signed.server.get(query.path(), signed.token)
+        if (answer is ServerAnswer.Failed && answer.status == NOT_FOUND) served(signed, TypedAnswer.Failed(answer))
+        val body = answer.orStop(signed.serverUrl, "No sessions on ${signed.serverUrl}.")
+        return SessionsPage(body.list("items").filterIsInstance<JsonObject>(), body.text("next"))
+    }
+    val answer = typedAnswer {
+        signed.client.sessions.list(
+            repo = query.repo,
+            dev = query.dev,
+            open = true.takeIf { query.open },
+            before = query.before,
+        )
+    }
     served(signed, answer)
-    val body = answer.orStop(signed.serverUrl, "No sessions on ${signed.serverUrl}.")
-    return SessionsPage(body.list("items").filterIsInstance<JsonObject>(), body.text("next"))
+    val page = answer.orStop(signed.serverUrl, "No sessions on ${signed.serverUrl}.")
+    return SessionsPage(page.items.map { asJson(it) }, page.next)
 }
 
 /**
@@ -116,26 +135,26 @@ internal suspend fun listSessions(signed: SignedIn, query: SessionsQuery): Sessi
  * session gone (66).
  */
 internal suspend fun pollSession(signed: SignedIn, id: String, kept: MutableMap<String, JsonObject>): SessionRead? {
-    val answer = signed.server.get(sessionPath(id), signed.token)
-    val failing = ((answer as? ServerAnswer.Failed)?.let { it.status ?: SERVER_ERROR } ?: 0) >= SERVER_ERROR
+    val answer = typedAnswer { signed.client.sessions.get(id) }
+    val failure = (answer as? TypedAnswer.Failed)?.failure
+    val failing = failure != null && (failure.status ?: SERVER_ERROR) >= SERVER_ERROR
     return if (failing) null else readOf(signed, id, answer, kept)
 }
-
-private fun sessionPath(id: String) = "$SESSIONS/${Routes.encode(id)}"
 
 /**
  * The session of [answer], with its gates' requests ([kept]: the gates asked once, those the server keeps for good and
  * those this token may not read or that are gone).
  */
-private suspend fun readOf(signed: SignedIn, id: String, answer: ServerAnswer, kept: MutableMap<String, JsonObject>) =
-    answer.orStop(signed.serverUrl, "No session $id on ${signed.serverUrl}.").let { response ->
-        // an answer without the session is not Ostrom's (a proxy, a portal): never followed forever
-        val session = response.child("session") ?: throw PrintMessage(
-            "ostrom: ${signed.serverUrl} answered without the session $id: is it an Ostrom server?",
-            ExitCode.UNREACHABLE.code,
-            printError = true,
-        )
-        val ids = session.list("gates").mapNotNull { (it as? JsonPrimitive)?.content }
+private suspend fun readOf(
+    signed: SignedIn,
+    id: String,
+    answer: TypedAnswer<SessionResponse>,
+    kept: MutableMap<String, JsonObject>,
+) =
+    answer.orStop(signed.serverUrl, "No session $id on ${signed.serverUrl}.").let { typed ->
+        val response = asJson(typed)
+        val session = asJson(typed.session)
+        val ids = typed.session.gates.orEmpty()
         val gates = ids.map { gate ->
             kept[gate] ?: gate(signed, gate).let { read ->
                 if (read.final) kept[gate] = read.request
@@ -147,12 +166,10 @@ private suspend fun readOf(signed: SignedIn, id: String, answer: ServerAnswer, k
 
 /** The id of the developer's newest session (the latest start of the first page), or null when there is none. */
 internal suspend fun lastSession(signed: SignedIn): String? {
-    val answer = signed.server.get(mine(signed), signed.token)
+    val answer = typedAnswer { signed.client.sessions.list(dev = signed.login) }
     served(signed, answer)
-    val body = answer.orStop(signed.serverUrl, "No sessions on ${signed.serverUrl}.")
-    val started = body.list("items").filterIsInstance<JsonObject>().mapNotNull { session ->
-        session.text("id")?.let { it to instant(session.text("startedAt").orEmpty()).orEmpty() }
-    }
+    val page = answer.orStop(signed.serverUrl, "No sessions on ${signed.serverUrl}.")
+    val started = page.items.map { it.id to instant(it.startedAt).orEmpty() }
     return started.maxByOrNull { it.second }?.first
 }
 

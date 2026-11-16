@@ -6,7 +6,9 @@ import kotlin.test.assertEquals
 
 /** `ostrom whoami`, as TeamCode's `teamcode whoami`. */
 class WhoAmICommandTest : SetupKit() {
-    private val me = "GET /api/v1/auth/me" to (200 to """{"dev":{"login":"maya-k"},"capabilities":[]}""")
+    private val me = "GET /api/v1/auth/me" to (
+        200 to """{"dev":{"login":"maya-k","verified":true,"via":"device"},"capabilities":[]}"""
+    )
 
     @Test
     fun itSaysTheLoginAndTheRoleInEachOrganisation() {
@@ -15,21 +17,18 @@ class WhoAmICommandTest : SetupKit() {
     }
 
     @Test
-    fun withoutAnOrganisationOrALoginInTheAnswerItSaysWhatItKnows() {
-        val bare = "GET /api/v1/auth/me" to (200 to """{"capabilities":[]}""")
-        assertEquals(0, run(mapOf(bare, orgs()), "whoami"))
-        assertEquals("maya\n", console.out.toString(), "the login kept at sign-in")
+    fun withoutAnOrganisationItSaysWhatItKnows() {
+        assertEquals(0, run(mapOf(me, orgs()), "whoami"))
+        assertEquals("maya-k\n", console.out.toString())
         assertErr("Not a member of an organisation on https://ostrom.example yet.\n")
-        console.out.clear()
-        val noLogin = "GET /api/v1/auth/me" to (200 to """{"dev":{},"capabilities":[]}""")
-        assertEquals(0, run(mapOf(noLogin, orgs()), "whoami"))
-        assertEquals("maya\n", console.out.toString(), "a dev without a login")
     }
 
     @Test
     fun jsonIsTheServersAnswerWithTheOrganisations() {
         assertEquals(0, run(mapOf(me, orgs(beta)), "whoami", "--json"))
-        val said = """{"dev":{"login":"maya-k"},"capabilities":[],"organizations":[$beta]}""" + "\n"
+        val said =
+            """{"dev":{"login":"maya-k","verified":true,"via":"device"},"capabilities":[],"organizations":[$beta]}""" +
+                "\n"
         assertEquals(said, console.out.toString())
     }
 

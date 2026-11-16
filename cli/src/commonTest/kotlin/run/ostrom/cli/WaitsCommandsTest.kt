@@ -21,10 +21,12 @@ class WaitsCommandsTest : SetupKit() {
     private val ask = "POST /api/v1/waits"
 
     private val wait = """{"id":"w1","status":"open","kind":"question","assignee":"m1",""" +
-        """"createdAt":"1970-01-10T21:00:00Z","question":{"title":"Which region?",""" +
+        """"createdBy":"m1","createdAt":"1970-01-10T21:00:00Z","question":{"title":"Which region?",""" +
         """"fields":[{"id":"region","type":"choice","label":"Region","options":["eu","us"]}],""" +
         """"actions":[{"id":"go","label":"Go"}]}}"""
     private val resolved = wait.replace(""""status":"open"""", """"status":"resolved"""")
+    private val answered = resolved.dropLast(1) + ""","answer":{"action":"go","values":{},""" +
+        """"author":"m1","answeredAt":"1970-01-10T22:00:00Z"}}"""
 
     private val served = mapOf(capabilities("waits.v1"))
     private fun routes(vararg more: Pair<String, Pair<Int, String>>) = served + more
@@ -92,7 +94,8 @@ class WaitsCommandsTest : SetupKit() {
         assertOut("Actions:\n  go  Go\n")
         console.out.clear()
         assertEquals(0, run(routes(show to (200 to wait)), "waits", "show", "w1", "--json"))
-        assertEquals("$wait\n", console.out.toString())
+        assertTrue(console.out.contains("\"id\":\"w1\""), console.out.toString())
+        assertTrue(console.out.contains("\"options\":[\"eu\",\"us\"]"), console.out.toString())
         assertEquals(66, run(routes(), "waits", "show", "w1"))
         assertErr("No wait w1.\n")
         assertEquals(64, run(routes(), "waits", "show", "a/b"))
@@ -101,22 +104,23 @@ class WaitsCommandsTest : SetupKit() {
 
     @Test
     fun anAnswerIsConvertedByTheFieldsTypeAndSent() {
-        val done = """{"id":"w1","status":"resolved","answer":{"action":"go","values":{"region":"eu"}}}"""
+        val done = resolved.dropLast(1) + ""","answer":{"action":"go","values":{"region":"eu"},""" +
+            """"author":"m1","answeredAt":"1970-01-10T22:00:00Z"}}"""
         val both = routes(show to (200 to wait), answerRoute to (200 to done))
         assertEquals(0, run(both, "waits", "answer", "w1", "--set", "region=eu"))
         assertEquals("""{"action":"go","values":{"region":"eu"}}""", bodyOf(answerRoute))
         assertOut("Answered w1 with go.\n")
         console.out.clear()
         assertEquals(0, run(both, "waits", "answer", "w1", "--action", "go", "--set-json", "region=\"us\"", "--json"))
-        assertEquals("$done\n", console.out.toString())
+        assertTrue(console.out.contains("\"action\":\"go\""), console.out.toString())
         console.out.clear()
-        val bare = routes(show to (200 to wait), answerRoute to (200 to """{"id":"w1"}"""))
-        assertEquals(0, run(bare, "waits", "answer", "w1"))
-        assertEquals("Answered w1.\n", console.out.toString())
-        console.out.clear()
-        val unnamed = routes(show to (200 to wait), answerRoute to (200 to """{"answer":{}}"""))
-        assertEquals(0, run(unnamed, "waits", "answer", "w1"))
-        assertEquals("Answered w1.\n", console.out.toString())
+    }
+
+    @Test
+    fun anAnsweredWaitWithoutItsAnswerIsStillSaidAnswered() {
+        val both = routes(show to (200 to wait), answerRoute to (200 to resolved))
+        assertEquals(0, run(both, "waits", "answer", "w1", "--set", "region=eu"))
+        assertOut("Answered w1.\n")
     }
 
     @Test
@@ -272,14 +276,15 @@ class WaitsCommandsTest : SetupKit() {
         assertTrue(sent().isEmpty(), "help asks the server nothing")
     }
 
-    private val secretWait = """{"id":"w1","status":"open","kind":"question","assignee":"m1",""" +
+    private val secretWait = """{"id":"w1","status":"open","kind":"question","assignee":"m1","createdBy":"m1",""" +
+        """"createdAt":"1970-01-10T21:00:00Z",""" +
         """"question":{"title":"Access","fields":[{"id":"pw","type":"secret","label":"Password"},""" +
         """{"id":"key","type":"secret","label":"Key"},{"id":"note","type":"text","label":"Note"}],""" +
         """"actions":[{"id":"go","label":"Go"}]}}"""
 
     @Test
     fun aSecretIsReadWithoutEchoOrFromStdinAndNeverAnArgument() {
-        val both = routes(show to (200 to secretWait), answerRoute to (200 to """{"id":"w1"}"""))
+        val both = routes(show to (200 to secretWait), answerRoute to (200 to answered))
         hidden += "hunter2"
         assertEquals(0, run(both, "waits", "answer", "w1", "--set-secret", "pw", "--set", "note=n"))
         assertEquals("""{"action":"go","values":{"note":"n","pw":"hunter2"}}""", bodyOf(answerRoute))

@@ -38,7 +38,7 @@ internal class AgentsWatchCommand(private val dependencies: CliDependencies) : C
 
     override fun run() {
         val access = dependencies.orgAccess(server, org)
-        val reads = GuidanceReads(access.server, access.signed.token)
+        val reads = GuidanceReads(access.client)
         runBlocking {
             var previous: String? = null
             while (true) {
@@ -90,7 +90,7 @@ internal class AgentsHintCommand(private val dependencies: CliDependencies) : Cl
     override fun run() {
         try {
             val access = dependencies.orgAccess(server, org)
-            runBlocking { hint(GuidanceReads(access.server, access.signed.token)) }
+            runBlocking { hint(GuidanceReads(access.client)) }
         } catch (error: CancellationException) {
             throw error
         } catch (_: Exception) {

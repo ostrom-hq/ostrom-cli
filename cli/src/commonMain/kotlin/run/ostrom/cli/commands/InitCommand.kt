@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli.commands
 
+import run.ostrom.cli.launcher.asJson
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.Context
 import com.github.ajalt.clikt.core.PrintMessage
@@ -97,8 +98,9 @@ internal class InitCommand(private val dependencies: CliDependencies) : CliktCom
         val covered = access.readIfAllowed("/api/v1/repos?limit=$REPOS_PAGE", "repos", unreadable)
             ?.let { coverage(it, name) }
         summary["covered"] = covered
-        val workflows = access.readIfAllowed("/api/v1/workflows?repo=${segment(name)}", "workflows", unreadable)
-            ?.let { page -> page.list("items").filterIsInstance<JsonObject>() }
+        val workflows = access.allowed("workflows", unreadable) {
+            typedIfServed { workflows.list(repo = name) }?.let { page -> page.items.map { asJson(it) } }
+        }
         summary["workflows"] = workflows?.size
         val harness = when {
             "workflows" in unreadable -> cannotRead(access, unreadable.getValue("workflows"))
@@ -215,8 +217,16 @@ private fun coverage(page: JsonObject, name: String): Boolean? {
  * `ostrom login` now gives included (its message says to sign in again).
  */
 private fun OrgAccess.readIfAllowed(path: String, what: String, unreadable: MutableMap<String, String>): JsonObject? =
+    allowed(what, unreadable) { readIfServed(path) }
+
+/** [read], with the refusal of a right the token lacks noted in [unreadable] under [what] (see [readIfAllowed]). */
+private fun <T : Any> OrgAccess.allowed(
+    what: String,
+    unreadable: MutableMap<String, String>,
+    read: OrgAccess.() -> T?,
+): T? =
     try {
-        readIfServed(path)
+        read()
     } catch (refused: PrintMessage) {
         val message = "${refused.message}"
         if (refused.statusCode != ExitCode.REFUSED.code || !message.startsWith(LACKS_SCOPE) || '\n' in message) {

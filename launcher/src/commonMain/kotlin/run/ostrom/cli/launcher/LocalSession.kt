@@ -4,8 +4,8 @@ package run.ostrom.cli.launcher
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.longOrNull
+import run.ostrom.core.api.models.CloudHost
+import run.ostrom.core.api.models.CreateCloudSessionRequest
 
 /** Local sessions (TeamCode's `cloud.sessions.local.v1`): the session of an `ostrom <agent>` launch. */
 const val RUNNERS_CLOUD_LOCAL = "runners.cloud.local.v1"
@@ -73,8 +73,8 @@ class LocalSession private constructor(
         var wait = RESUME_RETRY_MILLIS
         while (true) {
             when (val answer = host(server, sessionId, token)) {
-                is ServerAnswer.Ok -> answer.body.epoch()?.let { return it }
-                is ServerAnswer.Failed -> if (answer.status == NOT_FOUND || answer.type == NOT_RUNNING) {
+                is TypedAnswer.Ok -> return answer.value.epoch
+                is TypedAnswer.Failed -> if (answer.failure.status == NOT_FOUND || answer.failure.type == NOT_RUNNING) {
                     say("ostrom: the local session ended on the server and cannot be resumed; the agent goes on.")
                     return null
                 }
@@ -87,7 +87,7 @@ class LocalSession private constructor(
     /** Stops the session (the agent exited); a stop that is lost is a pause by the server once heartbeats stop. */
     suspend fun close() {
         withContext(NonCancellable) {
-            if (server.call("DELETE", path(sessionId), null, token, CALL_MILLIS) is ServerAnswer.Failed) {
+            if (stop(server, sessionId, token) is TypedAnswer.Failed) {
                 say(
                     "ostrom: the local session could not be closed; the server pauses it after 90 seconds and " +
                         "ends it with the organization's paused retention.",
@@ -98,7 +98,6 @@ class LocalSession private constructor(
 
     /** Opening a launch's session. */
     companion object {
-        private const val SESSIONS = "/api/v1/cloud/sessions"
         private const val HEARTBEAT = "/api/v1/cloud/runner/heartbeat"
         private const val LOCAL = "local"
         private const val STOP = "stop"
@@ -140,21 +139,21 @@ class LocalSession private constructor(
             directory: String,
             say: (String) -> Unit,
         ): LocalSession? {
-            val body = objectOf(
-                "agent" to agent.command,
-                "name" to nameOf(agent, directory),
-                "kind" to LOCAL,
-                "launchId" to launchId,
+            val request = CreateCloudSessionRequest(
+                agent = agent.command,
+                name = nameOf(agent, directory),
+                kind = LOCAL,
+                launchId = launchId,
             )
-            val created = server.call("POST", SESSIONS, body, token, CALL_MILLIS, idempotencyKey = launchId)
-            val id = if (created is ServerAnswer.Ok) created.body.text("id") else null
+            val created = typedAnswer { server.bounded(token).cloudSessions.create(request, idempotencyKey = launchId) }
+            val id = created.valueOrNull()?.id
             val hostAnswer = id?.let { host(server, it, token) }
-            val epoch = (hostAnswer as? ServerAnswer.Ok)?.let { it.body.epoch() }
+            val epoch = hostAnswer?.valueOrNull()?.epoch
             val session = if (id != null && epoch != null) LocalSession(id, server, token, say, epoch) else null
             // Ready before the agent starts, as a remote host reports it.
             if (session != null && session.beat()) return session
             // the call that failed: the create, else the host; an answer without its id or epoch, or a refused ready
-            val failed = (hostAnswer ?: created) as? ServerAnswer.Failed
+            val failed = ((hostAnswer ?: created) as? TypedAnswer.Failed)?.failure
             val why = when {
                 failed == null -> "the server did not host it"
                 failed.status == null -> "network error"
@@ -162,7 +161,7 @@ class LocalSession private constructor(
                 else -> "HTTP ${failed.status} ${failed.type}"
             }
             say("ostrom: the local session of this launch could not be opened ($why); the agent starts without it.")
-            if (id != null) withContext(NonCancellable) { server.call("DELETE", path(id), null, token, CALL_MILLIS) }
+            if (id != null) withContext(NonCancellable) { stop(server, id, token) }
             return null
         }
 
@@ -172,12 +171,13 @@ class LocalSession private constructor(
                 .filterNot { it.isISOControl() }
         }
 
-        private fun path(id: String) = "$SESSIONS/${Routes.encode(id)}"
+        private fun ServerJson.bounded(token: String) = client(token, timeoutMillis = CALL_MILLIS)
 
-        private suspend fun host(server: ServerJson, id: String, token: String): ServerAnswer =
-            server.post("${path(id)}/host", objectOf(), token, CALL_MILLIS)
+        private suspend fun stop(server: ServerJson, id: String, token: String) =
+            typedAnswer { server.bounded(token).cloudSessions.stop(id) }
 
-        private fun kotlinx.serialization.json.JsonObject.epoch(): Long? = (this["epoch"] as? JsonPrimitive)?.longOrNull
+        private suspend fun host(server: ServerJson, id: String, token: String): TypedAnswer<CloudHost> =
+            typedAnswer { server.bounded(token).cloudSessions.host(id) }
     }
 }
 

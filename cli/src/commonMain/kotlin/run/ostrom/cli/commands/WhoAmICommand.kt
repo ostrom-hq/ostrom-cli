@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli.commands
 
+import run.ostrom.cli.launcher.asJson
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.Context
 import run.ostrom.cli.CliDependencies
-import run.ostrom.cli.launcher.child
 import run.ostrom.cli.launcher.list
 import run.ostrom.cli.launcher.text
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 
-private const val ME = "/api/v1/auth/me"
 private const val ORGANISATIONS = "/api/v1/orgs"
 
 /**
@@ -27,15 +26,15 @@ internal class WhoAmICommand(private val dependencies: CliDependencies) : CliktC
 
     override fun run() {
         val signed = dependencies.signedIn(server)
-        val me = runBlocking { signed.server.get(ME, signed.token) }.orStop(signed.serverUrl, "No account here.")
+        val me = signed.typed("No account here.") { auth.me() }
         val orgs = runBlocking { signed.server.get(ORGANISATIONS, signed.token) }
             .orStop(signed.serverUrl, "No organisations here.").list("items").filterIsInstance<JsonObject>()
         val console = dependencies.console
         if (json) {
-            console.data(JsonObject(me + ("organizations" to JsonArray(orgs))).toString() + "\n")
+            console.data(JsonObject(asJson(me) + ("organizations" to JsonArray(orgs))).toString() + "\n")
             return
         }
-        console.out((me.child("dev")?.text("login") ?: signed.login) + "\n")
+        console.out((me.dev.login) + "\n")
         orgs.forEach { console.out("${it.text("slug") ?: it.text("id")}  ${it.text("role") ?: "member"}\n") }
         if (orgs.isEmpty()) console.err("Not a member of an organisation on ${signed.serverUrl} yet.\n")
     }

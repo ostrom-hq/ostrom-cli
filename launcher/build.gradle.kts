@@ -3,10 +3,15 @@ plugins {
     id("ostrom.kmp")
 }
 
+// ostrom-core's typed client, from GitHub Packages (gradle.properties, ostromCoreVersion).
+val ostromCoreVersion = providers.gradleProperty("ostromCoreVersion").get()
+
 kotlin {
     sourceSets {
         commonMain.dependencies {
             api(projects.platform)
+            api("run.ostrom:ostrom-client:$ostromCoreVersion")
+            implementation(libs.ktor.client.core)
         }
         nativeMain.dependencies {
             implementation(libs.cryptography.core)

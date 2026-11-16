@@ -20,7 +20,13 @@ class PackageTrustTest {
     private val packageRoute = "GET /api/v1/packages/current?repo=acme-api"
     private val keysRoute = "GET /api/v1/receipts/keys"
     private val keyList = objectOf(
-        "keys" to listOf(mapOf("kid" to PackageVector.KID, "publicKeyPem" to PackageVector.PUBLIC_KEY_PEM)),
+        "keys" to listOf(
+            mapOf(
+                "kid" to PackageVector.KID,
+                "alg" to "ed25519",
+                "publicKeyPem" to PackageVector.PUBLIC_KEY_PEM,
+            ),
+        ),
     ).toString()
 
     private fun serve(envelope: String = PackageVector.ENVELOPE) {

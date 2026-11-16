@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli.commands
 
+import run.ostrom.cli.launcher.asJson
 import run.ostrom.cli.CliDependencies
 import run.ostrom.cli.ExitCode
 import run.ostrom.cli.launch.ApiServerTransport
@@ -8,6 +9,10 @@ import run.ostrom.cli.launcher.LaunchVariables
 import run.ostrom.cli.launcher.ServerAnswer
 import run.ostrom.cli.launcher.ServerJson
 import run.ostrom.cli.launcher.list
+import run.ostrom.cli.launcher.TypedAnswer
+import run.ostrom.cli.launcher.typedAnswer
+import run.ostrom.cli.launcher.typedClient
+import run.ostrom.core.client.OstromClient
 import run.ostrom.cli.launcher.text
 import run.ostrom.cli.login.AdminTokens
 import run.ostrom.cli.platform.CaptureResult
@@ -15,6 +20,9 @@ import run.ostrom.cli.platform.Console
 import run.ostrom.cli.platform.RemoteUrls
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.jsonObject
+import run.ostrom.core.api.OstromJson
 
 /**
  * An organisation of the signed-in person, as `GET /api/v1/orgs` lists it (`OrgView` of the contract).
@@ -35,15 +43,20 @@ internal data class Org(val id: String, val slug: String, val name: String, val 
  * @property signed The device (or `OSTROM_TOKEN`) signed in to the server.
  * @property org The organisation the command acts in.
  * @property server The server's JSON API, every call carrying `Ostrom-Org`.
+ * @property client The typed client of the server with the device token, every call carrying `Ostrom-Org`.
+ * @property writeClient [client] with the longer bound of a write.
  * @property console The console of the server, where what the CLI cannot do is done.
  * @property consoleToken True when the token is `OSTROM_TOKEN` (a token made on the console), not the device's.
  * @param dependencies The tokens of `ostrom login --admin`, and the clock, the terminal and the pause a governance
  *   confirmation is waited on with.
  */
+@Suppress("LongParameterList", "TooManyFunctions") // the typed and the hand-built ways to one server, together
 internal class OrgAccess(
     val signed: SignedIn,
     val org: Org,
     val server: ServerJson,
+    val client: OstromClient,
+    val writeClient: OstromClient,
     val console: String,
     val consoleToken: Boolean,
     private val dependencies: CliDependencies,
@@ -59,6 +72,55 @@ internal class OrgAccess(
 
     /** Waits [millis] (between two polls of a governance confirmation). */
     fun pause(millis: Long) = runBlocking { dependencies.sleep(millis) }
+
+    /**
+     * [call] on the typed client in the organisation, or the spec's exit code, with what [read] adds to a refusal;
+     * [notFound] is said on a 404.
+     */
+    fun <T> typed(notFound: String, call: suspend OstromClient.() -> T): T =
+        when (val answer = runBlocking { typedAnswer { client.call() } }) {
+            is TypedAnswer.Ok -> answer.value
+            is TypedAnswer.Failed -> {
+                lackedRight(answer.failure)
+                throw answer.failure.refusal(signed.serverUrl, notFound)
+            }
+        }
+
+    /** [typed], as the JSON object the server sent. */
+    inline fun <reified T> typedJson(notFound: String, noinline call: suspend OstromClient.() -> T): JsonObject =
+        asJson(typed(notFound, call))
+
+    /**
+     * [typed], as the JSON the server writes (no default value added): the document a command sends back, which the
+     * server would hold against what it keeps.
+     */
+    inline fun <reified T> typedServed(notFound: String, noinline call: suspend OstromClient.() -> T): JsonObject =
+        OstromJson.encodeToJsonElement(typed(notFound, call)).jsonObject
+
+    /** [call] on the typed client, or null on a 404: as [readIfServed], for a route the server may not have. */
+    fun <T : Any> typedIfServed(call: suspend OstromClient.() -> T): T? =
+        when (val answer = runBlocking { typedAnswer { client.call() } }) {
+            is TypedAnswer.Ok -> answer.value
+            is TypedAnswer.Failed -> if (answer.failure.status == NOT_FOUND) {
+                null
+            } else {
+                lackedRight(answer.failure)
+                throw answer.failure.refusal(signed.serverUrl, "")
+            }
+        }
+
+    /**
+     * [call] on the typed client for a write, or the spec's exit code, with what [refused] adds to a refusal;
+     * [notFound] is said on a 404.
+     */
+    fun <T> typedWrite(notFound: String, call: suspend OstromClient.() -> T): T =
+        when (val answer = runBlocking { typedAnswer { writeClient.call() } }) {
+            is TypedAnswer.Ok -> answer.value
+            is TypedAnswer.Failed -> {
+                refused(answer.failure, false, null)
+                throw answer.failure.refusal(signed.serverUrl, notFound)
+            }
+        }
 
     /** `GET` [path] in the organisation, or the spec's exit code; [notFound] is said on a 404. */
     fun read(path: String, notFound: String): JsonObject =
@@ -211,8 +273,10 @@ internal fun CliDependencies.orgAccess(
     }
     val consoleToken = environment[LaunchVariables.LAUNCH_ID].isNullOrEmpty() &&
         !environment[LaunchVariables.DEVICE_TOKEN].isNullOrEmpty()
-    val server = ServerJson(ApiServerTransport(api(signed.serverUrl), org.id))
-    return OrgAccess(signed, org, server, console, consoleToken, this)
+    val transport = ApiServerTransport(api(signed.serverUrl), org.id)
+    val client = typedClient(transport, signed.token, org.id, TYPED_READ_MILLIS)
+    val writeClient = typedClient(transport, signed.token, org.id, TYPED_WRITE_MILLIS)
+    return OrgAccess(signed, org, ServerJson(transport), client, writeClient, console, consoleToken, this)
 }
 
 /** The organisations the caller is a member of (`GET /api/v1/orgs`). */

@@ -43,6 +43,8 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+      # @ostrom-hq/openapi, the server's generated document, from GitHub Packages.
+      packages: read
     env:
       HAS_SERVER_KEY: ${{ secrets.DEPLOY_KEY_SERVER != '' }}
     # The real server's database, for the CLI's journey against the real server (as ostrom-web's journeys). The
@@ -330,20 +332,37 @@ jobs:
       # driver runs it, with the binary an init container copies in; the agent must not reach the runner token.
       - name: Cloud session, the agent cannot read the runner token (S2-49)
         run: ci/runner-isolation.sh dist/ostrom
-      # docs-truth (ostrom-core's tools/docs-truth) at a pinned commit, whose api/contract/served-routes.txt says what
-      # ostrom-server main serves; moved out of the workspace, so that no check of this repository scans it.
+      # docs-truth (ostrom-core's tools/docs-truth) at a pinned commit; the routes come from the OpenAPI document the
+      # server generates, at the version docs/openapi.version pins. Moved out of the workspace, so that no check of
+      # this repository scans it.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ostrom-hq/ostrom-core
-          ref: f34e5bebbcb109a1d565b2a5c2196eb66b918fa2 # docs-truth and served-routes.txt; move it forward by pull request
+          ref: 332648fa3069a7614b1b09f8a963ad29b8b62c17 # docs-truth with --openapi; move it forward by pull request
           ssh-key: ${{ secrets.DEPLOY_KEY_CORE }}
           path: docs-truth-core
           persist-credentials: false
-      - name: The README and docs/ cite only this binary's commands, routes main serves, variables read here (docs-truth)
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          registry-url: https://npm.pkg.github.com
+          scope: '@ostrom-hq'
+      - name: The server's OpenAPI document (@ostrom-hq/openapi)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          dir="$RUNNER_TEMP/openapi"
+          mkdir -p "$dir"
+          version="$(tr -d '[:space:]' < docs/openapi.version)"
+          # A 403 read_package means this repository is not in the package's Actions access (ostrom-hq -> Packages ->
+          # openapi -> Manage Actions access -> ostrom-cli, Read).
+          (cd "$dir" && npm pack "@ostrom-hq/openapi@$version" && tar -xzf "ostrom-hq-openapi-$version.tgz")
+          test -s "$dir/package/openapi.json"
+      - name: The README and docs/ cite only this binary's commands, routes the server serves, variables read here (docs-truth)
         run: |
           mv docs-truth-core "$RUNNER_TEMP/docs-truth-core"
           core="$RUNNER_TEMP/docs-truth-core"
-          node "$core/tools/docs-truth/bin/docs-truth.mjs" --routes "$core/api/contract/served-routes.txt" \
+          node "$core/tools/docs-truth/bin/docs-truth.mjs" --openapi "$RUNNER_TEMP/openapi/package/openapi.json" \
             --ostrom dist/ostrom --tests --source . --source "$core/telemetry" README.md docs
       # the Windows job runs these even when a test failed here, so that a Windows-only failure shows on a red branch
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

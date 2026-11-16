@@ -57,7 +57,8 @@ class MemberVariablesLaunchTest : AgentLaunchKit() {
 
     private fun serve() {
         serveALaunch()
-        server["GET ${Routes.CAPABILITIES}"] = 200 to """{"apiVersion":1,"features":["environment.v1"]}"""
+        server["GET ${Routes.CAPABILITIES}"] =
+            200 to """{"apiVersion":1,"serverVersion":"1.4.0","features":["environment.v1"]}"""
         memberVariables = port
     }
 

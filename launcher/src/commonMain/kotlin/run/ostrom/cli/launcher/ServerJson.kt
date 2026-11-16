@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli.launcher
 
+import run.ostrom.core.client.OstromClient
 import kotlinx.serialization.json.JsonObject
 
 /**
@@ -14,6 +15,7 @@ import kotlinx.serialization.json.JsonObject
  * @property idempotencyKey Sent as `Idempotency-Key`, or null.
  * @property onBehalfOf The member a cloud session write acts for, sent as `Ostrom-On-Behalf-Of`, or null.
  * @property bytes A raw body sent instead of [body] (a cloud session's file), or null.
+ * @property org The organization the call acts in (`Ostrom-Org`), or null for the transport's own.
  */
 @Suppress("ArrayInDataClass") // a call is never compared: the bytes are only sent
 data class ServerCall(
@@ -25,6 +27,7 @@ data class ServerCall(
     val idempotencyKey: String? = null,
     val onBehalfOf: String? = null,
     val bytes: ByteArray? = null,
+    val org: String? = null,
 )
 
 /**
@@ -111,6 +114,13 @@ class ServerJson(private val transport: ServerTransport) {
         val message = error?.text("message") ?: json?.text("error") ?: "HTTP $status"
         return ServerAnswer.Failed(status, error?.text("type"), message)
     }
+
+    /**
+     * The typed client of ostrom-core over the same transport, with [token] and the organization [org] if any; each
+     * call takes [timeoutMillis] at most when given (the core client's 30 s otherwise).
+     */
+    fun client(token: String?, org: String? = null, timeoutMillis: Long? = null): OstromClient =
+        typedClient(transport, token, org, timeoutMillis)
 
     /** `GET` [path]. */
     suspend fun get(path: String, token: String?, timeoutMillis: Long = DEFAULT_MILLIS): ServerAnswer =

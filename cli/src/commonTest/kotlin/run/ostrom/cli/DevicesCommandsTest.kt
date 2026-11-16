@@ -8,8 +8,8 @@ import kotlin.test.assertTrue
 /** `ostrom devices`, as TeamCode's `teamcode devices list|rename|revoke`. */
 class DevicesCommandsTest : SetupKit() {
     private val devices = "/api/v1/devices"
-    private val listed = """{"items":[{"id":"d1","name":"laptop","activeSessions":2,"current":true},""" +
-        """{"id":"d2","name":"desktop"}]}"""
+    private val listed = """{"items":[{"id":"d1","name":"laptop","kind":"cli","activeSessions":2,"current":true},""" +
+        """{"id":"d2","name":"desktop","kind":"cli"}]}"""
 
     @Test
     fun devicesListShowsEachWorkstationAndWhichOneThisIs() {
@@ -25,7 +25,8 @@ class DevicesCommandsTest : SetupKit() {
 
     @Test
     fun devicesRenameSendsTheNewName() {
-        assertEquals(0, run(mapOf("PATCH $devices/d1" to (200 to "{}")), "devices", "rename", "d1", "--name", "work"))
+        val renamed = mapOf("PATCH $devices/d1" to (200 to """{"id":"d1","name":"work"}"""))
+        assertEquals(0, run(renamed, "devices", "rename", "d1", "--name", "work"))
         assertEquals("Device renamed.\n", console.out.toString())
         assertEquals("""{"name":"work"}""", bodyOf("PATCH $devices/d1"))
         assertEquals(66, run(emptyMap(), "devices", "rename", "nope", "--name", "x"))

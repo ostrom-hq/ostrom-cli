@@ -605,7 +605,7 @@ class OstromCliTest : CliKit() {
 
     @Test
     fun aLoginThatStopsSaysWhyWithTheSpecsCode() {
-        val noAccess = 403 to """{"error":{"message":"no access"}}"""
+        val noAccess = 403 to """{"error":{"type":"forbidden","message":"no access"}}"""
         val refused = deviceFlow + ("POST /api/v1/auth/device/token" to noAccess)
         assertEquals(77, cli(environment = withServer, api = serverOf(refused)).run(arrayOf("login")))
         assertTrue(console.err.endsWith("no access\n"), console.err.toString())

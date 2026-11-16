@@ -13,6 +13,7 @@ import com.github.ajalt.clikt.parameters.types.choice
 import com.github.ajalt.clikt.parameters.types.int
 import run.ostrom.cli.CliDependencies
 import run.ostrom.cli.ExitCode
+import run.ostrom.cli.required
 import run.ostrom.cli.waits.AnswerWait
 import run.ostrom.cli.waits.AnswerWaitUseCase
 import run.ostrom.cli.waits.AskWait
@@ -61,7 +62,7 @@ private fun <T> CliDependencies.waits(
     val access = orgAccess(server, org)
     requireFeature(access.signed.serverUrl, access.signed.token, ServerFeatures.WAITS, NO_WAITS)
     return try {
-        runBlocking { block(WaitsServer(access.server, access.signed.token)) }
+        runBlocking { block(WaitsServer(access.server, access.signed.token, access.client)) }
     } catch (expected: WaitInputException) {
         throw stopWith(ExitCode.USAGE, "ostrom: ${expected.message}")
     } catch (e: WaitsRefusal) {
@@ -207,8 +208,8 @@ internal class WaitsAnswerCommand(private val dependencies: CliDependencies) : C
         val answered = dependencies.waits(server, org, Right.ANSWER, "No wait $id.") {
             AnswerWaitUseCase(it, read)(AnswerWait(id, action, sets.map(::pairOf), jsonSets.map(::pairOf), secretSets))
         }
-        val taken = answered.child("answer")?.text("action")?.let { " with $it" }.orEmpty()
-        dependencies.console.data(if (json) "$answered\n" else "Answered ${answered.text("id") ?: id}$taken.\n")
+        val taken = answered.child("answer")?.let { " with ${it.required("action")}" }.orEmpty()
+        dependencies.console.data(if (json) "$answered\n" else "Answered ${answered.required("id")}$taken.\n")
     }
 }
 

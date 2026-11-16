@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli
 
+import run.ostrom.cli.api.OstromApi
+import run.ostrom.cli.api.ServerRequest
+import run.ostrom.cli.api.ServerResponse
+import run.ostrom.cli.api.ServerUnreachableException
 import run.ostrom.cli.imports.FakeMysql
 import run.ostrom.cli.launcher.Agent
 import run.ostrom.cli.platform.CaptureResult
@@ -18,8 +22,11 @@ class InitCommandTest : SetupKit() {
     private val zshAdmin = zsh + ("OSTROM_TOKEN" to "otk_admin")
     private val repos =
         "GET /api/v1/repos?limit=100" to (200 to """{"items":[{"name":"acme/acme-api"},{"name":"web"}]}""")
-    private val harness = "GET /api/v1/workflows?repo=acme-api" to
-        (200 to """{"items":[{"name":"git-safety","status":"proposed"},{"name":"tests","status":"accepted"}]}""")
+    private val harnessItems = listOf(
+        workflowJson("w1", "git-safety", "status" to "proposed"),
+        workflowJson("w2", "tests"),
+    ).joinToString(",")
+    private val harness = "GET /api/v1/workflows?repo=acme-api" to (200 to """{"items":[$harnessItems]}""")
     private val proposed = "GET /api/v1/rules?status=proposed"
     private val rules = proposed to
         (200 to """{"items":[{"id":"r1","statement":"No push to main","status":"proposed"},{"id":"r2"}]}""")
@@ -47,6 +54,33 @@ class InitCommandTest : SetupKit() {
         assertEquals("""{"ids":["r1","r2"],"status":"accepted"}""", bodyOf("POST /api/v1/rules/bulk"))
         assertTrue(requests.drop(1).all { it.second.org == "o1" }, "every call after the list names Acme")
         assertTrue(requests.all { it.second.token == "otk_admin" })
+    }
+
+    /** [routes] served, except [broken], which is unreachable. */
+    private fun breaking(routes: Map<String, Pair<Int, String>>, broken: String): (String) -> OstromApi = { url ->
+        val served = serverOf(routes)(url)
+        object : OstromApi {
+            override suspend fun get(path: String) = send(ServerRequest("GET", path))
+            override suspend fun send(request: ServerRequest): ServerResponse {
+                if (request.path.startsWith(broken)) throw ServerUnreachableException(url, Exception("refused"))
+                return served.send(request)
+            }
+        }
+    }
+
+    @Test
+    fun aWorkflowsListThatCannotBeReachedStopsInit() {
+        signIn("/home/maya/.config/ostrom")
+        val down = breaking(mapOf(orgs(acme)) + everything, "/api/v1/workflows")
+        val command = cli(environment = zshAdmin, api = down, capture = gitTop())
+        assertEquals(69, command.run(arrayOf("init", "--yes")))
+    }
+
+    @Test
+    fun aServerWithoutTheWorkflowsListInitsAllTheSame() {
+        val missing = """{"error":{"type":"not_found","message":"No workflows."}}"""
+        val without = everything + (harness.first to (404 to missing))
+        assertEquals(0, run(without, "init", "--yes", environment = zshAdmin, capture = gitTop()))
     }
 
     @Test
@@ -168,7 +202,7 @@ class InitCommandTest : SetupKit() {
 
     @Test
     fun aTokenThatCannotReadTheRepositoriesNorTheHarnessDoesNotFailInit() {
-        val denied = """{"error":{"message":"This credential does not allow repos:read."}}"""
+        val denied = """{"error":{"type":"forbidden","message":"This credential does not allow repos:read."}}"""
         val noRepos = mapOf("GET /api/v1/repos?limit=100" to (403 to denied), harness, rules)
         assertEquals(0, run(noRepos, "init", environment = zsh, capture = gitTop()))
         assertOut("  Repository  acme-api\n  Harness     git-safety (proposed) · tests (accepted)\n! Coverage    " +

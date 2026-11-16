@@ -253,7 +253,7 @@ class ReceiptCommandsTest {
     fun theListMarksTheReceiptsKeptOnThisDevice() {
         signIn()
         keep("W-e2e", ReceiptBundleVector.BUNDLE)
-        val items = """{"items":[$receipt,{"id":"R-1","createdAt":"2026-10-29T10:00:00.000Z"},"x"]}"""
+        val items = """{"items":[$receipt,{"id":"R-1","createdAt":"2026-10-29T10:00:00.000Z"}]}"""
         assertEquals(0, cli(mapOf("GET /api/v1/receipts" to (200 to items))).run(arrayOf("receipts", "list")))
         val lines = console.out.lines()
         assertEquals("● W-e2e  workflow  sess-e2e@p202610300845-a216a112  @maya  2026-10-30T09:05:01.000Z", lines[0])
@@ -267,6 +267,7 @@ class ReceiptCommandsTest {
         val routes = mapOf(
             "GET /api/v1/receipts" to (200 to """{"items":[{"id":"R-2"}],"next":"c 1"}"""),
             "GET /api/v1/receipts?before=c%201" to (200 to """{"items":[{"id":"R-1"}],"next":""}"""),
+            "GET /api/v1/receipts?before=c+1" to (200 to """{"items":[{"id":"R-1"}],"next":""}"""),
         )
         assertEquals(0, cli(routes).run(arrayOf("receipts", "list")))
         assertEquals("  R-2\n  R-1\n", console.out.toString())
@@ -439,9 +440,8 @@ class ReceiptCommandsTest {
         write("$home/server-keys.json", """{"https://other.example":{"kid":"k0","publicKeyPem":"p0"}}""")
         val pem = JsonPrimitive(ReceiptBundleVector.PUBLIC_KEY_PEM)
         val key = published(
-            "\"not a key\"",
-            """{"kid":"k1","publicKeyPem":"p1"}""",
-            """{"kid":"${ReceiptBundleVector.KID}","publicKeyPem":$pem}""",
+            """{"kid":"k1","alg":"ed25519","publicKeyPem":"p1"}""",
+            """{"kid":"${ReceiptBundleVector.KID}","alg":"ed25519","publicKeyPem":$pem}""",
         )
         assertEquals(0, cli(mapOf(pulled, key)).run(arrayOf("receipts", "pull", "W-e2e")))
         assertEquals(
@@ -507,8 +507,8 @@ class ReceiptCommandsTest {
         val answers = listOf(
             published(),
             published("""{"kid":"$kid"}"""),
-            published("""{"kid":"$kid","publicKeyPem":"not a PEM"}"""),
-            published("""{"kid":"$kid","publicKeyPem":"$anotherKey"}"""),
+            published("""{"kid":"$kid","alg":"ed25519","publicKeyPem":"not a PEM"}"""),
+            published("""{"kid":"$kid","alg":"ed25519","publicKeyPem":"$anotherKey"}"""),
             keys to (200 to "{}"),
             keys to (500 to "{}"),
         )

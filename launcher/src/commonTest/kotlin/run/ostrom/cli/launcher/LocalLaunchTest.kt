@@ -10,11 +10,12 @@ import kotlin.test.assertTrue
 class LocalLaunchTest : AgentLaunchKit() {
     private fun serveLocal(features: String) {
         serveALaunch()
-        server["GET ${Routes.CAPABILITIES}"] = 200 to """{"apiVersion":1,"features":[$features]}"""
-        server["POST $SESSIONS"] = 202 to """{"id":"cs1","owner":"m1","agent":"claude","status":"creating"}"""
-        server["POST $SESSIONS/cs1/host"] = 200 to """{"orgId":"o1","epoch":1,"session":{"id":"cs1"}}"""
+        server["GET ${Routes.CAPABILITIES}"] =
+            200 to """{"apiVersion":1,"serverVersion":"1.4.0","features":[$features]}"""
+        server["POST $SESSIONS"] = 202 to cloudJson("cs1", "status" to "creating")
+        server["POST $SESSIONS/cs1/host"] = 200 to """{"orgId":"o1","epoch":1,"session":${cloudJson("cs1")}}"""
         server["POST /api/v1/cloud/runner/heartbeat"] = 200 to """{"instruction":"run","state":"running"}"""
-        server["DELETE $SESSIONS/cs1"] = 200 to """{"id":"cs1"}"""
+        server["DELETE $SESSIONS/cs1"] = 200 to cloudJson("cs1", "status" to "terminated")
     }
 
     @Test

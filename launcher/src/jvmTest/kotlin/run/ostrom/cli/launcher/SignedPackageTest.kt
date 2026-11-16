@@ -30,7 +30,13 @@ class SignedPackageTest {
             "payload" to payload,
         ).toString()
         server["GET /api/v1/receipts/keys"] = 200 to objectOf(
-            "keys" to listOf(mapOf("kid" to PackageVector.KID, "publicKeyPem" to PackageVector.PUBLIC_KEY_PEM)),
+            "keys" to listOf(
+                mapOf(
+                    "kid" to PackageVector.KID,
+                    "alg" to "ed25519",
+                    "publicKeyPem" to PackageVector.PUBLIC_KEY_PEM,
+                ),
+            ),
         ).toString()
         return trust.fetch("https://ostrom.example", "t", "r", "/config", keep = true)
     }

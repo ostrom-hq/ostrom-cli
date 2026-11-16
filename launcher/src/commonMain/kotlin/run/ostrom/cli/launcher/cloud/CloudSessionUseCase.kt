@@ -4,6 +4,10 @@ package run.ostrom.cli.launcher.cloud
 import run.ostrom.cli.launcher.Agent
 import run.ostrom.cli.launcher.ServerAnswer
 import run.ostrom.cli.launcher.ServerJson
+import run.ostrom.cli.launcher.TypedAnswer
+import run.ostrom.cli.launcher.asServerAnswer
+import run.ostrom.cli.launcher.typedAnswer
+import run.ostrom.core.api.models.CreateCloudSessionRequest
 import run.ostrom.cli.launcher.child
 import run.ostrom.cli.launcher.objectOf
 import run.ostrom.cli.launcher.parseObject
@@ -60,13 +64,18 @@ class CloudSessionUseCase(
             say("ostrom: $problem")
             return USAGE
         }
-        val body = objectOf("agent" to start.agent.command, "model" to start.model, "repo" to repo)
-        return when (val created = server.post(SESSIONS, body, token)) {
-            is ServerAnswer.Failed -> refused(created)
-            is ServerAnswer.Ok -> created.body.text("id")?.let { id ->
+        val request = CreateCloudSessionRequest(
+            agent = start.agent.command,
+            model = start.model,
+            repo = repo,
+        )
+        return when (val created = typedAnswer { server.client(token).cloudSessions.create(request) }) {
+            is TypedAnswer.Failed -> refused(created.failure)
+            is TypedAnswer.Ok -> {
+                val id = created.value.id
                 say("Starting ${start.agent.displayName} in Ostrom's cloud (session $id)…")
                 attach(id, token)
-            } ?: refused(ServerAnswer.Failed(null, null, "Ostrom answered without a session"))
+            }
         }
     }
 
@@ -99,7 +108,7 @@ class CloudSessionUseCase(
         var waited = 0L
         var outcome = WAITING
         while (outcome == WAITING) {
-            outcome = when (val answer = server.get("$SESSIONS/$id", token)) {
+            outcome = when (val answer = typedAnswer { server.client(token).cloudSessions.get(id) }.asServerAnswer()) {
                 // a look that fails for a moment (network, 5xx, 429) is looked again, within the budget
                 is ServerAnswer.Failed -> if (passing(answer) && waited < BUDGET_MILLIS) WAITING else refused(answer)
                 is ServerAnswer.Ok -> {
@@ -239,6 +248,8 @@ class CloudSessionUseCase(
 
     /** The agents Ostrom's cloud runs, and the session's constants. */
     companion object {
+        private const val SESSIONS = "/api/v1/cloud/sessions"
+
         /** A failure that may pass: Ostrom unreachable for a moment, failing (5xx) or asking to slow down (429). */
         private fun passing(answer: ServerAnswer.Failed): Boolean {
             val status = answer.status
@@ -288,7 +299,6 @@ class CloudSessionUseCase(
 
         private fun resize(columns: Int, rows: Int) = """{"type":"resize","columns":$columns,"rows":$rows}"""
 
-        private const val SESSIONS = "/api/v1/cloud/sessions"
         private const val DETACH: Byte = 0x1d
         private const val KEY_BUFFER = 4_096
         private const val KEY_WAIT_MILLIS = 100

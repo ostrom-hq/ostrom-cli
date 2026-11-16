@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package run.ostrom.cli.commands
 
+import run.ostrom.cli.launcher.asJson
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.Context
 import com.github.ajalt.clikt.core.NoOpCliktCommand
@@ -21,15 +22,14 @@ import run.ostrom.cli.launcher.flag as booleanField
 import run.ostrom.cli.launcher.list
 import run.ostrom.cli.launcher.objectOf
 import run.ostrom.cli.launcher.text
+import run.ostrom.cli.required
 import run.ostrom.core.api.models.CloudTransferStates
+import run.ostrom.core.api.models.CreateCloudTransferRequest
 import run.ostrom.core.api.models.ServerFeatures
 import kotlin.uuid.Uuid
 
 // `ostrom cloud transfer` and `ostrom cloud transfers list|show|accept|decline|cancel`, as TeamCode's
 // `teamcode cloud transfer` and `teamcode cloud transfers`, on `/api/v1/cloud/transfers` (runners.cloud.transfer.v1).
-
-private const val TRANSFERS = "/api/v1/cloud/transfers"
-private const val RECIPIENTS = "/api/v1/cloud/transfer-recipients"
 
 /** What a transfer command says to a server that does not transfer sessions. */
 internal const val NO_CLOUD_TRANSFERS =
@@ -47,15 +47,13 @@ private const val PAGE = 50
 private fun CliDependencies.transferAccess(server: String?, org: String?): OrgAccess =
     cloudAccess(server, org, ServerFeatures.RUNNERS_CLOUD_TRANSFER, NO_CLOUD_TRANSFERS)
 
-private fun transferPath(id: String) = "$TRANSFERS/${segment(id)}"
-
 /** When an offer lapses; null for any other state, whose expiry no longer matters. */
 private fun JsonObject.offerExpiry(): String? {
     val at = text("expiresAt")
     return if (at != null && text("state") == CloudTransferStates.OFFERED) at else null
 }
 
-private fun JsonObject.field(key: String): String = text(key) ?: "?"
+private fun JsonObject.field(key: String): String = required(key)
 
 /** `ct_1  offered  cs_1  m1 -> m2  expires 2026-...`: one row of the transfers list, as TeamCode's. */
 internal fun JsonObject.transferLine(): String {
@@ -109,14 +107,11 @@ internal class CloudTransferCommand(private val dependencies: CliDependencies) :
         val onBehalfOf = dependencies.onBehalfOf(access, member, RUNNERS_CLOUD_ON_BEHALF_WRITES)
         val id = session ?: pickSession(access)
         val recipient = to ?: pickRecipient(access, id)
-        val request = objectOf("toMemberId" to recipient, "resume" to resume)
-        val transfer = access.write(
-            "POST",
-            "${cloudSessionPath(id)}/transfer",
-            request,
-            "No cloud session $id.",
-            idempotencyKey = idempotencyKey ?: Uuid.random().toString(),
-            onBehalfOf = onBehalfOf,
+        val key = idempotencyKey ?: Uuid.random().toString()
+        val transfer = asJson(
+            access.typedWrite("No cloud session $id.") {
+                cloudTransfers.request(id, CreateCloudTransferRequest(recipient, resume), key, onBehalfOf)
+            },
         )
         dependencies.console.let { if (json) it.data("$transfer\n") else it.out(transfer.transferLine() + "\n") }
     }
@@ -125,11 +120,11 @@ internal class CloudTransferCommand(private val dependencies: CliDependencies) :
         val sessions = mutableListOf<JsonObject>()
         var before: String? = null
         do {
-            val path = if (before == null) CLOUD_SESSIONS else "$CLOUD_SESSIONS?before=${segment(before)}"
-            val page = access.read(path, "No cloud sessions.")
-            sessions += page.list("items").filterIsInstance<JsonObject>()
+            val cursor = before
+            val page = access.typed("No cloud sessions.") { cloudSessions.list(before = cursor) }
+            sessions += page.items.map { asJson(it) }
                 .filter { it.text("status") in TRANSFERABLE && it.text("transferId") == null }
-            before = page.text("next")
+            before = page.next
         } while (before != null && sessions.isEmpty())
         if (sessions.isEmpty()) {
             throw stopWith(
@@ -138,16 +133,16 @@ internal class CloudTransferCommand(private val dependencies: CliDependencies) :
             )
         }
         val labels = sessions.map {
-            val name = it.text("name") ?: it.text("id")
-            "$name  ${it.text("status")} · ${it.text("agent") ?: "-"} · ${it.text("id")}"
+            "${it.required("name")}  ${it.required("status")} · ${it.required("agent")} · ${it.required("id")}"
         }
         return sessions[choose("Which session do you transfer?", labels, "SESSION")].field("id")
     }
 
     private fun pickRecipient(access: OrgAccess, sessionId: String): String {
-        val owner = access.read(cloudSessionPath(sessionId), "No cloud session $sessionId.").text("owner")
-        val others = access.read(RECIPIENTS, "This server does not list members for transfers: name one with --to.")
-            .list("recipients").filterIsInstance<JsonObject>()
+        val owner = access.typed("No cloud session $sessionId.") { cloudSessions.get(sessionId) }.owner
+        val others = access.typed("This server does not list members for transfers: name one with --to.") {
+            cloudTransfers.recipients()
+        }.recipients.map { asJson(it) }
             .filter { owner != it.text("id") && owner != it.text("login") }
         if (others.isEmpty()) throw stopWith(ExitCode.NOT_FOUND, "ostrom: no other member can receive a session.")
         val labels = others.map {
@@ -208,15 +203,13 @@ private class CloudTransfersListCommand(private val dependencies: CliDependencie
         val transfers = mutableListOf<JsonObject>()
         var before: String? = null
         do {
-            val query = listOfNotNull(
-                if (incoming) "direction=incoming" else if (outgoing) "direction=outgoing" else null,
-                session?.let { "session=${segment(it)}" },
-                before?.let { "before=${segment(it)}" },
-                "limit=$PAGE",
-            ) + states.map { "state=${segment(it)}" }
-            val page = access.read("$TRANSFERS?" + query.joinToString("&"), "No transfers.")
-            transfers += page.list("items").filterIsInstance<JsonObject>()
-            before = page.text("next")
+            val cursor = before
+            val direction = if (incoming) "incoming" else if (outgoing) "outgoing" else null
+            val page = access.typed("No transfers.") {
+                cloudTransfers.list(direction, states, session, cursor, PAGE)
+            }
+            transfers += page.items.map { asJson(it) }
+            before = page.next
         } while (before != null && transfers.size < MAX_LISTED)
         val console = dependencies.console
         transfers.subList(minOf(transfers.size, MAX_LISTED), transfers.size).clear()
@@ -239,7 +232,7 @@ private class CloudTransfersShowCommand(private val dependencies: CliDependencie
     private val json by jsonFlag()
 
     override fun run() {
-        val t = dependencies.transferAccess(server, org).read(transferPath(id), "No transfer $id.")
+        val t = dependencies.transferAccess(server, org).typedJson("No transfer $id.") { cloudTransfers.get(id) }
         if (json) {
             dependencies.console.data("$t\n")
             return
@@ -291,13 +284,10 @@ private class CloudTransfersAcceptCommand(private val dependencies: CliDependenc
         val access = dependencies.transferAccess(server, org)
         val onBehalfOf = dependencies.onBehalfOf(access, member, RUNNERS_CLOUD_ON_BEHALF_WRITES)
         val choice = resume
-        val body = JsonObject(if (choice == null) emptyMap() else mapOf("resume" to JsonPrimitive(choice)))
-        val accepted = access.write(
-            "POST",
-            "${transferPath(id)}/accept",
-            body,
-            "No transfer $id.",
-            onBehalfOf = onBehalfOf,
+        val accepted = asJson(
+            access.typedWrite("No transfer $id.") {
+                cloudTransfers.accept(id, choice, onBehalfOf)
+            },
         )
         dependencies.console.let { if (json) it.data("$accepted\n") else it.out(accepted.transferLine() + "\n") }
         dependencies.console.err(ACCEPTED_WORKSPACE_NOTICE + "\n")
@@ -318,12 +308,10 @@ private class CloudTransfersDeclineCommand(private val dependencies: CliDependen
         checkMember(member)
         val access = dependencies.transferAccess(server, org)
         val onBehalfOf = dependencies.onBehalfOf(access, member, RUNNERS_CLOUD_ON_BEHALF_WRITES)
-        val declined = access.write(
-            "POST",
-            "${transferPath(id)}/decline",
-            null,
-            "No transfer $id.",
-            onBehalfOf = onBehalfOf,
+        val declined = asJson(
+            access.typedWrite("No transfer $id.") {
+                cloudTransfers.decline(id, onBehalfOf)
+            },
         )
         dependencies.console.let { if (json) it.data("$declined\n") else it.out(declined.transferLine() + "\n") }
     }
@@ -344,12 +332,10 @@ private class CloudTransfersCancelCommand(private val dependencies: CliDependenc
         checkMember(member)
         val access = dependencies.transferAccess(server, org)
         val onBehalfOf = dependencies.onBehalfOf(access, member, RUNNERS_CLOUD_ON_BEHALF_WRITES)
-        val cancelled = access.write(
-            "POST",
-            "${transferPath(id)}/cancel",
-            null,
-            "No transfer $id.",
-            onBehalfOf = onBehalfOf,
+        val cancelled = asJson(
+            access.typedWrite("No transfer $id.") {
+                cloudTransfers.cancel(id, onBehalfOf)
+            },
         )
         dependencies.console.let { if (json) it.data("$cancelled\n") else it.out(cancelled.transferLine() + "\n") }
     }

@@ -2,6 +2,9 @@
 package run.ostrom.cli.waits
 
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -12,7 +15,7 @@ class AnswerWaitUseCaseTest {
 
     private fun serve(wait: String, status: Int = 200) {
         fake.answer("GET /api/v1/waits/w1", 200, wait)
-        fake.answer("POST /api/v1/waits/w1/answer", status, """{"id":"w1","status":"resolved"}""")
+        fake.answer("POST /api/v1/waits/w1/answer", status, waitJson(status = "resolved").toString())
     }
 
     private fun wait(fields: String = "[]", actions: String = "[]", status: String? = "open") =
@@ -41,19 +44,17 @@ class AnswerWaitUseCaseTest {
             field("no", "confirm"),
             field("region", "choice", ""","options":["eu","us"]"""),
             field("misc", "unknown"),
-            """{"id":"typeless","label":"L"}""",
         ).joinToString(",", "[", "]")
         serve(wait(fields, """[{"id":"approve","label":"Approve"}]"""))
         val done = answer(
             ask(
                 "note=a=b", "day=2026-11-13", "n= 42 ", "ratio=1.5", "ok=YES", "no=n", "region=eu", "misc=x",
-                "typeless=t",
             ),
         )
         assertEquals("resolved", done["status"].toString().trim('"'))
         assertEquals(
             """{"action":"approve","values":{"note":"a=b","day":"2026-11-13","n":42,"ratio":1.5,"ok":true,""" +
-                """"no":false,"region":"eu","misc":"x","typeless":"t"}}""",
+                """"no":false,"region":"eu","misc":"x"}}""",
             fake.calls.last().body,
         )
     }
@@ -85,17 +86,17 @@ class AnswerWaitUseCaseTest {
 
     @Test
     fun aWaitWithoutFieldsAcceptsAnAnswerWithNoValues() = runTest {
-        serve("""{"id":"w1","status":"open"}""")
+        serve(wait())
         answer(ask())
-        assertEquals("""{"action":"done","values":{}}""", fake.calls.last().body)
+        assertEquals("""{"action":"done"}""", fake.calls.last().body)
     }
 
     @Test
     fun aWaitNoLongerOpenIsNotAnswered() = runTest {
         serve(wait(status = "resolved"))
         assertEquals("This wait is already resolved.", refusal(ask()))
-        serve(wait(status = null))
-        assertEquals("This wait is already closed.", refusal(ask()))
+        serve(wait(status = "cancelled"))
+        assertEquals("This wait is already cancelled.", refusal(ask()))
         assertEquals(2, fake.calls.size, "read twice, answered never")
     }
 
@@ -110,7 +111,7 @@ class AnswerWaitUseCaseTest {
 
     @Test
     fun anUnknownFieldIsRefusedNamingTheFieldsTheWaitHas() = runTest {
-        serve(wait("""[${field("note", "text")},{"type":"text"}]"""))
+        serve(wait("""[${field("note", "text")}]"""))
         assertEquals("This wait has no field \"x\". Its fields: note.", refusal(ask("x=1")))
         assertEquals("This wait has no field \"x\". Its fields: note.", refusal(ask(json = listOf("x=1"))))
         serve(wait())
@@ -149,7 +150,7 @@ class AnswerWaitUseCaseTest {
 
     @Test
     fun anActionTheWaitDoesNotHaveIsRefusedAndSeveralNeedOneToBeChosen() = runTest {
-        serve(wait(actions = """[{"id":"yes","label":"Yes"},{"id":"no","label":"No"},{"label":"none"}]"""))
+        serve(wait(actions = """[{"id":"yes","label":"Yes"},{"id":"no","label":"No"}]"""))
         assertEquals("This wait has no action \"maybe\". Its actions: yes, no.", refusal(ask(action = "maybe")))
         assertEquals("This wait has several actions: choose one with --action (yes, no).", refusal(ask()))
         answer(ask(action = "no"))
@@ -223,5 +224,12 @@ class AnswerWaitUseCaseTest {
         val multi = ArrayDeque(listOf("-----BEGIN", "body", "-----END", ""))
         val key = readSecrets(listOf("k"), true, prompts::add, { error("no") }, { multi.removeFirstOrNull() })
         assertEquals(mapOf("k" to "-----BEGIN\nbody\n-----END"), key)
+    }
+
+    @Test
+    fun aWaitWithoutItsQuestionAsksNothing() {
+        assertEquals(JsonObject(emptyMap()), JsonObject(emptyMap()).questionOrEmpty())
+        val asked = Json.parseToJsonElement(wait()).jsonObject
+        assertEquals(asked["question"], asked.questionOrEmpty())
     }
 }
