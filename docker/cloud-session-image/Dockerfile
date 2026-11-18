@@ -31,10 +31,10 @@ FROM ${BASE_IMAGE}
 # Node.js for the agent CLIs (the major line of NodeSource's packages). Empty with every agent version empty skips it.
 ARG NODE_MAJOR=22
 # Agent CLIs. Empty skips one; pin exact versions so a rebuild gives the same agent.
-ARG CLAUDE_CODE_VERSION=2.1.314
-ARG CODEX_VERSION=0.166.0
-ARG OPENCODE_VERSION=1.19.5
-ARG GEMINI_CLI_VERSION=0.66.0
+ARG CLAUDE_CODE_VERSION=2.1.327
+ARG CODEX_VERSION=0.170.0
+ARG OPENCODE_VERSION=1.19.6
+ARG GEMINI_CLI_VERSION=0.68.0
 
 ARG DEBIAN_FRONTEND=noninteractive
 # DISABLE_AUTOUPDATER: Claude Code must not update itself in a session, the image pins its version.
